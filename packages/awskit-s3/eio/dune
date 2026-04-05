@@ -1,0 +1,5 @@
+(library
+ (name awskit_s3_eio)
+ (public_name awskit-s3.eio)
+ (optional)
+ (libraries awskit_s3 awskit_eio))

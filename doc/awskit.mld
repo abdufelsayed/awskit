@@ -1,0 +1,97 @@
+{0 awskit}
+
+AWS infrastructure for OCaml — pure core, optional runtime adapters.
+
+Two packages:
+{ul
+{li {{:../awskit/index.html}[awskit]} — SigV4 signing, credentials, endpoints, error types,
+  HTTP request/response types, Runtime module type, and adapters for Eio, Lwt, and Unix}
+{li {{:../awskit-s3/index.html}[awskit-s3]} — Amazon S3 client (objects, buckets, multipart
+  uploads, presigned URLs, policies, simulation)}
+}
+
+{1 Design}
+
+Every module in [awskit] is pure — no IO, no OS dependencies. Platform-specific code
+lives in {b adapter sub-libraries} that you pick at the edge of your application:
+
+{ul
+{li [awskit.eio] — Eio adapter (direct-style, OCaml 5)}
+{li [awskit.lwt] — Generic Lwt functor (for MirageOS or custom backends)}
+{li [awskit.lwt_unix] — Ready-to-use Lwt + Cohttp + Unix adapter}
+{li [awskit.unix] — OS helpers (wall clock, env-based credentials)}
+{li [awskit-s3.eio] — S3 via Eio}
+{li [awskit-s3.lwt_unix] — S3 via Lwt + Unix}
+}
+
+Service packages like [awskit-s3] depend on the {!module-type:Awskit.Runtime.S}
+abstraction, not on any particular concurrency library. Swap adapters — the
+same S3 code works with Eio, Lwt, or a custom runtime.
+
+{1 Quick start}
+
+{2 Install}
+
+{[opam install awskit awskit-s3]}
+
+Or with an adapter:
+{[opam install awskit awskit-s3 cohttp-eio      (* Eio *)]
+[opam install awskit awskit-s3 cohttp-lwt-unix  (* Lwt + Unix *)]}
+
+{2 Upload a file (Eio)}
+
+{[
+open Eio.Std
+
+let () =
+  Eio_main.run @@ fun env ->
+  let credentials = Awskit.Credentials.make
+    ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
+    ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    ()
+  in
+  let conn = Awskit_eio.create
+    ~env ~region:"us-east-1" ~credentials ()
+  in
+  match Awskit_s3_eio.Object.put conn
+    ~bucket:"my-bucket" ~key:"hello.txt" "Hello, S3!"
+  with
+  | Ok { Awskit_s3.Object.Put_result.etag } -> Fmt.pr "Uploaded! ETag: %s" etag
+  | Error err -> Fmt.epr "Error: %a" Awskit_s3.Error.pp err
+]}
+
+{2 Upload a file (Lwt)}
+
+{[
+let credentials = Awskit.Credentials.make
+  ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
+  ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  ()
+
+let conn = Awskit_lwt_unix.create
+  ~region:"us-east-1" ~credentials ()
+
+let* result = Awskit_s3_lwt_unix.Object.put conn
+  ~bucket:"my-bucket" ~key:"hello.txt" "Hello, S3!"
+]}
+
+{2 Simulation testing}
+
+{[
+let clock = Awskit_s3.Sim.Clock.create ()
+let store = Awskit_s3.Sim.create_store ~clock ()
+let conn = Awskit_s3.Sim.connect store ~credentials
+
+(* No AWS account, no network, deterministic *)
+Awskit_s3.Sim.Bucket.create conn ~bucket:"test" () |> ignore
+Awskit_s3.Sim.Object.put conn ~bucket:"test" ~key:"hello" "world" |> ignore
+]}
+
+{1 Packages}
+
+{ul
+{li {{:../awskit/index.html}[awskit]} — Runtime adapters, signing, credentials, endpoints, error types}
+{li {{:../awskit/guides.html}[awskit Guides]} — Adapter setup, signing, error handling, custom adapters}
+{li {{:../awskit-s3/index.html}[awskit-s3]} — S3 objects, buckets, multipart, presigned URLs, policies, simulation}
+{li {{:../awskit-s3/guides.html}[awskit-s3 Guides]} — S3 operations in depth}
+}

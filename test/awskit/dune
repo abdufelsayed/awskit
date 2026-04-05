@@ -1,0 +1,5 @@
+(test
+ (name test_awskit)
+ (package awskit)
+ (modules test_awskit signing_tests integration_tests)
+ (libraries awskit ptime alcotest qcheck-core qcheck-alcotest))

@@ -1,0 +1,16 @@
+(test
+ (name test_awskit_s3_eio)
+ (package awskit-s3)
+ (modules test_awskit_s3_eio integration_tests)
+ (libraries
+  awskit
+  awskit_eio
+  awskit_unix
+  awskit_s3
+  awskit_s3_eio
+  fmt
+  alcotest
+  eio
+  eio_main
+  ptime
+  digestif))

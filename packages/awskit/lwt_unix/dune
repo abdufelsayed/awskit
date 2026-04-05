@@ -1,0 +1,5 @@
+(library
+ (name awskit_lwt_unix)
+ (public_name awskit.lwt_unix)
+ (optional)
+ (libraries awskit_lwt cohttp-lwt-unix ptime.clock.os))

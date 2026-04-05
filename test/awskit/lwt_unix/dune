@@ -1,0 +1,5 @@
+(test
+ (name test_awskit_lwt_unix)
+ (package awskit)
+ (modules test_awskit_lwt_unix integration_tests)
+ (libraries awskit awskit_lwt_unix ptime alcotest))

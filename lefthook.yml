@@ -1,0 +1,11 @@
+pre-commit:
+  parallel: false
+  jobs:
+    - name: fmt
+      run: dune fmt
+
+    - name: build
+      run: dune build
+
+    - name: test
+      run: dune test

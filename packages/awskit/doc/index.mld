@@ -1,0 +1,145 @@
+{0 aws}
+
+See {{:../../doc/awskit.html}[awskit]} for the project overview.
+
+Pure AWS infrastructure — signing, credentials, endpoint configuration, error
+types, HTTP request/response types, and the Runtime module type.
+
+{b No IO dependencies.} Every module in this package is pure. Platform-specific
+code lives in sub-libraries ([awskit.eio], [awskit.lwt_unix], [awskit.unix]) that you
+choose at the edge of your application.
+
+Service packages like {{:../awskit-s3/index.html}[awskit-s3]} build on top of this
+package. They depend on the Runtime abstraction defined here, not on any
+particular concurrency library.
+
+{1 Libraries}
+
+{2 Library awskit}
+
+The entry point is {!module:Awskit}.
+
+Core modules:
+{ul
+  {li {!module:Awskit.Credentials} — AWS access keys and session tokens}
+  {li {!module:Awskit.Signing} — AWS Signature Version 4 (pure, no network)}
+  {li {!module:Awskit.Endpoint} — Service endpoint configuration}
+  {li {!module:Awskit.Request} — HTTP request type}
+  {li {!module:Awskit.Response} — HTTP response type with header helpers}
+  {li {!module:Awskit.Error} — Base error types (polymorphic variants)}
+  {li {!module-type:Awskit.Runtime.S} — Runtime abstraction for concurrency adapters}
+}
+
+{2 Library awskit.eio}
+
+The entry point is {!module:Awskit_eio}.
+
+Eio runtime adapter — direct-style on algebraic effects, no promises.
+Implements {!module-type:Awskit.Runtime.S} using [cohttp-eio] for HTTP.
+The monad type is [type 'a t = 'a], so [let*] works as plain [let]:
+
+{[
+let conn = Awskit_eio.create
+  ~env ~region:"us-east-1" ~credentials ()
+]}
+
+{2 Library awskit.lwt}
+
+The entry point is {!module:Awskit_lwt}.
+
+Generic Lwt runtime adapter — a functor parameterised by any
+[Cohttp_lwt.S.Client] implementation. Use this for MirageOS or custom HTTP
+backends. Most Unix users should use {!module:Awskit_lwt_unix} instead.
+
+{[
+module My_runtime = Awskit_lwt.Make (Cohttp_lwt_unix.Client)
+]}
+
+{2 Library awskit.lwt_unix}
+
+The entry point is {!module:Awskit_lwt_unix}.
+
+Ready-to-use Lwt + Cohttp + Unix adapter. The monad type is
+[type 'a t = 'a Lwt.t], so use [let*] for binding:
+
+{[
+let conn = Awskit_lwt_unix.create
+  ~region:"us-east-1" ~credentials ()
+]}
+
+{2 Library awskit.unix}
+
+The entry point is {!module:Awskit_unix}.
+
+OS-specific helpers — wall-clock time and environment-based credential loading.
+No network code; use alongside {!module:Awskit_eio} or {!module:Awskit_lwt_unix}:
+
+{[
+let credentials = Awskit_unix.Credentials.from_env () |> Result.get_ok
+let clock = Awskit_unix.Clock.now
+]}
+
+{1 Quick start}
+
+{2 Sign a request — no network, no IO}
+
+{[
+let credentials = Awskit.Credentials.make
+  ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
+  ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  ()
+
+let signed = Awskit.Signing.sign_request
+  ~credentials
+  ~region:"us-east-1"
+  ~service:"s3"
+  ~meth:"GET"
+  ~path:"/my-bucket/my-key"
+  ~query:""
+  ~headers:[("host", "s3.us-east-1.amazonaws.com")]
+  ~payload:""
+  ~now:(Ptime.v (2024, 1, 15, ((10, 30, 0), 0)))
+]}
+
+Signing is entirely pure. Test it with plain unit tests — no mocks, no network.
+
+{2 Connect with the Eio adapter}
+
+{[
+open Eio.Std
+
+let () =
+  Eio_main.run @@ fun env ->
+  let conn = Awskit_eio.create
+    ~env ~region:"us-east-1" ~credentials ()
+  in
+  (* Pass [conn] to any service package, e.g. Awskit_s3_eio.Object.put *)
+  ()
+]}
+
+{2 Connect with the Lwt adapter}
+
+{[
+let conn = Awskit_lwt_unix.create
+  ~region:"us-east-1" ~credentials ()
+in
+(* Operations return 'a Lwt.t *)
+let* result = Awskit_s3_lwt_unix.Object.get conn ~bucket:"b" ~key:"k" () in
+]}
+
+{1 Guides}
+
+{ul
+  {li {{!page-guides}Guides} — Request signing, credentials, error handling,
+    choosing an adapter, writing custom adapters, custom endpoints}
+}
+
+{1 Service packages}
+
+The adapters defined here power service-specific packages that implement
+individual AWS APIs:
+
+{ul
+  {li {{:../awskit-s3/index.html}[awskit-s3]} — Amazon S3 client (objects, buckets,
+    multipart uploads, presigned URLs, policies, simulation)}
+}

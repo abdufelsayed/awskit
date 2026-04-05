@@ -1,0 +1,6 @@
+(library
+ (name awskit)
+ (public_name awskit)
+ (libraries base digestif ptime fmt)
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq)))

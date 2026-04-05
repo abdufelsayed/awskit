@@ -1,0 +1,7 @@
+(library
+ (name awskit_lwt)
+ (public_name awskit.lwt)
+ (optional)
+ (libraries base awskit lwt cohttp cohttp-lwt uri ptime fmt logs)
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq)))

@@ -1,0 +1,24 @@
+(** AWS credentials. Opaque — prevents accidental logging of secret keys.
+
+    {[
+    Awskit.Credentials.make ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
+      ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" ()
+      (* Temporary (STS/role) — session_token triggers x-amz-security-token *)
+      Awskit.Credentials.make ~access_key_id:"ASIATESTSESSIONTOKEN"
+      ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+      ~session_token:"FwoGZXIvYXdzEBY..." ()
+    ]} *)
+
+type t
+
+val make :
+  access_key_id:string ->
+  secret_access_key:string ->
+  ?session_token:string ->
+  unit ->
+  t
+(** Create credentials. [session_token] for STS/role temporary credentials. *)
+
+val access_key_id : t -> string
+val secret_access_key : t -> string
+val session_token : t -> string option

@@ -1,0 +1,5 @@
+(library
+ (name awskit_s3_lwt_unix)
+ (public_name awskit-s3.lwt_unix)
+ (optional)
+ (libraries awskit_s3 awskit_lwt_unix))

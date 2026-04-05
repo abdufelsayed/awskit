@@ -1,0 +1,4 @@
+(library
+ (name awskit_unix)
+ (public_name awskit.unix)
+ (libraries base awskit ptime ptime.clock.os fmt))
