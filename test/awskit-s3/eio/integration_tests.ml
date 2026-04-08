@@ -1,6 +1,9 @@
 (** Integration tests against MinIO. Requires: docker compose up -d *)
 
 open Awskit_s3_eio
+module Error = Awskit_s3.Error
+module Tag = Awskit_s3.Tag
+module Range = Awskit_s3.Range
 
 let test_prefix = ref 0
 
@@ -11,11 +14,12 @@ let fresh_prefix () =
 let bucket = "test-bucket"
 
 let make_client env =
-  Awskit_eio.create ~env ~region:"us-east-1"
+  create ~env ~region:"us-east-1"
     ~credentials:
-      (Awskit.Credentials.make ~access_key_id:"minioadmin"
+      (Awskit_s3.Credentials.make ~access_key_id:"minioadmin"
          ~secret_access_key:"minioadmin" ())
-    ~endpoint:"localhost" ~port:9000 ()
+    ~endpoint:(Awskit_s3.Endpoint.http ~host:"localhost" ~port:9000 ())
+    ()
 
 (* ── Helpers ────────────────────────────────────────────────────── *)
 

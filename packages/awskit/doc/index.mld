@@ -5,9 +5,10 @@ See {{:../../doc/awskit.html}[awskit]} for the project overview.
 Pure AWS infrastructure — signing, credentials, endpoint configuration, error
 types, HTTP request/response types, and the Runtime module type.
 
-{b No IO dependencies.} Every module in this package is pure. Platform-specific
-code lives in sub-libraries ([awskit.eio], [awskit.lwt_unix], [awskit.unix]) that you
-choose at the edge of your application.
+{b No IO dependencies.} Every module in this package is pure. Concurrency and
+platform code lives in sub-libraries ([awskit.eio], [awskit.lwt],
+[awskit.lwt_unix], [awskit.unix]) that you choose at the edge of your
+application.
 
 Service packages like {{:../awskit-s3/index.html}[awskit-s3]} build on top of this
 package. They depend on the Runtime abstraction defined here, not on any
@@ -35,8 +36,8 @@ Core modules:
 The entry point is {!module:Awskit_eio}.
 
 Eio runtime adapter — direct-style on algebraic effects, no promises.
-Implements {!module-type:Awskit.Runtime.S} using [cohttp-eio] for HTTP.
-The monad type is [type 'a t = 'a], so [let*] works as plain [let]:
+Implements {!module-type:Awskit.Runtime.S} using [cohttp-eio] for HTTP. The
+monad type is [type 'a t = 'a], so [let*] works as plain [let]:
 
 {[
 let conn = Awskit_eio.create

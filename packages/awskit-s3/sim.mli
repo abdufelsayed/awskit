@@ -5,7 +5,8 @@
     let clock = Sim.Clock.create () in
     let store = Sim.create_store ~clock () in
     let credentials =
-      Awskit.Credentials.make ~access_key_id:"test" ~secret_access_key:"test" ()
+      Awskit_s3.Credentials.make ~access_key_id:"test" ~secret_access_key:"test"
+        ()
     in
     let conn = Sim.connect store ~credentials in
 

@@ -27,20 +27,19 @@ module Runtime :
 
 val create :
   ?ctx:Cohttp_lwt_unix.Client.ctx ->
-  ?scheme:[ `Http | `Https ] ->
+  ?endpoint:Awskit.Endpoint.t ->
   region:string ->
   credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
-  ?endpoint:string ->
-  ?port:int ->
+  ?max_response_body_bytes:int ->
   unit ->
   t
 (** Create a connection to AWS.
 
     @param ctx Optional Cohttp client context (e.g., for custom TLS config)
-    @param scheme [\`Http] or [\`Https] (default: [\`Https])
+    @param endpoint Explicit endpoint override (for LocalStack, MinIO, etc.)
     @param region AWS region (e.g., ["us-east-1"])
     @param credentials AWS credentials for request signing
     @param clock Time source for signing timestamps (default: OS clock)
-    @param endpoint Override endpoint host (for LocalStack, MinIO, etc.)
-    @param port Override port (implies HTTP) *)
+    @param max_response_body_bytes
+      Maximum response size to buffer in memory (default: 64 MiB) *)

@@ -12,8 +12,8 @@ Two packages:
 
 {1 Design}
 
-Every module in [awskit] is pure — no IO, no OS dependencies. Platform-specific code
-lives in {b adapter sub-libraries} that you pick at the edge of your application:
+Every module in [awskit] is pure — no IO, no OS dependencies. Adapter
+sub-libraries are chosen at the edge of your application:
 
 {ul
 {li [awskit.eio] — Eio adapter (direct-style, OCaml 5)}
@@ -21,6 +21,7 @@ lives in {b adapter sub-libraries} that you pick at the edge of your application
 {li [awskit.lwt_unix] — Ready-to-use Lwt + Cohttp + Unix adapter}
 {li [awskit.unix] — OS helpers (wall clock, env-based credentials)}
 {li [awskit-s3.eio] — S3 via Eio}
+{li [awskit-s3.lwt] — S3 via generic Lwt adapter}
 {li [awskit-s3.lwt_unix] — S3 via Lwt + Unix}
 }
 
@@ -63,15 +64,19 @@ let () =
 {2 Upload a file (Lwt)}
 
 {[
+open Lwt.Syntax
+
+module S3 = Awskit_s3_lwt.Make (Cohttp_lwt_unix.Client)
+
 let credentials = Awskit.Credentials.make
   ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
   ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
   ()
 
-let conn = Awskit_lwt_unix.create
-  ~region:"us-east-1" ~credentials ()
+let conn = S3.create
+  ~region:"us-east-1" ~credentials ~clock:Ptime_clock.now ()
 
-let* result = Awskit_s3_lwt_unix.Object.put conn
+let* result = S3.Object.put conn
   ~bucket:"my-bucket" ~key:"hello.txt" "Hello, S3!"
 ]}
 

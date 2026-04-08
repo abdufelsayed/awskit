@@ -156,8 +156,9 @@ let conn = Awskit_lwt_unix.create
 ]}
 
 The monad type is [type 'a t = 'a Lwt.t] — use [let*] for binding.
-Optional parameters for custom TLS ([?ctx]), HTTP scheme ([?scheme]), clock
-([?clock]), and endpoint overrides ([?endpoint], [?port]).
+Optional parameters include custom TLS ([?ctx]), clock ([?clock]), explicit
+endpoint overrides ([?endpoint]), and a buffered response size limit
+([?max_response_body_bytes]).
 
 {2 Lwt (generic)}
 
@@ -170,8 +171,8 @@ let conn = My_runtime.create ~region:"us-east-1" ~credentials
   ~clock:(fun () -> Ptime_clock.now ()) ()
 ]}
 
-This is lower-level. You supply the HTTP client, the clock, and the scheme.
-Most users should prefer {!module:Awskit_lwt_unix}.
+This is lower-level. You supply the HTTP client, the clock, and any explicit
+endpoint override. Most users should prefer {!module:Awskit_lwt_unix}.
 
 {1 Custom endpoints}
 
@@ -182,7 +183,7 @@ MinIO, etc.):
 (* Eio with custom endpoint *)
 let conn = Awskit_eio.create
   ~env ~region:"us-east-1" ~credentials
-  ~endpoint:"localhost" ~port:4566   (* LocalStack *)
+  ~endpoint:(Awskit.Endpoint.http ~host:"localhost" ~port:4566 ())
   ()
 ]}
 
@@ -190,12 +191,13 @@ let conn = Awskit_eio.create
 (* Lwt with custom endpoint *)
 let conn = Awskit_lwt_unix.create
   ~region:"us-east-1" ~credentials
-  ~endpoint:"localhost" ~port:9000   (* MinIO *)
+  ~endpoint:(Awskit.Endpoint.http ~host:"localhost" ~port:9000 ())
   ()
 ]}
 
-When you pass [?port], the adapter switches to HTTP automatically. Both
-[?endpoint] and [?port] are optional — omit them for production AWS endpoints.
+Pass an explicit {!module:Awskit.Endpoint} when talking to LocalStack, MinIO,
+or other S3-compatible services. Omit [?endpoint] for production AWS HTTPS
+endpoints.
 
 {1 Error handling}
 
@@ -252,7 +254,7 @@ The [connection] type bundles everything needed to make AWS calls:
   {li [region] — AWS region (e.g., ["us-east-1"])}
   {li [credentials] — AWS credentials for signing requests}
   {li [clock] — Time source for request timestamps and presigned URL expiry}
-  {li [endpoint_host] / [endpoint_port] — Override endpoint (for LocalStack,
+  {li [endpoint] — Optional explicit endpoint override (for LocalStack,
     MinIO, custom endpoints)}
 }
 

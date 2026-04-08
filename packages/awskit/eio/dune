@@ -12,6 +12,11 @@
   ptime
   ptime.clock.os
   fmt
-  logs)
+  logs
+  ca-certs
+  domain-name
+  tls
+  tls-eio
+  mirage-crypto-rng.unix)
  (preprocess
   (pps ppx_deriving.show ppx_deriving.eq)))

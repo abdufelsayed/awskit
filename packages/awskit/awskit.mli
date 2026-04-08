@@ -1,9 +1,10 @@
 (** Pure AWS infrastructure — signing, credentials, endpoints, error types, HTTP
     request/response types, and the {!Runtime} module type.
 
-    No IO. Platform-specific code lives in sub-libraries:
+    No IO. Concurrency/platform code lives in sub-libraries:
     - [awskit.eio] — Eio runtime adapter
-    - [awskit.lwt] — Lwt runtime functor
+    - [awskit.lwt] — generic Lwt runtime functor
+    - [awskit.lwt_unix] — ready-to-use Lwt + Unix backend
     - [awskit.unix] — Unix credential sources and clock *)
 
 module Credentials = Credentials

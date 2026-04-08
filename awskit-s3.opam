@@ -3,7 +3,7 @@ opam-version: "2.0"
 synopsis:
   "S3 client — objects, buckets, multipart, policies, and simulation"
 description:
-  "S3 operations, bucket configuration, multipart uploads, presigned URLs, policies, simulation, and XML wire types. Adapters for Eio and Lwt-Unix are available as separate sub-libraries."
+  "S3 operations, bucket configuration, multipart uploads, presigned URLs, policies, simulation, and XML wire types. Eio, generic Lwt, and Lwt + Unix adapters are available as separate sub-libraries."
 maintainer: ["Abdullah Elsayed <hey@abdufelsayed.dev>"]
 authors: ["Abdullah Elsayed <hey@abdufelsayed.dev>"]
 license: "MIT"

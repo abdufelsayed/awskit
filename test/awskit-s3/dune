@@ -1,7 +1,7 @@
 (test
  (name test_awskit_s3)
  (package awskit-s3)
- (modules test_awskit_s3 sim_tests faults_tests)
+ (modules test_awskit_s3 sim_tests faults_tests core_tests)
  (libraries
   awskit_s3
   fmt
@@ -9,4 +9,5 @@
   ptime
   qcheck-core
   qcheck-alcotest
-  digestif))
+  digestif
+  uri))

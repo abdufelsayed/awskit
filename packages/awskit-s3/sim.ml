@@ -1,5 +1,6 @@
 module S3_error = Error
 open Base
+module Credentials = Awskit.Credentials
 
 module Clock = struct
   type t = { mutable now : Ptime.t }
@@ -135,7 +136,15 @@ let fault_to_error : fault -> S3_error.t = function
   | Connection_reset -> `Request_error (0, "connection reset")
   | Response_lost -> `Request_error (0, "response lost")
 
-(* ── Policy check ─────��─────────────────────────────────────────── *)
+let validate_bucket bucket = Internal.Validation.validate_bucket bucket
+
+let validate_bucket_key bucket key =
+  let open Internal.Let_syntax in
+  let* () = Internal.Validation.validate_bucket bucket in
+  let* () = Internal.Validation.validate_key key in
+  Ok ()
+
+(* ── Policy check ──────────────────────────────────────────────── *)
 
 let check_access t ~bucket_name ~action ~key =
   match Hashtbl.find t.store.buckets bucket_name with
@@ -161,263 +170,323 @@ module Object = struct
       ?(metadata = []) ?storage_class ?tags ?cache_control:_ ?content_encoding:_
       ?content_disposition:_ body =
     let action = Object_.Action.to_string Object_.Action.Put in
-    match check_access t ~bucket_name:bucket ~action ~key:(Some key) with
-    | Error e -> Error e
-    | Ok b -> (
-        let tags = Option.value ~default:[] tags in
-        match pop_fault t with
-        | Some Response_lost ->
-            let obj =
-              make_object ~clock:t.store.clock ~content_type ~storage_class
-                ~metadata ~tags body
-            in
-            if if_none_match && Hashtbl.mem b.objects key then begin
-              record t.store `Put bucket key true;
-              Error `Precondition_failed
-            end
-            else begin
-              Hashtbl.set b.objects ~key ~data:obj;
-              record t.store `Put bucket key true;
-              Error (fault_to_error Response_lost)
-            end
-        | Some fault ->
-            record t.store `Put bucket key true;
-            Error (fault_to_error fault)
-        | None ->
-            if if_none_match && Hashtbl.mem b.objects key then begin
-              record t.store `Put bucket key false;
-              Error `Precondition_failed
-            end
-            else begin
-              let obj =
-                make_object ~clock:t.store.clock ~content_type ~storage_class
-                  ~metadata ~tags body
-              in
-              Hashtbl.set b.objects ~key ~data:obj;
-              record t.store `Put bucket key false;
-              Ok { Object_.Put_result.etag = obj.etag }
-            end)
+    match
+      Result.bind (validate_bucket_key bucket key) ~f:(fun () ->
+          let open Internal.Let_syntax in
+          let* () = Internal.Validation.validate_metadata metadata in
+          match tags with
+          | Some tags -> Internal.Validation.validate_tags tags
+          | None -> Ok ())
+    with
+    | Error _ as error -> error
+    | Ok () -> (
+        match check_access t ~bucket_name:bucket ~action ~key:(Some key) with
+        | Error e -> Error e
+        | Ok b -> (
+            let tags = Option.value ~default:[] tags in
+            match pop_fault t with
+            | Some Response_lost ->
+                let obj =
+                  make_object ~clock:t.store.clock ~content_type ~storage_class
+                    ~metadata ~tags body
+                in
+                if if_none_match && Hashtbl.mem b.objects key then begin
+                  record t.store `Put bucket key true;
+                  Error `Precondition_failed
+                end
+                else begin
+                  Hashtbl.set b.objects ~key ~data:obj;
+                  record t.store `Put bucket key true;
+                  Error (fault_to_error Response_lost)
+                end
+            | Some fault ->
+                record t.store `Put bucket key true;
+                Error (fault_to_error fault)
+            | None ->
+                if if_none_match && Hashtbl.mem b.objects key then begin
+                  record t.store `Put bucket key false;
+                  Error `Precondition_failed
+                end
+                else begin
+                  let obj =
+                    make_object ~clock:t.store.clock ~content_type
+                      ~storage_class ~metadata ~tags body
+                  in
+                  Hashtbl.set b.objects ~key ~data:obj;
+                  record t.store `Put bucket key false;
+                  Ok { Object_.Put_result.etag = obj.etag }
+                end))
 
   let get t ~bucket ~key ?range:_ ?if_match:_ ?if_none_match:_
       ?if_modified_since:_ ?if_unmodified_since:_ () =
     let action = Object_.Action.to_string Object_.Action.Get in
-    match check_access t ~bucket_name:bucket ~action ~key:(Some key) with
-    | Error e -> Error e
-    | Ok b -> (
-        match pop_fault t with
-        | Some Response_lost ->
-            record t.store `Get bucket key true;
-            Error (fault_to_error Response_lost)
-        | Some fault ->
-            record t.store `Get bucket key true;
-            Error (fault_to_error fault)
-        | None -> (
-            record t.store `Get bucket key false;
-            match Hashtbl.find b.objects key with
-            | Some obj ->
-                Ok
-                  {
-                    Object_.Get_result.body = obj.value;
-                    etag = obj.etag;
-                    content_type = obj.content_type;
-                    content_length = obj.size;
-                    last_modified = format_time obj.last_modified;
-                    metadata = obj.metadata;
-                  }
-            | None -> Error `Not_found))
+    match validate_bucket_key bucket key with
+    | Error _ as error -> error
+    | Ok () -> (
+        match check_access t ~bucket_name:bucket ~action ~key:(Some key) with
+        | Error e -> Error e
+        | Ok b -> (
+            match pop_fault t with
+            | Some Response_lost ->
+                record t.store `Get bucket key true;
+                Error (fault_to_error Response_lost)
+            | Some fault ->
+                record t.store `Get bucket key true;
+                Error (fault_to_error fault)
+            | None -> (
+                record t.store `Get bucket key false;
+                match Hashtbl.find b.objects key with
+                | Some obj ->
+                    Ok
+                      {
+                        Object_.Get_result.body = obj.value;
+                        etag = obj.etag;
+                        content_type = obj.content_type;
+                        content_length = obj.size;
+                        last_modified = format_time obj.last_modified;
+                        metadata = obj.metadata;
+                      }
+                | None -> Error `Not_found)))
 
   let head t ~bucket ~key ?if_match:_ ?if_none_match:_ ?if_modified_since:_
       ?if_unmodified_since:_ () =
     let action = Object_.Action.to_string Object_.Action.Head in
-    match check_access t ~bucket_name:bucket ~action ~key:(Some key) with
-    | Error e -> Error e
-    | Ok b -> (
-        match pop_fault t with
-        | Some fault ->
-            record t.store `Head bucket key true;
-            Error (fault_to_error fault)
-        | None -> (
-            record t.store `Head bucket key false;
-            match Hashtbl.find b.objects key with
-            | Some obj ->
-                Ok
-                  (Some
-                     {
-                       Object_.Info.etag = obj.etag;
-                       size = obj.size;
-                       last_modified = format_time obj.last_modified;
-                       content_type = obj.content_type;
-                       storage_class = obj.storage_class;
-                       metadata = obj.metadata;
-                     })
-            | None -> Ok None))
+    match validate_bucket_key bucket key with
+    | Error _ as error -> error
+    | Ok () -> (
+        match check_access t ~bucket_name:bucket ~action ~key:(Some key) with
+        | Error e -> Error e
+        | Ok b -> (
+            match pop_fault t with
+            | Some fault ->
+                record t.store `Head bucket key true;
+                Error (fault_to_error fault)
+            | None -> (
+                record t.store `Head bucket key false;
+                match Hashtbl.find b.objects key with
+                | Some obj ->
+                    Ok
+                      (Some
+                         {
+                           Object_.Info.etag = obj.etag;
+                           size = obj.size;
+                           last_modified = format_time obj.last_modified;
+                           content_type = obj.content_type;
+                           storage_class = obj.storage_class;
+                           metadata = obj.metadata;
+                         })
+                | None -> Ok None)))
 
   let delete t ~bucket ~key =
     let action = Object_.Action.to_string Object_.Action.Delete in
-    match check_access t ~bucket_name:bucket ~action ~key:(Some key) with
-    | Error e -> Error e
-    | Ok b -> (
-        match pop_fault t with
-        | Some Response_lost ->
-            Hashtbl.remove b.objects key;
-            record t.store `Delete bucket key true;
-            Error (fault_to_error Response_lost)
-        | Some fault ->
-            record t.store `Delete bucket key true;
-            Error (fault_to_error fault)
-        | None ->
-            Hashtbl.remove b.objects key;
-            record t.store `Delete bucket key false;
-            Ok ())
+    match validate_bucket_key bucket key with
+    | Error _ as error -> error
+    | Ok () -> (
+        match check_access t ~bucket_name:bucket ~action ~key:(Some key) with
+        | Error e -> Error e
+        | Ok b -> (
+            match pop_fault t with
+            | Some Response_lost ->
+                Hashtbl.remove b.objects key;
+                record t.store `Delete bucket key true;
+                Error (fault_to_error Response_lost)
+            | Some fault ->
+                record t.store `Delete bucket key true;
+                Error (fault_to_error fault)
+            | None ->
+                Hashtbl.remove b.objects key;
+                record t.store `Delete bucket key false;
+                Ok ()))
 
   let delete_batch t ~bucket ~keys =
     match
-      check_access t ~bucket_name:bucket
-        ~action:(Object_.Action.to_string Delete)
-        ~key:None
+      Result.bind (validate_bucket bucket) ~f:(fun () ->
+          Internal.Validation.validate_delete_batch_keys keys)
     with
-    | Error e -> Error e
-    | Ok b ->
-        let deleted =
-          List.map
-            ~f:(fun key ->
-              Hashtbl.remove b.objects key;
-              { Object_.Delete_result.Deleted.key })
-            keys
-        in
-        record t.store `Delete_batch bucket "" false;
-        Ok { Object_.Delete_result.deleted; errors = [] }
+    | Error _ as error -> error
+    | Ok () -> (
+        match
+          check_access t ~bucket_name:bucket
+            ~action:(Object_.Action.to_string Delete)
+            ~key:None
+        with
+        | Error e -> Error e
+        | Ok b ->
+            let deleted =
+              List.map
+                ~f:(fun key ->
+                  Hashtbl.remove b.objects key;
+                  { Object_.Delete_result.Deleted.key })
+                keys
+            in
+            record t.store `Delete_batch bucket "" false;
+            Ok { Object_.Delete_result.deleted; errors = [] })
 
   let copy t ~src_bucket ~src_key ~dst_bucket ~dst_key ?if_match:_
       ?if_none_match:_ ?metadata_directive:_ ?(metadata = []) () =
     match
-      check_access t ~bucket_name:src_bucket
-        ~action:(Object_.Action.to_string Get)
-        ~key:(Some src_key)
+      Result.bind (validate_bucket_key src_bucket src_key) ~f:(fun () ->
+          let open Internal.Let_syntax in
+          let* () = validate_bucket_key dst_bucket dst_key in
+          Internal.Validation.validate_metadata metadata)
     with
-    | Error e -> Error e
-    | Ok src_b -> (
+    | Error _ as error -> error
+    | Ok () -> (
         match
-          check_access t ~bucket_name:dst_bucket
-            ~action:(Object_.Action.to_string Put)
-            ~key:(Some dst_key)
+          check_access t ~bucket_name:src_bucket
+            ~action:(Object_.Action.to_string Get)
+            ~key:(Some src_key)
         with
         | Error e -> Error e
-        | Ok dst_b -> (
-            match pop_fault t with
-            | Some fault ->
-                record t.store `Copy dst_bucket dst_key true;
-                Error (fault_to_error fault)
-            | None -> (
-                record t.store `Copy dst_bucket dst_key false;
-                match Hashtbl.find src_b.objects src_key with
-                | None -> Error `Not_found
-                | Some src_obj ->
-                    let new_metadata =
-                      if not (List.is_empty metadata) then metadata
-                      else src_obj.metadata
-                    in
-                    let obj =
-                      make_object ~clock:t.store.clock
-                        ~content_type:src_obj.content_type
-                        ~storage_class:src_obj.storage_class
-                        ~metadata:new_metadata ~tags:src_obj.tags src_obj.value
-                    in
-                    Hashtbl.set dst_b.objects ~key:dst_key ~data:obj;
-                    Ok
-                      {
-                        Object_.Copy_result.etag = obj.etag;
-                        last_modified = format_time obj.last_modified;
-                      })))
+        | Ok src_b -> (
+            match
+              check_access t ~bucket_name:dst_bucket
+                ~action:(Object_.Action.to_string Put)
+                ~key:(Some dst_key)
+            with
+            | Error e -> Error e
+            | Ok dst_b -> (
+                match pop_fault t with
+                | Some fault ->
+                    record t.store `Copy dst_bucket dst_key true;
+                    Error (fault_to_error fault)
+                | None -> (
+                    record t.store `Copy dst_bucket dst_key false;
+                    match Hashtbl.find src_b.objects src_key with
+                    | None -> Error `Not_found
+                    | Some src_obj ->
+                        let new_metadata =
+                          if not (List.is_empty metadata) then metadata
+                          else src_obj.metadata
+                        in
+                        let obj =
+                          make_object ~clock:t.store.clock
+                            ~content_type:src_obj.content_type
+                            ~storage_class:src_obj.storage_class
+                            ~metadata:new_metadata ~tags:src_obj.tags
+                            src_obj.value
+                        in
+                        Hashtbl.set dst_b.objects ~key:dst_key ~data:obj;
+                        Ok
+                          {
+                            Object_.Copy_result.etag = obj.etag;
+                            last_modified = format_time obj.last_modified;
+                          }))))
 
   let list t ~bucket ~prefix ?delimiter:_
       ?(max_keys = t.store.config.max_list_keys) ?start_after:_
       ?continuation_token () =
     match
-      check_access t ~bucket_name:bucket
-        ~action:(Object_.Action.to_string List)
-        ~key:None
+      Result.bind (validate_bucket bucket) ~f:(fun () ->
+          let open Internal.Let_syntax in
+          let* () = Internal.Validation.validate_max_keys max_keys in
+          let* () = Internal.Validation.ensure_no_ctl ~field:"prefix" prefix in
+          Internal.Validation.validate_range_header_value "continuation_token"
+            continuation_token)
     with
-    | Error e -> Error e
-    | Ok b -> (
-        match pop_fault t with
-        | Some fault ->
-            record t.store `List bucket prefix true;
-            Error (fault_to_error fault)
-        | None ->
-            record t.store `List bucket prefix false;
-            let all_keys =
-              Hashtbl.keys b.objects
-              |> List.filter ~f:(fun k -> String.is_prefix k ~prefix)
-              |> List.sort ~compare:String.compare
-            in
-            let after_token =
-              match continuation_token with
-              | None -> all_keys
-              | Some token ->
-                  List.filter ~f:(fun k -> String.compare k token > 0) all_keys
-            in
-            let page =
-              let rec take n = function
-                | [] -> []
-                | _ when n <= 0 -> []
-                | x :: xs -> x :: take (n - 1) xs
-              in
-              take max_keys after_token
-            in
-            let is_truncated = List.length after_token > max_keys in
-            let next_continuation_token =
-              if is_truncated then
-                match List.rev page with last :: _ -> Some last | [] -> None
-              else None
-            in
-            Ok
-              {
-                Object_.List_result.keys = page;
-                is_truncated;
-                next_continuation_token;
-              })
+    | Error _ as error -> error
+    | Ok () -> (
+        match
+          check_access t ~bucket_name:bucket
+            ~action:(Object_.Action.to_string List)
+            ~key:None
+        with
+        | Error e -> Error e
+        | Ok b -> (
+            match pop_fault t with
+            | Some fault ->
+                record t.store `List bucket prefix true;
+                Error (fault_to_error fault)
+            | None ->
+                record t.store `List bucket prefix false;
+                let all_keys =
+                  Hashtbl.keys b.objects
+                  |> List.filter ~f:(fun k -> String.is_prefix k ~prefix)
+                  |> List.sort ~compare:String.compare
+                in
+                let after_token =
+                  match continuation_token with
+                  | None -> all_keys
+                  | Some token ->
+                      List.filter
+                        ~f:(fun k -> String.compare k token > 0)
+                        all_keys
+                in
+                let page =
+                  let rec take n = function
+                    | [] -> []
+                    | _ when n <= 0 -> []
+                    | x :: xs -> x :: take (n - 1) xs
+                  in
+                  take max_keys after_token
+                in
+                let is_truncated = List.length after_token > max_keys in
+                let next_continuation_token =
+                  if is_truncated then
+                    match List.rev page with
+                    | last :: _ -> Some last
+                    | [] -> None
+                  else None
+                in
+                Ok
+                  {
+                    Object_.List_result.keys = page;
+                    is_truncated;
+                    next_continuation_token;
+                  }))
 
   module Tagging = struct
     let get t ~bucket ~key =
-      match
-        check_access t ~bucket_name:bucket
-          ~action:(Object_.Tagging.Action.to_string Get)
-          ~key:(Some key)
-      with
-      | Error e -> Error e
-      | Ok b -> (
-          match Hashtbl.find b.objects key with
-          | None -> Error `Not_found
-          | Some obj -> Ok obj.tags)
+      match validate_bucket_key bucket key with
+      | Error _ as error -> error
+      | Ok () -> (
+          match
+            check_access t ~bucket_name:bucket
+              ~action:(Object_.Tagging.Action.to_string Get)
+              ~key:(Some key)
+          with
+          | Error e -> Error e
+          | Ok b -> (
+              match Hashtbl.find b.objects key with
+              | None -> Error `Not_found
+              | Some obj -> Ok obj.tags))
 
     let put t ~bucket ~key tags =
       match
-        check_access t ~bucket_name:bucket
-          ~action:(Object_.Tagging.Action.to_string Put)
-          ~key:(Some key)
+        Result.bind (validate_bucket_key bucket key) ~f:(fun () ->
+            Internal.Validation.validate_tags tags)
       with
-      | Error e -> Error e
-      | Ok b -> (
-          match Hashtbl.find b.objects key with
-          | None -> Error `Not_found
-          | Some obj ->
-              Hashtbl.set b.objects ~key ~data:{ obj with tags };
-              Ok ())
+      | Error _ as error -> error
+      | Ok () -> (
+          match
+            check_access t ~bucket_name:bucket
+              ~action:(Object_.Tagging.Action.to_string Put)
+              ~key:(Some key)
+          with
+          | Error e -> Error e
+          | Ok b -> (
+              match Hashtbl.find b.objects key with
+              | None -> Error `Not_found
+              | Some obj ->
+                  Hashtbl.set b.objects ~key ~data:{ obj with tags };
+                  Ok ()))
 
     let delete t ~bucket ~key =
-      match
-        check_access t ~bucket_name:bucket
-          ~action:(Object_.Tagging.Action.to_string Delete)
-          ~key:(Some key)
-      with
-      | Error e -> Error e
-      | Ok b -> (
-          match Hashtbl.find b.objects key with
-          | None -> Error `Not_found
-          | Some obj ->
-              Hashtbl.set b.objects ~key ~data:{ obj with tags = [] };
-              Ok ())
+      match validate_bucket_key bucket key with
+      | Error _ as error -> error
+      | Ok () -> (
+          match
+            check_access t ~bucket_name:bucket
+              ~action:(Object_.Tagging.Action.to_string Delete)
+              ~key:(Some key)
+          with
+          | Error e -> Error e
+          | Ok b -> (
+              match Hashtbl.find b.objects key with
+              | None -> Error `Not_found
+              | Some obj ->
+                  Hashtbl.set b.objects ~key ~data:{ obj with tags = [] };
+                  Ok ()))
   end
 end
 
@@ -425,29 +494,38 @@ end
 
 module Bucket = struct
   let create t ~bucket ?region:_ () =
-    if Hashtbl.mem t.store.buckets bucket then Error `Bucket_already_exists
-    else begin
-      Hashtbl.set t.store.buckets ~key:bucket
-        ~data:
-          {
-            objects = Hashtbl.create (module String);
-            policy = None;
-            creation_date = Clock.now t.store.clock;
-          };
-      Ok ()
-    end
-
-  let delete t ~bucket =
-    match Hashtbl.find t.store.buckets bucket with
-    | None -> Error `No_such_bucket
-    | Some b ->
-        if Hashtbl.length b.objects > 0 then Error `Bucket_not_empty
+    match validate_bucket bucket with
+    | Error _ as error -> error
+    | Ok () ->
+        if Hashtbl.mem t.store.buckets bucket then Error `Bucket_already_exists
         else begin
-          Hashtbl.remove t.store.buckets bucket;
+          Hashtbl.set t.store.buckets ~key:bucket
+            ~data:
+              {
+                objects = Hashtbl.create (module String);
+                policy = None;
+                creation_date = Clock.now t.store.clock;
+              };
           Ok ()
         end
 
-  let head t ~bucket = Ok (Hashtbl.mem t.store.buckets bucket)
+  let delete t ~bucket =
+    match validate_bucket bucket with
+    | Error _ as error -> error
+    | Ok () -> (
+        match Hashtbl.find t.store.buckets bucket with
+        | None -> Error `No_such_bucket
+        | Some b ->
+            if Hashtbl.length b.objects > 0 then Error `Bucket_not_empty
+            else begin
+              Hashtbl.remove t.store.buckets bucket;
+              Ok ()
+            end)
+
+  let head t ~bucket =
+    match validate_bucket bucket with
+    | Error _ as error -> error
+    | Ok () -> Ok (Hashtbl.mem t.store.buckets bucket)
 
   let list t =
     let buckets =
@@ -461,24 +539,33 @@ module Bucket = struct
 
   module Policy = struct
     let get t ~bucket =
-      match Hashtbl.find t.store.buckets bucket with
-      | None -> Error `No_such_bucket
-      | Some b -> (
-          match b.policy with None -> Error `Not_found | Some p -> Ok p)
+      match validate_bucket bucket with
+      | Error _ as error -> error
+      | Ok () -> (
+          match Hashtbl.find t.store.buckets bucket with
+          | None -> Error `No_such_bucket
+          | Some b -> (
+              match b.policy with None -> Error `Not_found | Some p -> Ok p))
 
     let put t ~bucket policy =
-      match Hashtbl.find t.store.buckets bucket with
-      | None -> Error `No_such_bucket
-      | Some b ->
-          b.policy <- Some policy;
-          Ok ()
+      match validate_bucket bucket with
+      | Error _ as error -> error
+      | Ok () -> (
+          match Hashtbl.find t.store.buckets bucket with
+          | None -> Error `No_such_bucket
+          | Some b ->
+              b.policy <- Some policy;
+              Ok ())
 
     let delete t ~bucket =
-      match Hashtbl.find t.store.buckets bucket with
-      | None -> Error `No_such_bucket
-      | Some b ->
-          b.policy <- None;
-          Ok ()
+      match validate_bucket bucket with
+      | Error _ as error -> error
+      | Ok () -> (
+          match Hashtbl.find t.store.buckets bucket with
+          | None -> Error `No_such_bucket
+          | Some b ->
+              b.policy <- None;
+              Ok ())
   end
 end
 

@@ -143,6 +143,28 @@ let test_path_encoding () =
     "signs path with special chars" true
     (not (String.equal (get_auth result.headers) ""))
 
+let test_sign_request_params_matches_raw_query () =
+  let query_params =
+    [ ("prefix", [ "folder/a b.txt" ]); ("max-keys", [ "10" ]) ]
+  in
+  let raw_query = "prefix=folder/a b.txt&max-keys=10" in
+  let from_raw =
+    Signing.sign_request ~credentials:creds ~region:"us-east-1" ~service:"s3"
+      ~meth:"GET" ~path:"/bucket" ~query:raw_query
+      ~headers:[ ("host", "s3.amazonaws.com") ]
+      ~payload:"" ~now:test_time
+  in
+  let from_params =
+    Signing.sign_request_params ~credentials:creds ~region:"us-east-1"
+      ~service:"s3" ~meth:"GET" ~path:"/bucket" ~query_params
+      ~headers:[ ("host", "s3.amazonaws.com") ]
+      ~payload:"" ~now:test_time
+  in
+  Alcotest.(check string)
+    "structured query matches raw query"
+    (get_auth from_raw.headers)
+    (get_auth from_params.headers)
+
 (* ── credentials ─────────────────────────────────────────────────── *)
 
 let test_credentials_roundtrip () =
@@ -168,6 +190,15 @@ let test_credentials_no_token () =
     "defaults to None" None
     (Awskit.Credentials.session_token c)
 
+let test_credentials_reject_whitespace () =
+  Alcotest.check_raises "reject whitespace"
+    (Invalid_argument
+       "Awskit.Credentials.make: access_key_id must not have leading/trailing \
+        whitespace") (fun () ->
+      ignore
+        (Awskit.Credentials.make ~access_key_id:" AK " ~secret_access_key:"SK"
+           ()))
+
 let suite =
   [
     ( "integration:sigv4:get",
@@ -175,6 +206,8 @@ let suite =
         Alcotest.test_case "vanilla" `Quick test_get_vanilla;
         Alcotest.test_case "query param order" `Quick test_get_query_order;
         Alcotest.test_case "path encoding" `Quick test_path_encoding;
+        Alcotest.test_case "structured query params" `Quick
+          test_sign_request_params_matches_raw_query;
       ] );
     ( "integration:sigv4:post",
       [ Alcotest.test_case "body affects signature" `Quick test_post_with_body ]
@@ -190,5 +223,7 @@ let suite =
         Alcotest.test_case "roundtrip with token" `Quick
           test_credentials_roundtrip;
         Alcotest.test_case "no token" `Quick test_credentials_no_token;
+        Alcotest.test_case "reject whitespace" `Quick
+          test_credentials_reject_whitespace;
       ] );
   ]

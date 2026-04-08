@@ -97,6 +97,8 @@ module Principal = struct
     | _ -> Decode.invalid_json "invalid Principal"
 end
 
+type target = Bucket_target of string | Object_target of string * string
+
 module Resource = struct
   type t = Bucket of string | Bucket_objects of string [@@deriving show, eq]
 
@@ -122,9 +124,13 @@ module Resource = struct
     | Some resource -> Ok resource
     | None -> Decode.invalid_json (Fmt.str "invalid Resource %S" arn)
 
-  let matches ~resource ~bucket =
-    match resource with
-    | Bucket name | Bucket_objects name -> String.equal name bucket
+  let matches ~resource ~target =
+    match (resource, target) with
+    | Bucket name, Bucket_target bucket -> String.equal name bucket
+    | Bucket_objects name, Object_target (bucket, _key) ->
+        String.equal name bucket
+    | Bucket _, Object_target _ -> false
+    | Bucket_objects _, Bucket_target _ -> false
 
   let yojson_of_t resource = `String (to_arn resource)
 
@@ -175,8 +181,6 @@ module Statement = struct
     | _ -> Decode.invalid_json "Statement must be an object"
 end
 
-type target = Bucket_target of string | Object_target of string * string
-
 type t = {
   version : string; [@yojson.key "Version"]
   statements : Statement.t list; [@yojson.key "Statement"]
@@ -211,11 +215,7 @@ let action_matches ~pattern ~action =
   String.equal pattern "s3:*" || String.equal pattern action
 
 let evaluate policy ~access_key_id ~action ~target =
-  let resource_matches resource =
-    match target with
-    | Bucket_target bucket | Object_target (bucket, _) ->
-        Resource.matches ~resource ~bucket
-  in
+  let resource_matches resource = Resource.matches ~resource ~target in
   let statement_matches (statement : Statement.t) =
     let principal_matches =
       Principal.matches ~principal:statement.principal ~access_key_id

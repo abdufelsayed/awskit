@@ -415,6 +415,51 @@ let test_policy_deny_overrides_allow () =
   | Error `Access_denied -> ()
   | _ -> Alcotest.fail "delete should be denied"
 
+let test_policy_resource_scope () =
+  let bucket_only_policy =
+    {
+      Policy.version = "2012-10-17";
+      statements =
+        [
+          {
+            Policy.Statement.effect_ = Policy.Effect.Allow;
+            principal = Policy.Principal.User [ "user-x" ];
+            actions = [ "s3:GetObject" ];
+            resources = [ Policy.Resource.Bucket bucket ];
+          };
+        ];
+    }
+  in
+  let object_only_policy =
+    {
+      Policy.version = "2012-10-17";
+      statements =
+        [
+          {
+            Policy.Statement.effect_ = Policy.Effect.Allow;
+            principal = Policy.Principal.User [ "user-x" ];
+            actions = [ "s3:ListBucket" ];
+            resources = [ Policy.Resource.Bucket_objects bucket ];
+          };
+        ];
+    }
+  in
+  let result_pp fmt = function
+    | `Allowed -> Fmt.string fmt "Allowed"
+    | `Denied -> Fmt.string fmt "Denied"
+    | `No_match -> Fmt.string fmt "No_match"
+  in
+  let result_t = Alcotest.of_pp result_pp in
+  Alcotest.(check result_t)
+    "bucket resource does not match object target" `No_match
+    (Policy.evaluate bucket_only_policy ~access_key_id:"user-x"
+       ~action:"s3:GetObject"
+       ~target:(Policy.Object_target (bucket, "k")));
+  Alcotest.(check result_t)
+    "object resource does not match bucket target" `No_match
+    (Policy.evaluate object_only_policy ~access_key_id:"user-x"
+       ~action:"s3:ListBucket" ~target:(Policy.Bucket_target bucket))
+
 (* ── Faults ─────────────────────────────────────────────────────── *)
 
 let test_fault_slowdown () =
@@ -745,6 +790,7 @@ let suite =
           test_policy_invalid_resource;
         Alcotest.test_case "deny overrides allow" `Quick
           test_policy_deny_overrides_allow;
+        Alcotest.test_case "resource scope" `Quick test_policy_resource_scope;
       ] );
     ( "sim:faults:inject",
       [

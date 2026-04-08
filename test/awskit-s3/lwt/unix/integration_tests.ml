@@ -2,6 +2,9 @@
 
 open Base
 open Awskit_s3_lwt_unix
+module Error = Awskit_s3.Error
+module Tag = Awskit_s3.Tag
+module Range = Awskit_s3.Range
 
 let ( let* ) = Lwt.bind
 let test_prefix = ref 0
@@ -13,11 +16,12 @@ let fresh_prefix () =
 let bucket = "test-bucket"
 
 let make_client () =
-  Awskit_lwt_unix.create ~scheme:`Http ~region:"us-east-1"
+  create ~region:"us-east-1"
     ~credentials:
-      (Awskit.Credentials.make ~access_key_id:"minioadmin"
+      (Awskit_s3.Credentials.make ~access_key_id:"minioadmin"
          ~secret_access_key:"minioadmin" ())
-    ~endpoint:"localhost" ~port:9000 ()
+    ~endpoint:(Awskit_s3.Endpoint.http ~host:"localhost" ~port:9000 ())
+    ()
 
 (* ── Helpers ────────────────────────────────────────────────────── *)
 
@@ -498,6 +502,43 @@ let test_presigned_get () =
         (String.is_substring url ~substring:sig_marker));
   Lwt.return_unit
 
+let call_raw ?content_type ~meth url body =
+  let headers =
+    match content_type with
+    | Some content_type -> Cohttp.Header.init_with "content-type" content_type
+    | None -> Cohttp.Header.init ()
+  in
+  let body = Cohttp_lwt.Body.of_string body in
+  let* resp, resp_body =
+    Cohttp_lwt_unix.Client.call ~headers ~body ~chunked:false meth
+      (Uri.of_string url)
+  in
+  let* body = Cohttp_lwt.Body.to_string resp_body in
+  Lwt.return (Cohttp.Code.code_of_status resp.status, body)
+
+let test_presigned_put_content_type () =
+  Lwt_main.run
+  @@
+  let c = make_client () in
+  let key = fresh_prefix () ^ "presigned-put.txt" in
+  let url =
+    match
+      Presigned.put_object c ~bucket ~key ~expires_in:60
+        ~content_type:"text/plain" ()
+    with
+    | Error e -> Alcotest.failf "presigned put: %a" Error.pp e
+    | Ok url -> url
+  in
+  let* bad_status, _ =
+    call_raw ~content_type:"application/json" ~meth:`PUT url "bad"
+  in
+  Alcotest.(check bool) "wrong content-type rejected" true (bad_status >= 400);
+  let* ok_status, _ = call_raw ~content_type:"text/plain" ~meth:`PUT url "ok" in
+  Alcotest.(check bool) "matching content-type accepted" true (ok_status < 300);
+  let* get_result = Object.get c ~bucket ~key () in
+  check_get_body "uploaded body" "ok" get_result;
+  Lwt.return_unit
+
 let test_presigned_invalid_expiry () =
   Lwt_main.run
   @@
@@ -507,6 +548,27 @@ let test_presigned_invalid_expiry () =
   | Error (`Invalid_request _) -> ()
   | Error e -> Alcotest.failf "unexpected: %a" Error.pp e
   | Ok _ -> Alcotest.fail "expected invalid expiry");
+  Lwt.return_unit
+
+let test_special_character_keys () =
+  Lwt_main.run
+  @@
+  let c = make_client () in
+  let prefix = fresh_prefix () in
+  let src = prefix ^ "folder name/hello +%.txt" in
+  let dst = prefix ^ "folder name/copied %file.txt" in
+  let* _ = Object.put c ~bucket ~key:src "special" in
+  let* src_result = Object.get c ~bucket ~key:src () in
+  check_get_body "special key get" "special" src_result;
+  let* copy_result =
+    Object.copy c ~src_bucket:bucket ~src_key:src ~dst_bucket:bucket
+      ~dst_key:dst ()
+  in
+  (match copy_result with
+  | Ok _ -> ()
+  | Error e -> Alcotest.failf "copy special: %a" Error.pp e);
+  let* dst_result = Object.get c ~bucket ~key:dst () in
+  check_get_body "special key copy" "special" dst_result;
   Lwt.return_unit
 
 let test_invalid_range () =
@@ -538,6 +600,8 @@ let suite () =
         Alcotest.test_case "etag" `Quick test_etag;
         Alcotest.test_case "copy" `Quick test_copy;
         Alcotest.test_case "metadata" `Quick test_put_get_metadata;
+        Alcotest.test_case "special character keys" `Quick
+          test_special_character_keys;
       ] );
     ( "integration:minio:cas",
       [ Alcotest.test_case "put-if-not-exists" `Quick test_cas ] );
@@ -563,6 +627,8 @@ let suite () =
     ( "integration:minio:presigned",
       [
         Alcotest.test_case "get url" `Quick test_presigned_get;
+        Alcotest.test_case "put content-type enforcement" `Quick
+          test_presigned_put_content_type;
         Alcotest.test_case "invalid expiry" `Quick test_presigned_invalid_expiry;
         Alcotest.test_case "invalid range" `Quick test_invalid_range;
       ] );

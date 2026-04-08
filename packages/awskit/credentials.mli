@@ -17,7 +17,9 @@ val make :
   ?session_token:string ->
   unit ->
   t
-(** Create credentials. [session_token] for STS/role temporary credentials. *)
+(** Create credentials. [session_token] for STS/role temporary credentials.
+    Raises [Invalid_argument] if required fields are empty, contain control
+    characters, or have leading/trailing whitespace. *)
 
 val access_key_id : t -> string
 val secret_access_key : t -> string

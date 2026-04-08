@@ -9,17 +9,31 @@ end
 type t = { scheme : Scheme.t; host : string; port : int option }
 [@@deriving show, eq]
 
+let fail format = Fmt.kstr invalid_arg format
+
+let has_ctl_or_del s =
+  String.exists s ~f:(fun c ->
+      let code = Char.to_int c in
+      code < 0x20 || code = 0x7F)
+
 let validate_host host =
-  if String.is_empty (String.strip host) then
-    invalid_arg "Awskit.Endpoint.create: host must be non-empty"
+  if String.is_empty host then
+    fail "Awskit.Endpoint.create: host must be non-empty";
+  if has_ctl_or_del host then
+    fail "Awskit.Endpoint.create: host contains control characters";
+  if String.is_substring host ~substring:"://" then
+    fail "Awskit.Endpoint.create: host must not include a URL scheme";
+  if
+    String.exists host ~f:(function
+      | '/' | '?' | '#' | '@' -> true
+      | _ -> false)
+  then fail "Awskit.Endpoint.create: host must be a bare hostname or IP"
 
 let validate_port = function
   | None -> ()
   | Some port when port > 0 && port <= 65_535 -> ()
   | Some port ->
-      invalid_arg
-        (Fmt.str "Awskit.Endpoint.create: invalid port %d (expected 1-65535)"
-           port)
+      fail "Awskit.Endpoint.create: invalid port %d (expected 1-65535)" port
 
 let create ~scheme ~host ?port () =
   let host = String.strip host in

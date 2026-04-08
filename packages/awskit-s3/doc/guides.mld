@@ -1,6 +1,6 @@
 {0 S3 Guides}
 
-Practical guides for using aws-s3. See the {{!page-index}index page}
+Practical guides for using awskit-s3. See the {{!page-index}index page}
 for the full library listing.
 
 For adapter setup, request signing, and error handling, see
@@ -678,7 +678,7 @@ AWS account, no network, no flaky tests.
 {[
 let clock = Awskit_s3.Sim.Clock.create ()
 let store = Awskit_s3.Sim.create_store ~clock ()
-let credentials = Awskit.Credentials.make
+let credentials = Awskit_s3.Credentials.make
   ~access_key_id:"test" ~secret_access_key:"test" ()
 let conn = Awskit_s3.Sim.connect store ~credentials
 
@@ -817,12 +817,11 @@ different credentials should get different access results.
 Override the endpoint to point at a local S3-compatible service:
 {[
 (* Eio adapter with custom endpoint *)
-let conn = Awskit_eio.create
+let conn = Awskit_s3_eio.create
   ~env
   ~region:"us-east-1"
   ~credentials
-  ~endpoint:"localhost"
-  ~port:4566     (* LocalStack default *)
+  ~endpoint:(Awskit_s3.Endpoint.http ~host:"localhost" ~port:4566 ())
   ()
 in
 
@@ -832,13 +831,13 @@ Awskit_s3_eio.Bucket.create conn ~bucket:"test" ()
 
 MinIO works the same way, typically on port 9000:
 {[
-let conn = Awskit_lwt_unix.create
+let conn = Awskit_s3_lwt_unix.create
   ~region:"us-east-1"
   ~credentials
-  ~endpoint:"localhost"
-  ~port:9000     (* MinIO default *)
+  ~endpoint:(Awskit_s3.Endpoint.http ~host:"localhost" ~port:9000 ())
   ()
 ]}
 
-When you pass [?port], the adapter switches to HTTP automatically. Both
-[?endpoint] and [?port] are optional — omit them for production AWS endpoints.
+Pass an explicit {!module:Awskit_s3.Endpoint} when talking to LocalStack,
+MinIO, or another S3-compatible service. Omit [?endpoint] for production AWS
+HTTPS endpoints.

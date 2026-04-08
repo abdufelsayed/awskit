@@ -25,8 +25,28 @@ val ptime_to_date_time : Ptime.t -> string * string
 val uri_encode : ?encode_slash:bool -> string -> string
 (** URI-encode per AWS rules. [encode_slash:false] for paths. *)
 
+val canonical_query_params : (string * string list) list -> string
+(** Sort parameters by name/value and URI-encode keys and values. Each key may
+    appear multiple times with different values. *)
+
 val canonical_query : string -> string
-(** Sort parameters by name, URI-encode keys and values. *)
+(** Parse, sort, and URI-encode a raw query string. Prefer
+    {!val:canonical_query_params} when you already have structured query
+    parameters. *)
+
+val sign_request_params :
+  credentials:Credentials.t ->
+  region:string ->
+  service:string ->
+  meth:string ->
+  path:string ->
+  query_params:(string * string list) list ->
+  headers:(string * string) list ->
+  payload:string ->
+  now:Ptime.t ->
+  signed_headers
+(** Like {!val:sign_request}, but takes structured query parameters and avoids
+    double-encoding. Prefer this when building queries programmatically. *)
 
 val sign_request :
   credentials:Credentials.t ->
@@ -39,4 +59,5 @@ val sign_request :
   payload:string ->
   now:Ptime.t ->
   signed_headers
-(** Full AWS SigV4. [headers] must include [("host", ...)]. *)
+(** Full AWS SigV4. [headers] must include exactly one non-empty [host] header.
+    Raises [Invalid_argument] if required headers are missing or malformed. *)

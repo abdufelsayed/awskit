@@ -10,7 +10,15 @@
     module S3 = Awskit_s3.Make (Awskit_eio.Runtime)
     ]}
 
-    Pre-built adapters: [aws-s3-eio], [aws-s3-lwt]. *)
+    Adapter libraries: [awskit-s3.eio], [awskit-s3.lwt], [awskit-s3.lwt_unix].
+*)
+
+module Credentials = Awskit.Credentials
+(** AWS credentials for request signing, re-exported for convenience so
+    [awskit-s3] users do not need to reference [Awskit] directly. *)
+
+module Endpoint = Awskit.Endpoint
+(** Endpoint configuration, re-exported for convenience. *)
 
 module Error = Error
 (** S3-specific error types. *)

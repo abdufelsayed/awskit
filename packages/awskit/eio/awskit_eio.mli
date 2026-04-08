@@ -13,7 +13,10 @@ val create :
   region:string ->
   credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
-  ?endpoint:string ->
-  ?port:int ->
+  ?endpoint:Awskit.Endpoint.t ->
+  ?max_response_body_bytes:int ->
   unit ->
   t
+(** Defaults to AWS HTTPS endpoints. Pass an explicit [endpoint] for LocalStack,
+    MinIO, or other S3-compatible services. [max_response_body_bytes] defaults
+    to 64 MiB. *)

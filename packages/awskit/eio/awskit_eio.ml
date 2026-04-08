@@ -1,4 +1,4 @@
-(** Eio runtime adapter for AWS. Thin wrapper over the pure aws package. *)
+(** Eio runtime adapter for AWS. Thin wrapper over the pure awskit package. *)
 
 module Runtime = Runtime
 

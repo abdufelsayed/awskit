@@ -1,10 +1,10 @@
-include Awskit_s3.Make (Awskit_eio.Runtime)
+type t = Awskit_eio.t
 
-(* Re-export pure types for convenience *)
-module Error = Awskit_s3.Error
-module Storage_class = Awskit_s3.Storage_class
-module Tag = Awskit_s3.Tag
-module Range = Awskit_s3.Range
-module Metadata = Awskit_s3.Metadata
-module Policy = Awskit_s3.Policy
-module Sim = Awskit_s3.Sim
+module Runtime = Awskit_eio.Runtime
+
+let create ~env ~region ~credentials ?clock ?endpoint ?max_response_body_bytes
+    () =
+  Awskit_eio.create ~env ~region ~credentials ?clock ?endpoint
+    ?max_response_body_bytes ()
+
+include Awskit_s3.Make (Awskit_eio.Runtime)

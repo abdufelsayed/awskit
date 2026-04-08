@@ -17,14 +17,14 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
 
   val create :
     ?ctx:Client.ctx ->
-    ?scheme:[ `Http | `Https ] ->
+    ?endpoint:Awskit.Endpoint.t ->
     region:string ->
     credentials:Awskit.Credentials.t ->
     clock:(unit -> Ptime.t) ->
-    ?endpoint:string ->
-    ?port:int ->
+    ?max_response_body_bytes:int ->
     unit ->
     t
-  (** [scheme] defaults to [`Https]. [endpoint] and [port] override for
-      LocalStack, MinIO, etc. *)
+  (** [endpoint] overrides the default AWS HTTPS endpoint for LocalStack, MinIO,
+      or other S3-compatible services. [max_response_body_bytes] defaults to 64
+      MiB. *)
 end

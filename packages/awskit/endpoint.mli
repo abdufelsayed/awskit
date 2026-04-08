@@ -12,7 +12,8 @@ module Scheme : sig
 end
 
 type t
-(** Opaque. [Invalid_argument] on empty host or port out of range. *)
+(** Opaque. [Invalid_argument] on invalid hosts (empty, contains control
+    characters, or includes URL syntax) or ports out of range. *)
 
 val pp : Format.formatter -> t -> unit
 val equal : t -> t -> bool

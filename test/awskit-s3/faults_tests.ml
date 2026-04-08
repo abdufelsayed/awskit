@@ -16,14 +16,19 @@ let make_sim () =
 
 (* ── Buggify never corrupts ─────────────────────────────────────── *)
 
+let safe_key_gen =
+  let open QCheck.Gen in
+  map
+    (fun s -> "k/" ^ s)
+    (string_size
+       ~gen:(oneof [ char_range 'a' 'z'; char_range '0' '9' ])
+       (int_range 1 16))
+
 let test_buggify_consistency =
   QCheck.Test.make ~count:2000 ~name:"buggify never corrupts store"
     QCheck.(
       pair int
-        (list_size (Gen.int_range 1 20)
-           (pair
-              (Gen.map (fun s -> "k/" ^ s) Gen.string_small |> make)
-              string_small)))
+        (list_size (Gen.int_range 1 20) (pair (make safe_key_gen) string_small)))
     (fun (seed, ops) ->
       let _store, c = make_sim () in
       Sim.enable_buggify c ~seed ~prob:0.3;

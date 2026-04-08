@@ -1,4 +1,4 @@
-(** S3 client functor. Pre-built adapters: [Awskit_s3_eio],
+(** S3 client functor. Adapter libraries: [Awskit_s3_eio], [Awskit_s3_lwt],
     [Awskit_s3_lwt_unix].
 
     {[

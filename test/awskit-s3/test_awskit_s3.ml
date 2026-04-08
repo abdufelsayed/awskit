@@ -1,2 +1,3 @@
 let () =
-  Alcotest.run "aws-s3" (List.concat [ Sim_tests.suite; Faults_tests.suite ])
+  Alcotest.run "awskit-s3"
+    (List.concat [ Core_tests.suite; Sim_tests.suite; Faults_tests.suite ])

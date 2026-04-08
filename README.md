@@ -7,28 +7,33 @@ AWS infrastructure for OCaml — pure core, optional runtime adapters.
 | Package | Description |
 |---------|-------------|
 | **awskit** | Pure AWS infrastructure — SigV4 signing, credentials, endpoints, error types, HTTP request/response types, `Runtime` module type. Optional `awskit.eio`, `awskit.lwt`, `awskit.lwt_unix`, `awskit.unix` adapters. |
-| **awskit-s3** | Pure S3 client core — objects, buckets, multipart uploads, presigned URLs, policies, simulation. Optional `awskit-s3.eio` and `awskit-s3.lwt_unix` adapters. |
+| **awskit-s3** | Pure S3 client core — objects, buckets, multipart uploads, presigned URLs, policies, simulation. Optional `awskit-s3.eio`, `awskit-s3.lwt`, and `awskit-s3.lwt_unix` adapters. |
 
 ## Quick start
 
 ```bash
-opam install awskit awskit-s3 cohttp-eio   # Eio
-opam install awskit awskit-s3 cohttp-lwt-unix  # Lwt + Unix
+opam install awskit-s3 cohttp-eio        # Eio
+opam install awskit-s3 cohttp-lwt-unix   # Lwt + Unix
 ```
 
 ### Eio (OCaml 5, direct-style)
+
+```lisp
+; dune
+(libraries awskit-s3 awskit-s3.eio eio_main)
+```
 
 ```ocaml
 open Eio.Std
 
 let () =
   Eio_main.run @@ fun env ->
-  let credentials = Awskit.Credentials.make
+  let credentials = Awskit_s3.Credentials.make
     ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
     ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
     ()
   in
-  let conn = Awskit_eio.create
+  let conn = Awskit_s3_eio.create
     ~env ~region:"us-east-1" ~credentials ()
   in
   match Awskit_s3_eio.Object.put conn
@@ -38,20 +43,31 @@ let () =
   | Error err -> Fmt.epr "Error: %a" Awskit_s3.Error.pp err
 ```
 
-### Lwt + Unix
+### Lwt
+
+```lisp
+; dune
+(libraries awskit-s3 awskit-s3.lwt cohttp-lwt-unix)
+```
 
 ```ocaml
-let credentials = Awskit.Credentials.make
+open Lwt.Syntax
+
+module S3 = Awskit_s3_lwt.Make (Cohttp_lwt_unix.Client)
+
+let credentials = Awskit_s3.Credentials.make
   ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
   ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
   ()
 
-let conn = Awskit_lwt_unix.create
-  ~region:"us-east-1" ~credentials ()
+let conn = S3.create
+  ~region:"us-east-1" ~credentials ~clock:Ptime_clock.now ()
 
-let* result = Awskit_s3_lwt_unix.Object.put conn
+let* result = S3.Object.put conn
   ~bucket:"my-bucket" ~key:"hello.txt" "Hello, S3!"
 ```
+
+If you just want the ready-made Unix stack, use `Awskit_s3_lwt_unix.create`.
 
 ### Simulation testing (no network)
 
@@ -86,12 +102,11 @@ dune test
 packages/
 ├── awskit/              # Pure core + runtime adapters
 │   ├── eio/             # Eio adapter
-│   ├── lwt/             # Generic Lwt functor
-│   ├── lwt_unix/        # Lwt + Cohttp + Unix
+│   ├── lwt/             # Generic Lwt layer + Unix backend
 │   └── unix/            # OS helpers (clock, env credentials)
 ├── awskit-s3/           # S3 client core + adapters
 │   ├── eio/             # S3 via Eio
-│   ├── lwt_unix/        # S3 via Lwt + Unix
+│   ├── lwt/             # Generic Lwt adapter + Unix backend
 │   └── sim/             # In-memory S3 for testing
 doc/                     # Unified odoc landing page
 test/                    # Tests for all packages

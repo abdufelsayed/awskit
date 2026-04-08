@@ -1,0 +1,12 @@
+(test
+ (name test_awskit_s3_lwt)
+ (package awskit-s3)
+ (modules test_awskit_s3_lwt integration_tests)
+ (libraries
+  awskit
+  awskit_lwt
+  awskit_s3
+  awskit_s3_lwt
+  cohttp-lwt-unix
+  ptime
+  alcotest))

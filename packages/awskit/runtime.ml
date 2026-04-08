@@ -9,7 +9,6 @@ module type S = sig
   val region : connection -> string
   val credentials : connection -> Credentials.t
   val clock : connection -> Ptime.t
-  val endpoint_host : connection -> string option
-  val endpoint_port : connection -> int option
+  val endpoint : connection -> Endpoint.t option
   val call : connection -> Request.t -> (Response.t, Error.base) result t
 end

@@ -2,6 +2,8 @@
     functor parameterized by Awskit.Runtime.S. No IO dependencies. *)
 
 (* Pure types *)
+module Credentials = Awskit.Credentials
+module Endpoint = Awskit.Endpoint
 module Error = Error
 module Storage_class = Storage_class
 module Tag = Tag
