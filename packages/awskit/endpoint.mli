@@ -21,6 +21,13 @@ val equal : t -> t -> bool
 val create : scheme:Scheme.t -> host:string -> ?port:int -> unit -> t
 (** [Invalid_argument] if host is empty or port out of range (1–65535). *)
 
+val of_string : string -> (t, string) result
+(** Parse an endpoint override from a string.
+
+    Accepts full URLs such as ["http://localhost:9000"] and
+    ["https://s3.example.com"], plus bare authorities such as
+    ["localhost:9000"]. Bare authorities default to HTTPS. *)
+
 val http : host:string -> ?port:int -> unit -> t
 val https : host:string -> ?port:int -> unit -> t
 val scheme : t -> Scheme.t

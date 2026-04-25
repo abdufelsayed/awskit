@@ -1,5 +1,14 @@
-include Awskit_s3_lwt.Make (Cohttp_lwt_unix.Client)
+module Runtime = Awskit_lwt_unix.Runtime
+module S3 = Awskit_s3.Make (Runtime)
+include S3
 
-let create ?ctx ?endpoint ~region ~credentials ?(clock = Ptime_clock.now)
-    ?max_response_body_bytes () =
-  create ?ctx ?endpoint ~region ~credentials ~clock ?max_response_body_bytes ()
+type t = Awskit_lwt_unix.t
+
+let create ?ctx ?endpoint ?region ?credentials ?clock ?max_response_body_bytes
+    () =
+  match
+    Awskit_lwt_unix.create ?ctx ?endpoint ?region ?credentials ?clock
+      ?max_response_body_bytes ()
+  with
+  | Ok conn -> Ok conn
+  | Error (#Awskit.Error.base as error) -> Error (error :> Awskit_s3.Error.t)

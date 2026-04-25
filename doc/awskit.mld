@@ -4,7 +4,7 @@ AWS infrastructure for OCaml — pure core, optional runtime adapters.
 
 Two packages:
 {ul
-{li {{:../awskit/index.html}[awskit]} — SigV4 signing, credentials, endpoints, error types,
+{li {{:../awskit/index.html}[awskit]} — SigV4 signing, credentials, regions, endpoints, error types,
   HTTP request/response types, Runtime module type, and adapters for Eio, Lwt, and Unix}
 {li {{:../awskit-s3/index.html}[awskit-s3]} — Amazon S3 client (objects, buckets, multipart
   uploads, presigned URLs, policies, simulation)}
@@ -19,7 +19,7 @@ sub-libraries are chosen at the edge of your application:
 {li [awskit.eio] — Eio adapter (direct-style, OCaml 5)}
 {li [awskit.lwt] — Generic Lwt functor (for MirageOS or custom backends)}
 {li [awskit.lwt_unix] — Ready-to-use Lwt + Cohttp + Unix adapter}
-{li [awskit.unix] — OS helpers (wall clock, env-based credentials)}
+{li [awskit.unix] — OS helpers (wall clock, standard AWS env variables)}
 {li [awskit-s3.eio] — S3 via Eio}
 {li [awskit-s3.lwt] — S3 via generic Lwt adapter}
 {li [awskit-s3.lwt_unix] — S3 via Lwt + Unix}
@@ -28,6 +28,20 @@ sub-libraries are chosen at the edge of your application:
 Service packages like [awskit-s3] depend on the {!module-type:Awskit.Runtime.S}
 abstraction, not on any particular concurrency library. Swap adapters — the
 same S3 code works with Eio, Lwt, or a custom runtime.
+
+When arguments are omitted, the Unix adapters read only these standard AWS
+environment variables:
+
+{[
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_SESSION_TOKEN
+AWS_REGION
+AWS_DEFAULT_REGION
+]}
+
+Endpoint overrides are explicit; Unix adapters do not read endpoint URLs from
+the environment.
 
 {1 Quick start}
 
@@ -78,6 +92,16 @@ let conn = S3.create
 
 let* result = S3.Object.put conn
   ~bucket:"my-bucket" ~key:"hello.txt" "Hello, S3!"
+]}
+
+The ready-made Unix adapter can read those standard AWS variables directly:
+{[
+let* result =
+  match Awskit_s3_lwt_unix.create () with
+  | Error err -> Fmt.failwith "%a" Awskit_s3.Error.pp err
+  | Ok conn ->
+      Awskit_s3_lwt_unix.Object.put conn
+        ~bucket:"my-bucket" ~key:"hello.txt" "Hello, S3!"
 ]}
 
 {2 Simulation testing}

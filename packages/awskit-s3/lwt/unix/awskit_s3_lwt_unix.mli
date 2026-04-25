@@ -9,6 +9,7 @@
              ~secret_access_key:"..." ())
         ~endpoint:(Awskit_s3.Endpoint.http ~host:"localhost" ~port:9000 ())
         ()
+      |> Result.get_ok
     in
     let* result =
       Awskit_s3_lwt_unix.Object.get conn ~bucket:"my-bucket" ~key:"hello.txt" ()
@@ -30,12 +31,15 @@ module Runtime :
 val create :
   ?ctx:Cohttp_lwt_unix.Client.ctx ->
   ?endpoint:Awskit_s3.Endpoint.t ->
-  region:string ->
-  credentials:Awskit_s3.Credentials.t ->
+  ?region:string ->
+  ?credentials:Awskit_s3.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
   ?max_response_body_bytes:int ->
   unit ->
-  t
-(** Create an S3 connection without referencing [Awskit_lwt_unix] directly. *)
+  (t, Awskit_s3.Error.t) result
+(** Create an S3 connection without referencing [Awskit_lwt_unix] directly.
+
+    If [region] or [credentials] are omitted, standard AWS environment variables
+    are resolved by [awskit.unix]. *)
 
 include module type of Awskit_s3.Make (Runtime)

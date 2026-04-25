@@ -16,12 +16,16 @@ let fresh_prefix () =
 let bucket = "test-bucket"
 
 let make_client () =
-  create ~region:"us-east-1"
-    ~credentials:
-      (Awskit_s3.Credentials.make ~access_key_id:"minioadmin"
-         ~secret_access_key:"minioadmin" ())
-    ~endpoint:(Awskit_s3.Endpoint.http ~host:"localhost" ~port:9000 ())
-    ()
+  match
+    create ~region:"us-east-1"
+      ~credentials:
+        (Awskit_s3.Credentials.make ~access_key_id:"minioadmin"
+           ~secret_access_key:"minioadmin" ())
+      ~endpoint:(Awskit_s3.Endpoint.http ~host:"localhost" ~port:9000 ())
+      ()
+  with
+  | Ok conn -> conn
+  | Error e -> Fmt.failwith "%a" Error.pp e
 
 (* ── Helpers ────────────────────────────────────────────────────── *)
 

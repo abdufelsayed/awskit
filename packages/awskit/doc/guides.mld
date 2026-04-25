@@ -153,12 +153,27 @@ For existing Lwt codebases. Uses promises:
 {[
 let conn = Awskit_lwt_unix.create
   ~region:"us-east-1" ~credentials ()
+|> Result.get_ok
 ]}
 
 The monad type is [type 'a t = 'a Lwt.t] — use [let*] for binding.
 Optional parameters include custom TLS ([?ctx]), clock ([?clock]), explicit
 endpoint overrides ([?endpoint]), and a buffered response size limit
 ([?max_response_body_bytes]).
+
+If arguments are omitted, [awskit.lwt_unix] reads only these standard AWS
+environment variables:
+
+{[
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_SESSION_TOKEN
+AWS_REGION
+AWS_DEFAULT_REGION
+]}
+
+Endpoint overrides are explicit; [awskit.lwt_unix] does not read endpoint URLs
+from the environment.
 
 {2 Lwt (generic)}
 
@@ -193,6 +208,7 @@ let conn = Awskit_lwt_unix.create
   ~region:"us-east-1" ~credentials
   ~endpoint:(Awskit.Endpoint.http ~host:"localhost" ~port:9000 ())
   ()
+|> Result.get_ok
 ]}
 
 Pass an explicit {!module:Awskit.Endpoint} when talking to LocalStack, MinIO,

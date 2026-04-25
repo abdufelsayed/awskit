@@ -6,7 +6,7 @@ AWS infrastructure for OCaml — pure core, optional runtime adapters.
 
 | Package | Description |
 |---------|-------------|
-| **awskit** | Pure AWS infrastructure — SigV4 signing, credentials, endpoints, error types, HTTP request/response types, `Runtime` module type. Optional `awskit.eio`, `awskit.lwt`, `awskit.lwt_unix`, `awskit.unix` adapters. |
+| **awskit** | Pure AWS infrastructure — SigV4 signing, credentials, regions, endpoints, error types, HTTP request/response types, `Runtime` module type. Optional `awskit.eio`, `awskit.lwt`, `awskit.lwt_unix`, `awskit.unix` adapters. |
 | **awskit-s3** | Pure S3 client core — objects, buckets, multipart uploads, presigned URLs, policies, simulation. Optional `awskit-s3.eio`, `awskit-s3.lwt`, and `awskit-s3.lwt_unix` adapters. |
 
 ## Quick start
@@ -68,6 +68,29 @@ let* result = S3.Object.put conn
 ```
 
 If you just want the ready-made Unix stack, use `Awskit_s3_lwt_unix.create`.
+When arguments are omitted, it reads only these standard AWS environment
+variables:
+
+```text
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_SESSION_TOKEN
+AWS_REGION
+AWS_DEFAULT_REGION
+```
+
+Endpoint overrides are explicit; `create` does not read endpoint URLs from the
+environment.
+
+```ocaml
+let* result =
+  match Awskit_s3_lwt_unix.create () with
+  | Error err ->
+      Fmt.failwith "%a" Awskit_s3.Error.pp err
+  | Ok conn ->
+      Awskit_s3_lwt_unix.Object.put conn
+        ~bucket:"my-bucket" ~key:"hello.txt" "Hello, S3!"
+```
 
 ### Simulation testing (no network)
 
@@ -103,7 +126,7 @@ packages/
 ├── awskit/              # Pure core + runtime adapters
 │   ├── eio/             # Eio adapter
 │   ├── lwt/             # Generic Lwt layer + Unix backend
-│   └── unix/            # OS helpers (clock, env credentials)
+│   └── unix/            # OS helpers (clock, standard AWS env vars)
 ├── awskit-s3/           # S3 client core + adapters
 │   ├── eio/             # S3 via Eio
 │   ├── lwt/             # Generic Lwt adapter + Unix backend

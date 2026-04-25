@@ -41,6 +41,48 @@ let create ~scheme ~host ?port () =
   validate_port port;
   { scheme; host; port }
 
+let split_scheme input =
+  match String.substr_index input ~pattern:"://" with
+  | None -> Ok (`Https, input)
+  | Some i ->
+      let scheme = String.prefix input i |> String.lowercase in
+      let rest = String.drop_prefix input (i + 3) in
+      let scheme =
+        match scheme with
+        | "http" -> Ok `Http
+        | "https" -> Ok `Https
+        | _ -> Error (Fmt.str "unsupported endpoint scheme: %s" scheme)
+      in
+      Result.map scheme ~f:(fun scheme -> (scheme, rest))
+
+let split_host_port authority =
+  match String.rsplit2 authority ~on:':' with
+  | None -> Ok (authority, None)
+  | Some (host, port_s) -> (
+      match Stdlib.int_of_string_opt port_s with
+      | Some port -> Ok (host, Some port)
+      | None -> Error (Fmt.str "invalid endpoint port: %s" port_s))
+
+let of_string input =
+  let input = String.strip input in
+  try
+    if String.is_empty input then Error "endpoint must be non-empty"
+    else
+      match split_scheme input with
+      | Error _ as error -> error
+      | Ok (scheme, authority) -> (
+          if
+            String.exists authority ~f:(function
+              | '/' | '?' | '#' | '@' -> true
+              | _ -> false)
+          then
+            Error "endpoint must not include path, query, fragment, or userinfo"
+          else
+            match split_host_port authority with
+            | Error _ as error -> error
+            | Ok (host, port) -> Ok (create ~scheme ~host ?port ()))
+  with Invalid_argument msg -> Error msg
+
 let http ~host ?port () = create ~scheme:`Http ~host ?port ()
 let https ~host ?port () = create ~scheme:`Https ~host ?port ()
 let scheme t = t.scheme

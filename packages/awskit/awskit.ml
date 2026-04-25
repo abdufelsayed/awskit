@@ -2,6 +2,7 @@
     request/response types, and the Runtime module type. No IO. *)
 
 module Credentials = Credentials
+module Region = Region
 module Endpoint = Endpoint
 module Error = Error
 module Signing = Signing

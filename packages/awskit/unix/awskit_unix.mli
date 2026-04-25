@@ -40,3 +40,11 @@ module Credentials : sig
 
       @return [Ok credentials] or [Error (`Invalid_request msg)] *)
 end
+
+module Region : sig
+  (** Environment-based region loading. Reads the standard [AWS_REGION] first,
+      then [AWS_DEFAULT_REGION]. *)
+
+  val from_env : unit -> (Awskit.Region.t, Awskit.Error.base) Result.t
+  (** Load the AWS region from standard AWS environment variables. *)
+end

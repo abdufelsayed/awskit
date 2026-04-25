@@ -9,8 +9,12 @@ let test_connection_roundtrip () =
   let clock () = Ptime.epoch in
   let endpoint = Awskit.Endpoint.http ~host:"localhost" ~port:9000 () in
   let conn =
-    Awskit_lwt_unix.create ~region:"eu-west-1" ~credentials:c ~clock ~endpoint
-      ()
+    match
+      Awskit_lwt_unix.create ~region:"eu-west-1" ~credentials:c ~clock ~endpoint
+        ()
+    with
+    | Ok conn -> conn
+    | Error e -> Fmt.failwith "%a" Awskit.Error.pp_base e
   in
   Alcotest.(check string)
     "region" "eu-west-1"
@@ -27,7 +31,11 @@ let test_connection_defaults () =
   in
   let clock () = Ptime.epoch in
   let conn =
-    Awskit_lwt_unix.create ~region:"us-east-1" ~credentials:c ~clock ()
+    match
+      Awskit_lwt_unix.create ~region:"us-east-1" ~credentials:c ~clock ()
+    with
+    | Ok conn -> conn
+    | Error e -> Fmt.failwith "%a" Awskit.Error.pp_base e
   in
   Alcotest.(check (option string))
     "no endpoint" None

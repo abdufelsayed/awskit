@@ -10,6 +10,9 @@
 module Credentials = Credentials
 (** AWS credentials for request signing. *)
 
+module Region = Region
+(** AWS region names and pure validation. *)
+
 module Endpoint = Endpoint
 (** AWS service endpoint configuration. *)
 

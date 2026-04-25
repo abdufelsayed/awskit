@@ -91,6 +91,7 @@ Ready-to-use Lwt + Unix adapter. Includes
 {[
 let conn = Awskit_s3_lwt_unix.create
   ~region:"us-east-1" ~credentials ()
+|> Result.get_ok
 in
 let* result = Awskit_s3_lwt_unix.Object.get conn
   ~bucket:"my-bucket" ~key:"hello.txt" ()
@@ -99,6 +100,11 @@ match result with
 | Ok _ -> Lwt.return_unit
 | Error err -> Fmt.epr "Error: %a" Awskit_s3.Error.pp err; Lwt.return_unit
 ]}
+
+[awskit-s3.lwt_unix] delegates standard AWS environment variable reads to
+[awskit.unix]. It reads [AWS_ACCESS_KEY_ID], [AWS_SECRET_ACCESS_KEY], optional
+[AWS_SESSION_TOKEN], [AWS_REGION], and [AWS_DEFAULT_REGION] when corresponding
+arguments are omitted.
 
 {1 Quick start with awskit-s3.eio}
 

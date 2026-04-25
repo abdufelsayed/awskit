@@ -23,6 +23,7 @@ The entry point is {!module:Awskit}.
 Core modules:
 {ul
   {li {!module:Awskit.Credentials} — AWS access keys and session tokens}
+  {li {!module:Awskit.Region} — AWS region names and validation}
   {li {!module:Awskit.Signing} — AWS Signature Version 4 (pure, no network)}
   {li {!module:Awskit.Endpoint} — Service endpoint configuration}
   {li {!module:Awskit.Request} — HTTP request type}
@@ -66,6 +67,22 @@ Ready-to-use Lwt + Cohttp + Unix adapter. The monad type is
 {[
 let conn = Awskit_lwt_unix.create
   ~region:"us-east-1" ~credentials ()
+|> Result.get_ok
+]}
+
+[awskit.lwt_unix] reads only these standard AWS environment variables when
+arguments are omitted:
+
+{[
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_SESSION_TOKEN
+AWS_REGION
+AWS_DEFAULT_REGION
+]}
+
+{[
+let conn = Awskit_lwt_unix.create () |> Result.get_ok
 ]}
 
 {2 Library awskit.unix}
@@ -123,6 +140,7 @@ let () =
 {[
 let conn = Awskit_lwt_unix.create
   ~region:"us-east-1" ~credentials ()
+|> Result.get_ok
 in
 (* Operations return 'a Lwt.t *)
 let* result = Awskit_s3_lwt_unix.Object.get conn ~bucket:"b" ~key:"k" () in

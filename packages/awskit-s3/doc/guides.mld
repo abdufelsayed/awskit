@@ -836,8 +836,14 @@ let conn = Awskit_s3_lwt_unix.create
   ~credentials
   ~endpoint:(Awskit_s3.Endpoint.http ~host:"localhost" ~port:9000 ())
   ()
+|> Result.get_ok
 ]}
 
 Pass an explicit {!module:Awskit_s3.Endpoint} when talking to LocalStack,
 MinIO, or another S3-compatible service. Omit [?endpoint] for production AWS
 HTTPS endpoints.
+
+For the Lwt + Unix adapter, omitted arguments are read from standard AWS
+environment variables by [awskit.unix]: [AWS_ACCESS_KEY_ID],
+[AWS_SECRET_ACCESS_KEY], optional [AWS_SESSION_TOKEN], [AWS_REGION], and
+[AWS_DEFAULT_REGION]. Endpoint overrides remain explicit.

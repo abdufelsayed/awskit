@@ -3,3 +3,4 @@
 
 module Clock = Clock
 module Credentials = Credentials
+module Region = Region
