@@ -78,7 +78,9 @@ let test_cas_race =
       let results =
         List.mapi
           (fun i c ->
-            Sim.Object.put c ~bucket ~key ~if_none_match:true (Fmt.str "v%d" i))
+            Sim.Object.put c ~bucket ~key
+              ~preconditions:Object.Preconditions.Write.if_absent
+              (Fmt.str "v%d" i))
           clients
       in
       let ok_count =

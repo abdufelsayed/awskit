@@ -173,7 +173,8 @@ let test_sim_delete_batch () =
   ignore (Sim.Object.put c ~bucket ~key:"b" "2");
   ignore (Sim.Object.put c ~bucket ~key:"c" "3");
   let r =
-    Sim.Object.delete_batch c ~bucket ~keys:[ "a"; "b"; "missing" ]
+    Sim.Object.delete_batch c ~bucket
+      ~objects:(List.map Sim.Object.Delete_object.v [ "a"; "b"; "missing" ])
     |> ok_or_fail "batch"
   in
   Alcotest.(check int)
@@ -189,6 +190,53 @@ let test_sim_delete_batch () =
   | _ -> Alcotest.fail "b");
   let got = Sim.Object.get c ~bucket ~key:"c" () |> ok_or_fail "c" in
   Alcotest.(check string) "c intact" "3" got.body
+
+let test_sim_conditional_delete () =
+  let c = make_fresh () in
+  let put = Sim.Object.put c ~bucket ~key:"k" "v" |> ok_or_fail "put" in
+  (match
+     Sim.Object.delete c ~bucket ~key:"k"
+       ~preconditions:(Object.Preconditions.Delete.if_etag "\"wrong\"")
+       ()
+   with
+  | Error `Precondition_failed -> ()
+  | Ok () -> Alcotest.fail "expected conditional delete to fail"
+  | Error e -> Alcotest.failf "unexpected: %a" Error.pp e);
+  ignore (Sim.Object.get c ~bucket ~key:"k" () |> ok_or_fail "still present");
+  (match
+     Sim.Object.delete c ~bucket ~key:"k"
+       ~preconditions:(Object.Preconditions.Delete.if_etag put.etag)
+       ()
+   with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "conditional delete: %a" Error.pp e);
+  match Sim.Object.get c ~bucket ~key:"k" () with
+  | Error `Not_found -> ()
+  | _ -> Alcotest.fail "k should be gone"
+
+let test_sim_conditional_delete_batch () =
+  let c = make_fresh () in
+  let a = Sim.Object.put c ~bucket ~key:"a" "1" |> ok_or_fail "put a" in
+  ignore (Sim.Object.put c ~bucket ~key:"b" "2" |> ok_or_fail "put b");
+  let result =
+    Sim.Object.delete_batch c ~bucket
+      ~objects:
+        [
+          Sim.Object.Delete_object.v ~etag:a.etag "a";
+          Sim.Object.Delete_object.v ~etag:"\"wrong\"" "b";
+        ]
+    |> ok_or_fail "delete batch"
+  in
+  Alcotest.(check int)
+    "one deleted" 1
+    (List.length result.Object.Delete_result.deleted);
+  Alcotest.(check int)
+    "one error" 1
+    (List.length result.Object.Delete_result.errors);
+  (match Sim.Object.get c ~bucket ~key:"a" () with
+  | Error `Not_found -> ()
+  | _ -> Alcotest.fail "a should be gone");
+  ignore (Sim.Object.get c ~bucket ~key:"b" () |> ok_or_fail "b remains")
 
 (* ── Object tagging ─────────────────────────────────────────────── *)
 
@@ -411,7 +459,7 @@ let test_policy_deny_overrides_allow () =
   (* Get allowed *)
   ignore (Sim.Object.get user ~bucket ~key:"k" () |> ok_or_fail "get");
   (* Delete denied *)
-  match Sim.Object.delete user ~bucket ~key:"k" with
+  match Sim.Object.delete user ~bucket ~key:"k" () with
   | Error `Access_denied -> ()
   | _ -> Alcotest.fail "delete should be denied"
 
@@ -509,7 +557,7 @@ let test_fault_response_lost_delete () =
   let c = make_fresh () in
   ignore (Sim.Object.put c ~bucket ~key:"k" "v");
   Sim.inject_fault c Response_lost;
-  (match Sim.Object.delete c ~bucket ~key:"k" with
+  (match Sim.Object.delete c ~bucket ~key:"k" () with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "expected error");
   match Sim.Object.get c ~bucket ~key:"k" () with
@@ -541,9 +589,14 @@ let test_fault_per_client () =
 
 let test_cas_ambiguity () =
   let c = make_fresh () in
-  ignore (Sim.Object.put c ~bucket ~key:"k" ~if_none_match:true "v1");
+  ignore
+    (Sim.Object.put c ~bucket ~key:"k"
+       ~preconditions:Object.Preconditions.Write.if_absent "v1");
   Sim.inject_fault c Response_lost;
-  match Sim.Object.put c ~bucket ~key:"k" ~if_none_match:true "v2" with
+  match
+    Sim.Object.put c ~bucket ~key:"k"
+      ~preconditions:Object.Preconditions.Write.if_absent "v2"
+  with
   | Error `Precondition_failed -> ()
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "should not succeed"
@@ -565,7 +618,7 @@ let test_history_records () =
   let store, _, c = make () in
   ignore (Sim.Object.put c ~bucket ~key:"a" "1");
   ignore (Sim.Object.get c ~bucket ~key:"a" ());
-  ignore (Sim.Object.delete c ~bucket ~key:"a");
+  ignore (Sim.Object.delete c ~bucket ~key:"a" ());
   let h = Sim.history store in
   Alcotest.(check int) "3 ops" 3 (List.length h);
   let ops = List.map (fun (r : Sim.op_record) -> r.op) h in
@@ -586,7 +639,9 @@ let test_history_copy_and_batch () =
   ignore
     (Sim.Object.copy c ~src_bucket:bucket ~src_key:"s" ~dst_bucket:bucket
        ~dst_key:"d" ());
-  ignore (Sim.Object.delete_batch c ~bucket ~keys:[ "s"; "d" ]);
+  ignore
+    (Sim.Object.delete_batch c ~bucket
+       ~objects:(List.map Sim.Object.Delete_object.v [ "s"; "d" ]));
   let h = Sim.history store in
   let ops = List.map (fun (r : Sim.op_record) -> r.op) h in
   Alcotest.(check bool) "has copy" true (List.mem `Copy ops);
@@ -605,8 +660,14 @@ let test_cas_race () =
   in
   let c1 = mk 1 in
   let c2 = mk 2 in
-  let r1 = Sim.Object.put c1 ~bucket ~key:"race" ~if_none_match:true "c1" in
-  let r2 = Sim.Object.put c2 ~bucket ~key:"race" ~if_none_match:true "c2" in
+  let r1 =
+    Sim.Object.put c1 ~bucket ~key:"race"
+      ~preconditions:Object.Preconditions.Write.if_absent "c1"
+  in
+  let r2 =
+    Sim.Object.put c2 ~bucket ~key:"race"
+      ~preconditions:Object.Preconditions.Write.if_absent "c2"
+  in
   let ok_count =
     (if Result.is_ok r1 then 1 else 0) + if Result.is_ok r2 then 1 else 0
   in
@@ -764,7 +825,13 @@ let suite =
         Alcotest.test_case "cross bucket" `Quick test_sim_copy_cross_bucket;
       ] );
     ( "sim:object:delete-batch",
-      [ Alcotest.test_case "batch" `Quick test_sim_delete_batch ] );
+      [
+        Alcotest.test_case "batch" `Quick test_sim_delete_batch;
+        Alcotest.test_case "conditional delete" `Quick
+          test_sim_conditional_delete;
+        Alcotest.test_case "conditional batch" `Quick
+          test_sim_conditional_delete_batch;
+      ] );
     ( "sim:object:tagging",
       [
         Alcotest.test_case "put/get/delete" `Quick test_sim_object_tags;

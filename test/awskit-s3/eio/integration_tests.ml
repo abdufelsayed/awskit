@@ -98,21 +98,44 @@ let test_delete env () =
   let c = make_client env in
   let key = fresh_prefix () ^ "k" in
   ignore_put (Object.put c ~bucket ~key "v");
-  (match Object.delete c ~bucket ~key with
+  (match Object.delete c ~bucket ~key () with
   | Ok () -> ()
   | Error e -> Alcotest.failf "delete: %a" Error.pp e);
   check_error "gone" `Not_found (Object.get c ~bucket ~key ());
-  match Object.delete c ~bucket ~key with
+  match Object.delete c ~bucket ~key () with
   | Ok () -> ()
   | Error e -> Alcotest.failf "delete missing: %a" Error.pp e
+
+let test_conditional_delete env () =
+  let c = make_client env in
+  let key = fresh_prefix () ^ "conditional-delete" in
+  ignore_put (Object.put c ~bucket ~key "v");
+  let etag =
+    match Object.get c ~bucket ~key () with
+    | Ok result -> result.Object.Get_result.etag
+    | Error e -> Alcotest.failf "get before delete: %a" Error.pp e
+  in
+  (match
+     Object.delete c ~bucket ~key
+       ~preconditions:(Object.Preconditions.Delete.if_etag etag)
+       ()
+   with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "conditional delete: %a" Error.pp e);
+  check_error "gone" `Not_found (Object.get c ~bucket ~key ())
 
 let test_cas env () =
   let c = make_client env in
   let key = fresh_prefix () ^ "version" in
   Alcotest.(check bool)
     "first ok" true
-    (Result.is_ok (Object.put c ~bucket ~key ~if_none_match:true "v1"));
-  (match Object.put c ~bucket ~key ~if_none_match:true "v2" with
+    (Result.is_ok
+       (Object.put c ~bucket ~key
+          ~preconditions:Object.Preconditions.Write.if_absent "v1"));
+  (match
+     Object.put c ~bucket ~key
+       ~preconditions:Object.Preconditions.Write.if_absent "v2"
+   with
   | Error `Precondition_failed -> ()
   | Ok _ -> Alcotest.fail "expected 412"
   | Error e -> Alcotest.failf "unexpected: %a" Error.pp e);
@@ -271,7 +294,10 @@ let test_delete_batch env () =
   ignore_put (Object.put c ~bucket ~key:k1 "1");
   ignore_put (Object.put c ~bucket ~key:k2 "2");
   ignore_put (Object.put c ~bucket ~key:k3 "3");
-  match Object.delete_batch c ~bucket ~keys:[ k1; k2 ] with
+  match
+    Object.delete_batch c ~bucket
+      ~objects:(List.map Object.Delete_object.v [ k1; k2 ])
+  with
   | Ok r ->
       Alcotest.(check int)
         "2 deleted" 2
@@ -414,6 +440,8 @@ let suite env =
         Alcotest.test_case "head" `Quick (test_head env);
         Alcotest.test_case "head with info" `Quick (test_head_info env);
         Alcotest.test_case "delete" `Quick (test_delete env);
+        Alcotest.test_case "conditional delete" `Quick
+          (test_conditional_delete env);
         Alcotest.test_case "delete batch" `Quick (test_delete_batch env);
         Alcotest.test_case "etag" `Quick (test_etag env);
         Alcotest.test_case "copy" `Quick (test_copy env);

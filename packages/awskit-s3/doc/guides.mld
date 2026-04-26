@@ -149,9 +149,10 @@ let result = Awskit_s3_eio.Object.put conn
 
 Optional parameters:
 {ul
-  {li [?if_none_match:true] — conditional write; returns
-    [Error `Precondition_failed] if the key already exists}
-  {li [?if_match:"\"etag...\""] — only write if the current ETag matches}
+  {li [?preconditions] — conditional write rules. Use
+    [Awskit_s3.Object.Preconditions.Write.if_absent] for put-if-not-exists and
+    [Awskit_s3.Object.Preconditions.Write.if_etag etag] for ETag-checked
+    replacement}
   {li [?content_type] — MIME type for the object}
   {li [?metadata] — custom key-value pairs stored as [x-amz-meta-*] headers}
   {li [?storage_class] — storage tier (Standard, Standard_ia, Glacier, etc.)}
@@ -180,14 +181,21 @@ let result = Awskit_s3_eio.Object.get conn
   ()
 ]}
 
-Conditional reads with [?if_match], [?if_none_match],
-[?if_modified_since], [?if_unmodified_since]:
+Conditional reads use [?preconditions]:
 {[
 (* Only download if the ETag matches *)
+let preconditions =
+  Awskit_s3.Object.Preconditions.Read.
+    { none with
+      if_match =
+        Some
+          (Awskit_s3.Object.Etag_condition.Etag
+             "\"d41d8cd98f00b204e9800998ecf8427e\"") }
+in
 let result = Awskit_s3_eio.Object.get conn
   ~bucket:"my-bucket"
   ~key:"data.csv"
-  ~if_match:(Some "\"d41d8cd98f00b204e9800998ecf8427e\"")
+  ~preconditions
   ()
 ]}
 
@@ -204,23 +212,29 @@ match Awskit_s3_eio.Object.head conn ~bucket:"b" ~key:"k" () with
 | Error e -> Fmt.epr "Error: %a" Awskit_s3.Error.pp e
 ]}
 
-[head] also supports [?if_match], [?if_none_match], [?if_modified_since], and
-[?if_unmodified_since] for conditional checks.
+[head] also supports [?preconditions] for conditional checks.
 
 {2 Deleting objects}
 
 Single delete:
 {[
-let result = Awskit_s3_eio.Object.delete conn ~bucket:"b" ~key:"k"
+let result = Awskit_s3_eio.Object.delete conn ~bucket:"b" ~key:"k" ()
 ]}
 
-S3 semantics: [delete] succeeds even if the key doesn't exist.
+S3 semantics: [delete] succeeds even if the key doesn't exist unless a
+precondition fails. Use [Awskit_s3.Object.Preconditions.Delete.if_etag etag] for
+ETag-checked deletion.
 
-Batch delete (up to 1000 keys per request):
+Batch delete (up to 1000 objects per request):
 {[
 let result = Awskit_s3_eio.Object.delete_batch conn
   ~bucket:"b"
-  ~keys:["key1"; "key2"; "key3"]
+  ~objects:
+    [
+      Awskit_s3_eio.Object.Delete_object.v "key1";
+      Awskit_s3_eio.Object.Delete_object.v "key2";
+      Awskit_s3_eio.Object.Delete_object.v "key3";
+    ]
 in
 match result with
 | Ok { deleted; errors } ->
@@ -288,7 +302,7 @@ let result = Awskit_s3_eio.Object.copy conn
   {li [Some `Replace] — Replace with new [?metadata]}
 }
 
-[copy] also supports [?if_match] and [?if_none_match] for conditional copies.
+[copy] also supports [?source_preconditions] for conditional copies.
 
 {1 Metadata}
 

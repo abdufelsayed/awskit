@@ -25,6 +25,82 @@ module Put_result = struct
   (** Contains the ETag of the uploaded object. *)
 end
 
+(** ETag condition values for S3 conditional requests. *)
+module Etag_condition = struct
+  type t = Any | Etag of string [@@deriving show, eq]
+
+  let to_header = function Any -> "*" | Etag etag -> etag
+end
+
+(** Operation-specific preconditions for object requests. *)
+module Preconditions = struct
+  module Write = struct
+    type t = {
+      if_match : Etag_condition.t option;
+      if_none_match : Etag_condition.t option;
+    }
+    [@@deriving show, eq]
+
+    let none = { if_match = None; if_none_match = None }
+    let if_absent = { none with if_none_match = Some Etag_condition.Any }
+    let if_etag etag = { none with if_match = Some (Etag_condition.Etag etag) }
+  end
+
+  module Read = struct
+    type t = {
+      if_match : Etag_condition.t option;
+      if_none_match : Etag_condition.t option;
+      if_modified_since : string option;
+      if_unmodified_since : string option;
+    }
+    [@@deriving show, eq]
+
+    let none =
+      {
+        if_match = None;
+        if_none_match = None;
+        if_modified_since = None;
+        if_unmodified_since = None;
+      }
+  end
+
+  module Delete = struct
+    type t = {
+      if_match : Etag_condition.t option;
+      if_match_last_modified_time : string option;
+      if_match_size : int option;
+    }
+    [@@deriving show, eq]
+
+    let none =
+      {
+        if_match = None;
+        if_match_last_modified_time = None;
+        if_match_size = None;
+      }
+
+    let if_etag etag = { none with if_match = Some (Etag_condition.Etag etag) }
+  end
+
+  module Copy_source = struct
+    type t = {
+      if_match : Etag_condition.t option;
+      if_none_match : Etag_condition.t option;
+      if_modified_since : string option;
+      if_unmodified_since : string option;
+    }
+    [@@deriving show, eq]
+
+    let none =
+      {
+        if_match = None;
+        if_none_match = None;
+        if_modified_since = None;
+        if_unmodified_since = None;
+      }
+  end
+end
+
 (** Result of a successful GET operation. *)
 module Get_result = struct
   type t = {
@@ -112,7 +188,13 @@ module Xml = struct
   }
   [@@deriving of_protocol ~driver:(module Protocol_conv_xmlm.Xmlm)]
 
-  type delete_object = { key : string [@key "Key"] }
+  type delete_object = {
+    key : string; [@key "Key"]
+    version_id : string option; [@key "VersionId"]
+    etag : string option; [@key "ETag"]
+    last_modified_time : string option; [@key "LastModifiedTime"]
+    size : int option; [@key "Size"]
+  }
   [@@deriving
     of_protocol ~driver:(module Protocol_conv_xmlm.Xmlm),
     to_protocol ~driver:(module Protocol_conv_xmlm.Xmlm)]

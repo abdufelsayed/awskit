@@ -97,19 +97,141 @@ module Make (R : Awskit.Runtime.S) = struct
     Ok ()
 
   let validate_bucket_only bucket = Internal.Validation.validate_bucket bucket
+  let etag_condition_header = Object_.Etag_condition.to_header
 
-  let validate_common_object_headers ?if_match ?content_type ?cache_control
-      ?content_encoding ?content_disposition ?if_none_match () =
+  let opt_etag_condition_header name condition headers =
+    match condition with
+    | None -> headers
+    | Some condition -> (name, etag_condition_header condition) :: headers
+
+  let validate_etag_condition name condition =
+    Internal.Validation.validate_range_header_value name
+      (Option.map condition ~f:etag_condition_header)
+
+  let read_precondition_headers
+      ({
+         Object_.Preconditions.Read.if_match;
+         if_none_match;
+         if_modified_since;
+         if_unmodified_since;
+       } :
+        Object_.Preconditions.Read.t) =
+    []
+    |> opt_etag_condition_header "if-match" if_match
+    |> opt_etag_condition_header "if-none-match" if_none_match
+    |> Internal.opt_header "if-modified-since" if_modified_since
+    |> Internal.opt_header "if-unmodified-since" if_unmodified_since
+
+  let validate_read_preconditions
+      ({
+         Object_.Preconditions.Read.if_match;
+         if_none_match;
+         if_modified_since;
+         if_unmodified_since;
+       } :
+        Object_.Preconditions.Read.t) =
+    let open Internal.Let_syntax in
+    let* () = validate_etag_condition "if-match" if_match in
+    let* () = validate_etag_condition "if-none-match" if_none_match in
+    let* () =
+      Internal.Validation.validate_range_header_value "if-modified-since"
+        if_modified_since
+    in
+    Internal.Validation.validate_range_header_value "if-unmodified-since"
+      if_unmodified_since
+
+  let write_precondition_headers
+      ({ Object_.Preconditions.Write.if_match; if_none_match } :
+        Object_.Preconditions.Write.t) =
+    []
+    |> opt_etag_condition_header "if-match" if_match
+    |> opt_etag_condition_header "if-none-match" if_none_match
+
+  let validate_write_preconditions
+      ({ Object_.Preconditions.Write.if_match; if_none_match } :
+        Object_.Preconditions.Write.t) =
+    let open Internal.Let_syntax in
+    let* () = validate_etag_condition "if-match" if_match in
+    validate_etag_condition "if-none-match" if_none_match
+
+  let delete_precondition_headers
+      ({
+         Object_.Preconditions.Delete.if_match;
+         if_match_last_modified_time;
+         if_match_size;
+       } :
+        Object_.Preconditions.Delete.t) =
+    []
+    |> opt_etag_condition_header "if-match" if_match
+    |> Internal.opt_header "x-amz-if-match-last-modified-time"
+         if_match_last_modified_time
+    |> Internal.opt_header "x-amz-if-match-size"
+         (Option.map if_match_size ~f:Int.to_string)
+
+  let validate_delete_preconditions
+      ({
+         Object_.Preconditions.Delete.if_match;
+         if_match_last_modified_time;
+         if_match_size;
+       } :
+        Object_.Preconditions.Delete.t) =
+    let open Internal.Let_syntax in
+    let* () = validate_etag_condition "if-match" if_match in
+    let* () =
+      Internal.Validation.validate_range_header_value
+        "x-amz-if-match-last-modified-time" if_match_last_modified_time
+    in
+    match if_match_size with
+    | Some size when size < 0 ->
+        Error (`Invalid_request "x-amz-if-match-size must be non-negative")
+    | _ -> Ok ()
+
+  let copy_source_precondition_headers
+      ({
+         Object_.Preconditions.Copy_source.if_match;
+         if_none_match;
+         if_modified_since;
+         if_unmodified_since;
+       } :
+        Object_.Preconditions.Copy_source.t) =
+    []
+    |> opt_etag_condition_header "x-amz-copy-source-if-match" if_match
+    |> opt_etag_condition_header "x-amz-copy-source-if-none-match" if_none_match
+    |> Internal.opt_header "x-amz-copy-source-if-modified-since"
+         if_modified_since
+    |> Internal.opt_header "x-amz-copy-source-if-unmodified-since"
+         if_unmodified_since
+
+  let validate_copy_source_preconditions
+      ({
+         Object_.Preconditions.Copy_source.if_match;
+         if_none_match;
+         if_modified_since;
+         if_unmodified_since;
+       } :
+        Object_.Preconditions.Copy_source.t) =
+    let open Internal.Let_syntax in
+    let* () = validate_etag_condition "x-amz-copy-source-if-match" if_match in
+    let* () =
+      validate_etag_condition "x-amz-copy-source-if-none-match" if_none_match
+    in
+    let* () =
+      Internal.Validation.validate_range_header_value
+        "x-amz-copy-source-if-modified-since" if_modified_since
+    in
+    Internal.Validation.validate_range_header_value
+      "x-amz-copy-source-if-unmodified-since" if_unmodified_since
+
+  let validate_common_object_headers ?content_type ?cache_control
+      ?content_encoding ?content_disposition () =
     let open Internal.Validation in
     let open Internal.Let_syntax in
-    let* () = validate_range_header_value "if-match" if_match in
     let* () = validate_range_header_value "content-type" content_type in
     let* () = validate_range_header_value "cache-control" cache_control in
     let* () = validate_range_header_value "content-encoding" content_encoding in
     let* () =
       validate_range_header_value "content-disposition" content_disposition
     in
-    let* () = validate_range_header_value "if-none-match" if_none_match in
     Ok ()
 
   (* ── Object operations ────────────────────────────────────────── *)
@@ -209,9 +331,9 @@ module Make (R : Awskit.Runtime.S) = struct
                   else Error (S3_error.of_status resp.status resp.body))
     end
 
-    let put conn ~bucket ~key ?(if_none_match = false) ?if_match ?content_type
-        ?(metadata = []) ?storage_class ?tags ?cache_control ?content_encoding
-        ?content_disposition body =
+    let put conn ~bucket ~key ?(preconditions = Preconditions.Write.none)
+        ?content_type ?(metadata = []) ?storage_class ?tags ?cache_control
+        ?content_encoding ?content_disposition body =
       Internal.Log.debug (fun m ->
           m "PUT %s/%s (%d bytes)" bucket key (String.length body));
       match
@@ -219,11 +341,10 @@ module Make (R : Awskit.Runtime.S) = struct
             let open Internal.Validation in
             let open Internal.Let_syntax in
             let* () = validate_metadata metadata in
+            let* () = validate_write_preconditions preconditions in
             let* () =
-              validate_common_object_headers ?if_match ?content_type
-                ?cache_control ?content_encoding ?content_disposition
-                ?if_none_match:(if if_none_match then Some "*" else None)
-                ()
+              validate_common_object_headers ?content_type ?cache_control
+                ?content_encoding ?content_disposition ()
             in
             match tags with Some tags -> validate_tags tags | None -> Ok ())
       with
@@ -236,12 +357,8 @@ module Make (R : Awskit.Runtime.S) = struct
             :: Internal.Metadata_headers.to_headers metadata
           in
           let extra_headers =
-            if if_none_match then ("if-none-match", "*") :: extra_headers
-            else extra_headers
-          in
-          let extra_headers =
             extra_headers
-            |> Internal.opt_header "if-match" if_match
+            |> List.append (write_precondition_headers preconditions)
             |> Internal.opt_header "content-type" content_type
             |> Internal.opt_header "cache-control" cache_control
             |> Internal.opt_header "content-encoding" content_encoding
@@ -279,8 +396,8 @@ module Make (R : Awskit.Runtime.S) = struct
                   Result.map (Awskit.Response.header_exn resp "etag")
                     ~f:(fun etag -> { Put_result.etag }))
 
-    let get conn ~bucket ~key ?range ?if_match ?if_none_match ?if_modified_since
-        ?if_unmodified_since () =
+    let get conn ~bucket ~key ?range ?(preconditions = Preconditions.Read.none)
+        () =
       Internal.Log.debug (fun m -> m "GET %s/%s" bucket key);
       let range_header =
         match range with
@@ -291,30 +408,14 @@ module Make (R : Awskit.Runtime.S) = struct
         Result.bind (validate_bucket_key bucket key) ~f:(fun () ->
             let open Internal.Validation in
             let open Internal.Let_syntax in
-            let* () = validate_range_header_value "if-match" if_match in
-            let* () =
-              validate_range_header_value "if-none-match" if_none_match
-            in
-            let* () =
-              validate_range_header_value "if-modified-since" if_modified_since
-            in
-            let* () =
-              validate_range_header_value "if-unmodified-since"
-                if_unmodified_since
-            in
+            let* () = validate_read_preconditions preconditions in
             Result.map range_header ~f:(fun _ -> ()))
       with
       | Error _ as error -> R.return error
       | Ok () -> (
           let raw_path = Internal.raw_object_key_path key in
           let path = Internal.encode_object_key_path key in
-          let extra_headers =
-            []
-            |> Internal.opt_header "if-match" if_match
-            |> Internal.opt_header "if-none-match" if_none_match
-            |> Internal.opt_header "if-modified-since" if_modified_since
-            |> Internal.opt_header "if-unmodified-since" if_unmodified_since
-          in
+          let extra_headers = read_precondition_headers preconditions in
           match
             Result.map range_header ~f:(function
               | Some rh -> ("range", rh) :: extra_headers
@@ -334,34 +435,17 @@ module Make (R : Awskit.Runtime.S) = struct
                       Error (S3_error.of_status resp.status resp.body)
                     else get_result_of_response resp))
 
-    let head conn ~bucket ~key ?if_match ?if_none_match ?if_modified_since
-        ?if_unmodified_since () =
+    let head conn ~bucket ~key ?(preconditions = Preconditions.Read.none) () =
       Internal.Log.debug (fun m -> m "HEAD %s/%s" bucket key);
       match
         Result.bind (validate_bucket_key bucket key) ~f:(fun () ->
-            let open Internal.Validation in
-            let open Internal.Let_syntax in
-            let* () = validate_range_header_value "if-match" if_match in
-            let* () =
-              validate_range_header_value "if-none-match" if_none_match
-            in
-            let* () =
-              validate_range_header_value "if-modified-since" if_modified_since
-            in
-            validate_range_header_value "if-unmodified-since"
-              if_unmodified_since)
+            validate_read_preconditions preconditions)
       with
       | Error _ as error -> R.return error
       | Ok () ->
           let raw_path = Internal.raw_object_key_path key in
           let path = Internal.encode_object_key_path key in
-          let extra_headers =
-            []
-            |> Internal.opt_header "if-match" if_match
-            |> Internal.opt_header "if-none-match" if_none_match
-            |> Internal.opt_header "if-modified-since" if_modified_since
-            |> Internal.opt_header "if-unmodified-since" if_unmodified_since
-          in
+          let extra_headers = read_precondition_headers preconditions in
           let* result =
             call_s3 conn ~meth:HEAD ~bucket ~path ~sign_path:raw_path ~query:""
               ~payload:"" ~extra_headers
@@ -375,16 +459,21 @@ module Make (R : Awskit.Runtime.S) = struct
                 else if resp.status = 404 then Ok None
                 else Error (S3_error.of_status resp.status resp.body))
 
-    let delete conn ~bucket ~key =
+    let delete conn ~bucket ~key ?(preconditions = Preconditions.Delete.none) ()
+        =
       Internal.Log.debug (fun m -> m "DELETE %s/%s" bucket key);
-      match validate_bucket_key bucket key with
+      match
+        Result.bind (validate_bucket_key bucket key) ~f:(fun () ->
+            validate_delete_preconditions preconditions)
+      with
       | Error _ as error -> R.return error
       | Ok () ->
           let raw_path = Internal.raw_object_key_path key in
           let path = Internal.encode_object_key_path key in
+          let extra_headers = delete_precondition_headers preconditions in
           let* result =
             call_s3 conn ~meth:DELETE ~bucket ~path ~sign_path:raw_path
-              ~query:"" ~payload:"" ~extra_headers:[]
+              ~query:"" ~payload:"" ~extra_headers
           in
           R.return
             (match result with
@@ -393,16 +482,66 @@ module Make (R : Awskit.Runtime.S) = struct
                 if Awskit.Response.is_success resp then Ok ()
                 else Error (S3_error.of_status resp.status resp.body))
 
-    let delete_batch conn ~bucket ~keys =
+    module Delete_object = struct
+      type t = {
+        key : string;
+        version_id : string option;
+        etag : string option;
+        last_modified_time : string option;
+        size : int option;
+      }
+      [@@deriving show, eq]
+
+      let v ?version_id ?etag ?last_modified_time ?size key =
+        { key; version_id; etag; last_modified_time; size }
+    end
+
+    let validate_delete_object (object_ : Delete_object.t) =
+      let open Internal.Let_syntax in
+      let* () = Internal.Validation.validate_key object_.key in
+      let* () =
+        Internal.Validation.validate_range_header_value "VersionId"
+          object_.version_id
+      in
+      let* () =
+        Internal.Validation.validate_range_header_value "ETag" object_.etag
+      in
+      let* () =
+        Internal.Validation.validate_range_header_value "LastModifiedTime"
+          object_.last_modified_time
+      in
+      match object_.size with
+      | Some size when size < 0 ->
+          Error (`Invalid_request "Size must be non-negative")
+      | _ -> Ok ()
+
+    let delete_batch conn ~bucket ~objects =
       Internal.Log.debug (fun m ->
-          m "DELETE-BATCH %s (%d keys)" bucket (List.length keys));
+          m "DELETE-BATCH %s (%d keys)" bucket (List.length objects));
       match
         Result.bind (validate_bucket_only bucket) ~f:(fun () ->
-            Internal.Validation.validate_delete_batch_keys keys)
+            let open Internal.Let_syntax in
+            let* () =
+              Internal.Validation.validate_delete_batch_keys
+                (List.map objects ~f:(fun object_ -> object_.Delete_object.key))
+            in
+            List.fold objects ~init:(Ok ()) ~f:(fun acc object_ ->
+                match acc with
+                | Error _ as error -> error
+                | Ok () -> validate_delete_object object_))
       with
       | Error _ as error -> R.return error
       | Ok () ->
-          let objects = List.map keys ~f:(fun key -> { Xml.key }) in
+          let objects =
+            List.map objects ~f:(fun object_ ->
+                {
+                  Xml.key = object_.key;
+                  version_id = object_.version_id;
+                  etag = object_.etag;
+                  last_modified_time = object_.last_modified_time;
+                  size = object_.size;
+                })
+          in
           let xml =
             Xml.delete_request_to_xmlm { quiet = false; objects }
             |> Internal.set_xml_name "Delete"
@@ -451,8 +590,9 @@ module Make (R : Awskit.Runtime.S) = struct
                       in
                       Ok { Delete_result.deleted; errors }))
 
-    let copy conn ~src_bucket ~src_key ~dst_bucket ~dst_key ?if_match
-        ?if_none_match ?metadata_directive ?(metadata = []) () =
+    let copy conn ~src_bucket ~src_key ~dst_bucket ~dst_key
+        ?(source_preconditions = Preconditions.Copy_source.none)
+        ?metadata_directive ?(metadata = []) () =
       Internal.Log.debug (fun m ->
           m "COPY %s/%s → %s/%s" src_bucket src_key dst_bucket dst_key);
       match
@@ -461,11 +601,7 @@ module Make (R : Awskit.Runtime.S) = struct
             let open Internal.Let_syntax in
             let* () = validate_bucket_key dst_bucket dst_key in
             let* () = validate_metadata metadata in
-            let* () =
-              validate_range_header_value "x-amz-copy-source-if-match" if_match
-            in
-            validate_range_header_value "x-amz-copy-source-if-none-match"
-              if_none_match)
+            validate_copy_source_preconditions source_preconditions)
       with
       | Error _ as error -> R.return error
       | Ok () ->
@@ -477,9 +613,8 @@ module Make (R : Awskit.Runtime.S) = struct
           let extra_headers =
             ("x-amz-copy-source", copy_source)
             :: Internal.Metadata_headers.to_headers metadata
-            |> Internal.opt_header "x-amz-copy-source-if-match" if_match
-            |> Internal.opt_header "x-amz-copy-source-if-none-match"
-                 if_none_match
+            |> List.append
+                 (copy_source_precondition_headers source_preconditions)
           in
           let extra_headers =
             match metadata_directive with

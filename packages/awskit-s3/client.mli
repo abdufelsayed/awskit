@@ -41,8 +41,7 @@ module Make (R : Awskit.Runtime.S) : sig
       R.connection ->
       bucket:string ->
       key:string ->
-      ?if_none_match:bool ->
-      ?if_match:string ->
+      ?preconditions:Preconditions.Write.t ->
       ?content_type:string ->
       ?metadata:Metadata.t ->
       ?storage_class:Storage_class.t ->
@@ -54,49 +53,69 @@ module Make (R : Awskit.Runtime.S) : sig
       (Put_result.t, Error.t) result R.t
     (** Upload an object. Returns the ETag.
 
-        [if_none_match:true] makes this a conditional write — fails with
-        [`Precondition_failed] if the key already exists (put-if-not-exists).
-        [if_match] only writes if the current ETag matches. [metadata] is stored
-        as [x-amz-meta-*] headers. *)
+        [preconditions] enables conditional writes such as
+        {!Preconditions.Write.if_absent} for put-if-not-exists and
+        {!Preconditions.Write.if_etag} for ETag-checked replacement. [metadata]
+        is stored as [x-amz-meta-*] headers. *)
 
     val get :
       R.connection ->
       bucket:string ->
       key:string ->
       ?range:Range.t ->
-      ?if_match:string ->
-      ?if_none_match:string ->
-      ?if_modified_since:string ->
-      ?if_unmodified_since:string ->
+      ?preconditions:Preconditions.Read.t ->
       unit ->
       (Get_result.t, Error.t) result R.t
-    (** Download an object. [range] for partial reads, [if_*] for conditional
-        gets per S3 semantics. *)
+    (** Download an object. [range] performs partial reads and [preconditions]
+        enables conditional gets per S3 semantics. *)
 
     val head :
       R.connection ->
       bucket:string ->
       key:string ->
-      ?if_match:string ->
-      ?if_none_match:string ->
-      ?if_modified_since:string ->
-      ?if_unmodified_since:string ->
+      ?preconditions:Preconditions.Read.t ->
       unit ->
       (Info.t option, Error.t) result R.t
     (** Object metadata without the body. [Ok (Some info)] if exists, [Ok None]
         if not — no error for missing objects. *)
 
     val delete :
-      R.connection -> bucket:string -> key:string -> (unit, Error.t) result R.t
-    (** Succeeds even if the key doesn't exist (S3 semantics). *)
+      R.connection ->
+      bucket:string ->
+      key:string ->
+      ?preconditions:Preconditions.Delete.t ->
+      unit ->
+      (unit, Error.t) result R.t
+    (** Succeeds even if the key doesn't exist (S3 semantics), unless a
+        precondition fails. *)
+
+    module Delete_object : sig
+      type t = {
+        key : string;
+        version_id : string option;
+        etag : string option;
+        last_modified_time : string option;
+        size : int option;
+      }
+      [@@deriving show, eq]
+
+      val v :
+        ?version_id:string ->
+        ?etag:string ->
+        ?last_modified_time:string ->
+        ?size:int ->
+        string ->
+        t
+    end
 
     val delete_batch :
       R.connection ->
       bucket:string ->
-      keys:string list ->
+      objects:Delete_object.t list ->
       (Delete_result.t, Error.t) result R.t
-    (** Up to 1000 keys per request. Returns both deleted keys and per-key
-        errors. *)
+    (** Up to 1000 objects per request. Returns both deleted keys and per-key
+        errors. The object descriptors can carry AWS conditional delete fields
+        such as ETag, last-modified time, and size. *)
 
     val copy :
       R.connection ->
@@ -104,8 +123,7 @@ module Make (R : Awskit.Runtime.S) : sig
       src_key:string ->
       dst_bucket:string ->
       dst_key:string ->
-      ?if_match:string ->
-      ?if_none_match:string ->
+      ?source_preconditions:Preconditions.Copy_source.t ->
       ?metadata_directive:[ `Copy | `Replace ] ->
       ?metadata:Metadata.t ->
       unit ->

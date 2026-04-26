@@ -166,9 +166,74 @@ let check_access t ~bucket_name ~action ~key =
 (* ── Sim.Object ─────────────────────────��───────────────────────── *)
 
 module Object = struct
-  let put t ~bucket ~key ?(if_none_match = false) ?if_match:_ ?content_type
-      ?(metadata = []) ?storage_class ?tags ?cache_control:_ ?content_encoding:_
-      ?content_disposition:_ body =
+  module Delete_object = struct
+    type t = {
+      key : string;
+      version_id : string option;
+      etag : string option;
+      last_modified_time : string option;
+      size : int option;
+    }
+    [@@deriving show, eq]
+
+    let v ?version_id ?etag ?last_modified_time ?size key =
+      { key; version_id; etag; last_modified_time; size }
+  end
+
+  let etag_matches condition object_ =
+    match condition with
+    | Object_.Etag_condition.Any -> true
+    | Object_.Etag_condition.Etag etag -> String.equal etag object_.etag
+
+  let write_preconditions_pass preconditions object_ =
+    let open Object_.Preconditions.Write in
+    let object_matches condition =
+      match object_ with
+      | None -> false
+      | Some object_ -> etag_matches condition object_
+    in
+    match preconditions.if_match with
+    | Some condition when not (object_matches condition) -> false
+    | _ -> (
+        match preconditions.if_none_match with
+        | Some Object_.Etag_condition.Any when Option.is_some object_ -> false
+        | Some condition when object_matches condition -> false
+        | _ -> true)
+
+  let read_preconditions_pass preconditions object_ =
+    let open Object_.Preconditions.Read in
+    write_preconditions_pass
+      {
+        Object_.Preconditions.Write.if_match = preconditions.if_match;
+        if_none_match = preconditions.if_none_match;
+      }
+      object_
+
+  let delete_preconditions_pass preconditions object_ =
+    let open Object_.Preconditions.Delete in
+    match object_ with
+    | None -> Option.is_none preconditions.if_match
+    | Some object_ ->
+        let etag_ok =
+          match preconditions.if_match with
+          | None -> true
+          | Some condition -> etag_matches condition object_
+        in
+        let size_ok =
+          match preconditions.if_match_size with
+          | None -> true
+          | Some size -> size = object_.size
+        in
+        let last_modified_ok =
+          match preconditions.if_match_last_modified_time with
+          | None -> true
+          | Some t -> String.equal t (format_time object_.last_modified)
+        in
+        etag_ok && size_ok && last_modified_ok
+
+  let put t ~bucket ~key ?(preconditions = Object_.Preconditions.Write.none)
+      ?content_type ?(metadata = []) ?storage_class ?tags ?cache_control:_
+      ?content_encoding:_ ?content_disposition:_ body =
     let action = Object_.Action.to_string Object_.Action.Put in
     match
       Result.bind (validate_bucket_key bucket key) ~f:(fun () ->
@@ -190,7 +255,8 @@ module Object = struct
                   make_object ~clock:t.store.clock ~content_type ~storage_class
                     ~metadata ~tags body
                 in
-                if if_none_match && Hashtbl.mem b.objects key then begin
+                let current = Hashtbl.find b.objects key in
+                if not (write_preconditions_pass preconditions current) then begin
                   record t.store `Put bucket key true;
                   Error `Precondition_failed
                 end
@@ -203,7 +269,8 @@ module Object = struct
                 record t.store `Put bucket key true;
                 Error (fault_to_error fault)
             | None ->
-                if if_none_match && Hashtbl.mem b.objects key then begin
+                let current = Hashtbl.find b.objects key in
+                if not (write_preconditions_pass preconditions current) then begin
                   record t.store `Put bucket key false;
                   Error `Precondition_failed
                 end
@@ -217,8 +284,8 @@ module Object = struct
                   Ok { Object_.Put_result.etag = obj.etag }
                 end))
 
-  let get t ~bucket ~key ?range:_ ?if_match:_ ?if_none_match:_
-      ?if_modified_since:_ ?if_unmodified_since:_ () =
+  let get t ~bucket ~key ?range:_
+      ?(preconditions = Object_.Preconditions.Read.none) () =
     let action = Object_.Action.to_string Object_.Action.Get in
     match validate_bucket_key bucket key with
     | Error _ as error -> error
@@ -237,19 +304,22 @@ module Object = struct
                 record t.store `Get bucket key false;
                 match Hashtbl.find b.objects key with
                 | Some obj ->
-                    Ok
-                      {
-                        Object_.Get_result.body = obj.value;
-                        etag = obj.etag;
-                        content_type = obj.content_type;
-                        content_length = obj.size;
-                        last_modified = format_time obj.last_modified;
-                        metadata = obj.metadata;
-                      }
+                    if not (read_preconditions_pass preconditions (Some obj))
+                    then Error `Precondition_failed
+                    else
+                      Ok
+                        {
+                          Object_.Get_result.body = obj.value;
+                          etag = obj.etag;
+                          content_type = obj.content_type;
+                          content_length = obj.size;
+                          last_modified = format_time obj.last_modified;
+                          metadata = obj.metadata;
+                        }
                 | None -> Error `Not_found)))
 
-  let head t ~bucket ~key ?if_match:_ ?if_none_match:_ ?if_modified_since:_
-      ?if_unmodified_since:_ () =
+  let head t ~bucket ~key ?(preconditions = Object_.Preconditions.Read.none) ()
+      =
     let action = Object_.Action.to_string Object_.Action.Head in
     match validate_bucket_key bucket key with
     | Error _ as error -> error
@@ -265,19 +335,23 @@ module Object = struct
                 record t.store `Head bucket key false;
                 match Hashtbl.find b.objects key with
                 | Some obj ->
-                    Ok
-                      (Some
-                         {
-                           Object_.Info.etag = obj.etag;
-                           size = obj.size;
-                           last_modified = format_time obj.last_modified;
-                           content_type = obj.content_type;
-                           storage_class = obj.storage_class;
-                           metadata = obj.metadata;
-                         })
+                    if not (read_preconditions_pass preconditions (Some obj))
+                    then Error `Precondition_failed
+                    else
+                      Ok
+                        (Some
+                           {
+                             Object_.Info.etag = obj.etag;
+                             size = obj.size;
+                             last_modified = format_time obj.last_modified;
+                             content_type = obj.content_type;
+                             storage_class = obj.storage_class;
+                             metadata = obj.metadata;
+                           })
                 | None -> Ok None)))
 
-  let delete t ~bucket ~key =
+  let delete t ~bucket ~key ?(preconditions = Object_.Preconditions.Delete.none)
+      () =
     let action = Object_.Action.to_string Object_.Action.Delete in
     match validate_bucket_key bucket key with
     | Error _ as error -> error
@@ -287,21 +361,59 @@ module Object = struct
         | Ok b -> (
             match pop_fault t with
             | Some Response_lost ->
-                Hashtbl.remove b.objects key;
-                record t.store `Delete bucket key true;
-                Error (fault_to_error Response_lost)
+                let current = Hashtbl.find b.objects key in
+                if not (delete_preconditions_pass preconditions current) then
+                  Error `Precondition_failed
+                else begin
+                  Hashtbl.remove b.objects key;
+                  record t.store `Delete bucket key true;
+                  Error (fault_to_error Response_lost)
+                end
             | Some fault ->
                 record t.store `Delete bucket key true;
                 Error (fault_to_error fault)
             | None ->
-                Hashtbl.remove b.objects key;
-                record t.store `Delete bucket key false;
-                Ok ()))
+                let current = Hashtbl.find b.objects key in
+                if not (delete_preconditions_pass preconditions current) then
+                  Error `Precondition_failed
+                else begin
+                  Hashtbl.remove b.objects key;
+                  record t.store `Delete bucket key false;
+                  Ok ()
+                end))
 
-  let delete_batch t ~bucket ~keys =
+  let delete_batch t ~bucket ~objects =
+    let validate_delete_object (object_ : Delete_object.t) =
+      let open Internal.Let_syntax in
+      let* () = Internal.Validation.validate_key object_.key in
+      let* () =
+        Internal.Validation.validate_range_header_value "VersionId"
+          object_.version_id
+      in
+      let* () =
+        Internal.Validation.validate_range_header_value "ETag" object_.etag
+      in
+      let* () =
+        Internal.Validation.validate_range_header_value "LastModifiedTime"
+          object_.last_modified_time
+      in
+      match object_.size with
+      | Some size when size < 0 ->
+          Error (`Invalid_request "Size must be non-negative")
+      | _ -> Ok ()
+    in
     match
       Result.bind (validate_bucket bucket) ~f:(fun () ->
-          Internal.Validation.validate_delete_batch_keys keys)
+          let open Internal.Let_syntax in
+          let* () =
+            Internal.Validation.validate_delete_batch_keys
+              (List.map objects ~f:(fun (object_ : Delete_object.t) ->
+                   object_.key))
+          in
+          List.fold objects ~init:(Ok ()) ~f:(fun acc object_ ->
+              match acc with
+              | Error _ as error -> error
+              | Ok () -> validate_delete_object object_))
     with
     | Error _ as error -> error
     | Ok () -> (
@@ -312,18 +424,41 @@ module Object = struct
         with
         | Error e -> Error e
         | Ok b ->
-            let deleted =
-              List.map
-                ~f:(fun key ->
-                  Hashtbl.remove b.objects key;
-                  { Object_.Delete_result.Deleted.key })
-                keys
+            let deleted, errors =
+              List.fold objects ~init:([], [])
+                ~f:(fun (deleted, errors) (object_ : Delete_object.t) ->
+                  let key = object_.key in
+                  let current = Hashtbl.find b.objects key in
+                  let preconditions =
+                    {
+                      Object_.Preconditions.Delete.if_match =
+                        Option.map object_.etag ~f:(fun etag ->
+                            Object_.Etag_condition.Etag etag);
+                      if_match_last_modified_time = object_.last_modified_time;
+                      if_match_size = object_.size;
+                    }
+                  in
+                  if delete_preconditions_pass preconditions current then begin
+                    Hashtbl.remove b.objects key;
+                    ({ Object_.Delete_result.Deleted.key } :: deleted, errors)
+                  end
+                  else
+                    ( deleted,
+                      {
+                        Object_.Delete_result.Error.key;
+                        code = "PreconditionFailed";
+                        message = "At least one precondition failed";
+                      }
+                      :: errors ))
             in
+            let deleted = List.rev deleted in
+            let errors = List.rev errors in
             record t.store `Delete_batch bucket "" false;
-            Ok { Object_.Delete_result.deleted; errors = [] })
+            Ok { Object_.Delete_result.deleted; errors })
 
-  let copy t ~src_bucket ~src_key ~dst_bucket ~dst_key ?if_match:_
-      ?if_none_match:_ ?metadata_directive:_ ?(metadata = []) () =
+  let copy t ~src_bucket ~src_key ~dst_bucket ~dst_key
+      ?(source_preconditions = Object_.Preconditions.Copy_source.none)
+      ?metadata_directive:_ ?(metadata = []) () =
     match
       Result.bind (validate_bucket_key src_bucket src_key) ~f:(fun () ->
           let open Internal.Let_syntax in
@@ -355,23 +490,36 @@ module Object = struct
                     match Hashtbl.find src_b.objects src_key with
                     | None -> Error `Not_found
                     | Some src_obj ->
-                        let new_metadata =
-                          if not (List.is_empty metadata) then metadata
-                          else src_obj.metadata
-                        in
-                        let obj =
-                          make_object ~clock:t.store.clock
-                            ~content_type:src_obj.content_type
-                            ~storage_class:src_obj.storage_class
-                            ~metadata:new_metadata ~tags:src_obj.tags
-                            src_obj.value
-                        in
-                        Hashtbl.set dst_b.objects ~key:dst_key ~data:obj;
-                        Ok
+                        let source_write_preconditions =
                           {
-                            Object_.Copy_result.etag = obj.etag;
-                            last_modified = format_time obj.last_modified;
-                          }))))
+                            Object_.Preconditions.Write.if_match =
+                              source_preconditions.if_match;
+                            if_none_match = source_preconditions.if_none_match;
+                          }
+                        in
+                        if
+                          not
+                            (write_preconditions_pass source_write_preconditions
+                               (Some src_obj))
+                        then Error `Precondition_failed
+                        else
+                          let new_metadata =
+                            if not (List.is_empty metadata) then metadata
+                            else src_obj.metadata
+                          in
+                          let obj =
+                            make_object ~clock:t.store.clock
+                              ~content_type:src_obj.content_type
+                              ~storage_class:src_obj.storage_class
+                              ~metadata:new_metadata ~tags:src_obj.tags
+                              src_obj.value
+                          in
+                          Hashtbl.set dst_b.objects ~key:dst_key ~data:obj;
+                          Ok
+                            {
+                              Object_.Copy_result.etag = obj.etag;
+                              last_modified = format_time obj.last_modified;
+                            }))))
 
   let list t ~bucket ~prefix ?delimiter:_
       ?(max_keys = t.store.config.max_list_keys) ?start_after:_

@@ -125,16 +125,40 @@ let test_delete () =
   let c = make_client () in
   let key = fresh_prefix () ^ "k" in
   let* _ = Object.put c ~bucket ~key "v" in
-  let* del_result = Object.delete c ~bucket ~key in
+  let* del_result = Object.delete c ~bucket ~key () in
   (match del_result with
   | Ok () -> ()
   | Error e -> Alcotest.failf "delete: %a" Error.pp e);
   let* get_result = Object.get c ~bucket ~key () in
   check_error "gone" `Not_found get_result;
-  let* del_missing = Object.delete c ~bucket ~key in
+  let* del_missing = Object.delete c ~bucket ~key () in
   (match del_missing with
   | Ok () -> ()
   | Error e -> Alcotest.failf "delete missing: %a" Error.pp e);
+  Lwt.return_unit
+
+let test_conditional_delete () =
+  Lwt_main.run
+  @@
+  let c = make_client () in
+  let key = fresh_prefix () ^ "conditional-delete" in
+  let* _ = Object.put c ~bucket ~key "v" in
+  let* get_before = Object.get c ~bucket ~key () in
+  let etag =
+    match get_before with
+    | Ok result -> result.Object.Get_result.etag
+    | Error e -> Alcotest.failf "get before delete: %a" Error.pp e
+  in
+  let* deleted =
+    Object.delete c ~bucket ~key
+      ~preconditions:(Object.Preconditions.Delete.if_etag etag)
+      ()
+  in
+  (match deleted with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "conditional delete: %a" Error.pp e);
+  let* gone = Object.get c ~bucket ~key () in
+  check_error "gone" `Not_found gone;
   Lwt.return_unit
 
 let test_cas () =
@@ -142,9 +166,15 @@ let test_cas () =
   @@
   let c = make_client () in
   let key = fresh_prefix () ^ "version" in
-  let* first = Object.put c ~bucket ~key ~if_none_match:true "v1" in
+  let* first =
+    Object.put c ~bucket ~key
+      ~preconditions:Object.Preconditions.Write.if_absent "v1"
+  in
   Alcotest.(check bool) "first ok" true (Result.is_ok first);
-  let* second = Object.put c ~bucket ~key ~if_none_match:true "v2" in
+  let* second =
+    Object.put c ~bucket ~key
+      ~preconditions:Object.Preconditions.Write.if_absent "v2"
+  in
   (match second with
   | Error `Precondition_failed -> ()
   | Ok _ -> Alcotest.fail "expected 412"
@@ -354,7 +384,10 @@ let test_delete_batch () =
   let* _ = Object.put c ~bucket ~key:k1 "1" in
   let* _ = Object.put c ~bucket ~key:k2 "2" in
   let* _ = Object.put c ~bucket ~key:k3 "3" in
-  let* result = Object.delete_batch c ~bucket ~keys:[ k1; k2 ] in
+  let* result =
+    Object.delete_batch c ~bucket
+      ~objects:(List.map [ k1; k2 ] ~f:Object.Delete_object.v)
+  in
   (match result with
   | Ok r ->
       Alcotest.(check int)
@@ -600,6 +633,7 @@ let suite () =
         Alcotest.test_case "head" `Quick test_head;
         Alcotest.test_case "head with info" `Quick test_head_info;
         Alcotest.test_case "delete" `Quick test_delete;
+        Alcotest.test_case "conditional delete" `Quick test_conditional_delete;
         Alcotest.test_case "delete batch" `Quick test_delete_batch;
         Alcotest.test_case "etag" `Quick test_etag;
         Alcotest.test_case "copy" `Quick test_copy;

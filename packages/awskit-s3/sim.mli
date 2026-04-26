@@ -84,8 +84,7 @@ module Object : sig
     t ->
     bucket:string ->
     key:string ->
-    ?if_none_match:bool ->
-    ?if_match:string ->
+    ?preconditions:Object_.Preconditions.Write.t ->
     ?content_type:string ->
     ?metadata:Metadata.t ->
     ?storage_class:Storage_class.t ->
@@ -101,10 +100,7 @@ module Object : sig
     bucket:string ->
     key:string ->
     ?range:Range.t ->
-    ?if_match:string ->
-    ?if_none_match:string ->
-    ?if_modified_since:string ->
-    ?if_unmodified_since:string ->
+    ?preconditions:Object_.Preconditions.Read.t ->
     unit ->
     (Object_.Get_result.t, Error.t) result
 
@@ -112,19 +108,41 @@ module Object : sig
     t ->
     bucket:string ->
     key:string ->
-    ?if_match:string ->
-    ?if_none_match:string ->
-    ?if_modified_since:string ->
-    ?if_unmodified_since:string ->
+    ?preconditions:Object_.Preconditions.Read.t ->
     unit ->
     (Object_.Info.t option, Error.t) result
 
-  val delete : t -> bucket:string -> key:string -> (unit, Error.t) result
+  val delete :
+    t ->
+    bucket:string ->
+    key:string ->
+    ?preconditions:Object_.Preconditions.Delete.t ->
+    unit ->
+    (unit, Error.t) result
+
+  module Delete_object : sig
+    type t = {
+      key : string;
+      version_id : string option;
+      etag : string option;
+      last_modified_time : string option;
+      size : int option;
+    }
+    [@@deriving show, eq]
+
+    val v :
+      ?version_id:string ->
+      ?etag:string ->
+      ?last_modified_time:string ->
+      ?size:int ->
+      string ->
+      t
+  end
 
   val delete_batch :
     t ->
     bucket:string ->
-    keys:string list ->
+    objects:Delete_object.t list ->
     (Object_.Delete_result.t, Error.t) result
 
   val copy :
@@ -133,8 +151,7 @@ module Object : sig
     src_key:string ->
     dst_bucket:string ->
     dst_key:string ->
-    ?if_match:string ->
-    ?if_none_match:string ->
+    ?source_preconditions:Object_.Preconditions.Copy_source.t ->
     ?metadata_directive:[ `Copy | `Replace ] ->
     ?metadata:Metadata.t ->
     unit ->
