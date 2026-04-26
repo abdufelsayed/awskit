@@ -111,18 +111,9 @@ let generate ~region ~credentials ~now ~endpoint ~bucket ~key ~meth ?expires_in
                           digest_string canonical_request |> to_hex);
                       ]
                   in
-                  let hmac ~key data =
-                    Digestif.SHA256.(hmac_string ~key data |> to_raw_string)
-                  in
                   let signing_key =
-                    hmac
-                      ~key:
-                        ("AWS4"
-                        ^ Awskit.Credentials.secret_access_key credentials)
-                      datestamp
-                    |> fun key ->
-                    hmac ~key region |> fun key ->
-                    hmac ~key "s3" |> fun key -> hmac ~key "aws4_request"
+                    Awskit.Credentials.signing_key credentials ~datestamp
+                      ~region ~service:"s3"
                   in
                   let signature =
                     Digestif.SHA256.(

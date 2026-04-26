@@ -124,12 +124,11 @@ module Make (R : Awskit.Runtime.S) : sig
       dst_bucket:string ->
       dst_key:string ->
       ?source_preconditions:Preconditions.Copy_source.t ->
-      ?metadata_directive:[ `Copy | `Replace ] ->
-      ?metadata:Metadata.t ->
+      ?metadata:Copy_metadata.t ->
       unit ->
       (Copy_result.t, Error.t) result R.t
-    (** Server-side copy. [metadata_directive]: [`Copy] keeps source metadata
-        (default), [`Replace] uses the new [metadata] parameter. *)
+    (** Server-side copy. [metadata]: omitted or [`Copy] keeps source metadata;
+        [`Replace metadata] replaces it. *)
 
     val list :
       R.connection ->

@@ -152,10 +152,12 @@ module Object : sig
     dst_bucket:string ->
     dst_key:string ->
     ?source_preconditions:Object_.Preconditions.Copy_source.t ->
-    ?metadata_directive:[ `Copy | `Replace ] ->
-    ?metadata:Metadata.t ->
+    ?metadata:Object_.Copy_metadata.t ->
     unit ->
     (Object_.Copy_result.t, Error.t) result
+  (** Copy an object inside the simulated store. [metadata] matches the real
+      client: omitted or [`Copy] keeps source metadata; [`Replace metadata]
+      replaces it. *)
 
   val list :
     t ->

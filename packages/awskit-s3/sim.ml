@@ -52,6 +52,21 @@ let format_time t =
   let (y, m, d), ((hh, mm, ss), _) = Ptime.to_date_time t in
   Fmt.str "%04d-%02d-%02dT%02d:%02d:%02dZ" y m d hh mm ss
 
+let parse_time s =
+  match Ptime.of_rfc3339 ~strict:false s with
+  | Ok (time, _, _) -> Some time
+  | Error _ -> None
+
+let time_after stored header =
+  match parse_time header with
+  | Some header_time -> Ptime.compare stored header_time > 0
+  | None -> String.( > ) (format_time stored) header
+
+let time_on_or_before stored header =
+  match parse_time header with
+  | Some header_time -> Ptime.compare stored header_time <= 0
+  | None -> String.( <= ) (format_time stored) header
+
 type sim_bucket = {
   objects : (string, stored_object) Hashtbl.t;
   mutable policy : Policy.t option;
@@ -202,12 +217,70 @@ module Object = struct
 
   let read_preconditions_pass preconditions object_ =
     let open Object_.Preconditions.Read in
-    write_preconditions_pass
+    let etag_ok =
+      write_preconditions_pass
+        {
+          Object_.Preconditions.Write.if_match = preconditions.if_match;
+          if_none_match = preconditions.if_none_match;
+        }
+        object_
+    in
+    match object_ with
+    | None -> etag_ok
+    | Some object_ ->
+        let modified_since_ok =
+          match preconditions.if_modified_since with
+          | None -> true
+          | Some since_ -> time_after object_.last_modified since_
+        in
+        let unmodified_since_ok =
+          match preconditions.if_unmodified_since with
+          | None -> true
+          | Some since_ -> time_on_or_before object_.last_modified since_
+        in
+        etag_ok && modified_since_ok && unmodified_since_ok
+
+  let copy_source_preconditions_pass preconditions object_ =
+    let open Object_.Preconditions.Copy_source in
+    read_preconditions_pass
       {
-        Object_.Preconditions.Write.if_match = preconditions.if_match;
+        Object_.Preconditions.Read.if_match = preconditions.if_match;
         if_none_match = preconditions.if_none_match;
+        if_modified_since = preconditions.if_modified_since;
+        if_unmodified_since = preconditions.if_unmodified_since;
       }
       object_
+
+  let apply_range range object_ =
+    match range with
+    | None -> Ok object_.value
+    | Some range -> (
+        match Range.to_header range with
+        | Error _ as error -> error
+        | Ok _ -> (
+            let len = String.length object_.value in
+            match range with
+            | Range.Bytes (start, finish) ->
+                if start >= len then
+                  Error
+                    (`Request_error (416, "Requested Range Not Satisfiable"))
+                else
+                  let finish = Int.min finish (len - 1) in
+                  Ok
+                    (String.sub object_.value ~pos:start
+                       ~len:(finish - start + 1))
+            | Range.From start ->
+                if start >= len then
+                  Error
+                    (`Request_error (416, "Requested Range Not Satisfiable"))
+                else Ok (String.drop_prefix object_.value start)
+            | Range.Suffix suffix_len ->
+                let pos = Int.max 0 (len - suffix_len) in
+                Ok (String.drop_prefix object_.value pos)))
+
+  let validate_copy_metadata = function
+    | Some (`Replace metadata) -> Internal.Validation.validate_metadata metadata
+    | Some `Copy | None -> Ok ()
 
   let delete_preconditions_pass preconditions object_ =
     let open Object_.Preconditions.Delete in
@@ -284,7 +357,7 @@ module Object = struct
                   Ok { Object_.Put_result.etag = obj.etag }
                 end))
 
-  let get t ~bucket ~key ?range:_
+  let get t ~bucket ~key ?range
       ?(preconditions = Object_.Preconditions.Read.none) () =
     let action = Object_.Action.to_string Object_.Action.Get in
     match validate_bucket_key bucket key with
@@ -303,19 +376,22 @@ module Object = struct
             | None -> (
                 record t.store `Get bucket key false;
                 match Hashtbl.find b.objects key with
-                | Some obj ->
+                | Some obj -> (
                     if not (read_preconditions_pass preconditions (Some obj))
                     then Error `Precondition_failed
                     else
-                      Ok
-                        {
-                          Object_.Get_result.body = obj.value;
-                          etag = obj.etag;
-                          content_type = obj.content_type;
-                          content_length = obj.size;
-                          last_modified = format_time obj.last_modified;
-                          metadata = obj.metadata;
-                        }
+                      match apply_range range obj with
+                      | Error _ as error -> error
+                      | Ok body ->
+                          Ok
+                            {
+                              Object_.Get_result.body;
+                              etag = obj.etag;
+                              content_type = obj.content_type;
+                              content_length = String.length body;
+                              last_modified = format_time obj.last_modified;
+                              metadata = obj.metadata;
+                            })
                 | None -> Error `Not_found)))
 
   let head t ~bucket ~key ?(preconditions = Object_.Preconditions.Read.none) ()
@@ -457,13 +533,13 @@ module Object = struct
             Ok { Object_.Delete_result.deleted; errors })
 
   let copy t ~src_bucket ~src_key ~dst_bucket ~dst_key
-      ?(source_preconditions = Object_.Preconditions.Copy_source.none)
-      ?metadata_directive:_ ?(metadata = []) () =
+      ?(source_preconditions = Object_.Preconditions.Copy_source.none) ?metadata
+      () =
     match
       Result.bind (validate_bucket_key src_bucket src_key) ~f:(fun () ->
           let open Internal.Let_syntax in
           let* () = validate_bucket_key dst_bucket dst_key in
-          Internal.Validation.validate_metadata metadata)
+          validate_copy_metadata metadata)
     with
     | Error _ as error -> error
     | Ok () -> (
@@ -490,22 +566,16 @@ module Object = struct
                     match Hashtbl.find src_b.objects src_key with
                     | None -> Error `Not_found
                     | Some src_obj ->
-                        let source_write_preconditions =
-                          {
-                            Object_.Preconditions.Write.if_match =
-                              source_preconditions.if_match;
-                            if_none_match = source_preconditions.if_none_match;
-                          }
-                        in
                         if
                           not
-                            (write_preconditions_pass source_write_preconditions
+                            (copy_source_preconditions_pass source_preconditions
                                (Some src_obj))
                         then Error `Precondition_failed
                         else
                           let new_metadata =
-                            if not (List.is_empty metadata) then metadata
-                            else src_obj.metadata
+                            match metadata with
+                            | Some (`Replace metadata) -> metadata
+                            | Some `Copy | None -> src_obj.metadata
                           in
                           let obj =
                             make_object ~clock:t.store.clock

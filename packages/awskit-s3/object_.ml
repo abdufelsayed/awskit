@@ -133,6 +133,11 @@ module Copy_result = struct
   type t = { etag : string; last_modified : string } [@@deriving show, eq]
 end
 
+(** Metadata behavior for server-side copy. *)
+module Copy_metadata = struct
+  type t = [ `Copy | `Replace of Metadata.t ] [@@deriving show, eq]
+end
+
 (** Result of a batch DELETE operation. *)
 module Delete_result = struct
   (** Successfully deleted objects. *)

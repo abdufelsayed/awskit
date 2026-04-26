@@ -22,5 +22,9 @@ val make :
     characters, or have leading/trailing whitespace. *)
 
 val access_key_id : t -> string
-val secret_access_key : t -> string
 val session_token : t -> string option
+
+val signing_key :
+  t -> datestamp:string -> region:string -> service:string -> string
+(** Derive a SigV4 signing key without exposing the raw secret access key. This
+    is primarily for {!Awskit.Signing} and custom AWS signers. *)

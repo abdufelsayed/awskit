@@ -78,9 +78,10 @@ let creds = Awskit.Credentials.make
 ]}
 
 Credentials are opaque — the record fields are not accessible directly. Use
-{!val:Awskit.Credentials.access_key_id}, {!val:Awskit.Credentials.secret_access_key},
-and {!val:Awskit.Credentials.session_token} to read individual fields. This
-prevents accidental logging of secret keys.
+{!val:Awskit.Credentials.access_key_id} and
+{!val:Awskit.Credentials.session_token} to read non-secret fields. The secret
+access key is accepted at construction time but is not exposed afterward, which
+helps prevent accidental logging.
 
 {2 Temporary credentials (STS, IAM roles)}
 

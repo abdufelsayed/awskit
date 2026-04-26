@@ -41,6 +41,13 @@ let make ~access_key_id ~secret_access_key ?session_token () =
   validate_optional ~field:"session_token" session_token;
   { access_key_id; secret_access_key; session_token }
 
+let hmac_sha256 ~key data =
+  Digestif.SHA256.(hmac_string ~key data |> to_raw_string)
+
 let access_key_id t = t.access_key_id
-let secret_access_key t = t.secret_access_key
 let session_token t = t.session_token
+
+let signing_key t ~datestamp ~region ~service =
+  hmac_sha256 ~key:("AWS4" ^ t.secret_access_key) datestamp |> fun key ->
+  hmac_sha256 ~key region |> fun key ->
+  hmac_sha256 ~key service |> fun key -> hmac_sha256 ~key "aws4_request"

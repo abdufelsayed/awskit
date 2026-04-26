@@ -165,6 +165,74 @@ let test_sim_copy_cross_bucket () =
   in
   Alcotest.(check string) "body" "cross" got.body
 
+let test_sim_copy_replace_metadata () =
+  let c = make_fresh () in
+  ignore
+    (Sim.Object.put c ~bucket ~key:"src" ~metadata:[ ("m", "old") ] "payload");
+  let new_metadata = [ ("m", "new") ] in
+  ignore
+    (Sim.Object.copy c ~src_bucket:bucket ~src_key:"src" ~dst_bucket:bucket
+       ~dst_key:"dst" ~metadata:(`Replace new_metadata) ()
+    |> ok_or_fail "copy replace");
+  let got = Sim.Object.get c ~bucket ~key:"dst" () |> ok_or_fail "get dst" in
+  Alcotest.(check (list (pair string string)))
+    "metadata replaced" new_metadata got.metadata
+
+let test_sim_range_get () =
+  let c = make_fresh () in
+  ignore (Sim.Object.put c ~bucket ~key:"k" "abcdef");
+  let bytes =
+    Sim.Object.get c ~bucket ~key:"k" ~range:(Range.Bytes (2, 4)) ()
+    |> ok_or_fail "bytes"
+  in
+  Alcotest.(check string) "bytes body" "cde" bytes.body;
+  Alcotest.(check int) "bytes length" 3 bytes.content_length;
+  let suffix =
+    Sim.Object.get c ~bucket ~key:"k" ~range:(Range.Suffix 2) ()
+    |> ok_or_fail "suffix"
+  in
+  Alcotest.(check string) "suffix body" "ef" suffix.body
+
+let test_sim_read_date_preconditions () =
+  let c = make_fresh () in
+  ignore (Sim.Object.put c ~bucket ~key:"k" "v");
+  let before =
+    {
+      Object.Preconditions.Read.none with
+      if_modified_since = Some "2025-12-31T23:59:59Z";
+    }
+  in
+  ignore
+    (Sim.Object.get c ~bucket ~key:"k" ~preconditions:before ()
+    |> ok_or_fail "modified since before");
+  let after =
+    {
+      Object.Preconditions.Read.none with
+      if_unmodified_since = Some "2025-12-31T23:59:59Z";
+    }
+  in
+  match Sim.Object.head c ~bucket ~key:"k" ~preconditions:after () with
+  | Error `Precondition_failed -> ()
+  | Ok _ -> Alcotest.fail "expected unmodified-since to fail"
+  | Error e -> Alcotest.failf "unexpected: %a" Error.pp e
+
+let test_sim_copy_source_date_preconditions () =
+  let c = make_fresh () in
+  ignore (Sim.Object.put c ~bucket ~key:"src" "payload");
+  let source_preconditions =
+    {
+      Object.Preconditions.Copy_source.none with
+      if_unmodified_since = Some "2025-12-31T23:59:59Z";
+    }
+  in
+  match
+    Sim.Object.copy c ~src_bucket:bucket ~src_key:"src" ~dst_bucket:bucket
+      ~dst_key:"dst" ~source_preconditions ()
+  with
+  | Error `Precondition_failed -> ()
+  | Ok _ -> Alcotest.fail "expected copy source precondition to fail"
+  | Error e -> Alcotest.failf "unexpected: %a" Error.pp e
+
 (* ── Delete batch ───────────────────────────────────────────────── *)
 
 let test_sim_delete_batch () =
@@ -289,6 +357,31 @@ let test_sim_bucket_already_exists () =
   match Sim.Bucket.create c ~bucket () with
   | Error `Bucket_already_exists -> ()
   | _ -> Alcotest.fail "expected Bucket_already_exists"
+
+let test_sim_bucket_validation () =
+  let c = make_fresh () in
+  let invalid_names =
+    [
+      "ab";
+      "Uppercase";
+      "has_underscore";
+      "-starts";
+      "ends-";
+      "a..b";
+      "a.-b";
+      "192.168.0.1";
+      "xn--bucket";
+      "bucket-s3alias";
+      "bucket--x-s3";
+    ]
+  in
+  List.iter
+    (fun bucket ->
+      match Sim.Bucket.create c ~bucket () with
+      | Error (`Invalid_request _) -> ()
+      | Ok () -> Alcotest.failf "expected invalid bucket %S" bucket
+      | Error e -> Alcotest.failf "unexpected for %S: %a" bucket Error.pp e)
+    invalid_names
 
 let test_sim_bucket_not_empty () =
   let c = make_fresh () in
@@ -823,6 +916,16 @@ let suite =
         Alcotest.test_case "basic" `Quick test_sim_copy;
         Alcotest.test_case "missing source" `Quick test_sim_copy_missing;
         Alcotest.test_case "cross bucket" `Quick test_sim_copy_cross_bucket;
+        Alcotest.test_case "replace metadata" `Quick
+          test_sim_copy_replace_metadata;
+        Alcotest.test_case "source date preconditions" `Quick
+          test_sim_copy_source_date_preconditions;
+      ] );
+    ( "sim:object:get",
+      [
+        Alcotest.test_case "range" `Quick test_sim_range_get;
+        Alcotest.test_case "date preconditions" `Quick
+          test_sim_read_date_preconditions;
       ] );
     ( "sim:object:delete-batch",
       [
@@ -842,6 +945,7 @@ let suite =
         Alcotest.test_case "create/delete" `Quick test_sim_bucket_create_delete;
         Alcotest.test_case "already exists" `Quick
           test_sim_bucket_already_exists;
+        Alcotest.test_case "validation" `Quick test_sim_bucket_validation;
         Alcotest.test_case "not empty" `Quick test_sim_bucket_not_empty;
         Alcotest.test_case "list" `Quick test_sim_bucket_list;
         Alcotest.test_case "no such bucket" `Quick test_sim_no_such_bucket;

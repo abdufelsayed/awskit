@@ -222,6 +222,10 @@ module Make (R : Awskit.Runtime.S) = struct
     Internal.Validation.validate_range_header_value
       "x-amz-copy-source-if-unmodified-since" if_unmodified_since
 
+  let validate_copy_metadata = function
+    | Some (`Replace metadata) -> Internal.Validation.validate_metadata metadata
+    | Some `Copy | None -> Ok ()
+
   let validate_common_object_headers ?content_type ?cache_control
       ?content_encoding ?content_disposition () =
     let open Internal.Validation in
@@ -591,8 +595,7 @@ module Make (R : Awskit.Runtime.S) = struct
                       Ok { Delete_result.deleted; errors }))
 
     let copy conn ~src_bucket ~src_key ~dst_bucket ~dst_key
-        ?(source_preconditions = Preconditions.Copy_source.none)
-        ?metadata_directive ?(metadata = []) () =
+        ?(source_preconditions = Preconditions.Copy_source.none) ?metadata () =
       Internal.Log.debug (fun m ->
           m "COPY %s/%s → %s/%s" src_bucket src_key dst_bucket dst_key);
       match
@@ -600,7 +603,7 @@ module Make (R : Awskit.Runtime.S) = struct
             let open Internal.Validation in
             let open Internal.Let_syntax in
             let* () = validate_bucket_key dst_bucket dst_key in
-            let* () = validate_metadata metadata in
+            let* () = validate_copy_metadata metadata in
             validate_copy_source_preconditions source_preconditions)
       with
       | Error _ as error -> R.return error
@@ -612,15 +615,19 @@ module Make (R : Awskit.Runtime.S) = struct
           in
           let extra_headers =
             ("x-amz-copy-source", copy_source)
-            :: Internal.Metadata_headers.to_headers metadata
+            ::
+            (match metadata with
+            | Some (`Replace metadata) ->
+                Internal.Metadata_headers.to_headers metadata
+            | Some `Copy | None -> [])
             |> List.append
                  (copy_source_precondition_headers source_preconditions)
           in
           let extra_headers =
-            match metadata_directive with
+            match metadata with
             | Some `Copy ->
                 ("x-amz-metadata-directive", "COPY") :: extra_headers
-            | Some `Replace ->
+            | Some (`Replace _) ->
                 ("x-amz-metadata-directive", "REPLACE") :: extra_headers
             | None -> extra_headers
           in

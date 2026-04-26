@@ -290,16 +290,15 @@ let result = Awskit_s3_eio.Object.copy conn
   ~src_key:"original.txt"
   ~dst_bucket:"dest-bucket"
   ~dst_key:"copy.txt"
-  ?metadata_directive:(Some `Replace)
-  ?metadata:[ ("copied-by", "backup-script" ) ]
+  ~metadata:(`Replace [ ("copied-by", "backup-script" ) ])
   ()
 ]}
 
-[?metadata_directive]:
+[?metadata]:
 {ul
   {li [None] — Copy metadata from source (default)}
   {li [Some `Copy] — Explicitly copy metadata}
-  {li [Some `Replace] — Replace with new [?metadata]}
+  {li [Some (`Replace metadata)] — Replace with new metadata}
 }
 
 [copy] also supports [?source_preconditions] for conditional copies.

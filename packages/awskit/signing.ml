@@ -16,6 +16,9 @@ let sha256_hex s = Digestif.SHA256.(digest_string s |> to_hex)
 let hmac_sha256 ~key data =
   Digestif.SHA256.(hmac_string ~key data |> to_raw_string)
 
+let signing_key ~credentials ~datestamp ~region ~service =
+  Credentials.signing_key credentials ~datestamp ~region ~service
+
 let uri_encode ?(encode_slash = true) s =
   let buf = Buffer.create (String.length s) in
   String.iter s ~f:(fun c ->
@@ -73,7 +76,9 @@ let canonicalize_headers headers =
 let require_host_header headers =
   let hosts =
     List.filter_map headers ~f:(fun (key, value) ->
-        if String.equal key "host" then Some value else None)
+        if String.Caseless.equal key "host" then
+          Some (normalize_header_value value)
+        else None)
   in
   match hosts with
   | [] -> invalid_arg "Awskit.Signing.sign_request: missing host header"
@@ -96,8 +101,8 @@ let sign_request_params ~credentials ~region ~service ~meth ~path ~query_params
     | Some token -> ("x-amz-security-token", token) :: base_headers
     | None -> base_headers
   in
+  require_host_header base_headers;
   let sorted_headers = canonicalize_headers base_headers in
-  require_host_header sorted_headers;
   let signed_headers_str =
     String.concat ~sep:";" (List.map sorted_headers ~f:fst)
   in
@@ -123,14 +128,7 @@ let sign_request_params ~credentials ~region ~service ~meth ~path ~query_params
     String.concat ~sep:"\n"
       [ "AWS4-HMAC-SHA256"; amz_date; scope; sha256_hex canonical_request ]
   in
-  let signing_key =
-    hmac_sha256
-      ~key:("AWS4" ^ Credentials.secret_access_key credentials)
-      datestamp
-    |> fun key ->
-    hmac_sha256 ~key region |> fun key ->
-    hmac_sha256 ~key service |> fun key -> hmac_sha256 ~key "aws4_request"
-  in
+  let signing_key = signing_key ~credentials ~datestamp ~region ~service in
   let signature =
     Digestif.SHA256.(hmac_string ~key:signing_key string_to_sign |> to_hex)
   in

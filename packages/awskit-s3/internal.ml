@@ -69,8 +69,53 @@ module Validation = struct
     let* () = ensure_present ~field:"bucket" bucket in
     let* () = ensure_no_ctl ~field:"bucket" bucket in
     let* () = ensure_no_surrounding_whitespace ~field:"bucket" bucket in
-    if String.exists bucket ~f:(function '/' | '\\' -> true | _ -> false) then
-      invalid "bucket must not contain path separators"
+    let len = String.length bucket in
+    let is_lowercase_letter = function 'a' .. 'z' -> true | _ -> false in
+    let is_digit = function '0' .. '9' -> true | _ -> false in
+    let is_alnum c = is_lowercase_letter c || is_digit c in
+    let is_bucket_char = function '.' | '-' -> true | c -> is_alnum c in
+    let looks_like_ipv4 =
+      let parts = String.split bucket ~on:'.' in
+      List.length parts = 4
+      && List.for_all parts ~f:(fun part ->
+          (not (String.is_empty part))
+          && String.for_all part ~f:is_digit
+          &&
+          match Int.of_string_opt part with
+          | Some n -> n >= 0 && n <= 255
+          | None -> false)
+    in
+    let has_bad_dot_dash_pair =
+      String.is_substring bucket ~substring:".."
+      || String.is_substring bucket ~substring:".-"
+      || String.is_substring bucket ~substring:"-."
+    in
+    if len < 3 || len > 63 then invalid "bucket must be 3-63 characters"
+    else if not (String.for_all bucket ~f:is_bucket_char) then
+      invalid
+        "bucket must contain only lowercase letters, digits, dots, and hyphens"
+    else if not (is_alnum bucket.[0] && is_alnum bucket.[len - 1]) then
+      invalid "bucket must start and end with a lowercase letter or digit"
+    else if has_bad_dot_dash_pair then
+      invalid "bucket must not contain adjacent dots or dot-hyphen pairs"
+    else if looks_like_ipv4 then
+      invalid "bucket must not be formatted as an IPv4 address"
+    else if String.is_prefix bucket ~prefix:"xn--" then
+      invalid "bucket must not start with xn--"
+    else if String.is_prefix bucket ~prefix:"sthree-" then
+      invalid "bucket must not start with sthree-"
+    else if String.is_prefix bucket ~prefix:"amzn-s3-demo-" then
+      invalid "bucket must not start with amzn-s3-demo-"
+    else if String.is_suffix bucket ~suffix:"-s3alias" then
+      invalid "bucket must not end with -s3alias"
+    else if String.is_suffix bucket ~suffix:"--ol-s3" then
+      invalid "bucket must not end with --ol-s3"
+    else if String.is_suffix bucket ~suffix:".mrap" then
+      invalid "bucket must not end with .mrap"
+    else if String.is_suffix bucket ~suffix:"--x-s3" then
+      invalid "bucket must not end with --x-s3"
+    else if String.is_suffix bucket ~suffix:"--table-s3" then
+      invalid "bucket must not end with --table-s3"
     else Ok ()
 
   let validate_key key =

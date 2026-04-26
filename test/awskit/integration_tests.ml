@@ -132,6 +132,20 @@ let test_header_whitespace () =
     (get_auth (sign "  example.amazonaws.com  ").headers)
     (get_auth (sign "example.amazonaws.com").headers)
 
+let test_duplicate_host_rejected () =
+  Alcotest.check_raises "duplicate host"
+    (Invalid_argument "Awskit.Signing.sign_request: duplicate host header")
+    (fun () ->
+      ignore
+        (Signing.sign_request ~credentials:creds ~region:"us-east-1"
+           ~service:"service" ~meth:"GET" ~path:"/" ~query:""
+           ~headers:
+             [
+               ("host", "example.amazonaws.com");
+               ("Host", "duplicate.amazonaws.com");
+             ]
+           ~payload:"" ~now:test_time))
+
 let test_path_encoding () =
   let result =
     Signing.sign_request ~credentials:creds ~region:"us-east-1" ~service:"s3"
@@ -175,9 +189,6 @@ let test_credentials_roundtrip () =
   Alcotest.(check string)
     "access_key_id" "AK"
     (Awskit.Credentials.access_key_id c);
-  Alcotest.(check string)
-    "secret_access_key" "SK"
-    (Awskit.Credentials.secret_access_key c);
   Alcotest.(check (option string))
     "session_token" (Some "TOK")
     (Awskit.Credentials.session_token c)
@@ -217,6 +228,8 @@ let suite =
         Alcotest.test_case "case normalization" `Quick test_header_case;
         Alcotest.test_case "whitespace trimming" `Quick test_header_whitespace;
         Alcotest.test_case "session token" `Quick test_session_token;
+        Alcotest.test_case "duplicate host rejected" `Quick
+          test_duplicate_host_rejected;
       ] );
     ( "integration:credentials",
       [
