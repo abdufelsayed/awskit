@@ -32,12 +32,12 @@ end
 
 (** User metadata represented as unprefixed [x-amz-meta-*] key/value pairs. *)
 module Metadata : sig
-  type t = Awskit_s3_common.Metadata.t
+  type t = Common.Metadata.t
 end
 
 (** S3 object storage classes. *)
 module Storage_class : sig
-  type t = Awskit_s3_common.Storage_class.t =
+  type t = Common.Storage_class.t =
     | Standard
     | Standard_ia
     | Onezone_ia
@@ -53,12 +53,12 @@ end
 
 (** S3 tag key/value pair. *)
 module Tag : sig
-  type t = Awskit_s3_common.Tag.t = { key : string; value : string }
+  type t = Common.Tag.t = { key : string; value : string }
 end
 
 (** HTTP byte-range requests for S3 object reads. *)
 module Range : sig
-  type t = Awskit_s3_common.Range.t
+  type t = Common.Range.t
 
   val bytes : start:int64 -> finish:int64 -> (t, Error.t) result
   val bytes_exn : start:int64 -> finish:int64 -> t
@@ -82,7 +82,7 @@ type endpoint_variant =
   | `Accelerate_dualstack ]
 (** AWS S3 endpoint variant. Ignored when an explicit [endpoint] is supplied. *)
 
-type endpoint_config = Awskit_s3_endpoint.t
+type endpoint_config = Endpoint_resolver.t
 (** Opaque S3 endpoint and addressing configuration for custom runtimes. Most
     callers pass endpoint options directly to an adapter [create] function. *)
 

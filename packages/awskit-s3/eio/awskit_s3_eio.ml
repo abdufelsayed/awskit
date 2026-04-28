@@ -42,7 +42,7 @@ let create ~sw ~env ~region ~credentials ?retry_policy ?endpoint
 
 module Object = struct
   include S3.Object
-  module Transfer = Awskit_s3_eio_transfer.Make (Runtime) (S3)
+  module Transfer = Transfer.Make (Runtime) (S3)
 end
 
 module Bucket = S3.Bucket

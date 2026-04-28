@@ -50,7 +50,7 @@ let create ?ctx ?endpoint ?addressing_style ?endpoint_variant ?scheme ?region
 
 module Object = struct
   include S3.Object
-  module Transfer = Awskit_s3_lwt_unix_transfer.Make (Runtime) (S3)
+  module Transfer = Transfer.Make (Runtime) (S3)
 end
 
 module Bucket = S3.Bucket
