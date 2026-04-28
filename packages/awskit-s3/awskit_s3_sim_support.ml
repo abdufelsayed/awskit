@@ -19,6 +19,7 @@ let default_config = { max_list_keys = 1000 }
 type stored_object = {
   mutable body : string;
   mutable etag : Object.Etag.t;
+  mutable version_id : Object.Version_id.t option;
   mutable content_type : string option;
   mutable metadata : Metadata.t;
   mutable storage_class : Storage_class.t option;
@@ -26,6 +27,15 @@ type stored_object = {
   mutable checksum : Object.Checksum.response option;
   mutable last_modified : Ptime.t;
 }
+
+type stored_delete_marker = {
+  version_id : Object.Version_id.t;
+  last_modified : Ptime.t;
+}
+
+type stored_version =
+  | Stored_object of stored_object
+  | Stored_delete_marker of stored_delete_marker
 
 type stored_part = {
   part_number : int;
@@ -48,7 +58,8 @@ type multipart_upload = {
 
 type bucket_state = {
   created_at : Ptime.t;
-  objects : (string, stored_object) Hashtbl.t;
+  objects : (string, stored_version) Hashtbl.t;
+  versions : (string, stored_version list) Hashtbl.t;
   multipart_uploads : (string, multipart_upload) Hashtbl.t;
   mutable policy : Policy.t option;
   mutable bucket_tags : Tag.t list;
@@ -89,6 +100,7 @@ type store = {
   buckets : (string, bucket_state) Hashtbl.t;
   mutable history : op_record list;
   mutable next_upload_id : int;
+  mutable next_version_id : int;
 }
 
 let create_store ?(config = default_config) ~clock () =
@@ -98,6 +110,7 @@ let create_store ?(config = default_config) ~clock () =
     buckets = Hashtbl.create 17;
     history = [];
     next_upload_id = 1;
+    next_version_id = 1;
   }
 
 type fault = Slow_down | Internal_error | Connection_reset | Response_lost
@@ -178,8 +191,121 @@ let require_bucket t bucket =
 let require_object t bucket key =
   let* bucket = require_bucket t bucket in
   match Hashtbl.find_opt bucket.objects key with
-  | Some object_ -> Ok object_
+  | Some (Stored_object object_) -> Ok object_
   | None -> Error (no_such_key ())
+  | Some (Stored_delete_marker _) -> Error (no_such_key ())
+
+let versioning_enabled (bucket : bucket_state) =
+  match bucket.versioning with
+  | Some Bucket.Versioning.Status.Enabled -> true
+  | Some Suspended | None -> false
+
+let next_version_id t =
+  let id = t.store.next_version_id in
+  t.store.next_version_id <- id + 1;
+  Object.Version_id.of_string_exn (Fmt.str "sim-version-%d" id)
+
+let version_id_of_version = function
+  | Stored_object obj -> obj.version_id
+  | Stored_delete_marker marker -> Some marker.version_id
+
+let prepend_version bucket key version =
+  let versions =
+    match Hashtbl.find_opt bucket.versions key with
+    | None -> []
+    | Some versions -> versions
+  in
+  Hashtbl.replace bucket.versions key (version :: versions)
+
+let store_object t bucket key (obj : stored_object) =
+  let obj =
+    if versioning_enabled bucket then
+      { obj with version_id = Some (next_version_id t) }
+    else obj
+  in
+  let version = Stored_object obj in
+  Hashtbl.replace bucket.objects key version;
+  if Option.is_some obj.version_id then prepend_version bucket key version;
+  obj
+
+let find_version bucket key version_id =
+  match Hashtbl.find_opt bucket.versions key with
+  | None -> None
+  | Some versions ->
+      List.find_opt
+        (fun version ->
+          match version_id_of_version version with
+          | Some candidate -> Object.Version_id.equal candidate version_id
+          | None -> false)
+        versions
+
+let current_or_version bucket key version_id =
+  match version_id with
+  | None -> Hashtbl.find_opt bucket.objects key
+  | Some version_id -> find_version bucket key version_id
+
+let current_object bucket key =
+  match Hashtbl.find_opt bucket.objects key with
+  | Some (Stored_object obj) -> Some obj
+  | None | Some (Stored_delete_marker _) -> None
+
+let require_object_version t bucket key version_id =
+  let* bucket = require_bucket t bucket in
+  match current_or_version bucket key version_id with
+  | Some (Stored_object object_) -> Ok object_
+  | None -> Error (no_such_key ())
+  | Some (Stored_delete_marker _) -> Error (no_such_key ())
+
+let delete_version bucket key version_id =
+  match Hashtbl.find_opt bucket.versions key with
+  | None -> None
+  | Some versions -> (
+      let deleted = ref None in
+      let remaining =
+        List.filter
+          (fun version ->
+            match version_id_of_version version with
+            | Some candidate when Object.Version_id.equal candidate version_id
+              ->
+                deleted := Some version;
+                false
+            | _ -> true)
+          versions
+      in
+      match !deleted with
+      | None -> None
+      | Some deleted_version ->
+          (match remaining with
+          | [] ->
+              Hashtbl.remove bucket.versions key;
+              Hashtbl.remove bucket.objects key
+          | latest :: _ ->
+              Hashtbl.replace bucket.versions key remaining;
+              Hashtbl.replace bucket.objects key latest);
+          Some deleted_version)
+
+let store_delete_marker t bucket key =
+  let marker = { version_id = next_version_id t; last_modified = now t } in
+  let version = Stored_delete_marker marker in
+  Hashtbl.replace bucket.objects key version;
+  prepend_version bucket key version;
+  marker
+
+let version_headers = function
+  | None -> []
+  | Some version_id ->
+      [ ("x-amz-version-id", Object.Version_id.to_string version_id) ]
+
+let copy_source_version_headers = function
+  | None -> []
+  | Some version_id ->
+      [
+        ("x-amz-copy-source-version-id", Object.Version_id.to_string version_id);
+      ]
+
+let delete_marker_headers = function
+  | None | Some false -> []
+  | Some true -> [ ("x-amz-delete-marker", "true") ]
 
 let object_size (obj : stored_object) = Int64.of_int (String.length obj.body)
 
@@ -413,8 +539,8 @@ let object_meta store ~bucket ~key =
   | None -> None
   | Some bucket -> (
       match Hashtbl.find_opt bucket.objects key with
-      | None -> None
-      | Some obj ->
+      | None | Some (Stored_delete_marker _) -> None
+      | Some (Stored_object obj) ->
           Some
             {
               etag = Some obj.etag;
@@ -427,6 +553,10 @@ let keys store ~bucket =
   | None -> []
   | Some bucket ->
       Hashtbl.to_seq_keys bucket.objects
+      |> Seq.filter (fun key ->
+          match Hashtbl.find_opt bucket.objects key with
+          | Some (Stored_object _) -> true
+          | None | Some (Stored_delete_marker _) -> false)
       |> List.of_seq
       |> List.sort String.compare
 
@@ -438,7 +568,9 @@ let dump_strings store ~bucket =
   | None -> []
   | Some (bucket : bucket_state) ->
       Hashtbl.to_seq bucket.objects
-      |> Seq.map (fun (key, (obj : stored_object)) -> (key, obj.body))
+      |> Seq.filter_map (function
+        | key, Stored_object obj -> Some (key, obj.body)
+        | _, Stored_delete_marker _ -> None)
       |> List.of_seq
       |> List.sort compare
 
@@ -462,7 +594,7 @@ let info_of_object ?content_length response (obj : stored_object) =
     last_modified = Some obj.last_modified;
     metadata = obj.metadata;
     storage_class = obj.storage_class;
-    version_id = None;
+    version_id = obj.version_id;
     checksum = obj.checksum;
     server_side_encryption = None;
     request = response;

@@ -150,6 +150,7 @@ module Multipart = struct
                       {
                         body;
                         etag;
+                        version_id = None;
                         content_type = upload.content_type;
                         metadata = upload.metadata;
                         storage_class = upload.storage_class;
@@ -158,17 +159,19 @@ module Multipart = struct
                         last_modified = now conn;
                       }
                     in
-                    Hashtbl.replace bucket_state.objects key obj;
+                    let obj = store_object conn bucket_state key obj in
                     Hashtbl.remove bucket_state.multipart_uploads
                       (upload_key upload_id);
                     Ok
                       {
                         Public_multipart.Complete.etag = Some etag;
-                        version_id = None;
+                        version_id = obj.version_id;
                         checksum;
                         request =
                           response 200
-                            ~headers:(checksum_response_headers checksum);
+                            ~headers:
+                              (version_headers obj.version_id
+                              @ checksum_response_headers checksum);
                       })))
 
   let abort conn ~bucket ~key ~upload_id =

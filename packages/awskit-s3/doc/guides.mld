@@ -533,5 +533,7 @@ ignore
 
 [Sim.Response_lost] is modeled as a body-read failure. [Sim.Slow_down],
 [Sim.Internal_error], and [Sim.Connection_reset] fail object and multipart
-operations before mutation. Object version history is still explicitly
-deferred.
+operations before mutation. The simulator models enabled bucket versioning for
+object puts, gets, heads, deletes, copies, multipart completion, and delete
+markers. Suspended bucket versioning keeps the unversioned current-object
+behavior.

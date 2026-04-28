@@ -61,6 +61,12 @@ module Make (Client : SUBJECT) = struct
       (Client.Object.Buffer.put_string conn ~bucket ~key value
       |> ok_or_fail ("put " ^ key))
 
+  let require_version label = function
+    | Some version_id -> version_id
+    | None -> Alcotest.failf "%s: expected version id" label
+
+  let version_string = Option.map Object.Version_id.to_string
+
   let test_bucket_lifecycle () =
     let conn = Client.fresh () in
     Alcotest.(check bool)
@@ -345,6 +351,148 @@ module Make (Client : SUBJECT) = struct
       |> ok_or_fail "get deleted tags"
     in
     Alcotest.(check int) "deleted tag count" 0 (List.length result.tags)
+
+  let test_object_versioning () =
+    let conn = Client.fresh () in
+    create_bucket conn;
+    ignore
+      (Client.Bucket.Versioning.put conn ~bucket
+         Bucket.Versioning.Status.Enabled
+      |> ok_or_fail "enable versioning");
+    let put1 =
+      Client.Object.Buffer.put_string conn ~bucket ~key:"versioned.txt" "one"
+      |> ok_or_fail "put version one"
+    in
+    let v1 = require_version "put version one" put1.version_id in
+    let put2 =
+      Client.Object.Buffer.put_string conn ~bucket ~key:"versioned.txt" "two"
+      |> ok_or_fail "put version two"
+    in
+    let v2 = require_version "put version two" put2.version_id in
+    let info, body =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"versioned.txt"
+        ~max_size:16L ()
+      |> ok_or_fail "get current version"
+    in
+    Alcotest.(check string) "current body" "two" body;
+    Alcotest.(check (option string))
+      "current version"
+      (Some (Object.Version_id.to_string v2))
+      (version_string info.version_id);
+    let previous_options =
+      { Object.Get.default_options with version_id = Some v1 }
+    in
+    let info, body =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"versioned.txt"
+        ~max_size:16L ~options:previous_options ()
+      |> ok_or_fail "get previous version"
+    in
+    Alcotest.(check string) "previous body" "one" body;
+    Alcotest.(check (option string))
+      "previous version"
+      (Some (Object.Version_id.to_string v1))
+      (version_string info.version_id);
+    let head_options =
+      { Object.Head.default_options with version_id = Some v1 }
+    in
+    let head =
+      Client.Object.head conn ~bucket ~key:"versioned.txt" ~options:head_options
+        ()
+      |> ok_or_fail "head previous version"
+    in
+    Alcotest.(check (option int64))
+      "previous length" (Some 3L) head.content_length;
+    Alcotest.(check (option string))
+      "previous head version"
+      (Some (Object.Version_id.to_string v1))
+      (version_string head.version_id);
+    let copy =
+      Client.Object.copy conn ~src_bucket:bucket ~src_key:"versioned.txt"
+        ~dst_bucket:bucket ~dst_key:"copy.txt" ()
+      |> ok_or_fail "copy versioned object"
+    in
+    ignore (require_version "copy destination version" copy.version_id);
+    Alcotest.(check (option string))
+      "copy source version"
+      (Some (Object.Version_id.to_string v2))
+      (version_string copy.copy_source_version_id);
+    let upload =
+      Client.Multipart.create conn ~bucket ~key:"multi-versioned.txt" ()
+      |> ok_or_fail "create versioned multipart"
+    in
+    let part =
+      Client.Multipart.upload_part conn ~bucket ~key:"multi-versioned.txt"
+        ~upload_id:upload.upload.upload_id ~part_number:1
+        ~body:(Client.upload_body_of_string "multipart")
+        ()
+      |> ok_or_fail "upload versioned part"
+    in
+    let complete =
+      Client.Multipart.complete conn ~bucket ~key:"multi-versioned.txt"
+        ~upload_id:upload.upload.upload_id [ part.part ]
+      |> ok_or_fail "complete versioned multipart"
+    in
+    ignore (require_version "complete multipart version" complete.version_id);
+    let deleted =
+      Client.Object.delete conn ~bucket ~key:"versioned.txt" ()
+      |> ok_or_fail "delete current version"
+    in
+    let marker = require_version "delete marker version" deleted.version_id in
+    Alcotest.(check (option bool))
+      "delete marker" (Some true) deleted.delete_marker;
+    Alcotest.(check bool)
+      "delete marker hides current" false
+      (Client.Object.exists conn ~bucket ~key:"versioned.txt"
+      |> ok_or_fail "exists after delete marker");
+    let missing_version_options =
+      {
+        Object.Delete.default_options with
+        version_id = Some (Object.Version_id.of_string_exn "missing-version");
+      }
+    in
+    ignore
+      (Client.Object.delete conn ~bucket ~key:"versioned.txt"
+         ~options:missing_version_options ()
+      |> ok_or_fail "delete missing version id");
+    Alcotest.(check bool)
+      "missing version delete keeps marker" false
+      (Client.Object.exists conn ~bucket ~key:"versioned.txt"
+      |> ok_or_fail "exists after missing version delete");
+    let version_two_options =
+      { Object.Get.default_options with version_id = Some v2 }
+    in
+    let _info, body =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"versioned.txt"
+        ~max_size:16L ~options:version_two_options ()
+      |> ok_or_fail "get hidden version"
+    in
+    Alcotest.(check string) "hidden body" "two" body;
+    let delete_marker_options =
+      { Object.Delete.default_options with version_id = Some marker }
+    in
+    ignore
+      (Client.Object.delete conn ~bucket ~key:"versioned.txt"
+         ~options:delete_marker_options ()
+      |> ok_or_fail "delete delete marker");
+    let _info, body =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"versioned.txt"
+        ~max_size:16L ()
+      |> ok_or_fail "get restored current"
+    in
+    Alcotest.(check string) "restored current" "two" body;
+    let delete_v2_options =
+      { Object.Delete.default_options with version_id = Some v2 }
+    in
+    ignore
+      (Client.Object.delete conn ~bucket ~key:"versioned.txt"
+         ~options:delete_v2_options ()
+      |> ok_or_fail "delete version two");
+    let _info, body =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"versioned.txt"
+        ~max_size:16L ()
+      |> ok_or_fail "get remaining version"
+    in
+    Alcotest.(check string) "remaining current" "one" body
 
   let sample_policy_json =
     Fmt.str
@@ -908,6 +1056,7 @@ module Make (Client : SUBJECT) = struct
       Alcotest.test_case "list copy delete many" `Quick
         test_list_copy_delete_many;
       Alcotest.test_case "object tagging" `Quick test_object_tagging;
+      Alcotest.test_case "object versioning" `Quick test_object_versioning;
       Alcotest.test_case "bucket config roundtrips" `Quick
         test_bucket_config_roundtrips;
       Alcotest.test_case "buffer limit" `Quick test_buffer_limit;

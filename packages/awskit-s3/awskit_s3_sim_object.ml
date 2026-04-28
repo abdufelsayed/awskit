@@ -64,7 +64,7 @@ module Object = struct
                     | None -> (
                         match
                           ensure_write_preconditions
-                            (Hashtbl.find_opt bucket_state.objects key)
+                            (current_object bucket_state key)
                             options.preconditions
                         with
                         | Error error -> Error error
@@ -77,6 +77,7 @@ module Object = struct
                               {
                                 body;
                                 etag;
+                                version_id = None;
                                 content_type = options.content_type;
                                 metadata = options.metadata;
                                 storage_class = options.storage_class;
@@ -85,17 +86,18 @@ module Object = struct
                                 last_modified = now conn;
                               }
                             in
-                            Hashtbl.replace bucket_state.objects key obj;
+                            let obj = store_object conn bucket_state key obj in
                             Ok
                               {
                                 Object.Put.etag = Some etag;
-                                version_id = None;
+                                version_id = obj.version_id;
                                 checksum;
                                 request =
                                   response 200
                                     ~headers:
                                       (("etag", etag)
-                                      :: checksum_response_headers checksum);
+                                      :: (version_headers obj.version_id
+                                         @ checksum_response_headers checksum));
                               })))))
 
   let get conn ~bucket ~key ?options ~consume () =
@@ -103,7 +105,7 @@ module Object = struct
     match validate_bucket_key bucket key with
     | Error error -> Error error
     | Ok () -> (
-        match require_object conn bucket key with
+        match require_object_version conn bucket key options.version_id with
         | Error error -> Error error
         | Ok obj -> (
             match take_fault conn with
@@ -124,6 +126,7 @@ module Object = struct
                                string_of_int (String.length body) );
                            ]
                           @ range_headers
+                          @ version_headers obj.version_id
                           @ checksum_response_headers obj.checksum)
                     in
                     let info =
@@ -157,6 +160,7 @@ module Object = struct
                                string_of_int (String.length body) );
                            ]
                           @ range_headers
+                          @ version_headers obj.version_id
                           @ checksum_response_headers obj.checksum)
                     in
                     let info =
@@ -174,7 +178,7 @@ module Object = struct
     match validate_bucket_key bucket key with
     | Error error -> Error error
     | Ok () -> (
-        match require_object conn bucket key with
+        match require_object_version conn bucket key options.version_id with
         | Error error -> Error error
         | Ok obj -> (
             match operation_fault conn `Head bucket (Some key) with
@@ -191,6 +195,7 @@ module Object = struct
                              ( "content-length",
                                string_of_int (String.length obj.body) );
                            ]
+                          @ version_headers obj.version_id
                           @ checksum_response_headers obj.checksum)
                     in
                     Ok (info_of_object response obj))))
@@ -200,6 +205,16 @@ module Object = struct
     | Ok _ -> Ok true
     | Error error when Error.is_not_found error -> Ok false
     | Error error -> Error error
+
+  let delete_result ?delete_marker ?version_id () =
+    {
+      Object.Delete.delete_marker;
+      version_id;
+      request =
+        response 204
+          ~headers:
+            (version_headers version_id @ delete_marker_headers delete_marker);
+    }
 
   let delete conn ~bucket ~key ?options () =
     let options = Option.value ~default:Object.Delete.default_options options in
@@ -212,30 +227,65 @@ module Object = struct
             match operation_fault conn `Delete bucket (Some key) with
             | Some error -> Error error
             | None -> (
-                match Hashtbl.find_opt bucket_state.objects key with
-                | None when delete_preconditions_are_empty options.preconditions
-                  ->
-                    Hashtbl.remove bucket_state.objects key;
-                    Ok
-                      {
-                        Object.Delete.delete_marker = None;
-                        version_id = None;
-                        request = response 204;
-                      }
-                | None -> Error (precondition_failed ())
-                | Some obj -> (
-                    match
-                      ensure_delete_preconditions obj options.preconditions
-                    with
-                    | Error error -> Error error
-                    | Ok () ->
-                        Hashtbl.remove bucket_state.objects key;
+                match options.version_id with
+                | Some version_id -> (
+                    match delete_version bucket_state key version_id with
+                    | None
+                      when delete_preconditions_are_empty options.preconditions
+                      ->
+                        Ok (delete_result ~version_id ())
+                    | None -> Error (precondition_failed ())
+                    | Some (Stored_delete_marker _) ->
+                        if delete_preconditions_are_empty options.preconditions
+                        then
+                          Ok (delete_result ~delete_marker:true ~version_id ())
+                        else Error (precondition_failed ())
+                    | Some (Stored_object obj) -> (
+                        match
+                          ensure_delete_preconditions obj options.preconditions
+                        with
+                        | Error error -> Error error
+                        | Ok () -> Ok (delete_result ~version_id ())))
+                | None when versioning_enabled bucket_state -> (
+                    match current_object bucket_state key with
+                    | None
+                      when delete_preconditions_are_empty options.preconditions
+                      ->
+                        let marker =
+                          store_delete_marker conn bucket_state key
+                        in
                         Ok
-                          {
-                            Object.Delete.delete_marker = None;
-                            version_id = None;
-                            request = response 204;
-                          }))))
+                          (delete_result ~delete_marker:true
+                             ~version_id:marker.version_id ())
+                    | None -> Error (precondition_failed ())
+                    | Some obj -> (
+                        match
+                          ensure_delete_preconditions obj options.preconditions
+                        with
+                        | Error error -> Error error
+                        | Ok () ->
+                            let marker =
+                              store_delete_marker conn bucket_state key
+                            in
+                            Ok
+                              (delete_result ~delete_marker:true
+                                 ~version_id:marker.version_id ())))
+                | None -> (
+                    match current_object bucket_state key with
+                    | None
+                      when delete_preconditions_are_empty options.preconditions
+                      ->
+                        Hashtbl.remove bucket_state.objects key;
+                        Ok (delete_result ())
+                    | None -> Error (precondition_failed ())
+                    | Some obj -> (
+                        match
+                          ensure_delete_preconditions obj options.preconditions
+                        with
+                        | Error error -> Error error
+                        | Ok () ->
+                            Hashtbl.remove bucket_state.objects key;
+                            Ok (delete_result ()))))))
 
   let delete_many conn ~bucket ~objects =
     match validate_bucket bucket with
@@ -250,11 +300,29 @@ module Object = struct
                 let deleted =
                   List.map
                     (fun (object_ : Object.Delete_many.object_) ->
-                      Hashtbl.remove bucket_state.objects object_.key;
+                      let delete_marker, version_id =
+                        match object_.version_id with
+                        | Some version_id -> (
+                            match
+                              delete_version bucket_state object_.key version_id
+                            with
+                            | Some (Stored_delete_marker _) ->
+                                (Some true, Some version_id)
+                            | Some (Stored_object _) | None ->
+                                (None, Some version_id))
+                        | None when versioning_enabled bucket_state ->
+                            let marker =
+                              store_delete_marker conn bucket_state object_.key
+                            in
+                            (Some true, Some marker.version_id)
+                        | None ->
+                            Hashtbl.remove bucket_state.objects object_.key;
+                            (None, None)
+                      in
                       {
                         Object.Delete_many.key = object_.key;
-                        version_id = object_.version_id;
-                        delete_marker = None;
+                        version_id;
+                        delete_marker;
                       })
                     objects
                 in
@@ -298,6 +366,7 @@ module Object = struct
                       {
                         body = src.body;
                         etag = src.etag;
+                        version_id = None;
                         content_type = src.content_type;
                         metadata;
                         storage_class =
@@ -312,14 +381,18 @@ module Object = struct
                         last_modified = now conn;
                       }
                     in
-                    Hashtbl.replace dst_bucket_state.objects dst_key obj;
+                    let obj = store_object conn dst_bucket_state dst_key obj in
                     Ok
                       {
                         Object.Copy.etag = Some obj.etag;
                         last_modified = Some obj.last_modified;
-                        version_id = None;
-                        copy_source_version_id = None;
-                        request = response 200;
+                        version_id = obj.version_id;
+                        copy_source_version_id = src.version_id;
+                        request =
+                          response 200
+                            ~headers:
+                              (version_headers obj.version_id
+                              @ copy_source_version_headers src.version_id);
                       })))
 
   let list conn ~bucket ?options () =
@@ -335,10 +408,14 @@ module Object = struct
             | None ->
                 let all =
                   Hashtbl.to_seq bucket_state.objects
-                  |> Seq.filter (fun (key, _) ->
-                      match options.prefix with
-                      | None -> true
-                      | Some prefix -> is_prefix ~prefix key)
+                  |> Seq.filter_map (function
+                    | key, Stored_object obj -> (
+                        match options.prefix with
+                        | None -> Some (key, obj)
+                        | Some prefix ->
+                            if is_prefix ~prefix key then Some (key, obj)
+                            else None)
+                    | _, Stored_delete_marker _ -> None)
                   |> List.of_seq
                   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
                 in

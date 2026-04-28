@@ -16,6 +16,7 @@ module Bucket = struct
             {
               created_at = now conn;
               objects = Hashtbl.create 17;
+              versions = Hashtbl.create 17;
               multipart_uploads = Hashtbl.create 17;
               policy = None;
               bucket_tags = [];
