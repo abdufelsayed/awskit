@@ -1,7 +1,7 @@
 {0 S3 Guides}
 
-Guides for the redesigned S3 API. The public surface is streaming-first,
-AWS S3-shaped, endpoint-configurable, and result-returning.
+Guides for using [awskit-s3] with AWS S3 object and bucket workflows. The
+client surface is streaming-first, endpoint-configurable, and result-returning.
 
 {1 Object Operations}
 
@@ -44,11 +44,10 @@ Awskit_s3_eio.Object.put s3
 
 {2 Checksums}
 
-[Object.Checksum.request] supports the checksum algorithms exposed by classic
-S3 object and multipart operations: [CRC32], [CRC32C], [CRC64NVME], [SHA1],
-and [SHA256]. A request can provide both the algorithm and a precomputed
-checksum value, or provide only the algorithm and let AWS compute the stored
-checksum.
+[Object.Checksum.request] supports the checksum algorithms exposed by S3 object
+and multipart operations: [CRC32], [CRC32C], [CRC64NVME], [SHA1], and
+[SHA256]. A request can provide both the algorithm and a precomputed checksum
+value, or provide only the algorithm and let AWS compute the stored checksum.
 
 Runtime-backed operations send the checksum algorithm/value headers and parse
 checksum response headers from [PutObject], [GetObject], [HeadObject],
@@ -57,9 +56,9 @@ checksum headers in the signed header set when configured.
 
 The simulator stores checksum metadata for objects and multipart parts. It
 computes [SHA1] and [SHA256] values when the request omits an explicit value,
-and preserves explicit values for all supported algorithms. It does not
-implement local CRC math for algorithm-only [CRC32], [CRC32C], or [CRC64NVME]
-requests.
+and preserves explicit values for all supported algorithms. For simulator tests
+that assert exact CRC response values, pass explicit [CRC32], [CRC32C], or
+[CRC64NVME] checksum values in the request.
 
 {2 Preconditions}
 
@@ -178,8 +177,8 @@ If the response body exceeds [max_size], the helper returns
 {1 Object.Transfer}
 
 Unix-capable adapters expose local-path helpers under [Object.Transfer].
-These helpers are adapter-level APIs because pure [awskit-s3] must not depend
-on filesystem APIs.
+Keeping these helpers at the adapter layer lets the pure [awskit-s3] core stay
+independent of filesystem APIs.
 
 {2 Eio}
 
@@ -228,8 +227,8 @@ let* result =
 
 To resume an interrupted multipart upload, keep the [upload_id]. The resume
 helper lists uploaded parts, skips matching part numbers and sizes, uploads the
-missing parts, and completes the upload. It does not abort the existing upload
-on failure, so the same upload ID can be retried:
+missing parts, and completes the upload. Existing uploads are left open on
+failure, so the same upload ID can be retried:
 
 {[
 let* result =
@@ -462,8 +461,7 @@ Awskit_s3_lwt_unix.create ()
 The Unix adapters cover static credentials, environment variables, shared AWS
 config files, named static profiles, ECS container credentials, and EC2
 instance profile credentials. Metadata credentials are resolved through the
-Lwt-Unix runtime provider and refreshed before expiration. Web identity and STS
-assume-role remain future work.
+Lwt-Unix runtime credential source and refreshed before expiration.
 
 {1 Errors}
 

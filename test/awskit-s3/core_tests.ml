@@ -200,6 +200,7 @@ module Recording_runtime = struct
     status : int;
     headers : (string * string) list;
     body : string;
+    read_error_after : int option;
   }
 
   type call = { request : Awskit.Request.t; body : string }
@@ -225,9 +226,14 @@ module Recording_runtime = struct
   let return value = value
   let bind value f = f value
 
-  type download_body = string
+  type download_body = { body : string; read_error_after : int option }
   type upload_writer = Buffer.t
-  type download_reader = { body : string; mutable offset : int }
+
+  type download_reader = {
+    body : string;
+    read_error_after : int option;
+    mutable offset : int;
+  }
 
   let connect ?(endpoint_config = Awskit_s3.default_endpoint_config)
       ?(region = Region.of_string_exn "us-east-1")
@@ -286,6 +292,11 @@ module Recording_runtime = struct
 
   let read reader bytes ~off ~len =
     if len = 0 then Ok 0
+    else if
+      match reader.read_error_after with
+      | Some limit -> reader.offset >= limit
+      | None -> false
+    then Stdlib.Error (Awskit.Error.body "simulated download read failure")
     else
       let remaining = String.length reader.body - reader.offset in
       if remaining <= 0 then Ok 0
@@ -302,8 +313,10 @@ module Recording_runtime = struct
     | Ok 0 -> Ok ()
     | Ok _ -> drain reader
 
-  let with_download_body body ~consume =
-    let reader = { body; offset = 0 } in
+  let with_download_body (body : download_body) ~consume =
+    let reader =
+      { body = body.body; read_error_after = body.read_error_after; offset = 0 }
+    in
     match consume reader with
     | Ok _ as result -> (
         match drain reader with Ok () -> result | Error _ as error -> error)
@@ -312,8 +325,10 @@ module Recording_runtime = struct
         | Ok () -> error
         | Error _ as drain_error -> drain_error)
 
-  let discard_download_body body =
-    let reader = { body; offset = 0 } in
+  let discard_download_body (body : download_body) =
+    let reader =
+      { body = body.body; read_error_after = body.read_error_after; offset = 0 }
+    in
     let result = drain reader in
     result
 
@@ -326,13 +341,16 @@ module Recording_runtime = struct
         Ok
           ( Awskit.Response.create_exn ~status:response.status
               ~headers:response.headers (),
-            response.body )
+            {
+              body = response.body;
+              read_error_after = response.read_error_after;
+            } )
 end
 
 module Recording_s3 = Awskit_s3.Make (Recording_runtime)
 
-let response ?(headers = []) status body =
-  { Recording_runtime.status; headers; body }
+let response ?(headers = []) ?read_error_after status body =
+  { Recording_runtime.status; headers; body; read_error_after }
 
 let test_bucket_head_request () =
   let conn =
@@ -863,6 +881,71 @@ let test_upload_descriptor_validation () =
   | Ok _ -> Alcotest.fail "expected multipart descriptor validation failure");
   Alcotest.(check int) "multipart put not called" 0 (List.length conn.calls)
 
+let test_download_body_drain_errors () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:[ ("etag", "\"etag\""); ("content-length", "6") ]
+          ~read_error_after:3 "abcdef";
+        response 200
+          ~headers:[ ("etag", "\"etag\""); ("content-length", "6") ]
+          ~read_error_after:0 "abcdef";
+      ]
+  in
+  let consume reader =
+    let bytes = Bytes.create 3 in
+    match Recording_runtime.read reader bytes ~off:0 ~len:3 with
+    | Error _ as error -> error
+    | Ok read -> Ok (Bytes.sub_string bytes 0 read)
+  in
+  (match
+     Recording_s3.Object.get conn ~bucket:"my-bucket" ~key:"file" ~consume ()
+   with
+  | Error (Awskit.Error.Body _) -> ()
+  | Error error -> Alcotest.failf "unexpected get error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected drain failure after successful consume");
+  (match Recording_s3.Object.head conn ~bucket:"my-bucket" ~key:"file" () with
+  | Error (Awskit.Error.Body _) -> ()
+  | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected discard failure after successful head");
+  Alcotest.(check int) "calls" 2 (List.length conn.calls)
+
+let test_malformed_xml_responses () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 "<ListAllMyBucketsResult><Buckets>";
+        response 200 "<ListBucketResult><Contents>";
+        response 200 "<ListVersionsResult><Version>";
+        response 200 "<ListPartsResult><Part>";
+      ]
+  in
+  (match Recording_s3.Bucket.list conn with
+  | Error (Awskit.Error.Decode _) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected bucket decode error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected bucket list decode error");
+  (match Recording_s3.Object.list conn ~bucket:"my-bucket" () with
+  | Error (Awskit.Error.Decode _) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected object decode error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected object list decode error");
+  (match Recording_s3.Object.list_versions conn ~bucket:"my-bucket" () with
+  | Error (Awskit.Error.Decode _) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected version decode error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected version list decode error");
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  match
+    Recording_s3.Multipart.list_parts conn ~bucket:"my-bucket" ~key:"large.bin"
+      ~upload_id ()
+  with
+  | Error (Awskit.Error.Decode _) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected multipart decode error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected list parts decode error"
+
 let list_page ?continuation_token ?next_continuation_token ~truncated keys =
   let token_xml name = function
     | None -> ""
@@ -1239,6 +1322,10 @@ let suite =
         Alcotest.test_case "retry jitter bounds" `Quick test_retry_jitter_bounds;
         Alcotest.test_case "upload descriptor validation" `Quick
           test_upload_descriptor_validation;
+        Alcotest.test_case "download body drain errors" `Quick
+          test_download_body_drain_errors;
+        Alcotest.test_case "malformed xml responses" `Quick
+          test_malformed_xml_responses;
         Alcotest.test_case "object paginator follows tokens" `Quick
           test_object_paginator_follows_tokens;
         Alcotest.test_case "object paginator max pages" `Quick

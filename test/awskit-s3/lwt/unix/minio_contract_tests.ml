@@ -1,4 +1,5 @@
 module S3 = Awskit_s3_lwt_unix
+module Bucket = Awskit_s3.Bucket
 module Object = Awskit_s3.Object
 module Multipart = Awskit_s3.Multipart
 module Range = Awskit_s3.Range
@@ -326,6 +327,37 @@ let test_object_versioning () =
       in
       Alcotest.(check string) "restored current body" "two" restored)
 
+let test_bucket_config_roundtrip () =
+  with_bucket "bucket-config" (fun conn ~bucket ->
+      ignore
+        (await "enable versioning"
+           (S3.Bucket.Versioning.put conn ~bucket
+              Bucket.Versioning.Status.Enabled));
+      let versioning =
+        await "get versioning" (S3.Bucket.Versioning.get conn ~bucket)
+      in
+      Alcotest.(check bool)
+        "versioning enabled" true
+        (versioning.status = Some Bucket.Versioning.Status.Enabled);
+      let tags =
+        [
+          { Awskit_s3.Tag.key = "env"; value = "test" };
+          { key = "suite"; value = "minio" };
+        ]
+      in
+      ignore (await "put bucket tags" (S3.Bucket.Tagging.put conn ~bucket tags));
+      let tagging =
+        await "get bucket tags" (S3.Bucket.Tagging.get conn ~bucket)
+      in
+      Alcotest.(check (list (pair string string)))
+        "bucket tags"
+        [ ("env", "test"); ("suite", "minio") ]
+        (tagging.tags
+        |> List.map (fun (tag : Awskit_s3.Tag.t) -> (tag.key, tag.value))
+        |> List.sort compare);
+      ignore
+        (await "delete bucket tags" (S3.Bucket.Tagging.delete conn ~bucket)))
+
 let test_multipart_edges () =
   with_bucket "multipart" (fun conn ~bucket ->
       let first_body = String.make Multipart.Managed.min_part_size 'a' in
@@ -485,6 +517,8 @@ let suite () =
         Alcotest.test_case "object range metadata copy" `Quick
           test_object_range_metadata_and_copy;
         Alcotest.test_case "object versioning" `Quick test_object_versioning;
+        Alcotest.test_case "bucket config roundtrip" `Quick
+          test_bucket_config_roundtrip;
         Alcotest.test_case "multipart edges" `Quick test_multipart_edges;
         Alcotest.test_case "path transfer streams" `Quick
           test_path_transfer_streams;

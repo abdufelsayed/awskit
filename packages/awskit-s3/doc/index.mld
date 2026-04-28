@@ -1,7 +1,7 @@
 {0 awskit-s3}
 
-AWS S3 client surface for classic bucket/object storage operations, multipart
-uploads, S3 presigned URLs, opaque bucket policy documents, and deterministic
+AWS S3 client surface for bucket/object storage operations, multipart uploads,
+S3 presigned URLs, opaque bucket policy documents, and deterministic
 simulation.
 
 See {{:../../doc/awskit.html}[awskit]} for the pure core and runtime adapter
@@ -22,8 +22,8 @@ applications:
     local-file transfer helpers in Unix-capable adapters}
   {li S3 presigned URLs for object and multipart upload-part workflows}
   {li bucket lifecycle needed to create, locate, inspect, and remove buckets}
-  {li bucket-scoped provisioning helpers already present in this package:
-    policy, CORS, encryption, tagging, and versioning}
+  {li bucket configuration helpers for policy, CORS, encryption, tagging, and
+    versioning}
   {li endpoint configuration, credentials, retries, pagination, streaming
     contracts, and deterministic simulation}
 }
@@ -57,7 +57,8 @@ Main modules:
 
 {ul
   {li {!module:Awskit_s3.Object} — object types, options, metadata records,
-    checksums, preconditions, and object tagging result types}
+    checksums, preconditions, object versioning, and object tagging result
+    types}
   {li {!module:Awskit_s3.Bucket} — bucket result types and bucket
     configuration records}
   {li {!module:Awskit_s3.Multipart} — multipart upload identifiers, parts,

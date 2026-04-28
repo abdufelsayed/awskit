@@ -1,8 +1,7 @@
 # awskit
 
 AWS infrastructure for OCaml, focused today on an AWS S3 SDK: pure core,
-optional runtime adapters, deterministic simulation, and local MinIO contract
-tests.
+runtime adapters, deterministic simulation, and local MinIO contract tests.
 
 ## Packages
 
@@ -15,7 +14,7 @@ tests.
 
 `awskit-s3` provides AWS S3 bucket/object storage workflows: object
 operations, object versioning, multipart uploads, presigned URLs, bucket
-policy documents, bucket provisioning helpers, endpoint configuration,
+policy documents, bucket configuration helpers, endpoint configuration,
 retries, streaming runtime adapters, deterministic simulation, and local
 MinIO contract tests.
 
@@ -105,8 +104,8 @@ AWS_CONTAINER_AUTHORIZATION_TOKEN
 AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
 ```
 
-Endpoint overrides are explicit; `create` does not read endpoint URLs from the
-environment.
+Endpoint overrides are explicit; pass `endpoint` to `create` when using a
+custom S3 endpoint.
 
 ### Simulation testing (no network)
 

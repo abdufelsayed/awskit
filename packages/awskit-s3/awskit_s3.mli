@@ -1,9 +1,8 @@
 (** AWS S3 SDK surface.
 
-    [Awskit_s3] is the public facade for classic AWS S3 bucket/object storage:
-    object operations, bucket operations and configuration, multipart upload,
-    presigned URLs, runtime-backed clients, and the in-memory simulator used by
-    tests.
+    [Awskit_s3] is the public facade for AWS S3 bucket/object storage: object
+    operations, bucket operations and configuration, multipart upload, presigned
+    URLs, runtime-backed clients, and the in-memory simulator used by tests.
 
     Implementation modules, XML codecs, request builders, and parser helpers are
     private to the package. *)
@@ -36,7 +35,7 @@ module Metadata : sig
   type t = Awskit_s3_common.Metadata.t
 end
 
-(** Classic S3 object storage classes. *)
+(** S3 object storage classes. *)
 module Storage_class : sig
   type t = Awskit_s3_common.Storage_class.t =
     | Standard
