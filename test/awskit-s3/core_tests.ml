@@ -203,6 +203,11 @@ module Recording_runtime = struct
 
   type call = { request : Awskit.Request.t; body : string }
 
+  type upload_body = {
+    body : string;
+    descriptor : Awskit.Body.Upload.descriptor;
+  }
+
   type connection = {
     region : Region.t;
     credentials : Credentials.t;
@@ -219,7 +224,6 @@ module Recording_runtime = struct
   let return value = value
   let bind value f = f value
 
-  type upload_body = string
   type download_body = string
   type upload_writer = Buffer.t
   type download_reader = { body : string; mutable offset : int }
@@ -251,23 +255,29 @@ module Recording_runtime = struct
   let sleep conn span = conn.sleeps <- span :: conn.sleeps
   let endpoint _ = None
 
-  let descriptor body =
+  let descriptor ?(replayable = true) body =
     {
       Awskit.Body.Upload.content_length =
         Some (Int64.of_int (String.length body));
       payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
-      replayable = true;
+      replayable;
     }
 
-  let empty_body = ""
-  let string_body body = body
-  let bytes_body body = Bytes.to_string body
+  let upload_body ?replayable body =
+    { body; descriptor = descriptor ?replayable body }
 
-  let stream_body _descriptor ~write =
+  let empty_body = upload_body ""
+  let string_body body = upload_body body
+  let bytes_body body = upload_body (Bytes.to_string body)
+
+  let stream_body descriptor ~write =
     let buffer = Buffer.create 128 in
-    match write buffer with Ok () -> Buffer.contents buffer | Error _ -> ""
+    let body =
+      match write buffer with Ok () -> Buffer.contents buffer | Error _ -> ""
+    in
+    { body; descriptor }
 
-  let upload_descriptor = descriptor
+  let upload_descriptor body = body.descriptor
 
   let write_string writer body =
     Buffer.add_string writer body;
@@ -306,8 +316,8 @@ module Recording_runtime = struct
     let result = drain reader in
     result
 
-  let call conn request body =
-    conn.calls <- { request; body } :: conn.calls;
+  let call conn request (body : upload_body) =
+    conn.calls <- { request; body = body.body } :: conn.calls;
     match conn.responses with
     | [] -> Error (Awskit.Error.transport ~retryable:false "no canned response")
     | response :: rest ->
@@ -697,6 +707,58 @@ let test_retry_disabled_policy () =
   Alcotest.(check int) "attempts" 1 (List.length conn.calls);
   Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
 
+let test_non_replayable_upload_not_retried () =
+  let slow_down =
+    {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
+  in
+  let descriptor : Awskit.Body.Upload.descriptor =
+    {
+      content_length = Some 4L;
+      payload_hash = Awskit.Body.Payload_hash.sha256_of_string "body";
+      replayable = false;
+    }
+  in
+  let conn =
+    Recording_runtime.connect [ response 503 slow_down; response 200 "" ]
+  in
+  let body =
+    Recording_runtime.stream_body descriptor ~write:(fun writer ->
+        Recording_runtime.write_string writer "body")
+  in
+  (match
+     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~body ()
+   with
+  | Error error when Error.service_code error = Some "SlowDown" -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected slow down");
+  Alcotest.(check int) "attempts" 1 (List.length conn.calls);
+  Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
+
+let test_retry_jitter_bounds () =
+  let policy =
+    Awskit.Retry.create_exn ~max_attempts:3
+      ~base_delay:(Ptime.Span.of_float_s 1.0 |> Option.get)
+      ~max_delay:(Ptime.Span.of_float_s 10.0 |> Option.get)
+      ~jitter:0.5 ()
+  in
+  let error =
+    Awskit.Error.transport ~retryable:true "temporary transport failure"
+  in
+  let low =
+    Awskit.Retry.delay policy ~attempt:1 ~error ~random_float:(fun () -> 0.0)
+    |> Option.get
+  in
+  let high =
+    Awskit.Retry.delay policy ~attempt:1 ~error ~random_float:(fun () -> 1.0)
+    |> Option.get
+  in
+  Alcotest.(check (float 0.0001)) "low jitter" 0.5 (Ptime.Span.to_float_s low);
+  Alcotest.(check (float 0.0001)) "high jitter" 1.0 (Ptime.Span.to_float_s high);
+  match Awskit.Retry.create ~jitter:1.5 () with
+  | Error (Awskit.Error.Validation _) -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected invalid jitter"
+
 let list_page ?continuation_token ?next_continuation_token ~truncated keys =
   let token_xml name = function
     | None -> ""
@@ -824,7 +886,9 @@ let test_multipart_upload_part_checksum_headers () =
   let options = { Multipart.Upload_part.checksum = Some checksum } in
   let part =
     Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket" ~key:"large.bin"
-      ~upload_id ~part_number:1 ~body:"hello" ~options ()
+      ~upload_id ~part_number:1
+      ~body:(Recording_runtime.string_body "hello")
+      ~options ()
     |> ok_or_fail "upload part checksum"
   in
   check_checksum "part response checksum" `SHA1 "provided-sha1" part.checksum;
@@ -1064,6 +1128,9 @@ let suite =
           test_retry_fatal_error_not_retried;
         Alcotest.test_case "retry disabled policy" `Quick
           test_retry_disabled_policy;
+        Alcotest.test_case "non-replayable upload not retried" `Quick
+          test_non_replayable_upload_not_retried;
+        Alcotest.test_case "retry jitter bounds" `Quick test_retry_jitter_bounds;
         Alcotest.test_case "object paginator follows tokens" `Quick
           test_object_paginator_follows_tokens;
         Alcotest.test_case "object paginator max pages" `Quick

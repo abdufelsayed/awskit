@@ -10,17 +10,21 @@ val create :
   ?max_attempts:int ->
   ?base_delay:Ptime.Span.t ->
   ?max_delay:Ptime.Span.t ->
+  ?jitter:float ->
   unit ->
   (t, Error.t) result
 (** Create a retry policy.
 
     [max_attempts] includes the first request attempt. A value of [1] disables
-    retries. *)
+    retries. [jitter] is a fractional multiplier in the range [[0, 1]]. A value
+    of [0] keeps deterministic exponential delays; a value of [1] uses a
+    full-jitter delay between zero and the capped exponential delay. *)
 
 val create_exn :
   ?max_attempts:int ->
   ?base_delay:Ptime.Span.t ->
   ?max_delay:Ptime.Span.t ->
+  ?jitter:float ->
   unit ->
   t
 
@@ -33,7 +37,13 @@ val disabled : t
 val max_attempts : t -> int
 val base_delay : t -> Ptime.Span.t
 val max_delay : t -> Ptime.Span.t
+val jitter : t -> float
 
-val delay : t -> attempt:int -> error:Error.t -> Ptime.Span.t option
+val delay :
+  ?random_float:(unit -> float) ->
+  t ->
+  attempt:int ->
+  error:Error.t ->
+  Ptime.Span.t option
 (** [delay t ~attempt ~error] returns the delay before retrying after [attempt]
     failed. [None] means the error should be returned to the caller. *)
