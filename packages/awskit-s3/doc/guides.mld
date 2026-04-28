@@ -377,6 +377,6 @@ ignore
 ]}
 
 [Sim.Response_lost] is modeled as a body-read failure. [Sim.Slow_down],
-[Sim.Internal_error], and [Sim.Connection_reset] fail object operations before
-mutation. Multipart simulator semantics and object version history are still
-explicitly deferred.
+[Sim.Internal_error], and [Sim.Connection_reset] fail object and multipart
+operations before mutation. Object version history is still explicitly
+deferred.

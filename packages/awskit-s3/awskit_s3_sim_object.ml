@@ -263,7 +263,7 @@ module Object = struct
                 in
                 let objects =
                   List.map
-                    (fun (key, obj) ->
+                    (fun (key, (obj : stored_object)) ->
                       {
                         Object.List.key;
                         size = Some (Int64.of_int (String.length obj.body));

@@ -26,9 +26,27 @@ type stored_object = {
   mutable last_modified : Ptime.t;
 }
 
+type stored_part = {
+  part_number : int;
+  body : string;
+  etag : Object.Etag.t;
+  last_modified : Ptime.t;
+}
+
+type multipart_upload = {
+  upload : Multipart.Upload.t;
+  content_type : string option;
+  metadata : Metadata.t;
+  storage_class : Storage_class.t option;
+  tags : Tag.t list;
+  parts : (int, stored_part) Hashtbl.t;
+  created_at : Ptime.t;
+}
+
 type bucket_state = {
   created_at : Ptime.t;
   objects : (string, stored_object) Hashtbl.t;
+  multipart_uploads : (string, multipart_upload) Hashtbl.t;
   mutable policy : Policy.t option;
   mutable bucket_tags : Tag.t list;
   mutable versioning : Bucket.Versioning.Status.t option;
@@ -43,7 +61,19 @@ type bucket_state = {
 }
 
 type op_record = {
-  op : [ `Put | `Get | `Head | `Delete | `List | `Copy | `Delete_many ];
+  op :
+    [ `Put
+    | `Get
+    | `Head
+    | `Delete
+    | `List
+    | `Copy
+    | `Delete_many
+    | `Multipart_create
+    | `Multipart_upload_part
+    | `Multipart_complete
+    | `Multipart_abort
+    | `Multipart_list_parts ];
   bucket : string;
   key : string option;
   timestamp : Ptime.t;
@@ -55,10 +85,17 @@ type store = {
   clock : Clock.t;
   buckets : (string, bucket_state) Hashtbl.t;
   mutable history : op_record list;
+  mutable next_upload_id : int;
 }
 
 let create_store ?(config = default_config) ~clock () =
-  { config; clock; buckets = Hashtbl.create 17; history = [] }
+  {
+    config;
+    clock;
+    buckets = Hashtbl.create 17;
+    history = [];
+    next_upload_id = 1;
+  }
 
 type fault = Slow_down | Internal_error | Connection_reset | Response_lost
 type buggify = { random : Random.State.t; prob : float }
@@ -90,6 +127,7 @@ let service ?message ~status ~code () =
 
 let no_such_bucket () = service ~status:404 ~code:"NoSuchBucket" ()
 let no_such_key () = service ~status:404 ~code:"NoSuchKey" ()
+let no_such_upload () = service ~status:404 ~code:"NoSuchUpload" ()
 let precondition_failed () = service ~status:412 ~code:"PreconditionFailed" ()
 let response ?headers status = Awskit.Response.create_exn ~status ?headers ()
 
@@ -139,7 +177,23 @@ let require_object t bucket key =
   | Some object_ -> Ok object_
   | None -> Error (no_such_key ())
 
+let upload_key upload_id = Multipart.Upload_id.to_string upload_id
+
+let require_multipart_upload t ~bucket ~key ~upload_id =
+  let* bucket_state = require_bucket t bucket in
+  match
+    Hashtbl.find_opt bucket_state.multipart_uploads (upload_key upload_id)
+  with
+  | Some upload when String.equal upload.upload.key key ->
+      Ok (bucket_state, upload)
+  | _ -> Error (no_such_upload ())
+
 let etag body = "\"" ^ Digestif.MD5.(digest_string body |> to_hex) ^ "\""
+
+let next_upload_id t =
+  let id = t.store.next_upload_id in
+  t.store.next_upload_id <- id + 1;
+  Multipart.Upload_id.of_string_exn (Fmt.str "sim-upload-%d" id)
 
 module Runtime = struct
   type connection = t
@@ -267,9 +321,9 @@ let clear_history store = store.history <- []
 let dump_strings store ~bucket =
   match bucket_state store bucket with
   | None -> []
-  | Some bucket ->
+  | Some (bucket : bucket_state) ->
       Hashtbl.to_seq bucket.objects
-      |> Seq.map (fun (key, obj) -> (key, obj.body))
+      |> Seq.map (fun (key, (obj : stored_object)) -> (key, obj.body))
       |> List.of_seq
       |> List.sort compare
 

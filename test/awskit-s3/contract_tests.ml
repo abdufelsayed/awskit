@@ -396,6 +396,84 @@ module Make (Client : SUBJECT) = struct
     | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
     | Ok _ -> Alcotest.fail "expected max_size failure"
 
+  let test_multipart_lifecycle () =
+    let conn = Client.fresh () in
+    create_bucket conn;
+    let upload =
+      Client.Multipart.create conn ~bucket ~key:"multi.bin" ()
+      |> ok_or_fail "create multipart"
+    in
+    let upload_id = upload.upload.upload_id in
+    let part1 =
+      Client.Multipart.upload_part conn ~bucket ~key:"multi.bin" ~upload_id
+        ~part_number:1
+        ~body:(Client.upload_body_of_string "hello-")
+        ()
+      |> ok_or_fail "upload part 1"
+    in
+    let part2 =
+      Client.Multipart.upload_part conn ~bucket ~key:"multi.bin" ~upload_id
+        ~part_number:2
+        ~body:(Client.upload_body_of_string "world")
+        ()
+      |> ok_or_fail "upload part 2"
+    in
+    let list_options =
+      { Multipart.List_parts.default_options with max_parts = Some 1 }
+    in
+    let page =
+      Client.Multipart.list_parts conn ~bucket ~key:"multi.bin" ~upload_id
+        ~options:list_options ()
+      |> ok_or_fail "list multipart parts"
+    in
+    Alcotest.(check int) "first page count" 1 (List.length page.parts);
+    Alcotest.(check bool) "parts truncated" true page.is_truncated;
+    let parts =
+      Client.Multipart.Paginator.parts conn ~bucket ~key:"multi.bin" ~upload_id
+        ~options:list_options ()
+      |> ok_or_fail "paginate multipart parts"
+    in
+    Alcotest.(check (list int))
+      "part numbers" [ 1; 2 ]
+      (List.map
+         (fun (part : Multipart.List_parts.part_info) -> part.part_number)
+         parts);
+    let complete =
+      Client.Multipart.complete conn ~bucket ~key:"multi.bin" ~upload_id
+        [ part1.part; part2.part ]
+      |> ok_or_fail "complete multipart"
+    in
+    Alcotest.(check bool) "complete etag" true (Option.is_some complete.etag);
+    let _info, body =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"multi.bin"
+        ~max_size:16L ()
+      |> ok_or_fail "get completed multipart object"
+    in
+    Alcotest.(check string) "completed body" "hello-world" body;
+    let aborted =
+      Client.Multipart.create conn ~bucket ~key:"abort.bin" ()
+      |> ok_or_fail "create abort multipart"
+    in
+    let aborted_upload_id = aborted.upload.upload_id in
+    ignore
+      (Client.Multipart.upload_part conn ~bucket ~key:"abort.bin"
+         ~upload_id:aborted_upload_id ~part_number:1
+         ~body:(Client.upload_body_of_string "discarded")
+         ()
+      |> ok_or_fail "upload aborted part");
+    ignore
+      (Client.Multipart.abort conn ~bucket ~key:"abort.bin"
+         ~upload_id:aborted_upload_id
+      |> ok_or_fail "abort multipart");
+    match
+      Client.Multipart.list_parts conn ~bucket ~key:"abort.bin"
+        ~upload_id:aborted_upload_id ()
+    with
+    | Error error when Error.service_code error = Some "NoSuchUpload" -> ()
+    | Error error ->
+        Alcotest.failf "unexpected abort list error: %a" Error.pp error
+    | Ok _ -> Alcotest.fail "expected aborted upload to be unavailable"
+
   let cases =
     [
       Alcotest.test_case "bucket lifecycle" `Quick test_bucket_lifecycle;
@@ -408,6 +486,7 @@ module Make (Client : SUBJECT) = struct
       Alcotest.test_case "bucket config roundtrips" `Quick
         test_bucket_config_roundtrips;
       Alcotest.test_case "buffer limit" `Quick test_buffer_limit;
+      Alcotest.test_case "multipart lifecycle" `Quick test_multipart_lifecycle;
     ]
 end
 

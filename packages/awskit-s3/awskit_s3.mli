@@ -243,7 +243,19 @@ module Sim : sig
   val disable_buggify : t -> unit
 
   type op_record = {
-    op : [ `Put | `Get | `Head | `Delete | `List | `Copy | `Delete_many ];
+    op :
+      [ `Put
+      | `Get
+      | `Head
+      | `Delete
+      | `List
+      | `Copy
+      | `Delete_many
+      | `Multipart_create
+      | `Multipart_upload_part
+      | `Multipart_complete
+      | `Multipart_abort
+      | `Multipart_list_parts ];
     bucket : string;
     key : string option;
     timestamp : Ptime.t;
