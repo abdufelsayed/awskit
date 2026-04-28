@@ -416,6 +416,25 @@ module Make (Client : SUBJECT) = struct
       "copy source version"
       (Some (Object.Version_id.to_string v2))
       (version_string copy.copy_source_version_id);
+    let copy_previous_options =
+      { Object.Copy.default_options with source_version_id = Some v1 }
+    in
+    let copy_previous =
+      Client.Object.copy conn ~src_bucket:bucket ~src_key:"versioned.txt"
+        ~dst_bucket:bucket ~dst_key:"copy-previous.txt"
+        ~options:copy_previous_options ()
+      |> ok_or_fail "copy previous version"
+    in
+    Alcotest.(check (option string))
+      "copy previous source version"
+      (Some (Object.Version_id.to_string v1))
+      (version_string copy_previous.copy_source_version_id);
+    let _info, body =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"copy-previous.txt"
+        ~max_size:16L ()
+      |> ok_or_fail "get copied previous"
+    in
+    Alcotest.(check string) "copied previous body" "one" body;
     let upload =
       Client.Multipart.create conn ~bucket ~key:"multi-versioned.txt" ()
       |> ok_or_fail "create versioned multipart"
@@ -444,6 +463,53 @@ module Make (Client : SUBJECT) = struct
       "delete marker hides current" false
       (Client.Object.exists conn ~bucket ~key:"versioned.txt"
       |> ok_or_fail "exists after delete marker");
+    let marker_get_options =
+      { Object.Get.default_options with version_id = Some marker }
+    in
+    expect_status "get delete marker version" 405
+      (Client.Object.Buffer.get_string conn ~bucket ~key:"versioned.txt"
+         ~max_size:16L ~options:marker_get_options ());
+    let versions_options =
+      {
+        Object.Versions.default_options with
+        prefix = Some "versioned.txt";
+        max_keys = Some 2;
+      }
+    in
+    let first_versions_page =
+      Client.Object.list_versions conn ~bucket ~options:versions_options ()
+      |> ok_or_fail "list object versions page"
+    in
+    Alcotest.(check bool)
+      "version page truncated" true first_versions_page.is_truncated;
+    Alcotest.(check int)
+      "version page entries" 2
+      (List.length first_versions_page.versions
+      + List.length first_versions_page.delete_markers);
+    let all_versions =
+      Client.Object.Versions.object_versions conn ~bucket
+        ~options:versions_options ()
+      |> ok_or_fail "paginate object versions"
+    in
+    Alcotest.(check (list string))
+      "listed object versions"
+      [ Object.Version_id.to_string v2; Object.Version_id.to_string v1 ]
+      (List.filter_map
+         (fun (version : Object.Versions.object_version) ->
+           Option.map Object.Version_id.to_string version.version_id)
+         all_versions);
+    let all_markers =
+      Client.Object.Versions.delete_markers conn ~bucket
+        ~options:versions_options ()
+      |> ok_or_fail "paginate delete markers"
+    in
+    Alcotest.(check (list string))
+      "listed delete markers"
+      [ Object.Version_id.to_string marker ]
+      (List.filter_map
+         (fun (marker : Object.Versions.delete_marker) ->
+           Option.map Object.Version_id.to_string marker.version_id)
+         all_markers);
     let missing_version_options =
       {
         Object.Delete.default_options with
@@ -492,7 +558,120 @@ module Make (Client : SUBJECT) = struct
         ~max_size:16L ()
       |> ok_or_fail "get remaining version"
     in
-    Alcotest.(check string) "remaining current" "one" body
+    Alcotest.(check string) "remaining current" "one" body;
+    let wrong_delete =
+      {
+        Object.Delete_many.key = "versioned.txt";
+        version_id = Some v1;
+        etag = Some (Object.Etag.of_string_exn "\"wrong\"");
+        last_modified_time = None;
+        size = None;
+      }
+    in
+    let failed_many =
+      Client.Object.delete_many conn ~bucket ~objects:[ wrong_delete ]
+      |> ok_or_fail "delete many wrong etag"
+    in
+    Alcotest.(check int)
+      "delete many precondition errors" 1
+      (List.length failed_many.errors);
+    Alcotest.(check int)
+      "delete many failed deleted" 0
+      (List.length failed_many.deleted);
+    let correct_delete = { wrong_delete with etag = None } in
+    let deleted_many =
+      Client.Object.delete_many conn ~bucket ~objects:[ correct_delete ]
+      |> ok_or_fail "delete many version"
+    in
+    Alcotest.(check int)
+      "delete many deleted version" 1
+      (List.length deleted_many.deleted);
+    Alcotest.(check bool)
+      "all versions removed" false
+      (Client.Object.exists conn ~bucket ~key:"versioned.txt"
+      |> ok_or_fail "exists after delete many version");
+    let enabled_put =
+      Client.Object.Buffer.put_string conn ~bucket ~key:"suspended.txt"
+        "enabled"
+      |> ok_or_fail "put before suspend"
+    in
+    let enabled_version =
+      require_version "put before suspend" enabled_put.version_id
+    in
+    ignore
+      (Client.Bucket.Versioning.put conn ~bucket
+         Bucket.Versioning.Status.Suspended
+      |> ok_or_fail "suspend versioning");
+    let suspended_put =
+      Client.Object.Buffer.put_string conn ~bucket ~key:"suspended.txt"
+        "suspended"
+      |> ok_or_fail "put while suspended"
+    in
+    Alcotest.(check (option string))
+      "suspended put version" (Some "null")
+      (version_string suspended_put.version_id);
+    let _info, body =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"suspended.txt"
+        ~max_size:16L ()
+      |> ok_or_fail "get suspended current"
+    in
+    Alcotest.(check string) "suspended current body" "suspended" body;
+    let enabled_options =
+      { Object.Get.default_options with version_id = Some enabled_version }
+    in
+    let _info, body =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"suspended.txt"
+        ~max_size:16L ~options:enabled_options ()
+      |> ok_or_fail "get enabled version after suspend"
+    in
+    Alcotest.(check string) "enabled version body" "enabled" body;
+    let suspended_versions =
+      Client.Object.Versions.object_versions conn ~bucket
+        ~options:
+          { Object.Versions.default_options with prefix = Some "suspended.txt" }
+        ()
+      |> ok_or_fail "list suspended versions"
+    in
+    Alcotest.(check bool)
+      "listed null object version" true
+      (List.exists
+         (fun (version : Object.Versions.object_version) ->
+           version_string version.version_id = Some "null")
+         suspended_versions);
+    Alcotest.(check bool)
+      "listed enabled object version" true
+      (List.exists
+         (fun (version : Object.Versions.object_version) ->
+           version_string version.version_id
+           = Some (Object.Version_id.to_string enabled_version))
+         suspended_versions);
+    let suspended_delete =
+      Client.Object.delete conn ~bucket ~key:"suspended.txt" ()
+      |> ok_or_fail "delete while suspended"
+    in
+    Alcotest.(check (option bool))
+      "suspended delete marker" (Some true) suspended_delete.delete_marker;
+    Alcotest.(check (option string))
+      "suspended delete marker version" (Some "null")
+      (version_string suspended_delete.version_id);
+    Alcotest.(check bool)
+      "suspended marker hides current" false
+      (Client.Object.exists conn ~bucket ~key:"suspended.txt"
+      |> ok_or_fail "exists after suspended delete");
+    let null_version = Object.Version_id.of_string_exn "null" in
+    let null_marker_options =
+      { Object.Delete.default_options with version_id = Some null_version }
+    in
+    ignore
+      (Client.Object.delete conn ~bucket ~key:"suspended.txt"
+         ~options:null_marker_options ()
+      |> ok_or_fail "delete suspended marker");
+    let _info, body =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"suspended.txt"
+        ~max_size:16L ()
+      |> ok_or_fail "get restored enabled version"
+    in
+    Alcotest.(check string) "restored enabled body" "enabled" body
 
   let sample_policy_json =
     Fmt.str

@@ -17,6 +17,7 @@ let checksum_value = function
   | None -> None
   | Some (checksum : Object.Checksum.response) -> Some checksum.value
 
+let version_string = Option.map Object.Version_id.to_string
 let query_param name url = Uri.query (Uri.of_string url) |> List.assoc_opt name
 
 let check_checksum label algorithm value = function
@@ -657,6 +658,78 @@ let test_object_precondition_headers () =
         (header "x-amz-copy-source-if-unmodified-since" copy.request.headers)
   | _ -> Alcotest.fail "expected five recorded calls"
 
+let test_object_versioning_requests_and_parse () =
+  let version_id = Object.Version_id.of_string_exn "version-1" in
+  let next_version_id = Object.Version_id.of_string_exn "version-2" in
+  let versions_body =
+    {|<ListVersionsResult><Name>my-bucket</Name><Prefix>logs/</Prefix><KeyMarker>logs/a.txt</KeyMarker><VersionIdMarker>version-1</VersionIdMarker><NextKeyMarker>logs/b.txt</NextKeyMarker><NextVersionIdMarker>version-2</NextVersionIdMarker><IsTruncated>true</IsTruncated><Version><Key>logs/a.txt</Key><VersionId>version-1</VersionId><IsLatest>false</IsLatest><LastModified>2026-04-08T12:00:00Z</LastModified><ETag>"etag"</ETag><Size>3</Size><StorageClass>STANDARD</StorageClass></Version><DeleteMarker><Key>logs/a.txt</Key><VersionId>marker-1</VersionId><IsLatest>true</IsLatest><LastModified>2026-04-08T12:00:00Z</LastModified></DeleteMarker></ListVersionsResult>|}
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:
+            [
+              ("x-amz-version-id", "copy-version");
+              ("x-amz-copy-source-version-id", "version-1");
+            ]
+          {|<CopyObjectResult><ETag>"copy"</ETag></CopyObjectResult>|};
+        response 200 versions_body;
+      ]
+  in
+  let copy_options =
+    { Object.Copy.default_options with source_version_id = Some version_id }
+  in
+  let copy =
+    Recording_s3.Object.copy conn ~src_bucket:"my-bucket" ~src_key:"file"
+      ~dst_bucket:"my-bucket" ~dst_key:"copy" ~options:copy_options ()
+    |> ok_or_fail "copy source version"
+  in
+  Alcotest.(check (option string))
+    "copy result source version" (Some "version-1")
+    (version_string copy.copy_source_version_id);
+  let list_options =
+    {
+      Object.Versions.default_options with
+      prefix = Some "logs/";
+      max_keys = Some 10;
+      key_marker = Some "logs/a.txt";
+      version_id_marker = Some version_id;
+    }
+  in
+  let page =
+    Recording_s3.Object.list_versions conn ~bucket:"my-bucket"
+      ~options:list_options ()
+    |> ok_or_fail "list versions"
+  in
+  Alcotest.(check bool) "versions truncated" true page.is_truncated;
+  Alcotest.(check int) "version count" 1 (List.length page.versions);
+  Alcotest.(check int) "delete marker count" 1 (List.length page.delete_markers);
+  Alcotest.(check (option string))
+    "next key marker" (Some "logs/b.txt") page.next_key_marker;
+  Alcotest.(check (option string))
+    "next version marker"
+    (Some (Object.Version_id.to_string next_version_id))
+    (version_string page.next_version_id_marker);
+  match List.rev conn.calls with
+  | [ copy_call; versions_call ] ->
+      Alcotest.(check (option string))
+        "copy source header" (Some "/my-bucket/file?versionId=version-1")
+        (header "x-amz-copy-source" copy_call.request.headers);
+      Alcotest.(check (option (list string)))
+        "versions query" (Some [])
+        (List.assoc_opt "versions" versions_call.request.target.query);
+      Alcotest.(check (option (list string)))
+        "prefix query" (Some [ "logs/" ])
+        (List.assoc_opt "prefix" versions_call.request.target.query);
+      Alcotest.(check (option (list string)))
+        "key marker query" (Some [ "logs/a.txt" ])
+        (List.assoc_opt "key-marker" versions_call.request.target.query);
+      Alcotest.(check (option (list string)))
+        "version marker query" (Some [ "version-1" ])
+        (List.assoc_opt "version-id-marker" versions_call.request.target.query)
+  | _ -> Alcotest.fail "expected copy and version listing calls"
+
 let test_retry_slow_down_then_success () =
   let slow_down =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
@@ -1153,6 +1226,8 @@ let suite =
           test_object_checksum_headers_and_response;
         Alcotest.test_case "object precondition headers" `Quick
           test_object_precondition_headers;
+        Alcotest.test_case "object versioning requests and parse" `Quick
+          test_object_versioning_requests_and_parse;
         Alcotest.test_case "retry slow down then success" `Quick
           test_retry_slow_down_then_success;
         Alcotest.test_case "retry fatal error not retried" `Quick

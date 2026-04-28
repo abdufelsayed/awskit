@@ -56,16 +56,45 @@ let delete_object key =
     size = None;
   }
 
+let delete_object_version key version_id =
+  { (delete_object key) with Object.Delete_many.version_id }
+
 let cleanup_bucket conn ~bucket =
   let open Lwt.Syntax in
-  let* keys_result = S3.Object.list_keys conn ~bucket () in
-  (match keys_result with
-    | Ok [] -> Lwt.return_unit
-    | Ok keys ->
-        let objects = List.map delete_object keys in
-        let* _ = S3.Object.delete_many conn ~bucket ~objects in
-        Lwt.return_unit
-    | Error _ -> Lwt.return_unit)
+  let* versions_result = S3.Object.Versions.pages conn ~bucket () in
+  (match versions_result with
+    | Ok pages ->
+        let objects =
+          List.concat_map
+            (fun (page : Object.Versions.page) ->
+              let versions =
+                List.map
+                  (fun (version : Object.Versions.object_version) ->
+                    delete_object_version version.key version.version_id)
+                  page.versions
+              in
+              let markers =
+                List.map
+                  (fun (marker : Object.Versions.delete_marker) ->
+                    delete_object_version marker.key marker.version_id)
+                  page.delete_markers
+              in
+              versions @ markers)
+            pages
+        in
+        if objects = [] then Lwt.return_unit
+        else
+          let* _ = S3.Object.delete_many conn ~bucket ~objects in
+          Lwt.return_unit
+    | Error _ -> (
+        let* keys_result = S3.Object.list_keys conn ~bucket () in
+        match keys_result with
+        | Ok [] -> Lwt.return_unit
+        | Ok keys ->
+            let objects = List.map delete_object keys in
+            let* _ = S3.Object.delete_many conn ~bucket ~objects in
+            Lwt.return_unit
+        | Error _ -> Lwt.return_unit))
   |> fun deleted ->
   let* () = deleted in
   let* _ = S3.Bucket.delete conn ~bucket in
@@ -87,6 +116,12 @@ let read_file path =
 
 let remove_file path = try Sys.remove path with Sys_error _ -> ()
 let first = function [] -> None | value :: _ -> Some value
+
+let require_version label = function
+  | Some version_id -> version_id
+  | None -> Alcotest.failf "%s: expected version id" label
+
+let version_string = Option.map Object.Version_id.to_string
 
 let with_bucket suffix f =
   let conn = connect () in
@@ -175,6 +210,121 @@ let test_object_range_metadata_and_copy () =
       Alcotest.(check (option string))
         "old metadata removed" None
         (List.assoc_opt "mode" replaced.metadata))
+
+let test_object_versioning () =
+  with_bucket "versioning" (fun conn ~bucket ->
+      ignore
+        (await "enable versioning"
+           (S3.Bucket.Versioning.put conn ~bucket
+              Awskit_s3.Bucket.Versioning.Status.Enabled));
+      let put1 =
+        await "put version one"
+          (S3.Object.Buffer.put_string conn ~bucket ~key:"versioned.txt" "one")
+      in
+      let v1 = require_version "put version one" put1.version_id in
+      let put2 =
+        await "put version two"
+          (S3.Object.Buffer.put_string conn ~bucket ~key:"versioned.txt" "two")
+      in
+      let v2 = require_version "put version two" put2.version_id in
+      let previous_options =
+        { Object.Get.default_options with version_id = Some v1 }
+      in
+      let _info, previous =
+        await "get previous version"
+          (S3.Object.Buffer.get_string conn ~bucket ~key:"versioned.txt"
+             ~options:previous_options ~max_size:16L ())
+      in
+      Alcotest.(check string) "previous version body" "one" previous;
+      let copy_previous_options =
+        { Object.Copy.default_options with source_version_id = Some v1 }
+      in
+      let copied =
+        await "copy previous version"
+          (S3.Object.copy conn ~src_bucket:bucket ~src_key:"versioned.txt"
+             ~dst_bucket:bucket ~dst_key:"copy-previous.txt"
+             ~options:copy_previous_options ())
+      in
+      Alcotest.(check (option string))
+        "copy source version"
+        (Some (Object.Version_id.to_string v1))
+        (version_string copied.copy_source_version_id);
+      let _info, copied_body =
+        await "get copied previous"
+          (S3.Object.Buffer.get_string conn ~bucket ~key:"copy-previous.txt"
+             ~max_size:16L ())
+      in
+      Alcotest.(check string) "copied previous body" "one" copied_body;
+      let deleted =
+        await "delete current"
+          (S3.Object.delete conn ~bucket ~key:"versioned.txt" ())
+      in
+      let marker = require_version "delete marker" deleted.version_id in
+      Alcotest.(check (option bool))
+        "delete marker" (Some true) deleted.delete_marker;
+      Alcotest.(check bool)
+        "delete marker hides current" false
+        (await "exists after delete marker"
+           (S3.Object.exists conn ~bucket ~key:"versioned.txt"));
+      let list_options =
+        {
+          Object.Versions.default_options with
+          prefix = Some "versioned.txt";
+          max_keys = Some 1;
+        }
+      in
+      let versions =
+        await "list versions"
+          (S3.Object.Versions.object_versions conn ~bucket ~options:list_options
+             ())
+      in
+      let listed_versions =
+        List.filter_map
+          (fun (version : Object.Versions.object_version) ->
+            Option.map Object.Version_id.to_string version.version_id)
+          versions
+      in
+      Alcotest.(check bool)
+        "listed v1" true
+        (List.mem (Object.Version_id.to_string v1) listed_versions);
+      Alcotest.(check bool)
+        "listed v2" true
+        (List.mem (Object.Version_id.to_string v2) listed_versions);
+      let markers =
+        await "list delete markers"
+          (S3.Object.Versions.delete_markers conn ~bucket ~options:list_options
+             ())
+      in
+      let listed_markers =
+        List.filter_map
+          (fun (marker : Object.Versions.delete_marker) ->
+            Option.map Object.Version_id.to_string marker.version_id)
+          markers
+      in
+      Alcotest.(check bool)
+        "listed delete marker" true
+        (List.mem (Object.Version_id.to_string marker) listed_markers);
+      let version_two_options =
+        { Object.Get.default_options with version_id = Some v2 }
+      in
+      let _info, hidden =
+        await "get hidden current"
+          (S3.Object.Buffer.get_string conn ~bucket ~key:"versioned.txt"
+             ~options:version_two_options ~max_size:16L ())
+      in
+      Alcotest.(check string) "hidden version body" "two" hidden;
+      ignore
+        (await "delete marker version"
+           (S3.Object.delete conn ~bucket ~key:"versioned.txt"
+              ~options:
+                { Object.Delete.default_options with version_id = Some marker }
+              ()));
+      let _info, restored =
+        await "get restored current"
+          (S3.Object.Buffer.get_string conn ~bucket ~key:"versioned.txt"
+             ~max_size:16L ())
+      in
+      Alcotest.(check string) "restored current body" "two" restored)
 
 let test_multipart_edges () =
   with_bucket "multipart" (fun conn ~bucket ->
@@ -334,6 +484,7 @@ let suite () =
       [
         Alcotest.test_case "object range metadata copy" `Quick
           test_object_range_metadata_and_copy;
+        Alcotest.test_case "object versioning" `Quick test_object_versioning;
         Alcotest.test_case "multipart edges" `Quick test_multipart_edges;
         Alcotest.test_case "path transfer streams" `Quick
           test_path_transfer_streams;

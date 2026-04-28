@@ -81,6 +81,7 @@ type op_record = {
     | `Head
     | `Delete
     | `List
+    | `List_versions
     | `Copy
     | `Delete_many
     | `Multipart_create
@@ -129,7 +130,7 @@ let connect store ~credentials =
 let store t = t.store
 let now t = Clock.now t.store.clock
 
-let service ?message ~status ~code () =
+let service ?message ?(headers = []) ~status ~code () =
   Awskit.Error.service
     {
       status;
@@ -137,13 +138,17 @@ let service ?message ~status ~code () =
       message;
       request_id = None;
       host_id = None;
-      headers = [];
+      headers;
       body = None;
     }
 
 let no_such_bucket () = service ~status:404 ~code:"NoSuchBucket" ()
 let no_such_key () = service ~status:404 ~code:"NoSuchKey" ()
 let no_such_upload () = service ~status:404 ~code:"NoSuchUpload" ()
+
+let method_not_allowed ?headers () =
+  service ?headers ~status:405 ~code:"MethodNotAllowed" ()
+
 let precondition_failed () = service ~status:412 ~code:"PreconditionFailed" ()
 let not_modified () = service ~status:304 ~code:"NotModified" ()
 let response ?headers status = Awskit.Response.create_exn ~status ?headers ()
@@ -200,10 +205,20 @@ let versioning_enabled (bucket : bucket_state) =
   | Some Bucket.Versioning.Status.Enabled -> true
   | Some Suspended | None -> false
 
+let versioning_suspended (bucket : bucket_state) =
+  match bucket.versioning with
+  | Some Bucket.Versioning.Status.Suspended -> true
+  | Some Enabled | None -> false
+
+let versioning_keeps_history bucket =
+  versioning_enabled bucket || versioning_suspended bucket
+
 let next_version_id t =
   let id = t.store.next_version_id in
   t.store.next_version_id <- id + 1;
   Object.Version_id.of_string_exn (Fmt.str "sim-version-%d" id)
+
+let null_version_id = Object.Version_id.of_string_exn "null"
 
 let version_id_of_version = function
   | Stored_object obj -> obj.version_id
@@ -217,15 +232,33 @@ let prepend_version bucket key version =
   in
   Hashtbl.replace bucket.versions key (version :: versions)
 
+let replace_null_version bucket key version =
+  let versions =
+    match Hashtbl.find_opt bucket.versions key with
+    | None -> []
+    | Some versions ->
+        List.filter
+          (fun existing ->
+            match version_id_of_version existing with
+            | Some version_id ->
+                not (Object.Version_id.equal version_id null_version_id)
+            | None -> true)
+          versions
+  in
+  Hashtbl.replace bucket.versions key (version :: versions)
+
 let store_object t bucket key (obj : stored_object) =
   let obj =
     if versioning_enabled bucket then
       { obj with version_id = Some (next_version_id t) }
+    else if versioning_suspended bucket then
+      { obj with version_id = Some null_version_id }
     else obj
   in
   let version = Stored_object obj in
   Hashtbl.replace bucket.objects key version;
-  if Option.is_some obj.version_id then prepend_version bucket key version;
+  if versioning_suspended bucket then replace_null_version bucket key version
+  else if Option.is_some obj.version_id then prepend_version bucket key version;
   obj
 
 let find_version bucket key version_id =
@@ -285,10 +318,18 @@ let delete_version bucket key version_id =
           Some deleted_version)
 
 let store_delete_marker t bucket key =
-  let marker = { version_id = next_version_id t; last_modified = now t } in
+  let marker =
+    {
+      version_id =
+        (if versioning_suspended bucket then null_version_id
+         else next_version_id t);
+      last_modified = now t;
+    }
+  in
   let version = Stored_delete_marker marker in
   Hashtbl.replace bucket.objects key version;
-  prepend_version bucket key version;
+  if versioning_suspended bucket then replace_null_version bucket key version
+  else prepend_version bucket key version;
   marker
 
 let version_headers = function
@@ -306,6 +347,13 @@ let copy_source_version_headers = function
 let delete_marker_headers = function
   | None | Some false -> []
   | Some true -> [ ("x-amz-delete-marker", "true") ]
+
+let delete_marker_error ~current marker =
+  let headers =
+    version_headers (Some marker.version_id) @ delete_marker_headers (Some true)
+  in
+  if current then service ~headers ~status:404 ~code:"NoSuchKey" ()
+  else method_not_allowed ~headers ()
 
 let object_size (obj : stored_object) = Int64.of_int (String.length obj.body)
 

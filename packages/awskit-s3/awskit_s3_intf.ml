@@ -93,6 +93,13 @@ module type OBJECT = sig
     unit ->
     (Object.Copy.result, Error.t) result io
 
+  val list_versions :
+    connection ->
+    bucket:string ->
+    ?options:Object.Versions.options ->
+    unit ->
+    (Object.Versions.page, Error.t) result io
+
   val list :
     connection ->
     bucket:string ->
@@ -141,6 +148,42 @@ module type OBJECT = sig
       ?max_pages:int ->
       unit ->
       (string list, Error.t) result io
+  end
+
+  module Versions : sig
+    val fold_pages :
+      connection ->
+      bucket:string ->
+      ?options:Object.Versions.options ->
+      ?max_pages:int ->
+      init:'acc ->
+      f:('acc -> Object.Versions.page -> ('acc, Error.t) result io) ->
+      unit ->
+      ('acc, Error.t) result io
+
+    val pages :
+      connection ->
+      bucket:string ->
+      ?options:Object.Versions.options ->
+      ?max_pages:int ->
+      unit ->
+      (Object.Versions.page list, Error.t) result io
+
+    val object_versions :
+      connection ->
+      bucket:string ->
+      ?options:Object.Versions.options ->
+      ?max_pages:int ->
+      unit ->
+      (Object.Versions.object_version list, Error.t) result io
+
+    val delete_markers :
+      connection ->
+      bucket:string ->
+      ?options:Object.Versions.options ->
+      ?max_pages:int ->
+      unit ->
+      (Object.Versions.delete_marker list, Error.t) result io
   end
 
   module Buffer : sig

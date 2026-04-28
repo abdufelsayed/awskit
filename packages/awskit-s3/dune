@@ -21,6 +21,7 @@
   awskit_s3_tagging_xml
   awskit_s3_object_delete_xml
   awskit_s3_object_list_xml
+  awskit_s3_object_versions_xml
   awskit_s3_operation_support
   awskit_s3_core
   awskit_s3_operation_context
@@ -68,6 +69,7 @@
   awskit_s3_object_ops
   awskit_s3_object_delete_xml
   awskit_s3_object_list_xml
+  awskit_s3_object_versions_xml
   awskit_s3_operation_context
   awskit_s3_operation_support
   awskit_s3_policy_intf

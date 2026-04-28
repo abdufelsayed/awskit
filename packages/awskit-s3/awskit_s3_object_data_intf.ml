@@ -192,6 +192,7 @@ module type OBJECT_DATA = sig
     type metadata_directive = [ `Copy | `Replace of Metadata.t ]
 
     type options = {
+      source_version_id : Version_id.t option;
       source_preconditions : Preconditions.Copy_source.t;
       metadata : metadata_directive option;
       storage_class : Storage_class.t option;
@@ -205,6 +206,52 @@ module type OBJECT_DATA = sig
       last_modified : Ptime.t option;
       version_id : Version_id.t option;
       copy_source_version_id : Version_id.t option;
+      request : Awskit.Response.t;
+    }
+
+    val default_options : options
+  end
+
+  module Versions : sig
+    type options = {
+      prefix : string option;
+      delimiter : string option;
+      max_keys : int option;
+      key_marker : string option;
+      version_id_marker : Version_id.t option;
+    }
+
+    type object_version = {
+      key : string;
+      version_id : Version_id.t option;
+      is_latest : bool option;
+      last_modified : Ptime.t option;
+      etag : Etag.t option;
+      size : int64 option;
+      storage_class : Storage_class.t option;
+      owner : string option;
+    }
+
+    type delete_marker = {
+      key : string;
+      version_id : Version_id.t option;
+      is_latest : bool option;
+      last_modified : Ptime.t option;
+      owner : string option;
+    }
+
+    type page = {
+      bucket : string option;
+      prefix : string option;
+      delimiter : string option;
+      versions : object_version list;
+      delete_markers : delete_marker list;
+      common_prefixes : string list;
+      is_truncated : bool;
+      key_marker : string option;
+      version_id_marker : Version_id.t option;
+      next_key_marker : string option;
+      next_version_id_marker : Version_id.t option;
       request : Awskit.Response.t;
     }
 

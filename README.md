@@ -11,13 +11,13 @@ tests.
 | **awskit** | Pure AWS infrastructure — SigV4 signing, credentials, regions, endpoints, error types, HTTP request/response types, `Runtime` module type. Optional `awskit.eio`, `awskit.lwt`, `awskit.lwt_unix`, `awskit.unix` adapters. |
 | **awskit-s3** | AWS S3 client core — objects, buckets, multipart uploads, presigned URLs, policies, simulation. Optional `awskit-s3.eio`, `awskit-s3.lwt`, and `awskit-s3.lwt_unix` adapters. |
 
-## Scope
+## S3 client surface
 
-`awskit-s3` implements classic AWS S3 bucket/object storage workflows. It does
-not include S3 Control, IAM, account administration, access point
-administration, Object Lambda administration, Outposts administration, Storage
-Lens, Access Grants, Batch Operations, or new S3-branded products outside the
-classic bucket/object API.
+`awskit-s3` provides AWS S3 bucket/object storage workflows: object
+operations, object versioning, multipart uploads, presigned URLs, bucket
+policy documents, bucket provisioning helpers, endpoint configuration,
+retries, streaming runtime adapters, deterministic simulation, and local
+MinIO contract tests.
 
 ## Quick start
 

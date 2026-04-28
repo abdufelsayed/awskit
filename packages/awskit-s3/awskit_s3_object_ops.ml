@@ -221,6 +221,14 @@ module Make (C : Awskit_s3_operation_context.S) = struct
               Awskit.Signing.uri_encode ~encode_slash:false
                 (Fmt.str "/%s/%s" src_bucket src_key)
             in
+            let copy_source =
+              match options.source_version_id with
+              | None -> copy_source
+              | Some version_id ->
+                  Fmt.str "%s?versionId=%s" copy_source
+                    (Awskit.Signing.uri_encode ~encode_slash:true
+                       (Object.Version_id.to_string version_id))
+            in
             let headers =
               ("x-amz-copy-source", copy_source)
               :: copy_source_precondition_headers options.source_preconditions
@@ -261,6 +269,46 @@ module Make (C : Awskit_s3_operation_context.S) = struct
                       match body with
                       | Error error -> return_error error
                       | Ok body -> return (copy_result response body)))))
+
+  let list_versions conn ~bucket ?options () =
+    let options =
+      Option.value ~default:Object.Versions.default_options options
+    in
+    match validate_bucket bucket with
+    | Error error -> return_error error
+    | Ok () -> (
+        let add name = function
+          | None -> []
+          | Some value -> [ (name, [ value ]) ]
+        in
+        let query =
+          [ ("versions", []) ]
+          @ add "prefix" options.prefix
+          @ add "delimiter" options.delimiter
+          @ add "max-keys" (Option.map string_of_int options.max_keys)
+          @ add "key-marker" options.key_marker
+          @ add "version-id-marker"
+              (Option.map Object.Version_id.to_string options.version_id_marker)
+        in
+        match bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/" with
+        | Error error -> return_error error
+        | Ok request -> (
+            let* result =
+              call_empty conn ~method_:`GET ~request ~query ~headers:[]
+            in
+            match result with
+            | Error error -> return_error error
+            | Ok (response, body) -> (
+                if not (Awskit.Response.is_success response) then
+                  error_response response body
+                else
+                  let* body = read_download_body body ~max_size:4_194_304L in
+                  match body with
+                  | Error error -> return_error error
+                  | Ok body ->
+                      return
+                        (Awskit_s3_object_versions_xml.parse_page
+                           ~request:response body))))
 
   let list conn ~bucket ?options () =
     let options = Option.value ~default:Object.List.default_options options in
@@ -382,6 +430,80 @@ module Make (C : Awskit_s3_operation_context.S) = struct
             page.objects
         in
         return_ok (List.rev_append page_keys keys)
+      in
+      let* result =
+        fold_pages conn ~bucket ?options ?max_pages ~init:[] ~f ()
+      in
+      return (Result.map List.rev result)
+  end
+
+  module Versions = struct
+    let validate_max_pages = function
+      | None -> Ok ()
+      | Some value when value > 0 -> Ok ()
+      | Some _ ->
+          invalid ~field:"max_pages" "max_pages must be greater than zero"
+
+    let options_for_page (base : Object.Versions.options) page =
+      {
+        base with
+        Object.Versions.key_marker = page.Object.Versions.next_key_marker;
+        version_id_marker = page.next_version_id_marker;
+      }
+
+    let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
+      match validate_max_pages max_pages with
+      | Error error -> return_error error
+      | Ok () ->
+          let base =
+            Option.value ~default:Object.Versions.default_options options
+          in
+          let rec loop options page_count acc =
+            let* page = list_versions conn ~bucket ~options () in
+            match page with
+            | Error error -> return_error error
+            | Ok page -> (
+                let* next_acc = f acc page in
+                match next_acc with
+                | Error error -> return_error error
+                | Ok acc -> (
+                    let page_count = page_count + 1 in
+                    if not page.is_truncated then return_ok acc
+                    else
+                      match max_pages with
+                      | Some max_pages when page_count >= max_pages ->
+                          return_ok acc
+                      | _ -> (
+                          match page.next_key_marker with
+                          | Some _ ->
+                              loop (options_for_page base page) page_count acc
+                          | None ->
+                              return_error
+                                (decode
+                                   "truncated version listing response missing \
+                                    NextKeyMarker"))))
+          in
+          loop base 0 init
+
+    let pages conn ~bucket ?options ?max_pages () =
+      let f pages page = return_ok (page :: pages) in
+      let* result =
+        fold_pages conn ~bucket ?options ?max_pages ~init:[] ~f ()
+      in
+      return (Result.map List.rev result)
+
+    let object_versions conn ~bucket ?options ?max_pages () =
+      let f versions (page : Object.Versions.page) =
+        return_ok (List.rev_append page.versions versions)
+      in
+      let* result =
+        fold_pages conn ~bucket ?options ?max_pages ~init:[] ~f ()
+      in
+      return (Result.map List.rev result)
+
+    let delete_markers conn ~bucket ?options ?max_pages () =
+      let f markers (page : Object.Versions.page) =
+        return_ok (List.rev_append page.delete_markers markers)
       in
       let* result =
         fold_pages conn ~bucket ?options ?max_pages ~init:[] ~f ()

@@ -10,34 +10,27 @@ overview.
 The public entrypoint is {!module:Awskit_s3}. Implementation modules, XML
 codecs, request builders, and response parsers are private.
 
-{1 Scope}
+{1 Client Surface}
 
-[awskit-s3] targets the regular AWS S3 service client shape: buckets,
-objects, multipart uploads, bucket configuration, presigned object URLs, and
-test simulation.
+[awskit-s3] provides an AWS S3 client surface for bucket and object storage
+applications:
 
-[awskit-s3] is optimized for common S3 application workloads, not exhaustive
-parity with every Amazon S3 action. The priority path is object CRUD/list/copy,
-metadata, tags, ranges, presigned URLs, multipart upload, common bucket
-configuration, and production SDK behavior such as credentials, retries,
-pagination, and streaming correctness.
+{ul
+  {li object [put], [get], [head], [delete], [copy], [list], metadata, tags,
+    ranges, checksums, conditional requests, version IDs, and version listings}
+  {li multipart upload, multipart part listing, managed multipart uploads, and
+    local-file transfer helpers in Unix-capable adapters}
+  {li S3 presigned URLs for object and multipart upload-part workflows}
+  {li bucket lifecycle needed to create, locate, inspect, and remove buckets}
+  {li bucket-scoped provisioning helpers already present in this package:
+    policy, CORS, encryption, tagging, and versioning}
+  {li endpoint configuration, credentials, retries, pagination, streaming
+    contracts, and deterministic simulation}
+}
 
-The package intentionally does not include S3 Control. Account/control-plane
-features such as access point administration, Storage Lens, Access Grants,
-Batch Operations, Object Lambda administration, Multi-Region Access Point
-administration, and Outposts administration do not belong in [awskit-s3].
-
-The package also does not model S3-branded products that are not the classic
-bucket/object API, such as S3 Tables, S3 Vectors, S3 Files, and S3 Metadata
-table features.
-
-AWS-only object-storage extensions such as directory buckets/S3 Express,
-access points, and Multi-Region Access Points are future explicit models, not
-part of the plain bucket/object API.
-
-Bucket policy operations are S3 operations and are included. Policy documents
-are opaque JSON payloads; this package does not build IAM policies or evaluate
-IAM policy semantics.
+Bucket policy operations use opaque JSON policy documents, which lets
+applications provision bucket-level access rules while keeping policy document
+construction in application code.
 
 {1 API Shape}
 

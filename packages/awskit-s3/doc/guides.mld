@@ -106,8 +106,12 @@ The object surface also includes:
   {li [Object.delete] and [Object.delete_many]}
   {li [Object.copy]}
   {li [Object.list] for rich pages and [Object.list_keys] for key-only pages}
+  {li [Object.list_versions] for [ListObjectVersions] pages, including object
+    versions and delete markers}
   {li [Object.Paginator.pages], [objects], and [keys] for following
     [ListObjectsV2] continuation tokens}
+  {li [Object.Versions.pages], [object_versions], and [delete_markers] for
+    following version-listing markers}
   {li [Object.Tagging.get], [put], and [delete]}
 }
 
@@ -121,6 +125,30 @@ let keys =
     ~options:{ Awskit_s3.Object.List.default_options with prefix = Some "logs/" }
     ~max_pages:10
     ()
+]}
+
+{2 Versioning}
+
+[Bucket.Versioning.put] enables bucket versioning. Object writes, copies, and
+multipart completion return version IDs when the bucket is versioned. Reads,
+heads, and deletes accept a [version_id] option. Copy requests can select a
+source version with [Object.Copy.source_version_id].
+
+Deleting the current object in a versioned bucket creates a delete marker.
+[Object.list_versions] returns object versions and delete markers, and
+[Object.Versions] provides paginator helpers for traversing the full history:
+
+{[
+let options =
+  {
+    Awskit_s3.Object.Versions.default_options with
+    prefix = Some "logs/";
+  }
+in
+Awskit_s3_eio.Object.Versions.object_versions s3
+  ~bucket:"my-bucket"
+  ~options
+  ()
 ]}
 
 {1 Object.Buffer}
@@ -292,8 +320,9 @@ subresources:
   {li [Bucket.Logging.get], [put] for target bucket/prefix logging}
 }
 
-[Bucket.Policy] sends and receives validated JSON policy payloads. It does not
-construct IAM policies or evaluate policy authorization decisions.
+[Bucket.Policy] sends and receives validated JSON policy payloads for bucket
+access configuration. Applications can construct those documents with their own
+policy model and pass the serialized JSON to the client.
 
 {[
 let encryption =
@@ -535,5 +564,5 @@ ignore
 [Sim.Internal_error], and [Sim.Connection_reset] fail object and multipart
 operations before mutation. The simulator models enabled bucket versioning for
 object puts, gets, heads, deletes, copies, multipart completion, and delete
-markers. Suspended bucket versioning keeps the unversioned current-object
-behavior.
+markers. Suspended bucket versioning models the S3 [null] object version and
+[null] delete marker behavior.
