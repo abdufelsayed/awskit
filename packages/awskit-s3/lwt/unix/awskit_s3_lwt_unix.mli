@@ -1,45 +1,59 @@
-(** Ready-to-use Lwt + Unix adapter. Thin wrapper over
-    [Awskit_s3_lwt.Make(Cohttp_lwt_unix.Client)].
+(** Ready-to-use Lwt + Unix S3 adapter.
 
-    {[
-    let conn =
-      Awskit_s3_lwt_unix.create ~region:"us-east-1"
-        ~credentials:
-          (Awskit_s3.Credentials.make ~access_key_id:"..."
-             ~secret_access_key:"..." ())
-        ~endpoint:(Awskit_s3.Endpoint.http ~host:"localhost" ~port:9000 ())
-        ()
-      |> Result.get_ok
-    in
-    let* result =
-      Awskit_s3_lwt_unix.Object.get conn ~bucket:"my-bucket" ~key:"hello.txt" ()
-    in
-    match result with
-    | Ok _ -> Lwt.return_unit
-    | Error err ->
-        Fmt.epr "Error: %a" Awskit_s3.Error.pp err;
-        Lwt.return_unit
-    ]} *)
+    Primitive operations stream through {!Awskit_lwt_unix.Runtime}. Local-path
+    helpers live under {!Object.Transfer}. *)
 
 type t
-(** S3 connection handle. *)
 
-(** Underlying runtime module. *)
 module Runtime :
-  Awskit.Runtime.S with type 'a t = 'a Lwt.t and type connection = t
+  Awskit_s3.RUNTIME with type 'a t = 'a Lwt.t and type connection = t
 
 val create :
   ?ctx:Cohttp_lwt_unix.Client.ctx ->
-  ?endpoint:Awskit_s3.Endpoint.t ->
-  ?region:string ->
-  ?credentials:Awskit_s3.Credentials.t ->
+  ?provider:Awskit_s3.Provider.t ->
+  ?region:Awskit.Region.t ->
+  ?credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
-  ?max_response_body_bytes:int ->
   unit ->
   (t, Awskit_s3.Error.t) result
-(** Create an S3 connection without referencing [Awskit_lwt_unix] directly.
 
-    If [region] or [credentials] are omitted, standard AWS environment variables
-    are resolved by [awskit.unix]. *)
+module Object : sig
+  include
+    Awskit_s3.OBJECT
+      with type connection := t
+       and type 'a io := 'a Lwt.t
+       and type upload_body := Runtime.upload_body
+       and type download_reader := Runtime.download_reader
 
-include module type of Awskit_s3.Make (Runtime)
+  module Transfer : sig
+    val upload_from_path :
+      t ->
+      bucket:string ->
+      key:string ->
+      ?options:Awskit_s3.Object.Put.options ->
+      path:string ->
+      unit ->
+      (Awskit_s3.Object.Put.result, Awskit_s3.Error.t) result Lwt.t
+
+    val download_to_path :
+      t ->
+      bucket:string ->
+      key:string ->
+      ?options:Awskit_s3.Object.Get.options ->
+      path:string ->
+      unit ->
+      (Awskit_s3.Object.Get.info, Awskit_s3.Error.t) result Lwt.t
+  end
+end
+
+module Bucket :
+  Awskit_s3.BUCKET with type connection := t and type 'a io := 'a Lwt.t
+
+module Multipart :
+  Awskit_s3.MULTIPART
+    with type connection := t
+     and type 'a io := 'a Lwt.t
+     and type upload_body := Runtime.upload_body
+
+module Presigned :
+  Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a Lwt.t

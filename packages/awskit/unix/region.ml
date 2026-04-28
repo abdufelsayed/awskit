@@ -1,7 +1,7 @@
 open Base
 
 module Env = struct
-  type 'a t = ('a, Awskit.Error.base) Result.t
+  type 'a t = ('a, Awskit.Error.t) Result.t
 
   let getenv_opt name = Stdlib.Sys.getenv_opt name
 
@@ -9,7 +9,7 @@ module Env = struct
     match getenv_opt name with
     | None -> Ok None
     | Some value when String.is_empty value ->
-        Error (`Invalid_request (Fmt.str "%s is empty" name))
+        Error (Awskit.Error.validation ~field:name (Fmt.str "%s is empty" name))
     | Some value -> Ok (Some value)
 end
 
@@ -23,6 +23,6 @@ let from_env () =
       | Ok (Some region) -> Awskit.Region.of_string region
       | Ok None ->
           Error
-            (`Invalid_request
+            (Awskit.Error.validation ~field:"region"
                "AWS region not set; configure AWS_REGION or AWS_DEFAULT_REGION")
       )

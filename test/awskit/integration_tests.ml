@@ -2,11 +2,14 @@
 
 open Base
 module Signing = Awskit.Signing
+module Payload_hash = Awskit.Body.Payload_hash
 
 (* AWS official test credentials *)
 let creds =
-  Awskit.Credentials.make ~access_key_id:"AKIDEXAMPLE"
+  Awskit.Credentials.create_exn ~access_key_id:"AKIDEXAMPLE"
     ~secret_access_key:"wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY" ()
+
+let region = Awskit.Region.of_string_exn "us-east-1"
 
 (* 2015-08-30T12:36:00Z *)
 let test_time =
@@ -26,10 +29,11 @@ let get_header key headers =
 
 let test_get_vanilla () =
   let result =
-    Signing.sign_request ~credentials:creds ~region:"us-east-1"
-      ~service:"service" ~meth:"GET" ~path:"/" ~query:""
+    Signing.sign_request_exn ~credentials:creds ~region ~service:"service"
+      ~method_:`GET ~path:"/" ~query:""
       ~headers:[ ("host", "example.amazonaws.com") ]
-      ~payload:"" ~now:test_time
+      ~payload_hash:(Payload_hash.sha256_of_string "")
+      ~now:test_time
   in
   let auth = get_auth result.headers in
   Alcotest.(check bool)
@@ -46,10 +50,11 @@ let test_get_vanilla () =
 
 let test_get_query_order () =
   let sign q =
-    Signing.sign_request ~credentials:creds ~region:"us-east-1"
-      ~service:"service" ~meth:"GET" ~path:"/" ~query:q
+    Signing.sign_request_exn ~credentials:creds ~region ~service:"service"
+      ~method_:`GET ~path:"/" ~query:q
       ~headers:[ ("host", "example.amazonaws.com") ]
-      ~payload:"" ~now:test_time
+      ~payload_hash:(Payload_hash.sha256_of_string "")
+      ~now:test_time
   in
   Alcotest.(check string)
     "query param order doesn't matter"
@@ -59,14 +64,15 @@ let test_get_query_order () =
 let test_post_with_body () =
   let body = "Action=ListUsers&Version=2010-05-08" in
   let sign payload =
-    Signing.sign_request ~credentials:creds ~region:"us-east-1"
-      ~service:"service" ~meth:"POST" ~path:"/" ~query:""
+    Signing.sign_request_exn ~credentials:creds ~region ~service:"service"
+      ~method_:`POST ~path:"/" ~query:""
       ~headers:
         [
           ("host", "example.amazonaws.com");
           ("content-type", "application/x-www-form-urlencoded");
         ]
-      ~payload ~now:test_time
+      ~payload_hash:(Payload_hash.sha256_of_string payload)
+      ~now:test_time
   in
   let with_body = sign body in
   let without_body = sign "" in
@@ -82,15 +88,16 @@ let test_post_with_body () =
 
 let test_session_token () =
   let creds_with_token =
-    Awskit.Credentials.make ~access_key_id:"AKIDEXAMPLE"
+    Awskit.Credentials.create_exn ~access_key_id:"AKIDEXAMPLE"
       ~secret_access_key:"wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"
       ~session_token:"FakeSessionToken" ()
   in
   let sign c =
-    Signing.sign_request ~credentials:c ~region:"us-east-1" ~service:"service"
-      ~meth:"GET" ~path:"/" ~query:""
+    Signing.sign_request_exn ~credentials:c ~region ~service:"service"
+      ~method_:`GET ~path:"/" ~query:""
       ~headers:[ ("host", "example.amazonaws.com") ]
-      ~payload:"" ~now:test_time
+      ~payload_hash:(Payload_hash.sha256_of_string "")
+      ~now:test_time
   in
   let with_token = sign creds_with_token in
   let without_token = sign creds in
@@ -110,10 +117,11 @@ let test_session_token () =
 
 let test_header_case () =
   let sign h =
-    Signing.sign_request ~credentials:creds ~region:"us-east-1"
-      ~service:"service" ~meth:"GET" ~path:"/" ~query:""
+    Signing.sign_request_exn ~credentials:creds ~region ~service:"service"
+      ~method_:`GET ~path:"/" ~query:""
       ~headers:[ ("host", h) ]
-      ~payload:"" ~now:test_time
+      ~payload_hash:(Payload_hash.sha256_of_string "")
+      ~now:test_time
   in
   Alcotest.(check string)
     "header case doesn't matter"
@@ -122,10 +130,11 @@ let test_header_case () =
 
 let test_header_whitespace () =
   let sign h =
-    Signing.sign_request ~credentials:creds ~region:"us-east-1"
-      ~service:"service" ~meth:"GET" ~path:"/" ~query:""
+    Signing.sign_request_exn ~credentials:creds ~region ~service:"service"
+      ~method_:`GET ~path:"/" ~query:""
       ~headers:[ ("host", h) ]
-      ~payload:"" ~now:test_time
+      ~payload_hash:(Payload_hash.sha256_of_string "")
+      ~now:test_time
   in
   Alcotest.(check string)
     "whitespace is trimmed"
@@ -133,25 +142,28 @@ let test_header_whitespace () =
     (get_auth (sign "example.amazonaws.com").headers)
 
 let test_duplicate_host_rejected () =
-  Alcotest.check_raises "duplicate host"
-    (Invalid_argument "Awskit.Signing.sign_request: duplicate host header")
-    (fun () ->
-      ignore
-        (Signing.sign_request ~credentials:creds ~region:"us-east-1"
-           ~service:"service" ~meth:"GET" ~path:"/" ~query:""
-           ~headers:
-             [
-               ("host", "example.amazonaws.com");
-               ("Host", "duplicate.amazonaws.com");
-             ]
-           ~payload:"" ~now:test_time))
+  match
+    Signing.sign_request ~credentials:creds ~region ~service:"service"
+      ~method_:`GET ~path:"/" ~query:""
+      ~headers:
+        [
+          ("host", "example.amazonaws.com"); ("Host", "duplicate.amazonaws.com");
+        ]
+      ~payload_hash:(Payload_hash.sha256_of_string "")
+      ~now:test_time
+  with
+  | Ok _ -> Alcotest.fail "duplicate host should be rejected"
+  | Error (Awskit.Error.Validation { field = Some "host"; _ }) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected error: %s" (Awskit.Error.to_string_hum error)
 
 let test_path_encoding () =
   let result =
-    Signing.sign_request ~credentials:creds ~region:"us-east-1" ~service:"s3"
-      ~meth:"GET" ~path:"/bucket/my key.txt" ~query:""
+    Signing.sign_request_exn ~credentials:creds ~region ~service:"s3"
+      ~method_:`GET ~path:"/bucket/my key.txt" ~query:""
       ~headers:[ ("host", "s3.amazonaws.com") ]
-      ~payload:"" ~now:test_time
+      ~payload_hash:(Payload_hash.sha256_of_string "")
+      ~now:test_time
   in
   Alcotest.(check bool)
     "signs path with special chars" true
@@ -163,16 +175,18 @@ let test_sign_request_params_matches_raw_query () =
   in
   let raw_query = "prefix=folder/a b.txt&max-keys=10" in
   let from_raw =
-    Signing.sign_request ~credentials:creds ~region:"us-east-1" ~service:"s3"
-      ~meth:"GET" ~path:"/bucket" ~query:raw_query
+    Signing.sign_request_exn ~credentials:creds ~region ~service:"s3"
+      ~method_:`GET ~path:"/bucket" ~query:raw_query
       ~headers:[ ("host", "s3.amazonaws.com") ]
-      ~payload:"" ~now:test_time
+      ~payload_hash:(Payload_hash.sha256_of_string "")
+      ~now:test_time
   in
   let from_params =
-    Signing.sign_request_params ~credentials:creds ~region:"us-east-1"
-      ~service:"s3" ~meth:"GET" ~path:"/bucket" ~query_params
+    Signing.sign_request_params_exn ~credentials:creds ~region ~service:"s3"
+      ~method_:`GET ~path:"/bucket" ~query_params
       ~headers:[ ("host", "s3.amazonaws.com") ]
-      ~payload:"" ~now:test_time
+      ~payload_hash:(Payload_hash.sha256_of_string "")
+      ~now:test_time
   in
   Alcotest.(check string)
     "structured query matches raw query"
@@ -183,7 +197,7 @@ let test_sign_request_params_matches_raw_query () =
 
 let test_credentials_roundtrip () =
   let c =
-    Awskit.Credentials.make ~access_key_id:"AK" ~secret_access_key:"SK"
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK"
       ~session_token:"TOK" ()
   in
   Alcotest.(check string)
@@ -195,20 +209,20 @@ let test_credentials_roundtrip () =
 
 let test_credentials_no_token () =
   let c =
-    Awskit.Credentials.make ~access_key_id:"AK" ~secret_access_key:"SK" ()
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   Alcotest.(check (option string))
     "defaults to None" None
     (Awskit.Credentials.session_token c)
 
 let test_credentials_reject_whitespace () =
-  Alcotest.check_raises "reject whitespace"
-    (Invalid_argument
-       "Awskit.Credentials.make: access_key_id must not have leading/trailing \
-        whitespace") (fun () ->
-      ignore
-        (Awskit.Credentials.make ~access_key_id:" AK " ~secret_access_key:"SK"
-           ()))
+  match
+    Awskit.Credentials.create ~access_key_id:" AK " ~secret_access_key:"SK" ()
+  with
+  | Ok _ -> Alcotest.fail "credentials should reject whitespace"
+  | Error (Awskit.Error.Validation { field = Some "access_key_id"; _ }) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected error: %s" (Awskit.Error.to_string_hum error)
 
 let suite =
   [

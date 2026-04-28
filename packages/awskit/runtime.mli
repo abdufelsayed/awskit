@@ -1,13 +1,7 @@
 (** Runtime abstraction for concurrency adapters.
 
-    Implement {!S} once per concurrency model; all service packages work
-    automatically. Built-in adapters include:
-    - [awskit.eio] — [type 'a t = 'a] (Eio, OCaml 5)
-    - [awskit.lwt] — [type 'a t = 'a Lwt.t]
-    - [awskit.lwt_unix] — ready-to-use Lwt + Unix backend
-
-    [connection] bundles region, credentials, clock, and an optional explicit
-    endpoint override. [call] is the only IO operation. *)
+    Runtime adapters own concrete upload and download body values. Service
+    packages use this module type without depending on Eio, Lwt, or Unix. *)
 
 module type S = sig
   type +'a t
@@ -16,17 +10,39 @@ module type S = sig
   val bind : 'a t -> ('a -> 'b t) -> 'b t
 
   type connection
+  type upload_body
+  type download_body
+  type upload_writer
+  type download_reader
 
-  val region : connection -> string
-  val credentials : connection -> Credentials.t
-
-  val clock : connection -> Ptime.t
-  (** Current time. Used for signing timestamps and presigned URL expiry. *)
-
+  val now : connection -> Ptime.t
+  val region : connection -> Region.t
+  val credentials : connection -> (Credentials.t, Error.t) result t
   val endpoint : connection -> Endpoint.t option
-  (** Explicit endpoint override for LocalStack, MinIO, etc. *)
+  val empty_body : upload_body
+  val string_body : string -> upload_body
+  val bytes_body : bytes -> upload_body
 
-  val call : connection -> Request.t -> (Response.t, Error.base) result t
-  (** The only IO operation. Adapters handle HTTP transport — TLS, connection
-      management, and error mapping are the adapter's responsibility. *)
+  val stream_body :
+    Body.Upload.descriptor ->
+    write:(upload_writer -> (unit, Error.t) result t) ->
+    upload_body
+
+  val upload_descriptor : upload_body -> Body.Upload.descriptor
+  val write_string : upload_writer -> string -> (unit, Error.t) result t
+
+  val read :
+    download_reader -> bytes -> off:int -> len:int -> (int, Error.t) result t
+  (** Returns [0] at end-of-body. *)
+
+  val with_download_body :
+    download_body ->
+    consume:(download_reader -> ('a, Error.t) result t) ->
+    ('a, Error.t) result t
+
+  val call :
+    connection ->
+    Request.t ->
+    upload_body ->
+    (Response.t * download_body, Error.t) result t
 end

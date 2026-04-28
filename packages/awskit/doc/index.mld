@@ -1,77 +1,116 @@
-{0 aws}
+{0 awskit}
 
-See {{:../../doc/awskit.html}[awskit]} for the project overview.
+Pure AWS infrastructure for credentials, regions, endpoints, structured
+errors, HTTP metadata, body metadata, request signing, and runtime adapters.
 
-Pure AWS infrastructure — signing, credentials, endpoint configuration, error
-types, HTTP request/response types, and the Runtime module type.
+The core {!module:Awskit} library has no IO dependencies. Concurrency,
+networking, filesystem access, clocks, and environment variables live in
+adapter libraries that you choose at the application edge.
 
-{b No IO dependencies.} Every module in this package is pure. Concurrency and
-platform code lives in sub-libraries ([awskit.eio], [awskit.lwt],
-[awskit.lwt_unix], [awskit.unix]) that you choose at the edge of your
-application.
-
-Service packages like {{:../awskit-s3/index.html}[awskit-s3]} build on top of this
-package. They depend on the Runtime abstraction defined here, not on any
-particular concurrency library.
+Service packages such as {{:../awskit-s3/index.html}[awskit-s3]} build on the
+runtime abstraction defined here instead of depending directly on Eio, Lwt, or
+Unix.
 
 {1 Libraries}
 
-{2 Library awskit}
+{2 awskit}
 
-The entry point is {!module:Awskit}.
+The entrypoint is {!module:Awskit}.
 
 Core modules:
+
 {ul
-  {li {!module:Awskit.Credentials} — AWS access keys and session tokens}
-  {li {!module:Awskit.Region} — AWS region names and validation}
-  {li {!module:Awskit.Signing} — AWS Signature Version 4 (pure, no network)}
-  {li {!module:Awskit.Endpoint} — Service endpoint configuration}
-  {li {!module:Awskit.Request} — HTTP request type}
-  {li {!module:Awskit.Response} — HTTP response type with header helpers}
-  {li {!module:Awskit.Error} — Base error types (polymorphic variants)}
-  {li {!module-type:Awskit.Runtime.S} — Runtime abstraction for concurrency adapters}
+  {li {!module:Awskit.Credentials} — opaque AWS access keys and session tokens}
+  {li {!module:Awskit.Region} — AWS region names with result/exn
+    constructors}
+  {li {!module:Awskit.Endpoint} — scheme, host, port, authority, and URL
+    helpers}
+  {li {!module:Awskit.Body} — runtime-neutral upload and payload-hash
+    metadata}
+  {li {!module:Awskit.Request} — body-free HTTP request metadata}
+  {li {!module:Awskit.Response} — body-free HTTP response metadata and header
+    helpers}
+  {li {!module:Awskit.Error} — structured errors and retry classification}
+  {li {!module:Awskit.Signing} — pure AWS Signature Version 4 signing}
+  {li {!module-type:Awskit.Runtime.S} — runtime abstraction used by service
+    packages}
 }
 
-{2 Library awskit.eio}
+{2 awskit.eio}
 
-The entry point is {!module:Awskit_eio}.
+{!module:Awskit_eio} is the direct-style Eio runtime adapter. Its monad type
+is [type 'a t = 'a]. Response bodies are scoped to [with_download_body].
 
-Eio runtime adapter — direct-style on algebraic effects, no promises.
-Implements {!module-type:Awskit.Runtime.S} using [cohttp-eio] for HTTP. The
-monad type is [type 'a t = 'a], so [let*] works as plain [let]:
+{2 awskit.lwt}
 
-{[
-let conn = Awskit_eio.create
-  ~env ~region:"us-east-1" ~credentials ()
-]}
+{!module:Awskit_lwt} is a generic Lwt runtime functor over
+[Cohttp_lwt.S.Client]. Use it for custom Lwt HTTP backends.
 
-{2 Library awskit.lwt}
+{2 awskit.lwt_unix}
 
-The entry point is {!module:Awskit_lwt}.
+{!module:Awskit_lwt_unix} is the ready-to-use Lwt + Unix runtime adapter. It
+can load credentials and region from standard AWS environment variables when
+arguments are omitted.
 
-Generic Lwt runtime adapter — a functor parameterised by any
-[Cohttp_lwt.S.Client] implementation. Use this for MirageOS or custom HTTP
-backends. Most Unix users should use {!module:Awskit_lwt_unix} instead.
+{2 awskit.unix}
 
-{[
-module My_runtime = Awskit_lwt.Make (Cohttp_lwt_unix.Client)
-]}
+{!module:Awskit_unix} contains Unix-specific credential and region sources. It
+does not perform HTTP calls.
 
-{2 Library awskit.lwt_unix}
-
-The entry point is {!module:Awskit_lwt_unix}.
-
-Ready-to-use Lwt + Cohttp + Unix adapter. The monad type is
-[type 'a t = 'a Lwt.t], so use [let*] for binding:
+{1 Minimal Signing Example}
 
 {[
-let conn = Awskit_lwt_unix.create
-  ~region:"us-east-1" ~credentials ()
-|> Result.get_ok
+let credentials =
+  Awskit.Credentials.create_exn
+    ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
+    ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    ()
+in
+let region = Awskit.Region.of_string_exn "us-east-1" in
+let payload_hash = Awskit.Body.Payload_hash.sha256_of_string "" in
+Awskit.Signing.sign_request
+  ~credentials
+  ~region
+  ~service:"s3"
+  ~method_:`GET
+  ~path:"/my-key"
+  ~query:""
+  ~headers:[ ("host", "my-bucket.s3.us-east-1.amazonaws.com") ]
+  ~payload_hash
+  ~now:Ptime.epoch
 ]}
 
-[awskit.lwt_unix] reads only these standard AWS environment variables when
-arguments are omitted:
+Signing is pure and testable without network access. Service packages sign
+requests automatically; use {!module:Awskit.Signing} directly for custom AWS
+services or low-level tests.
+
+{1 Minimal Eio Runtime Example}
+
+{[
+Eio.Switch.run @@ fun sw ->
+let region = Awskit.Region.of_string_exn "us-east-1" in
+let conn =
+  Awskit_eio.create
+    ~env
+    ~sw
+    ~region
+    ~credentials
+    ()
+in
+ignore conn
+]}
+
+{1 Minimal Lwt Unix Runtime Example}
+
+{[
+let conn =
+  Awskit_lwt_unix.create ()
+  |> Result.get_ok
+in
+ignore conn
+]}
+
+When omitted, [awskit.lwt_unix] reads:
 
 {[
 AWS_ACCESS_KEY_ID
@@ -81,84 +120,16 @@ AWS_REGION
 AWS_DEFAULT_REGION
 ]}
 
-{[
-let conn = Awskit_lwt_unix.create () |> Result.get_ok
-]}
+{1 Service Packages}
 
-{2 Library awskit.unix}
-
-The entry point is {!module:Awskit_unix}.
-
-OS-specific helpers — wall-clock time and environment-based credential loading.
-No network code; use alongside {!module:Awskit_eio} or {!module:Awskit_lwt_unix}:
-
-{[
-let credentials = Awskit_unix.Credentials.from_env () |> Result.get_ok
-let clock = Awskit_unix.Clock.now
-]}
-
-{1 Quick start}
-
-{2 Sign a request — no network, no IO}
-
-{[
-let credentials = Awskit.Credentials.make
-  ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
-  ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-  ()
-
-let signed = Awskit.Signing.sign_request
-  ~credentials
-  ~region:"us-east-1"
-  ~service:"s3"
-  ~meth:"GET"
-  ~path:"/my-bucket/my-key"
-  ~query:""
-  ~headers:[("host", "s3.us-east-1.amazonaws.com")]
-  ~payload:""
-  ~now:(Ptime.v (2024, 1, 15, ((10, 30, 0), 0)))
-]}
-
-Signing is entirely pure. Test it with plain unit tests — no mocks, no network.
-
-{2 Connect with the Eio adapter}
-
-{[
-open Eio.Std
-
-let () =
-  Eio_main.run @@ fun env ->
-  let conn = Awskit_eio.create
-    ~env ~region:"us-east-1" ~credentials ()
-  in
-  (* Pass [conn] to any service package, e.g. Awskit_s3_eio.Object.put *)
-  ()
-]}
-
-{2 Connect with the Lwt adapter}
-
-{[
-let conn = Awskit_lwt_unix.create
-  ~region:"us-east-1" ~credentials ()
-|> Result.get_ok
-in
-(* Operations return 'a Lwt.t *)
-let* result = Awskit_s3_lwt_unix.Object.get conn ~bucket:"b" ~key:"k" () in
-]}
+{ul
+  {li {{:../awskit-s3/index.html}[awskit-s3]} — AWS S3 object-storage client,
+    presigning, and simulator}
+}
 
 {1 Guides}
 
 {ul
-  {li {{!page-guides}Guides} — Request signing, credentials, error handling,
-    choosing an adapter, writing custom adapters, custom endpoints}
-}
-
-{1 Service packages}
-
-The adapters defined here power service-specific packages that implement
-individual AWS APIs:
-
-{ul
-  {li {{:../awskit-s3/index.html}[awskit-s3]} — Amazon S3 client (objects, buckets,
-    multipart uploads, presigned URLs, policies, simulation)}
+  {li {{!page-guides}Guides} — credentials, regions, endpoints, signing,
+    structured errors, streaming runtime bodies, and adapter selection}
 }

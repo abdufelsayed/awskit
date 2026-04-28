@@ -1,32 +1,21 @@
-(** HTTP response with case-insensitive header lookup and typed accessors. *)
+(** Body-free HTTP response metadata. *)
 
-type t = { status : int; headers : (string * string) list; body : string }
-[@@deriving show, eq]
+type t = private {
+  status : int;
+  headers : (string * string) list;
+  request_id : string option;
+  host_id : string option;
+}
 
+val create :
+  status:int -> ?headers:(string * string) list -> unit -> (t, Error.t) result
+
+val create_exn : status:int -> ?headers:(string * string) list -> unit -> t
+val status : t -> int
+val headers : t -> (string * string) list
 val header : t -> string -> string option
-(** Case-insensitive. [None] if absent. *)
-
-val header_exn :
-  t ->
-  string ->
-  ( string,
-    [> `Invalid_header of string * string | `Missing_response_header of string ]
-  )
-  result
-(** Required header. [Error] if missing or empty. *)
-
+val required_header : t -> string -> (string, Error.t) result
+val header_int : t -> string -> (int option, Error.t) result
 val is_success : t -> bool
-(** Status 2xx. *)
-
-val header_int :
-  t -> string -> (int option, [> `Invalid_header of string * string ]) result
-(** Optional integer header. [Ok None] if absent. *)
-
-val header_int_exn :
-  t ->
-  string ->
-  ( int,
-    [> `Invalid_header of string * string | `Missing_response_header of string ]
-  )
-  result
-(** Required integer header. [Error] if missing or unparseable. *)
+val request_id : t -> string option
+val host_id : t -> string option

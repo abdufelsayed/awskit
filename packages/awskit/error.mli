@@ -1,23 +1,48 @@
-(** Base error type. Polymorphic variants that compose across layers — service
-    packages extend with service-specific variants.
+(** Structured core AWS SDK errors.
 
-    {[
-    | Error `Access_denied
-    | Error (`Request_error (status, body))
-    | Error (#Awskit.Error.base as e)  (* catch-all *)
-    ]} *)
+    Service packages should preserve this value and add classifier helpers over
+    it instead of widening errors into service-specific polymorphic variants. *)
 
-type base =
-  [ `Access_denied  (** HTTP 403 *)
-  | `Service_unavailable of string  (** HTTP 503 *)
-  | `Request_error of int * string  (** HTTP error with status and body *)
-  | `Body_read_error of string
-  | `Invalid_response of string
-  | `Invalid_header of string * string
-  | `Missing_response_header of string
-  | `Invalid_xml of string
-  | `Invalid_json of string
-  | `Invalid_request of string ]
+type validation = { field : string option; message : string }
+type transport = { message : string; retryable : bool; cause : string option }
 
-val pp_base : Format.formatter -> base -> unit
-val equal_base : base -> base -> bool
+type service = {
+  status : int;
+  code : string option;
+  message : string option;
+  request_id : string option;
+  host_id : string option;
+  headers : (string * string) list;
+  body : string option;
+}
+
+type body = { message : string; limit : int64 option }
+
+type retry_class =
+  [ `Retryable
+  | `Throttled
+  | `Auth
+  | `Conflict
+  | `Not_found
+  | `Fatal
+  | `Unknown ]
+
+type t =
+  | Validation of validation
+  | Signing of string
+  | Transport of transport
+  | Service of service
+  | Decode of string
+  | Body of body
+
+val validation : ?field:string -> string -> t
+val signing : string -> t
+val transport : ?cause:string -> retryable:bool -> string -> t
+val service : service -> t
+val decode : string -> t
+val body : ?limit:int64 -> string -> t
+val retry_class : t -> retry_class
+val is_not_found : t -> bool
+val pp : Format.formatter -> t -> unit
+val to_string_hum : t -> string
+val equal : t -> t -> bool

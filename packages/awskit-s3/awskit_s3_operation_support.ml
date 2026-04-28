@@ -1,0 +1,6 @@
+module Public_object = Awskit_s3_object
+module Public_multipart = Awskit_s3_multipart
+module Public_presigned = Awskit_s3_presigned
+include Awskit_s3_headers
+include Awskit_s3_response
+include Awskit_s3_tagging_xml

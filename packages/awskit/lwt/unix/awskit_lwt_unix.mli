@@ -32,7 +32,7 @@ val create :
   ?clock:(unit -> Ptime.t) ->
   ?max_response_body_bytes:int ->
   unit ->
-  (t, Awskit.Error.base) result
+  (t, Awskit.Error.t) result
 (** Create a connection to AWS.
 
     @param ctx Optional Cohttp client context (e.g., for custom TLS config)

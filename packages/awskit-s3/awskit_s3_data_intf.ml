@@ -1,0 +1,6 @@
+include Awskit_s3_provider_intf
+include Awskit_s3_object_data_intf
+include Awskit_s3_bucket_data_intf
+include Awskit_s3_multipart_data_intf
+include Awskit_s3_policy_intf
+include Awskit_s3_presigned_data_intf

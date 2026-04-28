@@ -1,42 +1,57 @@
-(** Eio adapter. [Awskit_s3.Make(Awskit_eio.Runtime)].
+(** Eio S3 adapter.
 
-    {[
-    open Eio.Std
-
-    let () =
-      Eio_main.run @@ fun env ->
-      let conn =
-        Awskit_s3_eio.create ~env ~region:"us-east-1"
-          ~credentials:
-            (Awskit_s3.Credentials.make ~access_key_id:"..."
-               ~secret_access_key:"..." ())
-          ~endpoint:(Awskit_s3.Endpoint.http ~host:"localhost" ~port:9000 ())
-          ()
-      in
-      let result =
-        Awskit_s3_eio.Object.put conn ~bucket:"my-bucket" ~key:"hello.txt"
-          "Hello, S3!"
-      in
-      match result with
-      | Ok _ -> ()
-      | Error err -> Fmt.epr "Error: %a" Awskit_s3.Error.pp err
-    ]} *)
+    Primitive operations are direct-style and stream through
+    {!Awskit_eio.Runtime}. Local-path helpers live under {!Object.Transfer}. *)
 
 type t
-(** S3 connection handle. *)
 
-(** Underlying runtime module. *)
-module Runtime : Awskit.Runtime.S with type 'a t = 'a and type connection = t
+module Runtime : Awskit_s3.RUNTIME with type 'a t = 'a and type connection = t
 
 val create :
+  sw:Eio.Switch.t ->
   env:< net : _ Eio.Net.t ; .. > ->
-  region:string ->
-  credentials:Awskit_s3.Credentials.t ->
-  ?clock:(unit -> Ptime.t) ->
-  ?endpoint:Awskit_s3.Endpoint.t ->
-  ?max_response_body_bytes:int ->
+  region:Awskit.Region.t ->
+  credentials:Awskit.Credentials.t ->
+  ?provider:Awskit_s3.Provider.t ->
   unit ->
   t
-(** Create an S3 connection without referencing [Awskit_eio] directly. *)
 
-include module type of Awskit_s3.Make (Runtime)
+module Object : sig
+  include
+    Awskit_s3.OBJECT
+      with type connection := t
+       and type 'a io := 'a
+       and type upload_body := Runtime.upload_body
+       and type download_reader := Runtime.download_reader
+
+  module Transfer : sig
+    val upload_from_path :
+      t ->
+      bucket:string ->
+      key:string ->
+      ?options:Awskit_s3.Object.Put.options ->
+      path:_ Eio.Path.t ->
+      unit ->
+      (Awskit_s3.Object.Put.result, Awskit_s3.Error.t) result
+
+    val download_to_path :
+      t ->
+      bucket:string ->
+      key:string ->
+      ?options:Awskit_s3.Object.Get.options ->
+      path:_ Eio.Path.t ->
+      unit ->
+      (Awskit_s3.Object.Get.info, Awskit_s3.Error.t) result
+  end
+end
+
+module Bucket : Awskit_s3.BUCKET with type connection := t and type 'a io := 'a
+
+module Multipart :
+  Awskit_s3.MULTIPART
+    with type connection := t
+     and type 'a io := 'a
+     and type upload_body := Runtime.upload_body
+
+module Presigned :
+  Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a

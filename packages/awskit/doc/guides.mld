@@ -1,169 +1,40 @@
-{0 AWS Guides}
+{0 AWS Core Guides}
 
-Practical guides for using the aws package. See the
-{{!page-index}index page} for the full library listing.
-
-{1 Design philosophy}
-
-This package is built around a {b pure core / impure edge} split:
-
-{ul
-  {li {b Pure core} — signing, credentials, endpoints, error types, request and
-    response types. No IO, no OS dependencies. Testable with plain unit tests.}
-  {li {b Impure edge} — runtime adapters that actually make HTTP calls. You
-    pick one adapter at the application boundary and pass it in.}
-}
-
-The {!module-type:Awskit.Runtime.S} module type is the seam between the two.
-Service packages depend on this abstraction, not on any particular concurrency
-library. That means the same S3 client code works with Eio, Lwt, or a custom
-adapter — you just wire it up differently at the edge.
-
-{1 Request signing}
-
-Every AWS API request must be signed — this is how AWS authenticates callers.
-AWS Signature Version 4 is implemented in {!module:Awskit.Signing}.
-
-{[
-let credentials = Awskit.Credentials.make
-  ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
-  ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-  ()
-
-let signed = Awskit.Signing.sign_request
-  ~credentials
-  ~region:"us-east-1"
-  ~service:"s3"
-  ~meth:"GET"
-  ~path:"/my-bucket/my-key"
-  ~query:""
-  ~headers:[("host", "s3.us-east-1.amazonaws.com")]
-  ~payload:""
-  ~now:(Ptime.v (2024, 1, 15, ((10, 30, 0), 0)))
-in
-(* signed.headers contains the Authorization header,
-   x-amz-date, and x-amz-content-sha256 *)
-]}
-
-The [headers] field in the result includes the [Authorization] header,
-[x-amz-date], and [x-amz-content-sha256]. The [signed_headers_str] field is the
-semicolon-separated list of signed header names (used in the canonical request).
-
-Signing is {b entirely pure} — no IO, no network. You can test it with plain
-unit tests, no mocks needed. Service packages handle signing automatically; the
-raw API is available for custom AWS services or lower-level use.
-
-{2 Utility functions}
-
-{!module:Awskit.Signing} also exposes helpers used internally and occasionally
-useful directly:
-{ul
-  {li {!val:Awskit.Signing.uri_encode} — URI-encode per AWS rules. Pass
-    [~encode_slash:false] for paths (slashes are not encoded).}
-  {li {!val:Awskit.Signing.canonical_query} — Sort query parameters by name and
-    URI-encode keys and values.}
-  {li {!val:Awskit.Signing.ptime_to_date_time} — Split a [Ptime.t] into a
-    datestamp ["YYYYMMDD"] and an [x-amz-date] ["YYYYMMDDTHHMMSSZ"].}
-}
+The core package is a pure foundation plus explicit runtime adapters at the
+edge. Service packages use this foundation for signing, request construction,
+response metadata, and structured errors.
 
 {1 Credentials}
 
-{2 Permanent credentials}
+Create explicit credentials with result-returning or exception-raising
+constructors:
 
 {[
-let creds = Awskit.Credentials.make
-  ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
-  ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-  ()
+let credentials =
+  Awskit.Credentials.create_exn
+    ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
+    ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    ()
 ]}
 
-Credentials are opaque — the record fields are not accessible directly. Use
-{!val:Awskit.Credentials.access_key_id} and
+Temporary credentials include a session token:
+
+{[
+let credentials =
+  Awskit.Credentials.create_exn
+    ~access_key_id:"ASIATESTSESSIONTOKEN"
+    ~secret_access_key:"secret"
+    ~session_token:"FwoGZXIvYXdz..."
+    ()
+]}
+
+Credentials are opaque. Use {!val:Awskit.Credentials.access_key_id} and
 {!val:Awskit.Credentials.session_token} to read non-secret fields. The secret
-access key is accepted at construction time but is not exposed afterward, which
-helps prevent accidental logging.
+access key is accepted at construction time but not exposed afterward.
 
-{2 Temporary credentials (STS, IAM roles)}
+{2 Environment Variables}
 
-When [session_token] is present, {!val:Awskit.Signing.sign_request}
-automatically adds the [x-amz-security-token] header:
-
-{[
-let temp_creds = Awskit.Credentials.make
-  ~access_key_id:"ASIATESTSESSIONTOKEN"
-  ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-  ~session_token:(Some "FwoGZXIvYXdzEBY...")
-  ()
-]}
-
-{2 Loading from environment variables}
-
-{!module:Awskit_unix.Credentials} reads the standard AWS environment variables:
-
-{[
-let credentials = Awskit_unix.Credentials.from_env () |> Result.get_ok
-(* Reads AWS_ACCESS_KEY_ID (required),
-   AWS_SECRET_ACCESS_KEY (required),
-   AWS_SESSION_TOKEN (optional, for temporary credentials) *)
-]}
-
-Returns [Error (`Invalid_request msg)] if a required variable is missing or
-empty. This is the simplest way to get credentials in development — set the
-environment variables and call [from_env].
-
-{1 Endpoints}
-
-{!module:Awskit.Endpoint} constructs endpoint URLs. Runtime adapters build these
-automatically from the region, but you can override them for S3-compatible
-services:
-
-{[
-let standard = Awskit.Endpoint.https ~host:"s3.us-east-1.amazonaws.com" ()
-let localstack = Awskit.Endpoint.http ~host:"localhost" ~port:4566 ()
-]}
-
-The {!val:Awskit.Endpoint.create} function gives full control over scheme, host,
-and port. Use {!val:Awskit.Endpoint.to_url_prefix} to get the full URL prefix
-(e.g., ["https://s3.us-east-1.amazonaws.com"]) and
-{!val:Awskit.Endpoint.authority} for the [host:port] string.
-
-{1 Choosing an adapter}
-
-The {!module-type:Awskit.Runtime.S} module type defines the interface between
-pure code and impure adapters. Each adapter provides a monad type and a
-connection type. You pick one adapter and it works for {b every} service
-package — there is no per-service setup.
-
-{2 Eio (OCaml 5)}
-
-Direct-style on algebraic effects. [type 'a t = 'a], errors are
-[result] values. This is the recommended adapter for new OCaml 5 projects:
-
-{[
-let conn = Awskit_eio.create
-  ~env ~region:"us-east-1" ~credentials ()
-]}
-
-The monad type is [type 'a t = 'a] — [let*] is just [let]. No promises, no
-callbacks. Errors surface as [(result, Error.t)] return values.
-
-{2 Lwt + Unix}
-
-For existing Lwt codebases. Uses promises:
-
-{[
-let conn = Awskit_lwt_unix.create
-  ~region:"us-east-1" ~credentials ()
-|> Result.get_ok
-]}
-
-The monad type is [type 'a t = 'a Lwt.t] — use [let*] for binding.
-Optional parameters include custom TLS ([?ctx]), clock ([?clock]), explicit
-endpoint overrides ([?endpoint]), and a buffered response size limit
-([?max_response_body_bytes]).
-
-If arguments are omitted, [awskit.lwt_unix] reads only these standard AWS
-environment variables:
+[awskit.unix] and [awskit.lwt_unix] can read:
 
 {[
 AWS_ACCESS_KEY_ID
@@ -173,165 +44,181 @@ AWS_REGION
 AWS_DEFAULT_REGION
 ]}
 
-Endpoint overrides are explicit; [awskit.lwt_unix] does not read endpoint URLs
-from the environment.
+The current credential support is intentionally small: static credentials and
+environment variables. Shared AWS config files, named profiles, process
+providers, web identity, ECS/EC2 metadata, STS assume-role, and refreshable
+credentials are future work.
 
-{2 Lwt (generic)}
+{1 Regions And Endpoints}
 
-For MirageOS or custom HTTP backends. Applies the runtime functor to any
-[Cohttp_lwt.S.Client] implementation:
-
-{[
-module My_runtime = Awskit_lwt.Make (Cohttp_lwt_unix.Client)
-let conn = My_runtime.create ~region:"us-east-1" ~credentials
-  ~clock:(fun () -> Ptime_clock.now ()) ()
-]}
-
-This is lower-level. You supply the HTTP client, the clock, and any explicit
-endpoint override. Most users should prefer {!module:Awskit_lwt_unix}.
-
-{1 Custom endpoints}
-
-Override the endpoint to point at a local S3-compatible service (LocalStack,
-MinIO, etc.):
+Regions are explicit values:
 
 {[
-(* Eio with custom endpoint *)
-let conn = Awskit_eio.create
-  ~env ~region:"us-east-1" ~credentials
-  ~endpoint:(Awskit.Endpoint.http ~host:"localhost" ~port:4566 ())
-  ()
+let region = Awskit.Region.of_string_exn "us-east-1"
 ]}
+
+Endpoints are scheme/host/port records:
 
 {[
-(* Lwt with custom endpoint *)
-let conn = Awskit_lwt_unix.create
-  ~region:"us-east-1" ~credentials
-  ~endpoint:(Awskit.Endpoint.http ~host:"localhost" ~port:9000 ())
-  ()
-|> Result.get_ok
+let endpoint =
+  Awskit.Endpoint.https
+    ~host:"s3.us-east-1.amazonaws.com"
+    ()
 ]}
 
-Pass an explicit {!module:Awskit.Endpoint} when talking to LocalStack, MinIO,
-or other S3-compatible services. Omit [?endpoint] for production AWS HTTPS
-endpoints.
+Runtime adapters can take endpoint overrides, but service-specific packages
+should usually expose a provider model instead. For S3, prefer
+[Awskit_s3.Provider] through [awskit-s3] adapters.
 
-{1 Error handling}
+{1 Signing}
 
-Errors are represented as polymorphic variants that compose across layers.
-The base type from {!module:Awskit.Error}:
+{!module:Awskit.Signing} implements AWS Signature Version 4 without IO.
+
+Use [payload_hash] metadata instead of passing a raw body to signing:
 
 {[
-type base =
-  [ `Access_denied
-  | `Service_unavailable of string
-  | `Request_error of int * string        (* status, body *)
-  | `Body_read_error of string
-  | `Invalid_response of string
-  | `Invalid_header of string * string     (* name, value *)
-  | `Missing_response_header of string
-  | `Invalid_xml of string
-  | `Invalid_json of string
-  | `Invalid_request of string ]
+let signed =
+  Awskit.Signing.sign_request
+    ~credentials
+    ~region
+    ~service:"s3"
+    ~method_:`PUT
+    ~path:"/my-key"
+    ~query:""
+    ~headers:[ ("host", "my-bucket.s3.us-east-1.amazonaws.com") ]
+    ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string "hello")
+    ~now:Ptime.epoch
 ]}
 
-Service packages extend this with service-specific variants. For example,
-{{:../awskit-s3/index.html}[awskit-s3]} adds [\`Not_found],
-[\`Precondition_failed], [\`Bucket_already_exists], and more.
+For presigned or streaming cases, service packages may use explicit payload
+hash values such as [UNSIGNED-PAYLOAD].
 
-Pattern match on specific errors, catch a group, or handle everything with a
-wildcard:
-
-{[
-match result with
-| Ok value -> (* success *)
-| Error `Access_denied -> (* handle 403 *)
-| Error (#Awskit.Error.base as e) -> (* any other base error *)
-]}
-
-Because the variants are polymorphic, you can write handlers that work across
-multiple service packages — the base cases always apply.
-
-{1 Writing a custom adapter}
-
-Implement {!module-type:Awskit.Runtime.S} for your platform. The module type
-has two parts:
-
-{2 The monad type ['a t]}
-
-For Eio, [type 'a t = 'a] — direct-style. For Lwt,
-[type 'a t = 'a Lwt.t]. The monad abstraction lets service packages work
-with either without knowing which one they're using. You must provide
-{!val:Awskit.Runtime.S.return} and {!val:Awskit.Runtime.S.bind}.
-
-{2 The connection type}
-
-The [connection] type bundles everything needed to make AWS calls:
-{ul
-  {li [region] — AWS region (e.g., ["us-east-1"])}
-  {li [credentials] — AWS credentials for signing requests}
-  {li [clock] — Time source for request timestamps and presigned URL expiry}
-  {li [endpoint] — Optional explicit endpoint override (for LocalStack,
-    MinIO, custom endpoints)}
-}
-
-{2 The [call] function}
-
-The [call] function is the {b only IO operation} in the interface. It takes
-a {!type:Awskit.Request.t} and returns a {!type:Awskit.Response.t} (or an error).
-Everything else in the system is pure.
-
-{2 When to write a custom adapter}
+Useful low-level helpers:
 
 {ul
-  {li {b Testing} — use a simulated network (see
-    {{:../awskit-s3/guides.html}[awskit-s3 Sim]} for a built-in example)}
-  {li {b JavaScript targets} — use the browser [fetch] API}
-  {li {b MirageOS unikernels} — use a Mirage-specific HTTP client}
-  {li {b Observability} — inject logging, tracing, or metrics middleware}
+  {li {!val:Awskit.Signing.uri_encode}}
+  {li {!val:Awskit.Signing.canonical_query_params}}
+  {li {!val:Awskit.Signing.ptime_to_date_time}}
 }
 
-{1 The Request type}
+{1 Structured Errors}
 
-{!module:Awskit.Request} is the HTTP request type that service packages build and
-runtime adapters send. It is exposed for custom adapters:
+Core errors are structured values:
 
 {[
-type meth = GET | PUT | POST | DELETE | HEAD
-
-type t = {
-  meth : meth;
-  host : string;
-  port : int option;
-  path : string;          (* includes query string *)
-  headers : (string * string) list;
-  body : string;
-}
+type t =
+  | Validation of validation
+  | Signing of string
+  | Transport of transport
+  | Service of service
+  | Decode of string
+  | Body of body
 ]}
 
-Use {!val:Awskit.Request.meth_to_string} to convert the method to its HTTP
-string representation.
-
-{1 The Response type}
-
-{!module:Awskit.Response} wraps an HTTP response with case-insensitive header
-lookup and typed accessors:
+Use {!val:Awskit.Error.retry_class} for retry decisions:
 
 {[
-type t = {
-  status : int;
-  headers : (string * string) list;
-  body : string;
-}
+match Awskit.Error.retry_class err with
+| `Throttled | `Retryable -> retry ()
+| `Auth -> refresh_or_fail ()
+| `Not_found -> handle_missing ()
+| `Conflict | `Fatal | `Unknown -> fail err
 ]}
 
-Helpers:
+Service packages preserve {!type:Awskit.Error.t} and add classifier helpers.
+For example, [awskit-s3] exposes [Awskit_s3.Error.is_no_such_key] and
+[Awskit_s3.Error.is_precondition_failed].
+
+{1 Runtime Body Model}
+
+The runtime abstraction keeps HTTP metadata separate from bodies:
+
 {ul
-  {li {!val:Awskit.Response.is_success} — status 2xx}
-  {li {!val:Awskit.Response.header} — case-insensitive lookup, returns [None] if
-    absent}
-  {li {!val:Awskit.Response.header_exn} — required header, returns [Error] if
-    missing or empty}
-  {li {!val:Awskit.Response.header_int} — optional integer header}
-  {li {!val:Awskit.Response.header_int_exn} — required integer header}
+  {li upload bodies are passed separately to [Runtime.call]}
+  {li download bodies are scoped through [Runtime.with_download_body]}
+  {li request and response records are body-free}
 }
+
+This lets service packages stream bodies without forcing all adapters to buffer
+data in memory.
+
+Uploads carry a descriptor:
+
+{[
+{
+  Awskit.Body.Upload.content_length = Some 5L;
+  payload_hash = Awskit.Body.Payload_hash.sha256_of_string "hello";
+  replayable = true;
+}
+]}
+
+Downloads must be consumed inside [with_download_body]:
+
+{[
+Runtime.with_download_body body ~consume:(fun reader ->
+  Runtime.read reader bytes ~off:0 ~len:(Bytes.length bytes))
+]}
+
+Service packages expose higher-level helpers when buffering is intentional.
+For example, [awskit-s3] uses [Object.Buffer.get_string ~max_size].
+
+{1 Choosing An Adapter}
+
+{2 Eio}
+
+Use [awskit.eio] for direct-style OCaml 5 applications:
+
+{[
+Eio.Switch.run @@ fun sw ->
+let conn =
+  Awskit_eio.create
+    ~env
+    ~sw
+    ~region
+    ~credentials
+    ()
+in
+ignore conn
+]}
+
+The monad type is [type 'a t = 'a]. Errors are returned as [result] values by
+service operations.
+
+{2 Lwt Unix}
+
+Use [awskit.lwt_unix] for ordinary Lwt applications on Unix:
+
+{[
+let conn =
+  Awskit_lwt_unix.create
+    ~region:"us-east-1"
+    ~credentials
+    ()
+  |> Result.get_ok
+]}
+
+Operations in service packages return [Lwt.t].
+
+{2 Generic Lwt}
+
+Use [awskit.lwt] when you need to provide a custom [Cohttp_lwt.S.Client]:
+
+{[
+module Runtime = Awskit_lwt.Make (Cohttp_lwt_unix.Client)
+]}
+
+{1 Custom Runtime Adapters}
+
+Implement {!module-type:Awskit.Runtime.S} when integrating another concurrency
+or HTTP stack. The service package functors need:
+
+{ul
+  {li a monad type and bind/return}
+  {li connection region, credentials, clock, and optional endpoint}
+  {li upload-body constructors and upload descriptors}
+  {li download-body scoped consumption}
+  {li HTTP transport through [call]}
+}
+
+S3 adapters extend the core runtime with [s3_provider] so S3 endpoint
+resolution can stay AWS-aware without putting S3 concepts into the pure core.

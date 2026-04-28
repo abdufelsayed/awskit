@@ -1,5 +1,5 @@
-(** Pure AWS infrastructure — signing, credentials, endpoints, error types, HTTP
-    request/response types, and the {!Runtime} module type.
+(** Pure AWS infrastructure: signing, credentials, endpoints, structured errors,
+    body metadata, HTTP metadata, and the {!Runtime} module type.
 
     No IO. Concurrency/platform code lives in sub-libraries:
     - [awskit.eio] — Eio runtime adapter
@@ -17,16 +17,19 @@ module Endpoint = Endpoint
 (** AWS service endpoint configuration. *)
 
 module Error = Error
-(** Base error types — polymorphic variants that compose across services. *)
+(** Structured core error type. *)
+
+module Body = Body
+(** Runtime-neutral body metadata. *)
 
 module Signing = Signing
 (** AWS Signature Version 4 signing. *)
 
 module Request = Request
-(** HTTP request type for AWS API calls. *)
+(** Body-free HTTP request metadata. *)
 
 module Response = Response
-(** HTTP response with header lookup helpers. *)
+(** Body-free HTTP response metadata. *)
 
 module Runtime = Runtime
 (** Runtime abstraction for concurrency adapters. *)

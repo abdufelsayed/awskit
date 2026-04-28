@@ -1,39 +1,102 @@
+module Aws_error = Error
 open Base
 
-type t = { status : int; headers : (string * string) list; body : string }
-[@@deriving show, eq]
+type t = {
+  status : int;
+  headers : (string * string) list;
+  request_id : string option;
+  host_id : string option;
+}
 
-let header t name =
-  List.find_map t.headers ~f:(fun (k, v) ->
-      if String.Caseless.equal k name then Some v else None)
+let has_ctl_or_del s =
+  String.exists s ~f:(fun c ->
+      let code = Char.to_int c in
+      code < 0x20 || code = 0x7F)
 
-let header_exn t name =
+let invalid ?field message = Error (Aws_error.validation ?field message)
+
+let result_exn = function
+  | Ok value -> value
+  | Error error -> invalid_arg (Aws_error.to_string_hum error)
+
+let validate_status status =
+  if status >= 100 && status <= 599 then Ok ()
+  else invalid ~field:"status" (Fmt.str "invalid HTTP status: %d" status)
+
+let validate_header_name name =
+  if String.is_empty name then
+    invalid ~field:"header" "header name must be non-empty"
+  else if has_ctl_or_del name then
+    invalid ~field:"header"
+      (Fmt.str "header %s contains control characters" name)
+  else if String.exists name ~f:(function ':' -> true | _ -> false) then
+    invalid ~field:"header" (Fmt.str "header %s must not contain ':'" name)
+  else Ok ()
+
+let validate_header_value name value =
+  if String.exists value ~f:(function '\r' | '\n' -> true | _ -> false) then
+    invalid ~field:"header" (Fmt.str "header %s contains a newline" name)
+  else Ok ()
+
+let validate_headers headers =
+  let rec loop = function
+    | [] -> Ok ()
+    | (name, value) :: rest -> (
+        match validate_header_name name with
+        | Error _ as error -> error
+        | Ok () -> (
+            match validate_header_value name value with
+            | Error _ as error -> error
+            | Ok () -> loop rest))
+  in
+  loop headers
+
+let header_in headers name =
+  List.find_map headers ~f:(fun (key, value) ->
+      if String.Caseless.equal key name then Some value else None)
+
+let create ~status ?(headers = []) () =
+  match validate_status status with
+  | Error _ as error -> error
+  | Ok () -> (
+      match validate_headers headers with
+      | Error _ as error -> error
+      | Ok () ->
+          Ok
+            {
+              status;
+              headers;
+              request_id = header_in headers "x-amz-request-id";
+              host_id = header_in headers "x-amz-id-2";
+            })
+
+let create_exn ~status ?headers () = result_exn (create ~status ?headers ())
+let status t = t.status
+let headers t = t.headers
+let header t name = header_in t.headers name
+
+let required_header t name =
   match header t name with
-  | Some v when not (String.is_empty v) -> Ok v
-  | Some v -> Error (`Invalid_header (name, v))
-  | None -> Error (`Missing_response_header name)
-
-let is_success t = t.status >= 200 && t.status < 300
+  | Some value when not (String.is_empty value) -> Ok value
+  | Some value ->
+      Error
+        (Aws_error.validation ~field:name
+           (Fmt.str "required response header is empty: %s" value))
+  | None ->
+      Error
+        (Aws_error.validation ~field:name "required response header is missing")
 
 let header_int t name =
   match header t name with
   | None -> Ok None
   | Some value -> (
-      try
-        let parsed = Int.of_string value in
-        if parsed < 0 then Error (`Invalid_header (name, value))
-        else Ok (Some parsed)
-      with exn ->
-        Error
-          (`Invalid_header (name, Fmt.str "%s (%s)" value (Exn.to_string exn))))
+      match Int.of_string_opt value with
+      | Some parsed when parsed >= 0 -> Ok (Some parsed)
+      | _ ->
+          Error
+            (Aws_error.validation ~field:name
+               (Fmt.str "expected non-negative integer header, got %s" value)))
 
-let header_int_exn t name =
-  match header t name with
-  | None -> Error (`Missing_response_header name)
-  | Some value -> (
-      try
-        let parsed = Int.of_string value in
-        if parsed < 0 then Error (`Invalid_header (name, value)) else Ok parsed
-      with exn ->
-        Error
-          (`Invalid_header (name, Fmt.str "%s (%s)" value (Exn.to_string exn))))
+let is_success t = t.status >= 200 && t.status < 300
+let request_id t = t.request_id
+let host_id t = t.host_id

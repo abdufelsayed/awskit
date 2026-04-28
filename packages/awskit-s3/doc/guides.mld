@@ -1,862 +1,351 @@
 {0 S3 Guides}
 
-Practical guides for using awskit-s3. See the {{!page-index}index page}
-for the full library listing.
+Guides for the redesigned S3 API. The public surface is streaming-first,
+AWS-provider-aware, and result-returning.
 
-For adapter setup, request signing, and error handling, see
-{{:../awskit/guides.html}[aws Guides]}. This page focuses on S3 operations.
+{1 Object Operations}
 
-{1 Buckets and Objects}
+Primitive object operations live under [Object]. They use runtime-owned upload
+bodies and scoped download readers.
 
-S3 organizes data into {b buckets} and {b objects}:
-
-{v
-  Bucket: my-bucket
-  ├── photos/2024/vacation.jpg     ← object key
-  ├── photos/2024/family.png
-  ├── data/users.json
-  └── config/settings.yaml
-v}
-
-A {b bucket} is a globally-named container. An {b object} is a file with a
-key, a value (the bytes), and metadata. Keys are flat strings — the "/"
-separators are conventional, not hierarchical. S3 has no true directories,
-though prefix-based listing gives a similar effect.
-
-{2 Bucket operations}
-
-{!module:Awskit_s3.Bucket} provides:
-
-{ul
-  {li [create] — Create a new bucket}
-  {li [delete] — Delete an empty bucket}
-  {li [head] — Check if a bucket exists}
-  {li [list] — List all buckets in your account}
-  {li [get_location] — Get a bucket's region}
-}
-
-Each bucket can have sub-configurations accessed through submodules:
-{ul
-  {li [Bucket.Policy] — Access policy (JSON)}
-  {li [Bucket.Versioning] — Object versioning (enable or suspend)}
-  {li [Bucket.Encryption] — Default server-side encryption configuration}
-  {li [Bucket.Tagging] — Key-value tags on the bucket itself}
-}
-
-{2 Object operations}
-
-{!module:Awskit_s3.Object} provides:
-
-{ul
-  {li [put] — Upload an object}
-  {li [get] — Download an object (optionally with byte range)}
-  {li [delete] — Delete a single object}
-  {li [delete_batch] — Delete up to 1000 objects in one request}
-  {li [head] — Get object metadata without downloading}
-  {li [copy] — Copy an object (server-side, no download needed)}
-  {li [list] — List objects by prefix, with pagination}
-  {li [Object.Tagging.get/put/delete] — Manage object tags}
-}
-
-{1 Result types}
-
-Each operation returns a specific result type with the relevant data. All
-operations return [(result, Error.t)] — no exceptions are thrown.
-
-{2 Object.Put_result}
+{2 Upload}
 
 {[
-type put_result = {
-  etag : string;  (* ETag assigned by S3 *)
-}
-]}
-
-{2 Object.Get_result}
-
-{[
-type get_result = {
-  body : string;            (* the content *)
-  etag : string;            (* e.g., "\"d41d8cd98f00b204e9800998ecf8427e\"" *)
-  content_type : string option;
-  content_length : int;
-  last_modified : string;
-  metadata : Metadata.t;     (* custom x-amz-meta-* headers *)
-}
-]}
-
-{2 Object.Copy_result}
-
-{[
-type copy_result = {
-  etag : string;         (* ETag of the new object *)
-  last_modified : string; (* Last-modified timestamp of the copy *)
-}
-]}
-
-{2 Object.List_result}
-
-{[
-type list_result = {
-  keys : string list;
-  is_truncated : bool;            (* more results available? *)
-  next_continuation_token : string option;  (* pass to next call *)
-}
-]}
-
-{2 Object.Delete_result}
-
-{[
-type delete_result = {
-  deleted : Deleted.t list;  (* successfully deleted keys *)
-  errors : Error.t list;     (* per-key failures *)
-}
-]}
-
-Each [Deleted.t] has a [key] field. Each [Error.t] has [key], [code], and
-[message] fields describing the failure.
-
-{2 Object.Info}
-
-From [head]:
-
-{[
-type info = {
-  etag : string;
-  size : int;
-  last_modified : string;
-  content_type : string option;
-  storage_class : Storage_class.t option;  (* None = Standard *)
-  metadata : Metadata.t;
-}
-]}
-
-{1 Object operations in detail}
-
-{2 Uploading (put)}
-
-{[
-let result = Awskit_s3_eio.Object.put conn
+let body = Awskit_s3_eio.Runtime.string_body "hello" in
+Awskit_s3_eio.Object.put s3
   ~bucket:"my-bucket"
-  ~key:"data.csv"
-  ?content_type:(Some "text/csv")
-  ?storage_class:(Some Standard_ia)
-  ?metadata:[ ("author", "alice"); ("version", "2" ) ]
-  ?cache_control:(Some "max-age=3600")
-  ?content_encoding:(Some "gzip")
-  ?content_disposition:(Some "attachment; filename=\"data.csv\"")
-  file_content
-]}
-
-Optional parameters:
-{ul
-  {li [?preconditions] — conditional write rules. Use
-    [Awskit_s3.Object.Preconditions.Write.if_absent] for put-if-not-exists and
-    [Awskit_s3.Object.Preconditions.Write.if_etag etag] for ETag-checked
-    replacement}
-  {li [?content_type] — MIME type for the object}
-  {li [?metadata] — custom key-value pairs stored as [x-amz-meta-*] headers}
-  {li [?storage_class] — storage tier (Standard, Standard_ia, Glacier, etc.)}
-  {li [?tags] — key-value tags attached to the object}
-  {li [?cache_control] — Cache-Control header}
-  {li [?content_encoding] — Content-Encoding header}
-  {li [?content_disposition] — Content-Disposition header}
-}
-
-{2 Downloading (get)}
-
-{[
-let result = Awskit_s3_eio.Object.get conn
-  ~bucket:"my-bucket"
-  ~key:"data.csv"
+  ~key:"hello.txt"
+  ~body
   ()
 ]}
 
-Use [?range] for partial reads (see the {b Byte ranges} section below):
-{[
-(* Read the first 1024 bytes *)
-let result = Awskit_s3_eio.Object.get conn
-  ~bucket:"my-bucket"
-  ~key:"large-file.bin"
-  ~range:(Some (Awskit_s3.Range.Bytes (0, 1023)))
-  ()
-]}
+Primitive uploads require a known content length. The runtime records length
+and payload hash in its upload-body descriptor before signing.
 
-Conditional reads use [?preconditions]:
+Options carry object metadata, content type, storage class, tags,
+preconditions, checksum headers, and server-side encryption headers:
+
 {[
-(* Only download if the ETag matches *)
-let preconditions =
-  Awskit_s3.Object.Preconditions.Read.
-    { none with
-      if_match =
-        Some
-          (Awskit_s3.Object.Etag_condition.Etag
-             "\"d41d8cd98f00b204e9800998ecf8427e\"") }
+let options =
+  {
+    Awskit_s3.Object.Put.default_options with
+    content_type = Some "text/plain";
+    metadata = [ ("origin", "example") ];
+    tags = [ { Awskit_s3.Tag.key = "env"; value = "dev" } ];
+  }
 in
-let result = Awskit_s3_eio.Object.get conn
+Awskit_s3_eio.Object.put s3
   ~bucket:"my-bucket"
-  ~key:"data.csv"
-  ~preconditions
+  ~key:"hello.txt"
+  ~options
+  ~body:(Awskit_s3_eio.Runtime.string_body "hello")
   ()
 ]}
 
-{2 Checking existence (head)}
+{2 Download}
 
-[head] returns [Ok (Some info)] if the object exists, [Ok None] if not —
-no error for missing objects. This is the cheapest way to check whether an
-object exists or to read its metadata without downloading the body:
+[Object.get] scopes the response body to the [consume] callback. Do not store
+the reader outside that callback.
 
 {[
-match Awskit_s3_eio.Object.head conn ~bucket:"b" ~key:"k" () with
-| Ok (Some info) -> Fmt.pr "Size: %d" info.size
-| Ok None -> Fmt.pr "Not found"
-| Error e -> Fmt.epr "Error: %a" Awskit_s3.Error.pp e
-]}
-
-[head] also supports [?preconditions] for conditional checks.
-
-{2 Deleting objects}
-
-Single delete:
-{[
-let result = Awskit_s3_eio.Object.delete conn ~bucket:"b" ~key:"k" ()
-]}
-
-S3 semantics: [delete] succeeds even if the key doesn't exist unless a
-precondition fails. Use [Awskit_s3.Object.Preconditions.Delete.if_etag etag] for
-ETag-checked deletion.
-
-Batch delete (up to 1000 objects per request):
-{[
-let result = Awskit_s3_eio.Object.delete_batch conn
-  ~bucket:"b"
-  ~objects:
-    [
-      Awskit_s3_eio.Object.Delete_object.v "key1";
-      Awskit_s3_eio.Object.Delete_object.v "key2";
-      Awskit_s3_eio.Object.Delete_object.v "key3";
-    ]
+let consume reader =
+  let bytes = Bytes.create 8192 in
+  match Awskit_s3_eio.Runtime.read reader bytes ~off:0 ~len:8192 with
+  | Error _ as error -> error
+  | Ok n -> Ok (Bytes.sub_string bytes 0 n)
 in
-match result with
-| Ok { deleted; errors } ->
-  (* deleted = list of successfully deleted keys *)
-  (* errors = list of per-key failures with code and message *)
-  ()
-| Error e -> (* request-level failure *)
-]}
-
-{2 Listing objects}
-
-{[
-let result = Awskit_s3_eio.Object.list conn
+Awskit_s3_eio.Object.get s3
   ~bucket:"my-bucket"
-  ~prefix:"photos/2024/"
-  ?delimiter:(Some "/")     (* group by "directory" *)
-  ?max_keys:100
-  ?start_after:(Some "marker-key")
+  ~key:"large.bin"
+  ~consume
   ()
 ]}
 
-Paginate with [continuation_token]:
-{[
-let rec list_all conn ~bucket ~prefix acc continuation_token =
-  let result = Awskit_s3_eio.Object.list conn
-    ~bucket ~prefix ?continuation_token () in
-  match result with
-  | Error e -> Error e
-  | Ok { keys; is_truncated; next_continuation_token } ->
-    let acc = acc @ keys in
-    if is_truncated then
-      list_all conn ~bucket ~prefix acc next_continuation_token
-    else Ok acc
-]}
+Use [Object.head] when only metadata is needed. Use [Object.exists] for boolean
+existence checks. Missing-object and missing-bucket behavior is reported as
+structured service errors by primitive operations.
 
-Optional parameters:
+{2 Copy, Delete, List, Tagging}
+
+The object surface also includes:
+
 {ul
-  {li [?delimiter] — group keys by prefix (e.g., ["/"] for directory-like
-    listing)}
-  {li [?max_keys] — page size (default 1000)}
-  {li [?start_after] — start listing after this key}
-  {li [?continuation_token] — continue from a previous truncated response}
+  {li [Object.delete] and [Object.delete_many]}
+  {li [Object.copy]}
+  {li [Object.list] for rich pages and [Object.list_keys] for key-only pages}
+  {li [Object.Tagging.get], [put], and [delete]}
 }
 
-{2 Copying objects}
+{1 Object.Buffer}
 
-Copy is server-side — S3 reads the source and writes the destination. Your
-code never touches the data:
+[Object.Buffer] is for explicit in-memory use. Upload helpers accept strings or
+bytes. Download helpers require [max_size] to avoid accidental unbounded
+buffering.
 
 {[
-let result = Awskit_s3_eio.Object.copy conn
-  ~src_bucket:"source-bucket"
-  ~src_key:"original.txt"
-  ~dst_bucket:"dest-bucket"
-  ~dst_key:"copy.txt"
-  ~metadata:(`Replace [ ("copied-by", "backup-script" ) ])
+Awskit_s3_eio.Object.Buffer.put_string s3
+  ~bucket:"my-bucket"
+  ~key:"hello.txt"
+  "hello"
+]}
+
+{[
+Awskit_s3_eio.Object.Buffer.get_string s3
+  ~bucket:"my-bucket"
+  ~key:"hello.txt"
+  ~max_size:1_048_576L
   ()
 ]}
 
-[?metadata]:
-{ul
-  {li [None] — Copy metadata from source (default)}
-  {li [Some `Copy] — Explicitly copy metadata}
-  {li [Some (`Replace metadata)] — Replace with new metadata}
-}
+If the response body exceeds [max_size], the helper returns
+[Error (Awskit.Error.Body _)].
 
-[copy] also supports [?source_preconditions] for conditional copies.
+{1 Object.Transfer}
 
-{1 Metadata}
+Unix-capable adapters expose local-path helpers under [Object.Transfer].
+These helpers are adapter-level APIs because pure [awskit-s3] must not depend
+on filesystem APIs.
 
-{!module:Awskit_s3.Metadata} is a simple association list — custom key-value pairs
-stored as [x-amz-meta-*] HTTP headers on S3 objects:
+{2 Eio}
 
 {[
-let meta : Awskit_s3.Metadata.t = [ ("author", "alice"); ("version", "2") ]
-]}
-
-Set on upload, read from [get] and [head] results:
-
-{[
-(* Upload with metadata *)
-Awskit_s3_eio.Object.put conn ~bucket ~key ?metadata:(Some meta) body
-
-(* Read back *)
-let { Awskit_s3.Object.Get_result.metadata } =
-  Awskit_s3_eio.Object.get conn ~bucket ~key () |> Result.get_ok
-in
-(* metadata = [ ("author", "alice"); ("version", "2") ] *)
-]}
-
-{1 Tags}
-
-{!module:Awskit_s3.Tag} represents a key-value pair attached to an object or
-bucket:
-
-{[
-let tag : Awskit_s3.Tag.t = { key = "environment"; value = "production" }
-]}
-
-Tags are used for categorization, lifecycle rules, and access control.
-
-{2 Object tags}
-
-{[
-(* Set tags on an object — replaces all existing tags *)
-Awskit_s3_eio.Object.Tagging.put conn ~bucket ~key
-  [ { Tag.key = "env"; value = "prod" } ]
-
-(* Read tags *)
-let tags = Awskit_s3_eio.Object.Tagging.get conn ~bucket ~key
-
-(* Remove all tags *)
-Awskit_s3_eio.Object.Tagging.delete conn ~bucket ~key
-]}
-
-{2 Bucket tags}
-
-{[
-(* Set tags on a bucket *)
-Awskit_s3_eio.Bucket.Tagging.put conn ~bucket
-  [ { Tag.key = "team"; value = "platform" } ]
-
-(* Read tags *)
-let tags = Awskit_s3_eio.Bucket.Tagging.get conn ~bucket
-
-(* Remove all tags *)
-Awskit_s3_eio.Bucket.Tagging.delete conn ~bucket
-]}
-
-{1 Byte ranges}
-
-{!module:Awskit_s3.Range} represents a byte range for partial reads with
-[Object.get]:
-
-{[
-(* Inclusive range from start to end *)
-let range = Awskit_s3.Range.Bytes (0, 1023)
-
-(* Everything from an offset onward *)
-let range = Awskit_s3.Range.From 4096
-
-(* The last N bytes *)
-let range = Awskit_s3.Range.Suffix 1024
-]}
-
-{!val:Awskit_s3.Range.to_header} converts a range to an HTTP [Range] header value.
-Returns [Error] if the range is invalid (e.g., negative offsets, start > end).
-
-{1 Storage classes}
-
-{!module:Awskit_s3.Storage_class} represents S3 storage tiers:
-{ul
-  {li [Standard] — General purpose, frequently accessed}
-  {li [Standard_ia] — Infrequently accessed, lower cost}
-  {li [Onezone_ia] — Infrequently accessed, single availability zone}
-  {li [Intelligent_tiering] — Automatic optimization between frequent and
-    infrequent tiers}
-  {li [Glacier] — Archive, retrieval takes minutes to hours}
-  {li [Glacier_ir] — Glacier with instant retrieval}
-  {li [Deep_archive] — Long-term archive, retrieval takes hours}
-  {li [Express_onezone] — High performance, single AZ}
-}
-
-Set on upload:
-{[
-Awskit_s3_eio.Object.put conn ~bucket ~key ?storage_class:(Some Glacier) body
-]}
-
-Read from object metadata:
-{[
-match info.storage_class with
-| None -> (* Standard, the default *)
-| Some Standard_ia -> (* infrequent access *)
-| Some Glacier -> (* archived *)
-| _ -> (* other tier *)
-]}
-
-{1 Multipart uploads}
-
-For large objects (over 5 MB), use multipart uploads to upload in parts and
-assemble them on S3. Each part must be at least 5 MB, except the last one.
-
-{2 Three-step flow}
-
-{[
-(* 1. Initiate *)
-let upload = Awskit_s3_eio.Multipart.create conn
+Awskit_s3_eio.Object.Transfer.upload_from_path s3
   ~bucket:"my-bucket"
-  ~key:"large-file.bin"
-  ?content_type:(Some "application/octet-stream")
-  ?metadata:[ ("source", "backup") ]
-  ?storage_class:(Some Standard_ia)
+  ~key:"archive.tar"
+  ~path
   ()
-
-(* 2. Upload parts *)
-let part1 = Awskit_s3_eio.Multipart.upload_part conn
-  ~bucket:"my-bucket"
-  ~key:"large-file.bin"
-  ~upload_id:upload.Awskit_s3.Multipart.Upload.upload_id
-  ~part_number:1
-  chunk1
-in
-let part2 = Awskit_s3_eio.Multipart.upload_part conn
-  ~bucket:"my-bucket"
-  ~key:"large-file.bin"
-  ~upload_id:upload.Awskit_s3.Multipart.Upload.upload_id
-  ~part_number:2
-  chunk2
-in
-
-(* 3. Complete — S3 assembles the parts into the final object *)
-let result = Awskit_s3_eio.Multipart.complete conn
-  ~bucket:"my-bucket"
-  ~key:"large-file.bin"
-  ~upload_id:upload.Awskit_s3.Multipart.Upload.upload_id
-  [ part1; part2 ]
-in
 ]}
 
-{2 Aborting}
-
-If something goes wrong, abort the upload to clean up:
 {[
-Awskit_s3_eio.Multipart.abort conn
+Awskit_s3_eio.Object.Transfer.download_to_path s3
   ~bucket:"my-bucket"
-  ~key:"large-file.bin"
-  ~upload_id:upload.Awskit_s3.Multipart.Upload.upload_id
+  ~key:"archive.tar"
+  ~path
+  ()
 ]}
 
-Always abort uploads you don't complete — incomplete parts are still billed.
+{2 Lwt Unix}
 
-{2 Listing parts}
-
-Check which parts have been uploaded so far:
 {[
-let parts = Awskit_s3_eio.Multipart.list_parts conn
-  ~bucket:"my-bucket"
-  ~key:"large-file.bin"
-  ~upload_id:upload.Awskit_s3.Multipart.Upload.upload_id
-in
-(* parts : Part_info.t list — each has part_number, etag, size, last_modified *)
+let* result =
+  Awskit_s3_lwt_unix.Object.Transfer.upload_from_path s3
+    ~bucket:"my-bucket"
+    ~key:"archive.tar"
+    ~path:"/tmp/archive.tar"
+    ()
 ]}
+
+Current transfer helpers are convenience helpers. Managed concurrent multipart
+transfer, progress callbacks, resumability, and runtime-native file streaming
+are future work.
+
+{1 AWS S3 Provider Configuration}
+
+S3 provider configuration is AWS-specific. Pass [provider] when constructing an
+adapter connection or using standalone presigned helpers.
+
+{[
+let provider =
+  Awskit_s3.Provider.aws
+    ~endpoint_variant:`Dualstack
+    ~addressing_style:`Auto
+    ()
+in
+let s3 =
+  Awskit_s3_eio.create ~sw ~env ~region ~credentials ~provider ()
+]}
+
+Endpoint variants:
+
+{ul
+  {li [`Regional] — [s3.<region>.amazonaws.com]}
+  {li [`Dualstack] — [s3.dualstack.<region>.amazonaws.com]}
+  {li [`Fips] — [s3-fips.<region>.amazonaws.com]}
+  {li [`Fips_dualstack] — [s3-fips.dualstack.<region>.amazonaws.com]}
+  {li [`Accelerate] — [s3-accelerate.amazonaws.com]}
+  {li [`Accelerate_dualstack] — [s3-accelerate.dualstack.amazonaws.com]}
+}
+
+Addressing styles:
+
+{ul
+  {li [`Virtual_hosted] puts the bucket in the host name.}
+  {li [`Path] puts the bucket in the path.}
+  {li [`Auto] uses virtual-hosted style when valid and falls back to path-style
+    for dotted bucket names over HTTPS.}
+}
+
+Transfer Acceleration requires virtual-hosted-style-compatible bucket names and
+must be enabled on the bucket in AWS.
+
+{1 Bucket Operations}
+
+[Bucket] covers general-purpose bucket basics and the first configuration
+subresources:
+
+{ul
+  {li [Bucket.create], [delete], [head], [exists], [list], [get_location]}
+  {li [Bucket.Policy.get], [put], [delete]}
+  {li [Bucket.Policy_status.get]}
+  {li [Bucket.Versioning.get], [put]}
+  {li [Bucket.Tagging.get], [put], [delete]}
+  {li [Bucket.Encryption.get], [put], [delete]}
+  {li [Bucket.Cors.get], [put], [delete]}
+  {li [Bucket.Website.get], [put], [delete] for index/error documents}
+  {li [Bucket.Public_access_block.get], [put], [delete]}
+  {li [Bucket.Ownership_controls.get], [put], [delete]}
+  {li [Bucket.Request_payment.get], [put]}
+  {li [Bucket.Accelerate.get], [put]}
+  {li [Bucket.Logging.get], [put] for target bucket/prefix logging}
+}
+
+[Bucket.Policy] sends and receives validated JSON policy payloads. It does not
+construct IAM policies or evaluate policy authorization decisions.
+
+{[
+let encryption =
+  {
+    Awskit_s3.Bucket.Encryption.rules =
+      [
+        {
+          Awskit_s3.Bucket.Encryption.Rule.sse_algorithm =
+            Awskit_s3.Bucket.Encryption.Algorithm.Aes256;
+          kms_master_key_id = None;
+        };
+      ];
+  }
+in
+Awskit_s3_eio.Bucket.Encryption.put s3
+  ~bucket:"my-bucket"
+  encryption
+]}
+
+{1 Multipart Uploads}
+
+[Multipart] exposes the primitive AWS multipart flow:
+
+{ol
+  {li [Multipart.create] starts an upload and returns an upload ID.}
+  {li [Multipart.upload_part] uploads a known-length part.}
+  {li [Multipart.complete] completes the upload with ordered parts.}
+  {li [Multipart.abort] cancels an upload.}
+  {li [Multipart.list_parts] inspects uploaded parts.}
+}
+
+Managed high-level multipart transfer is not implemented yet.
 
 {1 Presigned URLs}
 
-{!module:Awskit_s3.Presigned} generates URLs that grant temporary access to S3
-objects without requiring AWS credentials on the client side. The URL embeds
-a SigV4 signature that expires after a configurable time.
-
-Presigned URLs are generated {b purely} — no network call is made. The runtime
-adapter versions ([Awskit_s3_eio.Presigned], [Awskit_s3_lwt_unix.Presigned]) pull the
-region, credentials, clock, and host from the connection automatically.
-
-{2 Download URL}
+Use adapter-level [Presigned] modules when a connection already exists, or use
+standalone {!module:Awskit_s3.Presigned} helpers when generating URLs without
+an adapter connection.
 
 {[
-let url = Awskit_s3_eio.Presigned.get_object conn
+Awskit_s3_eio.Presigned.get_object s3
   ~bucket:"my-bucket"
-  ~key:"report.pdf"
-  ?expires_in:3600   (* 1 hour, default *)
+  ~key:"public.txt"
   ()
-(* Anyone with [url] can download report.pdf for the next hour *)
 ]}
 
-{2 Upload URL}
-
 {[
-let url = Awskit_s3_eio.Presigned.put_object conn
-  ~bucket:"uploads"
-  ~key:"user-file.csv"
-  ?expires_in:300     (* 5 minutes *)
-  ?content_type:(Some "text/csv")
+Awskit_s3.Presigned.put_object
+  ~region
+  ~credentials
+  ~now
+  ~provider
+  ~bucket:"my-bucket"
+  ~key:"upload.txt"
   ()
-(* Anyone with [url] can PUT to this URL for the next 5 minutes *)
 ]}
 
-When [?content_type] is set on a PUT URL, the [Content-Type] is baked into the
-signed headers — the uploader must send the same [Content-Type] or the
-request will fail.
+Presigned URLs use [UNSIGNED-PAYLOAD] and the same provider endpoint resolver
+as normal operations.
 
-Expiry defaults to 3600 seconds (1 hour). Maximum is 604800 seconds (7 days).
+{1 Credentials}
 
-{1 Bucket configuration}
-
-{2 Bucket policies}
-
-{!module:Awskit_s3.Policy} provides typed bucket policies with JSON
-round-tripping and access evaluation. See the {b Policies in depth}
-below.
-
-{2 Versioning}
-
-{!module:Awskit_s3.Bucket.Versioning} lets you enable or suspend object
-versioning on a bucket. When versioning is enabled, S3 keeps multiple versions
-of each object instead of overwriting.
+Eio S3 connections require explicit [region] and [credentials].
 
 {[
-(* Enable versioning *)
-Awskit_s3_eio.Bucket.Versioning.put conn ~bucket:"my-bucket" Enabled
-
-(* Check versioning status *)
-let status = Awskit_s3_eio.Bucket.Versioning.get conn ~bucket:"my-bucket"
-(* Returns: None (never enabled), Some Enabled, or Some Suspended *)
-
-(* Suspend versioning — stops creating new versions but preserves existing ones *)
-Awskit_s3_eio.Bucket.Versioning.put conn ~bucket:"my-bucket" Suspended
-]}
-
-{2 Encryption}
-
-{!module:Awskit_s3.Bucket.Encryption} manages default server-side encryption:
-
-{[
-(* Set AES-256 encryption *)
-let config : Awskit_s3.Bucket.Encryption.Config.t = {
-  rules = [ { sse_algorithm = Aes256; kms_master_key_id = None } ]
-}
+let credentials =
+  Awskit.Credentials.create_exn
+    ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
+    ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    ()
 in
-Awskit_s3_eio.Bucket.Encryption.put conn ~bucket:"my-bucket" config
-
-(* Set AWS KMS encryption *)
-let kms_config : Awskit_s3.Bucket.Encryption.Config.t = {
-  rules = [ {
-    sse_algorithm = Aws_kms;
-    kms_master_key_id = Some "arn:aws:kms:us-east-1:123456789:key/abc";
-  } ]
-}
-in
-Awskit_s3_eio.Bucket.Encryption.put conn ~bucket:"my-bucket" kms_config
-
-(* Read current encryption config *)
-let config = Awskit_s3_eio.Bucket.Encryption.get conn ~bucket:"my-bucket"
-
-(* Remove encryption config *)
-Awskit_s3_eio.Bucket.Encryption.delete conn ~bucket:"my-bucket"
+let region = Awskit.Region.of_string_exn "us-east-1" in
+Awskit_s3_eio.create ~sw ~env ~region ~credentials ()
 ]}
 
-{1 Policies in depth}
-
-{!module:Awskit_s3.Policy} provides typed bucket policies with JSON
-round-tripping and access evaluation. A policy consists of {b statements},
-each with an effect (Allow/Deny), a principal (who), actions (what), and
-resources (where).
-
-{2 Reading a policy}
+[awskit-s3.lwt_unix] can use explicit values or load the standard environment
+variables through [awskit.lwt_unix]:
 
 {[
-let policy = Awskit_s3_eio.Bucket.Policy.get conn ~bucket:"my-bucket"
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_SESSION_TOKEN
+AWS_REGION
+AWS_DEFAULT_REGION
 ]}
-
-{2 Writing a policy}
-
-Build a policy programmatically:
-{[
-let policy : Awskit_s3.Policy.t = {
-  version = "2012-10-17";
-  statements = [
-    {
-      effect_ = Allow;
-      principal = Any;
-      actions = [ "s3:GetObject" ];
-      resources = [ Bucket_objects "my-bucket" ];
-    }
-  ]
-}
-in
-Awskit_s3_eio.Bucket.Policy.put conn ~bucket:"my-bucket" policy
-]}
-
-Or parse from JSON:
-{[
-let policy = Awskit_s3.Policy.of_json json_string
-]}
-
-And serialize back:
-{[
-let json = Awskit_s3.Policy.to_json policy
-]}
-
-{2 Principals}
-
-{ul
-  {li [Any] — matches all principals (the ["*"] wildcard)}
-  {li [Aws arns] — matches specific AWS ARNs}
-  {li [User ids] — matches specific user IDs}
-}
-
-{2 Resources}
-
-{ul
-  {li [Bucket "my-bucket"] — targets the bucket itself
-    (ARN: [arn:aws:s3:::my-bucket])}
-  {li [Bucket_objects "my-bucket"] — targets objects in the bucket
-    (ARN: [arn:aws:s3:::my-bucket/*])}
-}
-
-Use {!val:Awskit_s3.Policy.Resource.to_arn} and {!val:Awskit_s3.Policy.Resource.of_arn}
-to convert between the typed representation and ARN strings.
-
-{2 Evaluating access}
 
 {[
-match Awskit_s3.Policy.evaluate policy ~access_key_id ~action:"s3:GetObject"
-    ~target:(Object_target ("my-bucket", "secret.pdf"))
-with
-| `Allowed -> (* access granted *)
-| `Denied  -> (* explicit deny in policy *)
-| `No_match -> (* no matching statement, default deny *)
+Awskit_s3_lwt_unix.create ()
 ]}
 
-Evaluation follows AWS semantics: explicit [Deny] always wins over [Allow],
-and if no statement matches, the default is deny.
+The current credential helpers cover static credentials and environment
+variables. Shared AWS config files, named profiles, ECS/EC2 metadata, web
+identity, STS assume-role, and refreshable credentials remain future work.
 
-{2 Deleting a policy}
+{1 Errors}
 
-{[
-Awskit_s3_eio.Bucket.Policy.delete conn ~bucket:"my-bucket"
-]}
+S3 operations return [(value, Awskit_s3.Error.t) result] or that result inside
+the selected runtime monad.
 
-{1 Error handling}
+[Awskit_s3.Error.t] is {!type:Awskit.Error.t}. It preserves validation,
+signing, transport, service, decode, and body-consumption failures.
 
-{!module:Awskit_s3.Error} extends the base {!module:Awskit.Error} with S3-specific
-variants:
+Use S3 classifiers for service-specific checks:
 
-{[
-type t =
-  [ Awskit.Error.base           (* all base errors *)
-  | `Not_found               (* 404 - key doesn't exist *)
-  | `Precondition_failed     (* 412 - if-match/if-none-match failed *)
-  | `Bucket_already_exists   (* 409 - bucket name taken *)
-  | `Bucket_not_empty        (* 409 - can't delete non-empty bucket *)
-  | `No_such_bucket ]        (* 404 - bucket doesn't exist *)
-]}
-
-Pattern match on specific errors or handle them broadly:
 {[
 match result with
-| Ok value -> (* success *)
-| Error `Not_found -> (* key doesn't exist *)
-| Error `Bucket_already_exists -> (* pick a different name *)
-| Error (#Awskit.Error.base as e) -> (* any other AWS error *)
+| Ok value -> use value
+| Error err when Awskit_s3.Error.is_no_such_key err -> handle_missing ()
+| Error err when Awskit_s3.Error.is_precondition_failed err -> retry_later ()
+| Error err -> log_error err
 ]}
 
-Use {!val:Awskit_s3.Error.pp} to print errors for logging. Use
-{!val:Awskit_s3.Error.of_aws_error} to widen a base AWS error to an S3 error.
+For service failures, [Awskit_s3.Error.service_code] exposes the AWS error
+code when present.
 
-{1 Simulation testing}
+{1 Simulator Testing}
 
-{!module:Awskit_s3.Sim} provides a deterministic in-memory S3 for testing. No
-AWS account, no network, no flaky tests.
+{!module:Awskit_s3.Sim} exposes the same synchronous S3 operation shape as the
+runtime-backed client and adds test-only helpers:
 
-{2 Basic usage}
-
-{[
-let clock = Awskit_s3.Sim.Clock.create ()
-let store = Awskit_s3.Sim.create_store ~clock ()
-let credentials = Awskit_s3.Credentials.make
-  ~access_key_id:"test" ~secret_access_key:"test" ()
-let conn = Awskit_s3.Sim.connect store ~credentials
-
-(* Use just like the real S3 client *)
-Awskit_s3.Sim.Bucket.create conn ~bucket:"test" () |> ignore
-Awskit_s3.Sim.Object.put conn ~bucket:"test" ~key:"hello" "world" |> ignore
-]}
-
-The simulated [conn] exposes the same operations as the real client —
-[Object.put], [Object.get], [Object.list], [Bucket.create], [Policy], etc.
-Write your code against the adapter interface and swap in [Sim] for tests.
-
-{2 Deterministic clock}
-
-The simulation clock doesn't advance on its own. You control time explicitly:
-{[
-let clock = Awskit_s3.Sim.Clock.create ~now:(Ptime.v (2024, 1, 1, ((0, 0, 0), 0))) ()
-(* ... operations ... *)
-Awskit_s3.Sim.Clock.advance clock (Ptime.Span.of_int_s 3600)
-(* now it's 1 hour later *)
-]}
-
-Use {!val:Awskit_s3.Sim.Clock.advance_ms} for millisecond-grained control. Note
-that it truncates to whole seconds with a minimum of 1 second.
-
-This makes tests reproducible — the same operations at the same simulated
-time always produce the same results. Deterministic time is especially
-important for presigned URL expiry tests.
-
-{2 Fault injection}
-
-Inject specific faults to test error handling:
-{[
-Awskit_s3.Sim.inject_fault conn Slow_down
-(* next operation returns `Service_unavailable *)
-
-Awskit_s3.Sim.inject_fault conn Internal_error
-(* next operation returns `Request_error (500, ...) *)
-
-Awskit_s3.Sim.inject_faults conn [ Slow_down; Internal_error ]
-(* next two operations will fault, in order *)
-
-Awskit_s3.Sim.clear_faults conn
-(* remove all injected faults *)
-]}
-
-Available faults:
 {ul
-  {li [Slow_down] — Returns [`Service_unavailable]}
-  {li [Internal_error] — Returns [`Request_error (500, ...)]}
-  {li [Connection_reset] — Returns [`Request_error (0, "connection reset")]}
-  {li [Response_lost] — The operation happens but you get an error
-    (simulates a network drop after S3 processed the request)}
+  {li deterministic clock}
+  {li in-memory store inspection}
+  {li operation history}
+  {li deterministic fault injection}
 }
 
-[Response_lost] is particularly valuable — it tests the case where S3
-successfully processes your request but you never see the response. This is
-a real production failure mode that most SDKs don't make easy to test.
-
-{2 Buggify mode}
-
-Inspired by FoundationDB's testing methodology, buggify mode injects random
-faults with a configurable probability:
 {[
-Awskit_s3.Sim.enable_buggify conn ~seed:42 ~prob:0.1
-(* ~10% of operations will randomly fault, using seed 42 for reproducibility *)
+let clock = Awskit_s3.Sim.Clock.create () in
+let store = Awskit_s3.Sim.create_store ~clock () in
+let conn = Awskit_s3.Sim.connect store ~credentials in
 
-Awskit_s3.Sim.disable_buggify conn
-(* back to deterministic *)
+ignore
+  (Awskit_s3.Sim.Bucket.create conn ~bucket:"test-bucket" ()
+   |> Result.get_ok);
+
+ignore
+  (Awskit_s3.Sim.Object.Buffer.put_string conn
+     ~bucket:"test-bucket"
+     ~key:"hello.txt"
+     "hello"
+   |> Result.get_ok)
 ]}
 
-Use buggify in property tests: run the same operations many times with
-different seeds and probabilities. The seed makes failures reproducible —
-if a test fails with seed 42 at prob 0.1, it will fail the same way every
-time.
-
-{2 Operation history}
-
-Audit all operations performed on the simulation:
-{[
-let history = Awskit_s3.Sim.history store
-(* [ { op = `Put; bucket = "test"; key = "hello"; timestamp = ...; faulted = false } ] *)
-
-Awskit_s3.Sim.clear_history store
-(* reset the history *)
-]}
-
-Each record contains the operation type, bucket, key, timestamp, and whether
-a fault was injected.
-
-{2 Inspection helpers}
-
-Peek into the simulation state directly (bypasses access checks):
-{[
-(* Check if an object exists and get its metadata *)
-let meta = Awskit_s3.Sim.object_meta store ~bucket:"test" "hello"
-(* Returns: Some { etag = "..."; size = 5; last_modified = ... } or None *)
-
-(* List all keys in a bucket *)
-let keys = Awskit_s3.Sim.keys store ~bucket:"test"
-
-(* Dump all key-value pairs *)
-let data = Awskit_s3.Sim.dump store ~bucket:"test"
-]}
-
-{2 Store configuration}
-
-{!val:Awskit_s3.Sim.create_store} accepts an optional [?config] parameter:
-
-{[
-let store = Awskit_s3.Sim.create_store ~clock
-  ~config:{ max_list_keys = 100 }
-  ()
-]}
-
-[max_list_keys] controls the maximum number of keys returned by [Object.list],
-enabling pagination testing.
-
-{2 Multiple connections}
-
-Multiple connections can share one store — each has its own credentials and
-fault state, but they operate on the same data:
-
-{[
-let store = Awskit_s3.Sim.create_store ~clock ()
-let conn1 = Awskit_s3.Sim.connect store ~credentials:admin_creds
-let conn2 = Awskit_s3.Sim.connect store ~credentials:readonly_creds
-(* conn1 and conn2 see the same buckets and objects *)
-]}
-
-This is useful for testing policy enforcement — different principals with
-different credentials should get different access results.
-
-{1 Connecting to LocalStack or MinIO}
-
-Override the endpoint to point at a local S3-compatible service:
-{[
-(* Eio adapter with custom endpoint *)
-let conn = Awskit_s3_eio.create
-  ~env
-  ~region:"us-east-1"
-  ~credentials
-  ~endpoint:(Awskit_s3.Endpoint.http ~host:"localhost" ~port:4566 ())
-  ()
-in
-
-(* Now all S3 operations go to LocalStack *)
-Awskit_s3_eio.Bucket.create conn ~bucket:"test" ()
-]}
-
-MinIO works the same way, typically on port 9000:
-{[
-let conn = Awskit_s3_lwt_unix.create
-  ~region:"us-east-1"
-  ~credentials
-  ~endpoint:(Awskit_s3.Endpoint.http ~host:"localhost" ~port:9000 ())
-  ()
-|> Result.get_ok
-]}
-
-Pass an explicit {!module:Awskit_s3.Endpoint} when talking to LocalStack,
-MinIO, or another S3-compatible service. Omit [?endpoint] for production AWS
-HTTPS endpoints.
-
-For the Lwt + Unix adapter, omitted arguments are read from standard AWS
-environment variables by [awskit.unix]: [AWS_ACCESS_KEY_ID],
-[AWS_SECRET_ACCESS_KEY], optional [AWS_SESSION_TOKEN], [AWS_REGION], and
-[AWS_DEFAULT_REGION]. Endpoint overrides remain explicit.
+[Sim.Response_lost] is modeled as a body-read failure. [Sim.Slow_down],
+[Sim.Internal_error], and [Sim.Connection_reset] fail object operations before
+mutation. Multipart simulator semantics and object version history are still
+explicitly deferred.

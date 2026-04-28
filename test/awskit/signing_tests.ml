@@ -1,9 +1,13 @@
 (** Property-based tests for Awskit.Signing. *)
 
 module Signing = Awskit.Signing
+module Payload_hash = Awskit.Body.Payload_hash
 
 let creds =
-  Awskit.Credentials.make ~access_key_id:"AKID" ~secret_access_key:"SECRET" ()
+  Awskit.Credentials.create_exn ~access_key_id:"AKID"
+    ~secret_access_key:"SECRET" ()
+
+let region = Awskit.Region.of_string_exn "us-east-1"
 
 let fixed_time =
   Ptime.of_date_time ((2026, 1, 15), ((12, 0, 0), 0))
@@ -134,10 +138,11 @@ let test_sign_deterministic =
     QCheck.(pair string string)
     (fun (path, payload) ->
       let sign () =
-        Signing.sign_request ~credentials:creds ~region:"us-east-1"
-          ~service:"s3" ~meth:"GET" ~path:("/" ^ path) ~query:""
+        Signing.sign_request_exn ~credentials:creds ~region ~service:"s3"
+          ~method_:`GET ~path:("/" ^ path) ~query:""
           ~headers:[ ("host", "s3.amazonaws.com") ]
-          ~payload ~now:fixed_time
+          ~payload_hash:(Payload_hash.sha256_of_string payload)
+          ~now:fixed_time
       in
       let r1 = sign () in
       let r2 = sign () in
@@ -152,10 +157,11 @@ let test_sign_has_required_headers =
     QCheck.(pair string string)
     (fun (path, payload) ->
       let result =
-        Signing.sign_request ~credentials:creds ~region:"us-east-1"
-          ~service:"s3" ~meth:"GET" ~path:("/" ^ path) ~query:""
+        Signing.sign_request_exn ~credentials:creds ~region ~service:"s3"
+          ~method_:`GET ~path:("/" ^ path) ~query:""
           ~headers:[ ("host", "s3.amazonaws.com") ]
-          ~payload ~now:fixed_time
+          ~payload_hash:(Payload_hash.sha256_of_string payload)
+          ~now:fixed_time
       in
       let lower_keys =
         List.map (fun (k, _) -> String.lowercase_ascii k) result.headers
@@ -168,10 +174,11 @@ let test_sign_signature_is_hex =
   QCheck.Test.make ~count:500 ~name:"signature is 64 hex chars" QCheck.string
     (fun payload ->
       let result =
-        Signing.sign_request ~credentials:creds ~region:"us-east-1"
-          ~service:"s3" ~meth:"GET" ~path:"/bucket/key" ~query:""
+        Signing.sign_request_exn ~credentials:creds ~region ~service:"s3"
+          ~method_:`GET ~path:"/bucket/key" ~query:""
           ~headers:[ ("host", "s3.amazonaws.com") ]
-          ~payload ~now:fixed_time
+          ~payload_hash:(Payload_hash.sha256_of_string payload)
+          ~now:fixed_time
       in
       let auth =
         List.assoc "authorization"
@@ -204,10 +211,11 @@ let test_sign_different_payloads =
     (fun (p1, p2) ->
       QCheck.assume (not (String.equal p1 p2));
       let sign payload =
-        Signing.sign_request ~credentials:creds ~region:"us-east-1"
-          ~service:"s3" ~meth:"GET" ~path:"/bucket/key" ~query:""
+        Signing.sign_request_exn ~credentials:creds ~region ~service:"s3"
+          ~method_:`GET ~path:"/bucket/key" ~query:""
           ~headers:[ ("host", "s3.amazonaws.com") ]
-          ~payload ~now:fixed_time
+          ~payload_hash:(Payload_hash.sha256_of_string payload)
+          ~now:fixed_time
       in
       let get_auth h =
         List.assoc "authorization"

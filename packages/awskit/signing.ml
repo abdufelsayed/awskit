@@ -1,3 +1,4 @@
+module Aws_error = Error
 open Base
 
 type signed_headers = {
@@ -12,12 +13,6 @@ let ptime_to_date_time (t : Ptime.t) =
   (datestamp, amz_date)
 
 let sha256_hex s = Digestif.SHA256.(digest_string s |> to_hex)
-
-let hmac_sha256 ~key data =
-  Digestif.SHA256.(hmac_string ~key data |> to_raw_string)
-
-let signing_key ~credentials ~datestamp ~region ~service =
-  Credentials.signing_key credentials ~datestamp ~region ~service
 
 let uri_encode ?(encode_slash = true) s =
   let buf = Buffer.create (String.length s) in
@@ -36,7 +31,7 @@ let parse_raw_query query =
     |> List.filter ~f:(fun piece -> not (String.is_empty piece))
     |> List.map ~f:(fun pair ->
         match String.lsplit2 pair ~on:'=' with
-        | Some (k, v) -> (k, [ v ])
+        | Some (key, value) -> (key, [ value ])
         | None -> (pair, [ "" ]))
 
 let canonical_query_params params =
@@ -46,11 +41,12 @@ let canonical_query_params params =
         | [] -> [ (key, "") ]
         | values -> List.map values ~f:(fun value -> (key, value)))
     |> List.map ~f:(fun (key, value) -> (uri_encode key, uri_encode value))
-    |> List.sort ~compare:(fun (k1, v1) (k2, v2) ->
-        let c = String.compare k1 k2 in
-        if c <> 0 then c else String.compare v1 v2)
+    |> List.sort ~compare:(fun (key_a, value_a) (key_b, value_b) ->
+        let key_compare = String.compare key_a key_b in
+        if key_compare <> 0 then key_compare else String.compare value_a value_b)
   in
-  String.concat ~sep:"&" (List.map pairs ~f:(fun (k, v) -> k ^ "=" ^ v))
+  String.concat ~sep:"&"
+    (List.map pairs ~f:(fun (key, value) -> key ^ "=" ^ value))
 
 let canonical_query query = canonical_query_params (parse_raw_query query)
 
@@ -64,16 +60,17 @@ let canonicalize_headers headers =
   let grouped =
     List.map headers ~f:(fun (key, value) ->
         (String.lowercase key, normalize_header_value value))
-    |> List.sort ~compare:(fun (k1, _) (k2, _) -> String.compare k1 k2)
-    |> List.group ~break:(fun (k1, _) (k2, _) -> not (String.equal k1 k2))
+    |> List.sort ~compare:(fun (key_a, _) (key_b, _) ->
+        String.compare key_a key_b)
+    |> List.group ~break:(fun (key_a, _) (key_b, _) ->
+        not (String.equal key_a key_b))
   in
   List.map grouped ~f:(function
-    | [] ->
-        invalid_arg "Awskit.Signing.canonicalize_headers: empty header group"
+    | [] -> assert false
     | (key, value) :: rest ->
         (key, String.concat ~sep:"," (value :: List.map rest ~f:snd)))
 
-let require_host_header headers =
+let validate_host_header headers =
   let hosts =
     List.filter_map headers ~f:(fun (key, value) ->
         if String.Caseless.equal key "host" then
@@ -81,19 +78,25 @@ let require_host_header headers =
         else None)
   in
   match hosts with
-  | [] -> invalid_arg "Awskit.Signing.sign_request: missing host header"
+  | [] ->
+      Error
+        (Aws_error.validation ~field:"host"
+           "signing requires exactly one host header")
   | [ host ] when String.is_empty host ->
-      invalid_arg "Awskit.Signing.sign_request: host header is empty"
-  | [ _host ] -> ()
-  | _ -> invalid_arg "Awskit.Signing.sign_request: duplicate host header"
+      Error (Aws_error.validation ~field:"host" "host header is empty")
+  | [ _host ] -> Ok ()
+  | _ ->
+      Error
+        (Aws_error.validation ~field:"host"
+           "signing requires exactly one host header")
 
-let sign_request_params ~credentials ~region ~service ~meth ~path ~query_params
-    ~headers ~payload ~now =
+let sign_request_params ~credentials ~region ~service ~method_ ~path
+    ~query_params ~headers ~payload_hash ~now =
   let datestamp, amz_date = ptime_to_date_time now in
-  let payload_hash = sha256_hex payload in
+  let payload_hash_header = Body.Payload_hash.to_header_value payload_hash in
   let base_headers =
     ("x-amz-date", amz_date)
-    :: ("x-amz-content-sha256", payload_hash)
+    :: ("x-amz-content-sha256", payload_hash_header)
     :: headers
   in
   let base_headers =
@@ -101,46 +104,72 @@ let sign_request_params ~credentials ~region ~service ~meth ~path ~query_params
     | Some token -> ("x-amz-security-token", token) :: base_headers
     | None -> base_headers
   in
-  require_host_header base_headers;
-  let sorted_headers = canonicalize_headers base_headers in
-  let signed_headers_str =
-    String.concat ~sep:";" (List.map sorted_headers ~f:fst)
-  in
-  let canonical_headers =
-    String.concat
-      (List.map sorted_headers ~f:(fun (k, v) -> k ^ ":" ^ v ^ "\n"))
-  in
-  let canonical_request =
-    String.concat ~sep:"\n"
-      [
-        meth;
-        uri_encode ~encode_slash:false path;
-        canonical_query_params query_params;
-        canonical_headers;
-        signed_headers_str;
-        payload_hash;
-      ]
-  in
-  let scope =
-    String.concat ~sep:"/" [ datestamp; region; service; "aws4_request" ]
-  in
-  let string_to_sign =
-    String.concat ~sep:"\n"
-      [ "AWS4-HMAC-SHA256"; amz_date; scope; sha256_hex canonical_request ]
-  in
-  let signing_key = signing_key ~credentials ~datestamp ~region ~service in
-  let signature =
-    Digestif.SHA256.(hmac_string ~key:signing_key string_to_sign |> to_hex)
-  in
-  let authorization =
-    Fmt.str "AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s"
-      (Credentials.access_key_id credentials)
-      scope signed_headers_str signature
-  in
-  let final_headers = ("authorization", authorization) :: base_headers in
-  { headers = final_headers; signed_headers_str }
+  match validate_host_header base_headers with
+  | Error _ as error -> error
+  | Ok () ->
+      let sorted_headers = canonicalize_headers base_headers in
+      let signed_headers_str =
+        String.concat ~sep:";" (List.map sorted_headers ~f:fst)
+      in
+      let canonical_headers =
+        String.concat
+          (List.map sorted_headers ~f:(fun (key, value) ->
+               key ^ ":" ^ value ^ "\n"))
+      in
+      let canonical_request =
+        String.concat ~sep:"\n"
+          [
+            Request.Method.to_string method_;
+            uri_encode ~encode_slash:false path;
+            canonical_query_params query_params;
+            canonical_headers;
+            signed_headers_str;
+            payload_hash_header;
+          ]
+      in
+      let scope =
+        String.concat ~sep:"/"
+          [ datestamp; Region.to_string region; service; "aws4_request" ]
+      in
+      let string_to_sign =
+        String.concat ~sep:"\n"
+          [ "AWS4-HMAC-SHA256"; amz_date; scope; sha256_hex canonical_request ]
+      in
+      let signing_key =
+        Credentials.signing_key credentials ~datestamp ~region ~service
+      in
+      let signature =
+        Digestif.SHA256.(hmac_string ~key:signing_key string_to_sign |> to_hex)
+      in
+      let authorization =
+        Fmt.str
+          "AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s"
+          (Credentials.access_key_id credentials)
+          scope signed_headers_str signature
+      in
+      Ok
+        {
+          headers = ("authorization", authorization) :: base_headers;
+          signed_headers_str;
+        }
 
-let sign_request ~credentials ~region ~service ~meth ~path ~query ~headers
-    ~payload ~now =
-  sign_request_params ~credentials ~region ~service ~meth ~path
-    ~query_params:(parse_raw_query query) ~headers ~payload ~now
+let result_exn = function
+  | Ok value -> value
+  | Error error -> invalid_arg (Aws_error.to_string_hum error)
+
+let sign_request_params_exn ~credentials ~region ~service ~method_ ~path
+    ~query_params ~headers ~payload_hash ~now =
+  result_exn
+    (sign_request_params ~credentials ~region ~service ~method_ ~path
+       ~query_params ~headers ~payload_hash ~now)
+
+let sign_request ~credentials ~region ~service ~method_ ~path ~query ~headers
+    ~payload_hash ~now =
+  sign_request_params ~credentials ~region ~service ~method_ ~path
+    ~query_params:(parse_raw_query query) ~headers ~payload_hash ~now
+
+let sign_request_exn ~credentials ~region ~service ~method_ ~path ~query
+    ~headers ~payload_hash ~now =
+  result_exn
+    (sign_request ~credentials ~region ~service ~method_ ~path ~query ~headers
+       ~payload_hash ~now)

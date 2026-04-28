@@ -1,0 +1,304 @@
+open Awskit_s3_common
+
+module Etag = struct
+  type t = string
+
+  let of_string value =
+    if value = "" then invalid ~field:"etag" "etag must be non-empty"
+    else if has_ctl_or_del value then
+      invalid ~field:"etag" "etag contains control characters"
+    else Ok value
+
+  let of_string_exn value = result_exn (of_string value)
+  let to_string value = value
+  let pp fmt value = Format.pp_print_string fmt value
+  let equal = String.equal
+end
+
+module Version_id = struct
+  type t = string
+
+  let of_string value =
+    if value = "" then
+      invalid ~field:"version_id" "version id must be non-empty"
+    else if has_ctl_or_del value then
+      invalid ~field:"version_id" "version id contains control characters"
+    else Ok value
+
+  let of_string_exn value = result_exn (of_string value)
+  let to_string value = value
+  let pp fmt value = Format.pp_print_string fmt value
+  let equal = String.equal
+end
+
+module Checksum = struct
+  type algorithm = [ `CRC32 | `CRC32C | `CRC64NVME | `SHA1 | `SHA256 ]
+  type request = { algorithm : algorithm; value : string option }
+  type response = { algorithm : algorithm; value : string }
+end
+
+module Encryption = struct
+  type kms = { key_id : string option; bucket_key_enabled : bool option }
+  type request = [ `AES256 | `Aws_kms of kms ]
+  type response = [ `AES256 | `Aws_kms of kms | `Unknown of string ]
+end
+
+module Etag_condition = struct
+  type t = Any | Etag of Etag.t
+
+  let any = Any
+  let etag etag = Etag etag
+end
+
+module Preconditions = struct
+  module Write = struct
+    type t = {
+      if_match : Etag_condition.t option;
+      if_none_match : Etag_condition.t option;
+    }
+
+    let none = { if_match = None; if_none_match = None }
+    let if_absent = { none with if_none_match = Some Etag_condition.Any }
+    let if_etag etag = { none with if_match = Some (Etag_condition.Etag etag) }
+  end
+
+  module Read = struct
+    type t = {
+      if_match : Etag_condition.t option;
+      if_none_match : Etag_condition.t option;
+      if_modified_since : Ptime.t option;
+      if_unmodified_since : Ptime.t option;
+    }
+
+    let none =
+      {
+        if_match = None;
+        if_none_match = None;
+        if_modified_since = None;
+        if_unmodified_since = None;
+      }
+  end
+
+  module Delete = struct
+    type t = {
+      if_match : Etag_condition.t option;
+      if_match_last_modified_time : Ptime.t option;
+      if_match_size : int64 option;
+    }
+
+    let none =
+      {
+        if_match = None;
+        if_match_last_modified_time = None;
+        if_match_size = None;
+      }
+
+    let if_etag etag = { none with if_match = Some (Etag_condition.Etag etag) }
+  end
+
+  module Copy_source = struct
+    type t = {
+      if_match : Etag_condition.t option;
+      if_none_match : Etag_condition.t option;
+      if_modified_since : Ptime.t option;
+      if_unmodified_since : Ptime.t option;
+    }
+
+    let none =
+      {
+        if_match = None;
+        if_none_match = None;
+        if_modified_since = None;
+        if_unmodified_since = None;
+      }
+  end
+end
+
+module Put = struct
+  type options = {
+    content_type : string option;
+    metadata : Metadata.t;
+    storage_class : Storage_class.t option;
+    tags : Tag.t list;
+    cache_control : string option;
+    content_encoding : string option;
+    content_disposition : string option;
+    preconditions : Preconditions.Write.t;
+    checksum : Checksum.request option;
+    server_side_encryption : Encryption.request option;
+  }
+
+  type result = {
+    etag : Etag.t option;
+    version_id : Version_id.t option;
+    checksum : Checksum.response option;
+    request : Awskit.Response.t;
+  }
+
+  let default_options =
+    {
+      content_type = None;
+      metadata = [];
+      storage_class = None;
+      tags = [];
+      cache_control = None;
+      content_encoding = None;
+      content_disposition = None;
+      preconditions = Preconditions.Write.none;
+      checksum = None;
+      server_side_encryption = None;
+    }
+end
+
+module Get = struct
+  type options = {
+    range : Range.t option;
+    preconditions : Preconditions.Read.t;
+    version_id : Version_id.t option;
+  }
+
+  type info = {
+    etag : Etag.t option;
+    content_type : string option;
+    content_length : int64 option;
+    last_modified : Ptime.t option;
+    metadata : Metadata.t;
+    storage_class : Storage_class.t option;
+    version_id : Version_id.t option;
+    checksum : Checksum.response option;
+    server_side_encryption : Encryption.response option;
+    request : Awskit.Response.t;
+  }
+
+  let default_options =
+    { range = None; preconditions = Preconditions.Read.none; version_id = None }
+end
+
+module Head = struct
+  type options = {
+    preconditions : Preconditions.Read.t;
+    version_id : Version_id.t option;
+  }
+
+  type info = Get.info
+
+  let default_options =
+    { preconditions = Preconditions.Read.none; version_id = None }
+end
+
+module Delete = struct
+  type options = {
+    preconditions : Preconditions.Delete.t;
+    version_id : Version_id.t option;
+  }
+
+  type result = {
+    delete_marker : bool option;
+    version_id : Version_id.t option;
+    request : Awskit.Response.t;
+  }
+
+  let default_options =
+    { preconditions = Preconditions.Delete.none; version_id = None }
+end
+
+module Delete_many = struct
+  type object_ = {
+    key : string;
+    version_id : Version_id.t option;
+    etag : Etag.t option;
+    last_modified_time : Ptime.t option;
+    size : int64 option;
+  }
+
+  type deleted = {
+    key : string;
+    version_id : Version_id.t option;
+    delete_marker : bool option;
+  }
+
+  type item_error = { key : string; code : string; message : string option }
+
+  type result = {
+    deleted : deleted list;
+    errors : item_error list;
+    request : Awskit.Response.t;
+  }
+end
+
+module Copy = struct
+  type metadata_directive = [ `Copy | `Replace of Metadata.t ]
+
+  type options = {
+    source_preconditions : Preconditions.Copy_source.t;
+    metadata : metadata_directive option;
+    storage_class : Storage_class.t option;
+    tags : Tag.t list option;
+    checksum : Checksum.request option;
+    server_side_encryption : Encryption.request option;
+  }
+
+  type result = {
+    etag : Etag.t option;
+    last_modified : Ptime.t option;
+    version_id : Version_id.t option;
+    copy_source_version_id : Version_id.t option;
+    request : Awskit.Response.t;
+  }
+
+  let default_options =
+    {
+      source_preconditions = Preconditions.Copy_source.none;
+      metadata = None;
+      storage_class = None;
+      tags = None;
+      checksum = None;
+      server_side_encryption = None;
+    }
+end
+
+module List = struct
+  type options = {
+    prefix : string option;
+    delimiter : string option;
+    max_keys : int option;
+    start_after : string option;
+    continuation_token : string option;
+  }
+
+  type object_summary = {
+    key : string;
+    size : int64 option;
+    etag : Etag.t option;
+    last_modified : Ptime.t option;
+    storage_class : Storage_class.t option;
+    owner : string option;
+    checksums : Checksum.response list;
+  }
+
+  type page = {
+    bucket : string option;
+    prefix : string option;
+    delimiter : string option;
+    objects : object_summary list;
+    common_prefixes : string list;
+    key_count : int option;
+    is_truncated : bool;
+    continuation_token : string option;
+    next_continuation_token : string option;
+    request : Awskit.Response.t;
+  }
+
+  let default_options =
+    {
+      prefix = None;
+      delimiter = None;
+      max_keys = None;
+      start_after = None;
+      continuation_token = None;
+    }
+end
+
+module Tagging = struct
+  type result = { tags : Tag.t list; request : Awskit.Response.t }
+end

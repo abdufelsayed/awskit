@@ -1,36 +1,39 @@
-(** Lwt adapter functor. Compose {!module:Awskit_s3} with {!module:Awskit_lwt}.
+(** Lwt S3 adapter functor.
 
-    Most Unix users should use {!module:Awskit_s3_lwt_unix} directly.
-
-    {[
-    module S3 = Awskit_s3_lwt.Make (Cohttp_lwt_unix.Client)
-
-    let conn =
-      S3.create ~region:"us-east-1"
-        ~credentials:
-          (Awskit_s3.Credentials.make ~access_key_id:"..."
-             ~secret_access_key:"..." ())
-        ~clock:Ptime_clock.now ()
-    ]} *)
+    This package exposes streaming primitive operations and in-memory buffer
+    helpers. Unix local-path helpers are provided by [awskit-s3.lwt_unix]. *)
 
 module Make (Client : Cohttp_lwt.S.Client) : sig
   type t
-  (** S3 connection handle. *)
 
-  (** Underlying Lwt runtime module. *)
   module Runtime :
-    Awskit.Runtime.S with type 'a t = 'a Lwt.t and type connection = t
+    Awskit_s3.RUNTIME with type 'a t = 'a Lwt.t and type connection = t
 
   val create :
     ?ctx:Client.ctx ->
-    ?endpoint:Awskit_s3.Endpoint.t ->
-    region:string ->
-    credentials:Awskit_s3.Credentials.t ->
+    ?provider:Awskit_s3.Provider.t ->
+    region:Awskit.Region.t ->
+    credentials:Awskit.Credentials.t ->
     clock:(unit -> Ptime.t) ->
-    ?max_response_body_bytes:int ->
     unit ->
     t
-  (** Create an S3 connection for the given Lwt HTTP client. *)
 
-  include module type of Awskit_s3.Make (Runtime)
+  module Object :
+    Awskit_s3.OBJECT
+      with type connection := t
+       and type 'a io := 'a Lwt.t
+       and type upload_body := Runtime.upload_body
+       and type download_reader := Runtime.download_reader
+
+  module Bucket :
+    Awskit_s3.BUCKET with type connection := t and type 'a io := 'a Lwt.t
+
+  module Multipart :
+    Awskit_s3.MULTIPART
+      with type connection := t
+       and type 'a io := 'a Lwt.t
+       and type upload_body := Runtime.upload_body
+
+  module Presigned :
+    Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a Lwt.t
 end

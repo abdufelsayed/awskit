@@ -1,0 +1,60 @@
+open Awskit_s3_core
+
+module type S = sig
+  module R : RUNTIME
+
+  type connection = R.connection
+  type 'a io = 'a R.t
+  type upload_body = R.upload_body
+  type download_reader = R.download_reader
+
+  val bind : 'a io -> ('a -> 'b io) -> 'b io
+  val return : 'a -> 'a io
+  val return_ok : 'a -> ('a, Error.t) result io
+  val return_error : Error.t -> ('a, Error.t) result io
+  val provider : connection -> Provider.t
+
+  val object_request :
+    connection ->
+    bucket:string ->
+    key:string ->
+    (Provider.Request.t, Error.t) result
+
+  val bucket_request :
+    connection ->
+    bucket:string ->
+    suffix:string ->
+    signing_suffix:string ->
+    (Provider.Request.t, Error.t) result
+
+  val root_request : connection -> (Provider.Request.t, Error.t) result
+
+  val read_body :
+    download_reader -> max_size:int64 -> (string, Error.t) result io
+
+  val read_download_body :
+    R.download_body -> max_size:int64 -> (string, Error.t) result io
+
+  val error_response :
+    Awskit.Response.t -> R.download_body -> ('a, Error.t) result io
+
+  val call :
+    connection ->
+    method_:Awskit.Request.Method.t ->
+    request:Provider.Request.t ->
+    query:(string * string list) list ->
+    headers:(string * string) list ->
+    payload_hash:Awskit.Body.Payload_hash.t ->
+    upload_body ->
+    (Awskit.Response.t * R.download_body, Error.t) result io
+
+  val call_empty :
+    connection ->
+    method_:Awskit.Request.Method.t ->
+    request:Provider.Request.t ->
+    query:(string * string list) list ->
+    headers:(string * string) list ->
+    (Awskit.Response.t * R.download_body, Error.t) result io
+
+  val content_md5 : string -> string
+end

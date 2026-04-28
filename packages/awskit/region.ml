@@ -1,4 +1,6 @@
+module Aws_error = Error
 open Base
+module Format = Stdlib.Format
 
 type t = string
 
@@ -8,11 +10,23 @@ let has_ctl_or_del s =
       code < 0x20 || code = 0x7F)
 
 let of_string region =
-  let region = String.strip region in
   if String.is_empty region then
-    Error (`Invalid_request "AWS region must be non-empty")
+    Error (Aws_error.validation ~field:"region" "AWS region must be non-empty")
+  else if not (String.equal region (String.strip region)) then
+    Error
+      (Aws_error.validation ~field:"region"
+         "AWS region must not have leading/trailing whitespace")
   else if has_ctl_or_del region then
-    Error (`Invalid_request "AWS region contains control characters")
+    Error
+      (Aws_error.validation ~field:"region"
+         "AWS region contains control characters")
   else Ok region
 
+let of_string_exn region =
+  match of_string region with
+  | Ok region -> region
+  | Error error -> invalid_arg (Aws_error.to_string_hum error)
+
 let to_string t = t
+let pp formatter t = Format.pp_print_string formatter t
+let equal = String.equal

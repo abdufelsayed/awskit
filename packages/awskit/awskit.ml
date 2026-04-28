@@ -1,10 +1,11 @@
-(** Pure AWS infrastructure — signing, credentials, endpoint, error types, HTTP
-    request/response types, and the Runtime module type. No IO. *)
+(** Pure AWS infrastructure: signing, credentials, endpoints, structured errors,
+    body metadata, HTTP metadata, and runtime contracts. No IO. *)
 
 module Credentials = Credentials
 module Region = Region
 module Endpoint = Endpoint
 module Error = Error
+module Body = Body
 module Signing = Signing
 module Request = Request
 module Response = Response
