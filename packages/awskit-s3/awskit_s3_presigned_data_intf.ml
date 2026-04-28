@@ -1,6 +1,7 @@
 open Awskit_s3_common
 
 open struct
+  module Multipart = Awskit_s3_multipart
   module Object = Awskit_s3_object
 end
 
@@ -42,6 +43,16 @@ module type PRESIGNED_DATA = sig
       response_content_type : string option;
       response_content_disposition : string option;
       version_id : Object.Version_id.t option;
+      headers : (string * string) list;
+    }
+
+    val default_options : options
+  end
+
+  module Upload_part : sig
+    type options = {
+      expires_in : Ptime.Span.t option;
+      checksum : Object.Checksum.request option;
       headers : (string * string) list;
     }
 
@@ -101,6 +112,22 @@ module type PRESIGNED_DATA = sig
     bucket:string ->
     key:string ->
     ?expires_in:Ptime.Span.t ->
+    unit ->
+    (result, Error.t) Stdlib.result
+
+  val upload_part :
+    region:Awskit.Region.t ->
+    credentials:Awskit.Credentials.t ->
+    now:Ptime.t ->
+    ?endpoint:Awskit.Endpoint.t ->
+    ?addressing_style:addressing_style ->
+    ?endpoint_variant:endpoint_variant ->
+    ?scheme:Awskit.Endpoint.Scheme.t ->
+    bucket:string ->
+    key:string ->
+    upload_id:Multipart.Upload_id.t ->
+    part_number:int ->
+    ?options:Upload_part.options ->
     unit ->
     (result, Error.t) Stdlib.result
 end

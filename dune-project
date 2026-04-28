@@ -54,6 +54,7 @@
   lwt
   cohttp-lwt
   cohttp-lwt-unix
+  yojson
   uri))
 
 (package

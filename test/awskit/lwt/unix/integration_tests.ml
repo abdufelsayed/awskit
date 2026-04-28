@@ -17,6 +17,9 @@ let check_access_key label expected credentials =
     label expected
     (Awskit.Credentials.access_key_id credentials)
 
+let resolve_provider provider =
+  Lwt_main.run (Awskit_lwt_unix.Credentials.Provider.resolve provider)
+
 let credentials_or_fail label = function
   | Ok credentials -> credentials
   | Error error -> Alcotest.failf "%s: %a" label Awskit.Error.pp error
@@ -170,6 +173,147 @@ aws_secret_access_key = FILE_SK
   | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
   | Ok _ -> Alcotest.fail "expected partial env to fail"
 
+let metadata_json ?(access_key_id = "META_AK")
+    ?(expiration = "2030-01-01T00:00:00Z") () =
+  Printf.sprintf
+    {|{"Code":"Success","AccessKeyId":"%s","SecretAccessKey":"META_SK","Token":"META_TOKEN","Expiration":"%s"}|}
+    access_key_id expiration
+
+let test_container_credentials_provider () =
+  let calls = ref [] in
+  let getenv =
+    getenv_of_assoc
+      [
+        ("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "/v2/credentials/task-role");
+      ]
+  in
+  let http_call ~meth ~headers uri =
+    calls := (meth, headers, Uri.to_string uri) :: !calls;
+    Lwt.return_ok
+      {
+        Awskit_lwt_unix.Credentials.status = 200;
+        headers = [];
+        body = metadata_json ~access_key_id:"TASK_AK" ();
+      }
+  in
+  let provider =
+    Awskit_lwt_unix.Credentials.container_provider ~getenv ~http_call ()
+  in
+  let credentials =
+    resolve_provider provider |> credentials_or_fail "container"
+  in
+  check_access_key "container access key" "TASK_AK" credentials;
+  Alcotest.(check int) "one metadata call" 1 (List.length !calls);
+  match !calls with
+  | [ (`GET, [], uri) ] ->
+      Alcotest.(check string)
+        "container uri" "http://169.254.170.2/v2/credentials/task-role" uri
+  | _ -> Alcotest.fail "unexpected container metadata request"
+
+let test_container_full_uri_rejects_untrusted_http () =
+  let getenv =
+    getenv_of_assoc
+      [ ("AWS_CONTAINER_CREDENTIALS_FULL_URI", "http://example.com/creds") ]
+  in
+  let http_call ~meth:_ ~headers:_ _uri =
+    Alcotest.fail "metadata HTTP call should not be attempted"
+  in
+  let provider =
+    Awskit_lwt_unix.Credentials.container_provider ~getenv ~http_call ()
+  in
+  match resolve_provider provider with
+  | Error (Awskit.Error.Validation _) -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "expected untrusted HTTP endpoint to fail"
+
+let test_instance_metadata_provider_uses_imdsv2 () =
+  let calls = ref [] in
+  let http_call ~meth ~headers uri =
+    let uri_string = Uri.to_string uri in
+    calls := (meth, headers, uri_string) :: !calls;
+    match (meth, Uri.path uri) with
+    | `PUT, "/latest/api/token" ->
+        Lwt.return_ok
+          {
+            Awskit_lwt_unix.Credentials.status = 200;
+            headers = [];
+            body = "TOKEN";
+          }
+    | `GET, "/latest/meta-data/iam/security-credentials/" ->
+        Alcotest.(check (option string))
+          "role request token" (Some "TOKEN")
+          (List.Assoc.find headers "X-aws-ec2-metadata-token"
+             ~equal:String.equal);
+        Lwt.return_ok
+          {
+            Awskit_lwt_unix.Credentials.status = 200;
+            headers = [];
+            body = "instance-role\n";
+          }
+    | `GET, "/latest/meta-data/iam/security-credentials/instance-role" ->
+        Alcotest.(check (option string))
+          "credential request token" (Some "TOKEN")
+          (List.Assoc.find headers "X-aws-ec2-metadata-token"
+             ~equal:String.equal);
+        Lwt.return_ok
+          {
+            Awskit_lwt_unix.Credentials.status = 200;
+            headers = [];
+            body = metadata_json ~access_key_id:"IMDS_AK" ();
+          }
+    | _ ->
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"metadata"
+             ("unexpected request " ^ uri_string))
+  in
+  let provider =
+    Awskit_lwt_unix.Credentials.instance_metadata_provider ~http_call ()
+  in
+  let credentials = resolve_provider provider |> credentials_or_fail "imds" in
+  check_access_key "imds access key" "IMDS_AK" credentials;
+  Alcotest.(check int) "imds call count" 3 (List.length !calls)
+
+let ptime_of_rfc3339 value =
+  match Ptime.of_rfc3339 ~strict:false value with
+  | Ok (time, _, _) -> time
+  | Error _ -> Alcotest.failf "invalid test timestamp %S" value
+
+let test_metadata_provider_refreshes_before_expiration () =
+  let now = ref Ptime.epoch in
+  let calls = ref 0 in
+  let getenv =
+    getenv_of_assoc
+      [ ("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "/credentials") ]
+  in
+  let http_call ~meth:_ ~headers:_ _uri =
+    Int.incr calls;
+    Lwt.return_ok
+      {
+        Awskit_lwt_unix.Credentials.status = 200;
+        headers = [];
+        body =
+          metadata_json
+            ~access_key_id:(Printf.sprintf "AK_%d" !calls)
+            ~expiration:"1970-01-01T01:00:00Z" ();
+      }
+  in
+  let provider =
+    Awskit_lwt_unix.Credentials.container_provider ~getenv ~http_call
+      ~clock:(fun () -> !now)
+      ()
+  in
+  let first = resolve_provider provider |> credentials_or_fail "first" in
+  let second = resolve_provider provider |> credentials_or_fail "second" in
+  check_access_key "cached access key" "AK_1" first;
+  check_access_key "still cached access key" "AK_1" second;
+  Alcotest.(check int) "cached call count" 1 !calls;
+  now := ptime_of_rfc3339 "1970-01-01T00:56:00Z";
+  let refreshed =
+    resolve_provider provider |> credentials_or_fail "refreshed"
+  in
+  check_access_key "refreshed access key" "AK_2" refreshed;
+  Alcotest.(check int) "refreshed call count" 2 !calls
+
 let suite () =
   [
     ( "integration:connection",
@@ -186,5 +330,13 @@ let suite () =
           test_default_chain_prefers_env;
         Alcotest.test_case "default chain rejects partial env" `Quick
           test_default_chain_rejects_partial_env;
+        Alcotest.test_case "container credentials provider" `Quick
+          test_container_credentials_provider;
+        Alcotest.test_case "container full uri rejects untrusted http" `Quick
+          test_container_full_uri_rejects_untrusted_http;
+        Alcotest.test_case "instance metadata provider uses imdsv2" `Quick
+          test_instance_metadata_provider_uses_imdsv2;
+        Alcotest.test_case "metadata provider refreshes before expiration"
+          `Quick test_metadata_provider_refreshes_before_expiration;
       ] );
   ]

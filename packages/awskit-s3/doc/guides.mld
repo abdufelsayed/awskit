@@ -339,6 +339,21 @@ Awskit_s3.Presigned.put_object
   ()
 ]}
 
+Multipart direct-upload flows can presign individual [UploadPart] requests
+after [Multipart.create] has produced an upload ID:
+
+{[
+Awskit_s3.Presigned.upload_part
+  ~region
+  ~credentials
+  ~now
+  ~bucket:"my-bucket"
+  ~key:"large.bin"
+  ~upload_id
+  ~part_number:1
+  ()
+]}
+
 Presigned URLs use [UNSIGNED-PAYLOAD] and the same endpoint/addressing options
 as normal operations.
 
@@ -369,6 +384,10 @@ AWS_DEFAULT_REGION
 AWS_PROFILE
 AWS_SHARED_CREDENTIALS_FILE
 AWS_CONFIG_FILE
+AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
+AWS_CONTAINER_CREDENTIALS_FULL_URI
+AWS_CONTAINER_AUTHORIZATION_TOKEN
+AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
 ]}
 
 {[
@@ -376,8 +395,10 @@ Awskit_s3_lwt_unix.create ()
 ]}
 
 The Unix adapters cover static credentials, environment variables, shared AWS
-config files, and named static profiles. ECS/EC2 metadata, web identity, STS
-assume-role, and refreshable credentials remain future work.
+config files, named static profiles, ECS container credentials, and EC2
+instance profile credentials. Metadata credentials are resolved through the
+Lwt-Unix runtime provider and refreshed before expiration. Web identity and STS
+assume-role remain future work.
 
 {1 Errors}
 

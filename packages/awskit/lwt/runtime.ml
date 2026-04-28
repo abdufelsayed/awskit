@@ -11,7 +11,8 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     ctx : Client.ctx option;
     endpoint : Awskit.Endpoint.t option;
     region : Awskit.Region.t;
-    credentials : Awskit.Credentials.t;
+    credentials_provider :
+      unit -> (Awskit.Credentials.t, Awskit.Error.t) Result.t Lwt.t;
     clock : unit -> Ptime.t;
     retry_policy : Awskit.Retry.t;
     sleep : Ptime.Span.t -> unit Lwt.t;
@@ -41,20 +42,27 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     Option.iter endpoint ~f:(fun endpoint ->
         ignore (Awskit.Endpoint.to_url_prefix endpoint))
 
-  let create ?ctx ?endpoint ~region ~credentials ~clock
-      ?(retry_policy = Awskit.Retry.default) ?(sleep = fun _ -> Lwt.return_unit)
+  let create_with_credentials_provider ?ctx ?endpoint ~region
+      ~credentials_provider ~clock ?(retry_policy = Awskit.Retry.default)
+      ?(sleep = fun _ -> Lwt.return_unit)
       ?(max_response_body_bytes = default_max_response_body_bytes) () =
     validate_create_args ?endpoint ~max_response_body_bytes ();
     {
       ctx;
       endpoint;
       region;
-      credentials;
+      credentials_provider;
       clock;
       retry_policy;
       sleep;
       max_response_body_bytes;
     }
+
+  let create ?ctx ?endpoint ~region ~credentials ~clock ?retry_policy ?sleep
+      ?max_response_body_bytes () =
+    create_with_credentials_provider ?ctx ?endpoint ~region
+      ~credentials_provider:(fun () -> Lwt.return_ok credentials)
+      ~clock ?retry_policy ?sleep ?max_response_body_bytes ()
 
   (* URI construction *)
 
@@ -171,7 +179,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
     let now c = c.clock ()
     let region c = c.region
-    let credentials c = Lwt.return_ok c.credentials
+    let credentials c = c.credentials_provider ()
     let endpoint c = c.endpoint
     let retry_policy c = c.retry_policy
     let sleep c span = c.sleep span

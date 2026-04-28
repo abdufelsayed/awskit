@@ -45,6 +45,10 @@ AWS_DEFAULT_REGION
 AWS_PROFILE
 AWS_SHARED_CREDENTIALS_FILE
 AWS_CONFIG_FILE
+AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
+AWS_CONTAINER_CREDENTIALS_FULL_URI
+AWS_CONTAINER_AUTHORIZATION_TOKEN
+AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
 ]}
 
 [awskit.unix] also reads static shared AWS profiles from
@@ -52,10 +56,11 @@ AWS_CONFIG_FILE
 [AWS_PROFILE], defaulting to ["default"]. Environment credentials win over
 profile files when present.
 
-The current credential support covers static credentials, environment
-variables, shared AWS config files, and named static profiles. Process
-providers, web identity, ECS/EC2 metadata, STS assume-role, and refreshable
-credentials are future work.
+[awskit.lwt_unix] extends the local static sources with refreshable ECS
+container credentials and EC2 instance profile credentials. The EC2 provider
+uses IMDSv2 when available and refreshes metadata credentials before
+expiration. Process providers, web identity, and STS assume-role profiles
+remain future work.
 
 {1 Regions And Endpoints}
 

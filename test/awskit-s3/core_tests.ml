@@ -143,6 +143,57 @@ let test_presigned_put_checksum_headers () =
     "signed checksum value" true
     (List.mem "x-amz-checksum-sha1" signed_headers)
 
+let test_presigned_upload_part () =
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let checksum : Object.Checksum.request =
+    { Object.Checksum.algorithm = `SHA256; value = Some "provided-sha256" }
+  in
+  let options =
+    { Presigned.Upload_part.default_options with checksum = Some checksum }
+  in
+  let result =
+    Presigned.upload_part
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"large.bin"
+      ~upload_id ~part_number:7 ~options ()
+    |> ok_or_fail "presigned upload part"
+  in
+  Alcotest.(check string)
+    "method" "PUT"
+    (Awskit.Request.Method.to_string
+       (result.method_ :> Awskit.Request.Method.t));
+  Alcotest.(check (option (list string)))
+    "part number" (Some [ "7" ])
+    (query_param "partNumber" result.url);
+  Alcotest.(check (option (list string)))
+    "upload id" (Some [ "upload-1" ])
+    (query_param "uploadId" result.url);
+  Alcotest.(check (option string))
+    "checksum algorithm header" (Some "SHA256")
+    (header "x-amz-checksum-algorithm" result.headers);
+  Alcotest.(check (option string))
+    "checksum value header" (Some "provided-sha256")
+    (header "x-amz-checksum-sha256" result.headers);
+  let signed_headers =
+    match query_param "X-Amz-SignedHeaders" result.url with
+    | Some [ value ] -> String.split_on_char ';' value
+    | _ -> Alcotest.fail "missing signed headers"
+  in
+  Alcotest.(check bool)
+    "signed checksum algorithm" true
+    (List.mem "x-amz-checksum-algorithm" signed_headers);
+  Alcotest.(check bool)
+    "signed checksum value" true
+    (List.mem "x-amz-checksum-sha256" signed_headers);
+  match
+    Presigned.upload_part
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"large.bin"
+      ~upload_id ~part_number:0 ()
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected invalid part number"
+
 module Recording_runtime = struct
   type response = {
     status : int;
@@ -996,6 +1047,8 @@ let suite =
         Alcotest.test_case "presigned result" `Quick test_presigned_result;
         Alcotest.test_case "presigned put checksum headers" `Quick
           test_presigned_put_checksum_headers;
+        Alcotest.test_case "presigned multipart upload part" `Quick
+          test_presigned_upload_part;
         Alcotest.test_case "endpoint resolution" `Quick test_endpoint_resolution;
         Alcotest.test_case "endpoint variants" `Quick test_endpoint_variants;
         Alcotest.test_case "bucket head request" `Quick test_bucket_head_request;

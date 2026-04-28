@@ -37,4 +37,10 @@ module Make (C : Awskit_s3_operation_context.S) = struct
         Presigned.delete_object_with_endpoint_config ~region:(R.region conn)
           ~credentials ~now:(R.now conn) ~endpoint_config:(endpoint_config conn)
           ~bucket ~key ?expires_in ())
+
+  let upload_part conn ~bucket ~key ~upload_id ~part_number ?options () =
+    with_credentials conn (fun credentials ->
+        Presigned.upload_part_with_endpoint_config ~region:(R.region conn)
+          ~credentials ~now:(R.now conn) ~endpoint_config:(endpoint_config conn)
+          ~bucket ~key ~upload_id ~part_number ?options ())
 end

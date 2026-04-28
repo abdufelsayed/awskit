@@ -521,6 +521,16 @@ module type PRESIGNED = sig
     ?expires_in:Ptime.Span.t ->
     unit ->
     (Presigned.result, Error.t) result io
+
+  val upload_part :
+    connection ->
+    bucket:string ->
+    key:string ->
+    upload_id:Multipart.Upload_id.t ->
+    part_number:int ->
+    ?options:Presigned.Upload_part.options ->
+    unit ->
+    (Presigned.result, Error.t) result io
 end
 
 module type S = sig

@@ -203,6 +203,7 @@ module Presigned :
      and type result = Awskit_s3_presigned.result
      and type Put_object.options = Awskit_s3_presigned.Put_object.options
      and type Get_object.options = Awskit_s3_presigned.Get_object.options
+     and type Upload_part.options = Awskit_s3_presigned.Upload_part.options
 
 module type RUNTIME = Awskit_s3_intf.RUNTIME
 (** Runtime contract required by {!Make}. *)

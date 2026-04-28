@@ -24,6 +24,58 @@ type t
 module Runtime :
   Awskit.Runtime.S with type 'a t = 'a Lwt.t and type connection = t
 
+module Credentials : sig
+  module Provider = Awskit_lwt.Credentials.Provider
+
+  type http_response = {
+    status : int;
+    headers : (string * string) list;
+    body : string;
+  }
+
+  type http_call =
+    meth:Cohttp.Code.meth ->
+    headers:(string * string) list ->
+    Uri.t ->
+    (http_response, Awskit.Error.t) result Lwt.t
+
+  val local_provider :
+    ?getenv:Awskit_unix.Credentials.Env.getenv ->
+    ?home:string ->
+    unit ->
+    Provider.t
+  (** Static AWS environment variables, then shared AWS profile files. *)
+
+  val container_provider :
+    ?getenv:Awskit_unix.Credentials.Env.getenv ->
+    ?http_call:http_call ->
+    ?clock:(unit -> Ptime.t) ->
+    unit ->
+    Provider.t
+  (** ECS/container credential provider. Supports
+      [AWS_CONTAINER_CREDENTIALS_RELATIVE_URI],
+      [AWS_CONTAINER_CREDENTIALS_FULL_URI], [AWS_CONTAINER_AUTHORIZATION_TOKEN],
+      and [AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE]. *)
+
+  val instance_metadata_provider :
+    ?getenv:Awskit_unix.Credentials.Env.getenv ->
+    ?http_call:http_call ->
+    ?clock:(unit -> Ptime.t) ->
+    unit ->
+    Provider.t
+  (** EC2 instance profile credential provider using IMDSv2 when available. *)
+
+  val default_provider :
+    ?getenv:Awskit_unix.Credentials.Env.getenv ->
+    ?home:string ->
+    ?http_call:http_call ->
+    ?clock:(unit -> Ptime.t) ->
+    unit ->
+    Provider.t
+  (** AWS-style Unix credential chain: local static sources, container
+      credentials, then EC2 instance profile credentials. *)
+end
+
 val create :
   ?ctx:Cohttp_lwt_unix.Client.ctx ->
   ?endpoint:Awskit.Endpoint.t ->
@@ -44,7 +96,8 @@ val create :
     @param credentials
       AWS credentials for request signing. If omitted, resolves the
       [awskit.unix] default credential chain: static AWS environment variables,
-      then shared AWS profile files.
+      shared AWS profile files, ECS/container credentials, then EC2 instance
+      profile credentials.
     @param clock Time source for signing timestamps (default: OS clock)
     @param retry_policy
       Retry behavior for retryable AWS errors and transient transport failures

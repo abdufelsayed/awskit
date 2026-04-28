@@ -28,4 +28,10 @@ module Presigned = struct
       ~credentials:conn.credentials ~now:(now conn)
       ~endpoint_config:(Runtime.s3_endpoint_config conn)
       ~bucket ~key ?expires_in ()
+
+  let upload_part conn ~bucket ~key ~upload_id ~part_number ?options () =
+    Presigned.upload_part_with_endpoint_config ~region:(Runtime.region conn)
+      ~credentials:conn.credentials ~now:(now conn)
+      ~endpoint_config:(Runtime.s3_endpoint_config conn)
+      ~bucket ~key ~upload_id ~part_number ?options ()
 end

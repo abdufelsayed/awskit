@@ -47,6 +47,7 @@ depopts: [
   "lwt"
   "cohttp-lwt"
   "cohttp-lwt-unix"
+  "yojson"
   "uri"
 ]
 build: [

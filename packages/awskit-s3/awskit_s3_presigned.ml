@@ -1,4 +1,5 @@
 open Awskit_s3_common
+module Multipart = Awskit_s3_multipart
 module Object = Awskit_s3_object
 module Endpoint_resolver = Awskit_s3_endpoint
 
@@ -59,6 +60,16 @@ module Get_object = struct
     }
 end
 
+module Upload_part = struct
+  type options = {
+    expires_in : Ptime.Span.t option;
+    checksum : Object.Checksum.request option;
+    headers : (string * string) list;
+  }
+
+  let default_options = { expires_in = None; checksum = None; headers = [] }
+end
+
 let default_expires = Ptime.Span.of_int_s 3600
 let max_expires = 604_800
 
@@ -97,6 +108,13 @@ let expires_seconds span =
   | Some seconds when seconds > max_expires ->
       invalid ~field:"expires_in" "expires_in must be <= %d seconds" max_expires
   | Some seconds -> Ok seconds
+
+let validate_part_number part_number =
+  if part_number <= 0 then
+    invalid ~field:"part_number" "part number must be positive"
+  else if part_number > 10_000 then
+    invalid ~field:"part_number" "part number must be <= 10000"
+  else Ok ()
 
 let endpoint_config ?addressing_style ?endpoint_variant ?scheme ?endpoint () =
   Endpoint_resolver.create ?addressing_style ?endpoint_variant ?scheme ?endpoint
@@ -226,6 +244,25 @@ let delete_object ~region ~credentials ~now ?endpoint ?addressing_style
     ?endpoint_variant ?scheme ~bucket ~key ~method_:`DELETE ~headers:[]
     ~query:[] ?expires_in ()
 
+let upload_part_query ~upload_id ~part_number =
+  [
+    ("partNumber", [ string_of_int part_number ]);
+    ("uploadId", [ Multipart.Upload_id.to_string upload_id ]);
+  ]
+
+let upload_part_headers (options : Upload_part.options) =
+  Awskit_s3_headers.checksum_request_headers options.checksum @ options.headers
+
+let upload_part ~region ~credentials ~now ?endpoint ?addressing_style
+    ?endpoint_variant ?scheme ~bucket ~key ~upload_id ~part_number ?options () =
+  let* () = validate_part_number part_number in
+  let options = Option.value ~default:Upload_part.default_options options in
+  generate ~region ~credentials ~now ?endpoint ?addressing_style
+    ?endpoint_variant ?scheme ~bucket ~key ~method_:`PUT
+    ~headers:(upload_part_headers options)
+    ~query:(upload_part_query ~upload_id ~part_number)
+    ?expires_in:options.expires_in ()
+
 let get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
   let options = Option.value ~default:Get_object.default_options options in
@@ -258,3 +295,13 @@ let delete_object_with_endpoint_config ~region ~credentials ~now
     ~endpoint_config ~bucket ~key ?expires_in () =
   generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ~method_:`DELETE ~headers:[] ~query:[] ?expires_in ()
+
+let upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ~upload_id ~part_number ?options () =
+  let* () = validate_part_number part_number in
+  let options = Option.value ~default:Upload_part.default_options options in
+  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ~method_:`PUT
+    ~headers:(upload_part_headers options)
+    ~query:(upload_part_query ~upload_id ~part_number)
+    ?expires_in:options.expires_in ()
