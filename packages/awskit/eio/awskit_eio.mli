@@ -21,7 +21,7 @@ val create :
   ?max_response_body_bytes:int ->
   unit ->
   t
-(** Defaults to AWS HTTPS endpoints. Pass an explicit [endpoint] for LocalStack,
-    MinIO, or other S3-compatible services. [retry_policy] defaults to
+(** Defaults to AWS HTTPS endpoints. Pass an explicit [endpoint] for local test
+    services or custom service endpoints. [retry_policy] defaults to
     {!val:Awskit.Retry.default}. [max_response_body_bytes] defaults to 64 MiB.
 *)

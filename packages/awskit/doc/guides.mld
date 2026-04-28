@@ -80,8 +80,9 @@ let endpoint =
 ]}
 
 Runtime adapters can take endpoint overrides, but service-specific packages
-should usually expose a provider model instead. For S3, prefer
-[Awskit_s3.Provider] through [awskit-s3] adapters.
+usually expose their own endpoint configuration because addressing rules are
+service-specific. For S3, pass endpoint and addressing options directly to the
+[awskit-s3] adapter [create] functions.
 
 {1 Signing}
 
@@ -153,6 +154,8 @@ let retry_policy =
   Awskit.Retry.create_exn
     ~max_attempts:4
     ~base_delay:(Ptime.Span.of_float_s 0.2 |> Option.get)
+    ~max_delay:(Ptime.Span.of_float_s 3.0 |> Option.get)
+    ~jitter:0.5
     ()
 ]}
 

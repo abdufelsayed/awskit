@@ -38,8 +38,8 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     ?max_response_body_bytes:int ->
     unit ->
     t
-  (** [endpoint] overrides the default AWS HTTPS endpoint for LocalStack, MinIO,
-      or other S3-compatible services. [retry_policy] defaults to
+  (** [endpoint] overrides the default AWS HTTPS endpoint for local test
+      services or custom service endpoints. [retry_policy] defaults to
       {!val:Awskit.Retry.default}. [sleep] is used between retries and defaults
       to no delay for custom Lwt backends. [max_response_body_bytes] defaults to
       64 MiB. *)

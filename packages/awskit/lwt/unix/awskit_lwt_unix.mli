@@ -89,7 +89,9 @@ val create :
 (** Create a connection to AWS.
 
     @param ctx Optional Cohttp client context (e.g., for custom TLS config)
-    @param endpoint Explicit endpoint override (for LocalStack, MinIO, etc.)
+    @param endpoint
+      Explicit endpoint override for local test services or custom service
+      endpoints.
     @param region
       AWS region (e.g., ["us-east-1"]). If omitted, reads [AWS_REGION] and then
       [AWS_DEFAULT_REGION].

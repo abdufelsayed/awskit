@@ -204,12 +204,11 @@ let s3 =
 ]}
 
 Pass [endpoint] for S3 endpoints that are not the default AWS regional host,
-including local test services and S3-compatible services that implement the S3
-API:
+including local test services:
 
 {[
 let endpoint =
-  Awskit.Endpoint.of_string_exn "https://fly.storage.tigris.dev"
+  Awskit.Endpoint.of_string_exn "http://127.0.0.1:9000"
 in
 let s3 =
   Awskit_s3_eio.create
@@ -357,6 +356,16 @@ Awskit_s3.Presigned.upload_part
 Presigned URLs use [UNSIGNED-PAYLOAD] and the same endpoint/addressing options
 as normal operations.
 
+A typical direct-upload multipart flow is:
+
+{ol
+  {li Start the upload with [Multipart.create].}
+  {li Presign one [UploadPart] URL per part number with
+    [Presigned.upload_part].}
+  {li The uploader sends each part to the corresponding URL.}
+  {li Complete the upload with the returned part ETags.}
+}
+
 {1 Credentials}
 
 Eio S3 connections require explicit [region] and [credentials].
@@ -432,6 +441,39 @@ Only replayable upload bodies are retried. In-memory bodies created with
 [Runtime.string_body] and [Runtime.bytes_body] are replayable. Custom stream
 bodies are retried only when their {!type:Awskit.Body.Upload.descriptor}
 marks them replayable.
+
+Configure retry attempts, capped exponential backoff, and jitter explicitly:
+
+{[
+let retry_policy =
+  Awskit.Retry.create_exn
+    ~max_attempts:4
+    ~base_delay:(Ptime.Span.of_float_s 0.2 |> Option.get)
+    ~max_delay:(Ptime.Span.of_float_s 3.0 |> Option.get)
+    ~jitter:0.5
+    ()
+in
+Awskit_s3_lwt_unix.create ~retry_policy ()
+]}
+
+[jitter] is in the range [[0, 1]]. The default [0] keeps deterministic delays.
+Values greater than zero spread retry waits below the capped exponential delay.
+
+{1 Local MinIO Contract Testing}
+
+Normal tests use the deterministic in-memory simulator and do not require a
+network service. For local wire-level checks against MinIO, start the included
+Compose stack and run the opt-in alias:
+
+{[
+docker compose up -d
+dune build @minio-contract
+]}
+
+The contract runner defaults to [http://127.0.0.1:9000] with the
+[minioadmin]/[minioadmin] credentials from [docker-compose.yml]. Override with
+[AWSKIT_S3_MINIO_ENDPOINT], [AWSKIT_S3_MINIO_ACCESS_KEY_ID],
+[AWSKIT_S3_MINIO_SECRET_ACCESS_KEY], and [AWSKIT_S3_MINIO_REGION].
 
 {1 Simulator Testing}
 
