@@ -16,6 +16,8 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let now t = Aws.Runtime.now t.aws
     let region t = Aws.Runtime.region t.aws
     let credentials t = Aws.Runtime.credentials t.aws
+    let retry_policy t = Aws.Runtime.retry_policy t.aws
+    let sleep t = Aws.Runtime.sleep t.aws
     let s3_provider t = t.provider
 
     let endpoint t =
@@ -31,14 +33,17 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let write_string = Aws.Runtime.write_string
     let read = Aws.Runtime.read
     let with_download_body = Aws.Runtime.with_download_body
+    let discard_download_body = Aws.Runtime.discard_download_body
     let call t request body = Aws.Runtime.call t.aws request body
   end
 
   module S3 = Awskit_s3.Make (Runtime)
 
   let create ?ctx ?(provider = Awskit_s3.Provider.default) ~region ~credentials
-      ~clock () =
-    let aws = Aws.create ?ctx ~region ~credentials ~clock () in
+      ~clock ?retry_policy ?sleep () =
+    let aws =
+      Aws.create ?ctx ~region ~credentials ~clock ?retry_policy ?sleep ()
+    in
     { aws; provider }
 
   module Object = S3.Object

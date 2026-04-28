@@ -9,12 +9,15 @@ module Runtime : Awskit_s3.RUNTIME with type 'a t = 'a and type connection = t
 
 val create :
   sw:Eio.Switch.t ->
-  env:< net : _ Eio.Net.t ; .. > ->
+  env:< clock : _ Eio.Time.clock ; net : _ Eio.Net.t ; .. > ->
   region:Awskit.Region.t ->
   credentials:Awskit.Credentials.t ->
+  ?retry_policy:Awskit.Retry.t ->
   ?provider:Awskit_s3.Provider.t ->
   unit ->
   t
+(** Create an Eio S3 client. [retry_policy] defaults to
+    {!val:Awskit.Retry.default}. *)
 
 module Object : sig
   include

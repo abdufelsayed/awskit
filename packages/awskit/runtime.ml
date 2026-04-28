@@ -14,6 +14,8 @@ module type S = sig
   val region : connection -> Region.t
   val credentials : connection -> (Credentials.t, Error.t) result t
   val endpoint : connection -> Endpoint.t option
+  val retry_policy : connection -> Retry.t
+  val sleep : connection -> Ptime.Span.t -> unit t
   val empty_body : upload_body
   val string_body : string -> upload_body
   val bytes_body : bytes -> upload_body
@@ -33,6 +35,8 @@ module type S = sig
     download_body ->
     consume:(download_reader -> ('a, Error.t) result t) ->
     ('a, Error.t) result t
+
+  val discard_download_body : download_body -> (unit, Error.t) result t
 
   val call :
     connection ->

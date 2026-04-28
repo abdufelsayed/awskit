@@ -13,6 +13,8 @@ module Runtime = struct
   let now t = Awskit_lwt_unix.Runtime.now t.aws
   let region t = Awskit_lwt_unix.Runtime.region t.aws
   let credentials t = Awskit_lwt_unix.Runtime.credentials t.aws
+  let retry_policy t = Awskit_lwt_unix.Runtime.retry_policy t.aws
+  let sleep t = Awskit_lwt_unix.Runtime.sleep t.aws
   let s3_provider t = t.provider
 
   let endpoint t =
@@ -28,15 +30,18 @@ module Runtime = struct
   let write_string = Awskit_lwt_unix.Runtime.write_string
   let read = Awskit_lwt_unix.Runtime.read
   let with_download_body = Awskit_lwt_unix.Runtime.with_download_body
+  let discard_download_body = Awskit_lwt_unix.Runtime.discard_download_body
   let call t request body = Awskit_lwt_unix.Runtime.call t.aws request body
 end
 
 module S3 = Awskit_s3.Make (Runtime)
 
 let create ?ctx ?(provider = Awskit_s3.Provider.default) ?region ?credentials
-    ?clock () =
+    ?clock ?retry_policy () =
   let region = Option.map Awskit.Region.to_string region in
-  match Awskit_lwt_unix.create ?ctx ?region ?credentials ?clock () with
+  match
+    Awskit_lwt_unix.create ?ctx ?region ?credentials ?clock ?retry_policy ()
+  with
   | Error _ as error -> error
   | Ok aws -> Ok { aws; provider }
 

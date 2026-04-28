@@ -13,6 +13,8 @@ module Runtime = struct
   let now t = Awskit_eio.Runtime.now t.aws
   let region t = Awskit_eio.Runtime.region t.aws
   let credentials t = Awskit_eio.Runtime.credentials t.aws
+  let retry_policy t = Awskit_eio.Runtime.retry_policy t.aws
+  let sleep t = Awskit_eio.Runtime.sleep t.aws
   let s3_provider t = t.provider
 
   let endpoint t =
@@ -28,14 +30,15 @@ module Runtime = struct
   let write_string = Awskit_eio.Runtime.write_string
   let read = Awskit_eio.Runtime.read
   let with_download_body = Awskit_eio.Runtime.with_download_body
+  let discard_download_body = Awskit_eio.Runtime.discard_download_body
   let call t request body = Awskit_eio.Runtime.call t.aws request body
 end
 
 module S3 = Awskit_s3.Make (Runtime)
 
-let create ~sw ~env ~region ~credentials
+let create ~sw ~env ~region ~credentials ?retry_policy
     ?(provider = Awskit_s3.Provider.default) () =
-  let aws = Awskit_eio.create ~sw ~env ~region ~credentials () in
+  let aws = Awskit_eio.create ~sw ~env ~region ~credentials ?retry_policy () in
   { aws; provider }
 
 module Object = struct

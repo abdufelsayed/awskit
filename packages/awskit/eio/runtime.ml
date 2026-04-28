@@ -5,13 +5,16 @@ let src = Logs.Src.create "awskit-eio" ~doc:"AWS Eio HTTP"
 module Log = (val Logs.src_log src : Logs.LOG)
 
 type net = Net : _ Eio.Net.t -> net
+type time_clock = Time_clock : _ Eio.Time.clock -> time_clock
 
 type conn = {
   net : net;
+  time_clock : time_clock;
   sw : Eio.Switch.t;
   region : Awskit.Region.t;
   credentials : Awskit.Credentials.t;
   clock : unit -> Ptime.t;
+  retry_policy : Awskit.Retry.t;
   endpoint : Awskit.Endpoint.t option;
   max_response_body_bytes : int;
 }
@@ -88,12 +91,26 @@ let https_connector uri raw =
   in
   Tls_eio.client_of_flow ?host (Lazy.force tls_config) raw
 
-let create ~env ~sw ~region ~credentials ?(clock = Ptime_clock.now) ?endpoint
+let create ~env ~sw ~region ~credentials ?(clock = Ptime_clock.now)
+    ?(retry_policy = Awskit.Retry.default) ?endpoint
     ?(max_response_body_bytes = default_max_response_body_bytes) () =
   if max_response_body_bytes <= 0 then
     invalid_arg "Awskit_eio.create: max_response_body_bytes must be positive";
   let net = Net (env :> < net : _ Eio.Net.t ; .. >)#net in
-  { net; sw; region; credentials; clock; endpoint; max_response_body_bytes }
+  let time_clock =
+    Time_clock (env :> < clock : _ Eio.Time.clock ; .. >)#clock
+  in
+  {
+    net;
+    time_clock;
+    sw;
+    region;
+    credentials;
+    clock;
+    retry_policy;
+    endpoint;
+    max_response_body_bytes;
+  }
 
 let to_cohttp_meth = function
   | `GET -> `GET
@@ -194,6 +211,11 @@ let now c = c.clock ()
 let region c = c.region
 let credentials c = Ok c.credentials
 let endpoint c = c.endpoint
+let retry_policy c = c.retry_policy
+
+let sleep c span =
+  let (Time_clock clock) = c.time_clock in
+  Eio.Time.sleep clock (Ptime.Span.to_float_s span)
 
 let read source bytes ~off ~len =
   if len = 0 then Ok 0
@@ -202,7 +224,23 @@ let read source bytes ~off ~len =
     | End_of_file -> Ok 0
     | exn -> Error (Awskit.Error.body (Exn.to_string exn))
 
-let with_download_body body ~consume =
-  match consume body with Ok _ as result -> result | Error _ as error -> error
+let rec discard_reader reader =
+  let buffer = Bytes.create 8192 in
+  match read reader buffer ~off:0 ~len:(Bytes.length buffer) with
+  | Error _ as error -> error
+  | Ok 0 -> Ok ()
+  | Ok _ -> discard_reader reader
 
+let with_download_body body ~consume =
+  match consume body with
+  | Ok _ as result -> (
+      match discard_reader body with
+      | Ok () -> result
+      | Error _ as error -> error)
+  | Error _ as error -> (
+      match discard_reader body with
+      | Ok () -> error
+      | Error _ as drain_error -> drain_error)
+
+let discard_download_body body = discard_reader body
 let call = do_call

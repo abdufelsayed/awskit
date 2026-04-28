@@ -316,6 +316,18 @@ match result with
 For service failures, [Awskit_s3.Error.service_code] exposes the AWS error
 code when present.
 
+{1 Retries}
+
+Runtime-backed S3 clients use {!val:Awskit.Retry.default} unless a runtime
+adapter receives a custom [retry_policy]. Retries are centralized around the
+signed S3 request, so retryable service responses are classified before being
+returned to callers.
+
+Only replayable upload bodies are retried. In-memory bodies created with
+[Runtime.string_body] and [Runtime.bytes_body] are replayable. Custom stream
+bodies are retried only when their {!type:Awskit.Body.Upload.descriptor}
+marks them replayable.
+
 {1 Simulator Testing}
 
 {!module:Awskit_s3.Sim} exposes the same synchronous S3 operation shape as the

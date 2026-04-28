@@ -2,4 +2,4 @@
  (name awskit_lwt_unix)
  (public_name awskit.lwt_unix)
  (optional)
- (libraries awskit_lwt awskit.unix cohttp-lwt-unix ptime.clock.os))
+ (libraries awskit_lwt awskit.unix cohttp-lwt-unix lwt.unix ptime.clock.os))

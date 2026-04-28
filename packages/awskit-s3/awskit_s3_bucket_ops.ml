@@ -57,9 +57,11 @@ module Make (C : Awskit_s3_operation_context.S) = struct
             in
             match result with
             | Error error -> return_error error
-            | Ok (response, body) ->
-                if Awskit.Response.is_success response then return_ok response
-                else error_response response body))
+            | Ok (response, body) -> (
+                let* discarded = discard_download_body body in
+                match discarded with
+                | Error error -> return_error error
+                | Ok () -> return_ok response)))
 
   let delete_subresource conn ~bucket ~subresource =
     match validate_bucket bucket with
@@ -75,9 +77,11 @@ module Make (C : Awskit_s3_operation_context.S) = struct
             in
             match result with
             | Error error -> return_error error
-            | Ok (response, body) ->
-                if Awskit.Response.is_success response then return_ok response
-                else error_response response body))
+            | Ok (response, body) -> (
+                let* discarded = discard_download_body body in
+                match discarded with
+                | Error error -> return_error error
+                | Ok () -> return_ok response)))
 
   let create conn ~bucket ?options () =
     let options = Option.value ~default:Bucket.Create.default_options options in
@@ -104,10 +108,11 @@ module Make (C : Awskit_s3_operation_context.S) = struct
             in
             match result with
             | Error error -> return_error error
-            | Ok (response, body) ->
-                if Awskit.Response.is_success response then
-                  return_ok { Bucket.Create.request = response }
-                else error_response response body))
+            | Ok (response, body) -> (
+                let* discarded = discard_download_body body in
+                match discarded with
+                | Error error -> return_error error
+                | Ok () -> return_ok { Bucket.Create.request = response })))
 
   let delete conn ~bucket =
     match validate_bucket bucket with
@@ -121,10 +126,11 @@ module Make (C : Awskit_s3_operation_context.S) = struct
             in
             match result with
             | Error error -> return_error error
-            | Ok (response, body) ->
-                if Awskit.Response.is_success response then
-                  return_ok { Bucket.Delete.request = response }
-                else error_response response body))
+            | Ok (response, body) -> (
+                let* discarded = discard_download_body body in
+                match discarded with
+                | Error error -> return_error error
+                | Ok () -> return_ok { Bucket.Delete.request = response })))
 
   let head conn ~bucket =
     match validate_bucket bucket with
@@ -138,17 +144,20 @@ module Make (C : Awskit_s3_operation_context.S) = struct
             in
             match result with
             | Error error -> return_error error
-            | Ok (response, body) ->
-                if Awskit.Response.is_success response then
-                  let region =
-                    Option.bind
-                      (Awskit.Response.header response "x-amz-bucket-region")
-                      (fun value ->
-                        Result.to_option (Awskit.Region.of_string value))
-                  in
-                  return_ok
-                    { Bucket.Head.name = bucket; region; request = response }
-                else error_response response body))
+            | Ok (response, body) -> (
+                let* discarded = discard_download_body body in
+                match discarded with
+                | Error error -> return_error error
+                | Ok () ->
+                    let region =
+                      Option.bind
+                        (Awskit.Response.header response "x-amz-bucket-region")
+                        (fun value ->
+                          Result.to_option (Awskit.Region.of_string value))
+                    in
+                    return_ok
+                      { Bucket.Head.name = bucket; region; request = response })
+            ))
 
   let exists conn ~bucket =
     let* result = head conn ~bucket in
@@ -245,9 +254,11 @@ module Make (C : Awskit_s3_operation_context.S) = struct
               in
               match result with
               | Error error -> return_error error
-              | Ok (response, body) ->
-                  if Awskit.Response.is_success response then return_ok response
-                  else error_response response body))
+              | Ok (response, body) -> (
+                  let* discarded = discard_download_body body in
+                  match discarded with
+                  | Error error -> return_error error
+                  | Ok () -> return_ok response)))
 
     let delete conn ~bucket =
       delete_subresource conn ~bucket ~subresource:"policy"

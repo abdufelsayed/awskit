@@ -31,6 +31,7 @@ Core modules:
   {li {!module:Awskit.Response} — body-free HTTP response metadata and header
     helpers}
   {li {!module:Awskit.Error} — structured errors and retry classification}
+  {li {!module:Awskit.Retry} — shared retry policy used by service packages}
   {li {!module:Awskit.Signing} — pure AWS Signature Version 4 signing}
   {li {!module-type:Awskit.Runtime.S} — runtime abstraction used by service
     packages}

@@ -162,6 +162,8 @@ module Runtime = struct
   let region _ = Awskit.Region.of_string_exn "us-east-1"
   let credentials t = Ok t.credentials
   let endpoint _ = None
+  let retry_policy _ = Awskit.Retry.default
+  let sleep t span = Clock.advance t.store.clock span
   let s3_provider _ = Provider.default
   let empty_body = ""
   let string_body value = value
@@ -201,8 +203,29 @@ module Runtime = struct
 
   let download_body ?read_fault body : download_body = { body; read_fault }
 
+  let rec discard_reader reader =
+    let buffer = Bytes.create 8192 in
+    match read reader buffer ~off:0 ~len:(Bytes.length buffer) with
+    | Error _ as error -> error
+    | Ok 0 -> Ok ()
+    | Ok _ -> discard_reader reader
+
   let with_download_body (body : download_body) ~consume =
-    consume { body = body.body; offset = 0; read_fault = body.read_fault }
+    let reader =
+      { body = body.body; offset = 0; read_fault = body.read_fault }
+    in
+    match consume reader with
+    | Ok _ as result -> (
+        match discard_reader reader with
+        | Ok () -> result
+        | Error _ as error -> error)
+    | Error _ as error -> (
+        match discard_reader reader with
+        | Ok () -> error
+        | Error _ as drain_error -> drain_error)
+
+  let discard_download_body body =
+    with_download_body body ~consume:(fun reader -> discard_reader reader)
 
   let call _ _ _ =
     Error

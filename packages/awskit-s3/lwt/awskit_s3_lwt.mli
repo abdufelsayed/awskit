@@ -15,6 +15,8 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     region:Awskit.Region.t ->
     credentials:Awskit.Credentials.t ->
     clock:(unit -> Ptime.t) ->
+    ?retry_policy:Awskit.Retry.t ->
+    ?sleep:(Ptime.Span.t -> unit Lwt.t) ->
     unit ->
     t
 

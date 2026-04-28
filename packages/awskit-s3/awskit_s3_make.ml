@@ -66,6 +66,8 @@ module Make (R : RUNTIME) = struct
     let read_download_body body ~max_size =
       R.with_download_body body ~consume:(read_body ~max_size)
 
+    let discard_download_body = R.discard_download_body
+
     let service_error response body =
       Awskit.Error.service
         {
@@ -117,13 +119,42 @@ module Make (R : RUNTIME) = struct
                   | Error error -> return_error error
                   | Ok request -> return_ok request)))
 
+    let retry_or_error conn ~attempt ~replayable error retry =
+      match Awskit.Retry.delay (R.retry_policy conn) ~attempt ~error with
+      | Some delay when replayable ->
+          let* () = R.sleep conn delay in
+          retry (attempt + 1)
+      | _ -> return_error error
+
     let call conn ~method_ ~request ~query ~headers ~payload_hash body =
-      let* request =
-        signed_request conn ~method_ ~request ~query ~headers ~payload_hash
+      let replayable = (R.upload_descriptor body).replayable in
+      let rec attempt attempt_number =
+        let* request =
+          signed_request conn ~method_ ~request ~query ~headers ~payload_hash
+        in
+        match request with
+        | Error error -> return_error error
+        | Ok request -> (
+            let* response = R.call conn request body in
+            match response with
+            | Error error ->
+                retry_or_error conn ~attempt:attempt_number ~replayable error
+                  attempt
+            | Ok (response, response_body) -> (
+                if Awskit.Response.is_success response then
+                  return_ok (response, response_body)
+                else
+                  let* body =
+                    read_download_body response_body ~max_size:1_048_576L
+                  in
+                  match body with
+                  | Error error -> return_error error
+                  | Ok body ->
+                      let error = service_error response (Some body) in
+                      retry_or_error conn ~attempt:attempt_number ~replayable
+                        error attempt))
       in
-      match request with
-      | Error _ as error -> return error
-      | Ok request -> R.call conn request body
+      attempt 1
 
     let call_empty conn ~method_ ~request ~query ~headers =
       call conn ~method_ ~request ~query ~headers ~payload_hash:empty_hash

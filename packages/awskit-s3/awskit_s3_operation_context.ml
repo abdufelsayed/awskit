@@ -35,6 +35,8 @@ module type S = sig
   val read_download_body :
     R.download_body -> max_size:int64 -> (string, Error.t) result io
 
+  val discard_download_body : R.download_body -> (unit, Error.t) result io
+
   val error_response :
     Awskit.Response.t -> R.download_body -> ('a, Error.t) result io
 

@@ -13,6 +13,8 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     region : Awskit.Region.t;
     credentials : Awskit.Credentials.t;
     clock : unit -> Ptime.t;
+    retry_policy : Awskit.Retry.t;
+    sleep : Ptime.Span.t -> unit Lwt.t;
     max_response_body_bytes : int;
   }
 
@@ -40,9 +42,19 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         ignore (Awskit.Endpoint.to_url_prefix endpoint))
 
   let create ?ctx ?endpoint ~region ~credentials ~clock
+      ?(retry_policy = Awskit.Retry.default) ?(sleep = fun _ -> Lwt.return_unit)
       ?(max_response_body_bytes = default_max_response_body_bytes) () =
     validate_create_args ?endpoint ~max_response_body_bytes ();
-    { ctx; endpoint; region; credentials; clock; max_response_body_bytes }
+    {
+      ctx;
+      endpoint;
+      region;
+      credentials;
+      clock;
+      retry_policy;
+      sleep;
+      max_response_body_bytes;
+    }
 
   (* URI construction *)
 
@@ -161,6 +173,8 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let region c = c.region
     let credentials c = Lwt.return_ok c.credentials
     let endpoint c = c.endpoint
+    let retry_policy c = c.retry_policy
+    let sleep c span = c.sleep span
     let empty_body = empty_body
     let string_body = string_body
     let bytes_body = bytes_body
@@ -190,11 +204,26 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         (fun () -> read_from_current reader bytes ~off ~len)
         (fun exn -> Lwt.return_error (Awskit.Error.body (Exn.to_string exn)))
 
+    let rec drain_reader reader =
+      let buffer = Bytes.create 8192 in
+      Lwt.bind
+        (read reader buffer ~off:0 ~len:(Bytes.length buffer))
+        (function
+          | Error _ as error -> Lwt.return error
+          | Ok 0 -> Lwt.return_ok ()
+          | Ok _ -> drain_reader reader)
+
     let with_download_body body ~consume =
       let reader =
         { stream = Cohttp_lwt.Body.to_stream body; chunk = ""; offset = 0 }
       in
-      consume reader
+      Lwt.bind (consume reader) (fun result ->
+          Lwt.bind (drain_reader reader) (function
+            | Ok () -> Lwt.return result
+            | Error error -> Lwt.return_error error))
+
+    let discard_download_body body =
+      with_download_body body ~consume:(fun reader -> drain_reader reader)
 
     let call = do_call
   end

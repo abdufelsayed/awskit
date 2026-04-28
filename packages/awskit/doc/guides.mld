@@ -115,7 +115,7 @@ type t =
   | Body of body
 ]}
 
-Use {!val:Awskit.Error.retry_class} for retry decisions:
+Use {!val:Awskit.Error.retry_class} for manual retry decisions:
 
 {[
 match Awskit.Error.retry_class err with
@@ -128,6 +128,23 @@ match Awskit.Error.retry_class err with
 Service packages preserve {!type:Awskit.Error.t} and add classifier helpers.
 For example, [awskit-s3] exposes [Awskit_s3.Error.is_no_such_key] and
 [Awskit_s3.Error.is_precondition_failed].
+
+{1 Retry Policy}
+
+Service packages use {!module:Awskit.Retry} for built-in retries. The default
+policy retries retryable transport failures, throttling responses, and 5xx
+service responses when the upload body is replayable.
+
+{[
+let retry_policy =
+  Awskit.Retry.create_exn
+    ~max_attempts:4
+    ~base_delay:(Ptime.Span.of_float_s 0.2 |> Option.get)
+    ()
+]}
+
+Use {!val:Awskit.Retry.disabled} when an application wants to own all retry
+behavior itself.
 
 {1 Runtime Body Model}
 

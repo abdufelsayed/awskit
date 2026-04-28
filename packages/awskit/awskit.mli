@@ -22,6 +22,9 @@ module Error = Error
 module Body = Body
 (** Runtime-neutral body metadata. *)
 
+module Retry = Retry
+(** Shared retry policy for AWS service packages. *)
+
 module Signing = Signing
 (** AWS Signature Version 4 signing. *)
 

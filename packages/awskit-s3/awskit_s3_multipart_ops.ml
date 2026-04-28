@@ -112,26 +112,28 @@ module Make (C : Awskit_s3_operation_context.S) = struct
                     match result with
                     | Error error -> return_error error
                     | Ok (response, body) -> (
-                        if not (Awskit.Response.is_success response) then
-                          error_response response body
-                        else
-                          match response_etag response with
-                          | Error error -> return_error error
-                          | Ok None ->
-                              return_error
-                                (decode "missing multipart part etag")
-                          | Ok (Some etag) -> (
-                              match
-                                Public_multipart.Part.create ~part_number ~etag
-                              with
-                              | Error error -> return_error error
-                              | Ok part ->
-                                  return_ok
-                                    {
-                                      Public_multipart.Upload_part.part;
-                                      checksum = response_checksum response;
-                                      request = response;
-                                    }))))))
+                        let* discarded = discard_download_body body in
+                        match discarded with
+                        | Error error -> return_error error
+                        | Ok () -> (
+                            match response_etag response with
+                            | Error error -> return_error error
+                            | Ok None ->
+                                return_error
+                                  (decode "missing multipart part etag")
+                            | Ok (Some etag) -> (
+                                match
+                                  Public_multipart.Part.create ~part_number
+                                    ~etag
+                                with
+                                | Error error -> return_error error
+                                | Ok part ->
+                                    return_ok
+                                      {
+                                        Public_multipart.Upload_part.part;
+                                        checksum = response_checksum response;
+                                        request = response;
+                                      })))))))
 
   let complete conn ~bucket ~key ~upload_id parts =
     match validate_bucket_key bucket key with
@@ -249,9 +251,11 @@ module Make (C : Awskit_s3_operation_context.S) = struct
             in
             match result with
             | Error error -> return_error error
-            | Ok (response, body) ->
-                if Awskit.Response.is_success response then return_ok response
-                else error_response response body))
+            | Ok (response, body) -> (
+                let* discarded = discard_download_body body in
+                match discarded with
+                | Error error -> return_error error
+                | Ok () -> return_ok response)))
 
   let list_parts conn ~bucket ~key ~upload_id =
     match validate_bucket_key bucket key with

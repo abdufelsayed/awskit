@@ -30,6 +30,7 @@ val create :
   ?region:string ->
   ?credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
+  ?retry_policy:Awskit.Retry.t ->
   ?max_response_body_bytes:int ->
   unit ->
   (t, Awskit.Error.t) result
@@ -45,5 +46,8 @@ val create :
       [AWS_ACCESS_KEY_ID], [AWS_SECRET_ACCESS_KEY], and optional
       [AWS_SESSION_TOKEN].
     @param clock Time source for signing timestamps (default: OS clock)
+    @param retry_policy
+      Retry behavior for retryable AWS errors and transient transport failures
+      (default: {!val:Awskit.Retry.default})
     @param max_response_body_bytes
       Maximum response size to buffer in memory (default: 64 MiB) *)

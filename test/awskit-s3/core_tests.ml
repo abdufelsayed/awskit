@@ -85,8 +85,11 @@ module Recording_runtime = struct
     region : Region.t;
     credentials : Credentials.t;
     provider : Provider.t;
+    retry_policy : Awskit.Retry.t;
     mutable calls : call list;
     mutable responses : response list;
+    mutable sleeps : Ptime.Span.t list;
+    mutable discarded : string list;
   }
 
   type 'a t = 'a
@@ -100,8 +103,18 @@ module Recording_runtime = struct
   type download_reader = { body : string; mutable offset : int }
 
   let connect ?(provider = Provider.default)
-      ?(region = Region.of_string_exn "us-east-1") responses =
-    { region; credentials = creds; provider; calls = []; responses }
+      ?(region = Region.of_string_exn "us-east-1")
+      ?(retry_policy = Awskit.Retry.default) responses =
+    {
+      region;
+      credentials = creds;
+      provider;
+      retry_policy;
+      calls = [];
+      responses;
+      sleeps = [];
+      discarded = [];
+    }
 
   let last_call conn =
     match conn.calls with
@@ -112,6 +125,8 @@ module Recording_runtime = struct
   let region conn = conn.region
   let credentials conn = Ok conn.credentials
   let s3_provider conn = conn.provider
+  let retry_policy conn = conn.retry_policy
+  let sleep conn span = conn.sleeps <- span :: conn.sleeps
 
   let endpoint conn =
     Provider.endpoint conn.provider ~region:conn.region |> Result.to_option
@@ -149,7 +164,27 @@ module Recording_runtime = struct
         reader.offset <- reader.offset + copied;
         Ok copied
 
-  let with_download_body body ~consume = consume { body; offset = 0 }
+  let rec drain reader =
+    let bytes = Bytes.create 8 in
+    match read reader bytes ~off:0 ~len:(Bytes.length bytes) with
+    | Error _ as error -> error
+    | Ok 0 -> Ok ()
+    | Ok _ -> drain reader
+
+  let with_download_body body ~consume =
+    let reader = { body; offset = 0 } in
+    match consume reader with
+    | Ok _ as result -> (
+        match drain reader with Ok () -> result | Error _ as error -> error)
+    | Error _ as error -> (
+        match drain reader with
+        | Ok () -> error
+        | Error _ as drain_error -> drain_error)
+
+  let discard_download_body body =
+    let reader = { body; offset = 0 } in
+    let result = drain reader in
+    result
 
   let call conn request body =
     conn.calls <- { request; body } :: conn.calls;
@@ -326,6 +361,56 @@ let test_bucket_config_parse () =
       Alcotest.(check string) "logging prefix" "logs/" target.target_prefix
   | None -> Alcotest.fail "expected logging target"
 
+let test_retry_slow_down_then_success () =
+  let slow_down =
+    {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
+  in
+  let conn =
+    Recording_runtime.connect [ response 503 slow_down; response 200 "" ]
+  in
+  let result =
+    Recording_s3.Object.Buffer.put_string conn ~bucket:"my-bucket" ~key:"file"
+      "body"
+  in
+  ignore (ok_or_fail "retry put" result);
+  Alcotest.(check int) "attempts" 2 (List.length conn.calls);
+  Alcotest.(check int) "sleeps" 1 (List.length conn.sleeps)
+
+let test_retry_fatal_error_not_retried () =
+  let denied =
+    {|<Error><Code>AccessDenied</Code><Message>denied</Message></Error>|}
+  in
+  let conn =
+    Recording_runtime.connect [ response 403 denied; response 200 "" ]
+  in
+  (match
+     Recording_s3.Object.Buffer.put_string conn ~bucket:"my-bucket" ~key:"file"
+       "body"
+   with
+  | Error error when Error.service_code error = Some "AccessDenied" -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected access denied");
+  Alcotest.(check int) "attempts" 1 (List.length conn.calls);
+  Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
+
+let test_retry_disabled_policy () =
+  let slow_down =
+    {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
+  in
+  let conn =
+    Recording_runtime.connect ~retry_policy:Awskit.Retry.disabled
+      [ response 503 slow_down; response 200 "" ]
+  in
+  (match
+     Recording_s3.Object.Buffer.put_string conn ~bucket:"my-bucket" ~key:"file"
+       "body"
+   with
+  | Error error when Error.service_code error = Some "SlowDown" -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected slow down");
+  Alcotest.(check int) "attempts" 1 (List.length conn.calls);
+  Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
+
 let make_sim () =
   let clock = Sim.Clock.create ~now:test_time () in
   let store = Sim.create_store ~clock () in
@@ -394,6 +479,12 @@ let suite =
         Alcotest.test_case "bucket head request" `Quick test_bucket_head_request;
         Alcotest.test_case "bucket list parse" `Quick test_bucket_list_parse;
         Alcotest.test_case "bucket config parse" `Quick test_bucket_config_parse;
+        Alcotest.test_case "retry slow down then success" `Quick
+          test_retry_slow_down_then_success;
+        Alcotest.test_case "retry fatal error not retried" `Quick
+          test_retry_fatal_error_not_retried;
+        Alcotest.test_case "retry disabled policy" `Quick
+          test_retry_disabled_policy;
         Alcotest.test_case "sim buffer roundtrip" `Quick
           test_sim_buffer_roundtrip;
         Alcotest.test_case "sim streaming get" `Quick test_sim_streaming_get;

@@ -6,6 +6,7 @@ module Region = Region
 module Endpoint = Endpoint
 module Error = Error
 module Body = Body
+module Retry = Retry
 module Signing = Signing
 module Request = Request
 module Response = Response

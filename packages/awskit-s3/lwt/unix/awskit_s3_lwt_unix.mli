@@ -14,6 +14,7 @@ val create :
   ?region:Awskit.Region.t ->
   ?credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
+  ?retry_policy:Awskit.Retry.t ->
   unit ->
   (t, Awskit_s3.Error.t) result
 

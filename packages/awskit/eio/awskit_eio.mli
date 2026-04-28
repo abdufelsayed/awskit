@@ -11,15 +11,17 @@ type t = Runtime.conn
 module Runtime : Awskit.Runtime.S with type 'a t = 'a and type connection = t
 
 val create :
-  env:< net : _ Eio.Net.t ; .. > ->
+  env:< clock : _ Eio.Time.clock ; net : _ Eio.Net.t ; .. > ->
   sw:Eio.Switch.t ->
   region:Awskit.Region.t ->
   credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
+  ?retry_policy:Awskit.Retry.t ->
   ?endpoint:Awskit.Endpoint.t ->
   ?max_response_body_bytes:int ->
   unit ->
   t
 (** Defaults to AWS HTTPS endpoints. Pass an explicit [endpoint] for LocalStack,
-    MinIO, or other S3-compatible services. [max_response_body_bytes] defaults
-    to 64 MiB. *)
+    MinIO, or other S3-compatible services. [retry_policy] defaults to
+    {!val:Awskit.Retry.default}. [max_response_body_bytes] defaults to 64 MiB.
+*)
