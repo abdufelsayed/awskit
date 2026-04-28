@@ -7,6 +7,44 @@ module Object = struct
   type upload_body = Runtime.upload_body
   type download_reader = Runtime.download_reader
 
+  let invalid_range () = service ~status:416 ~code:"InvalidRange" ()
+
+  let ranged_body body = function
+    | None -> Ok (body, 200, [])
+    | Some range -> (
+        let length = String.length body in
+        let length64 = Int64.of_int length in
+        let bounds =
+          match (range : Range.t) with
+          | Bytes (start, finish) ->
+              if Int64.compare start length64 >= 0 then None
+              else
+                let finish = Int64.min finish (Int64.sub length64 1L) in
+                Some (start, finish)
+          | From start ->
+              if Int64.compare start length64 >= 0 then None
+              else Some (start, Int64.sub length64 1L)
+          | Suffix suffix ->
+              if length = 0 then None
+              else
+                let start =
+                  if Int64.compare suffix length64 >= 0 then 0L
+                  else Int64.sub length64 suffix
+                in
+                Some (start, Int64.sub length64 1L)
+        in
+        match bounds with
+        | None -> Error (invalid_range ())
+        | Some (start, finish) ->
+            let start_int = Int64.to_int start in
+            let slice_length = Int64.(to_int (add (sub finish start) 1L)) in
+            let headers =
+              [
+                ("content-range", Fmt.str "bytes %Ld-%Ld/%d" start finish length);
+              ]
+            in
+            Ok (String.sub body start_int slice_length, 206, headers))
+
   let put conn ~bucket ~key ?options ~body () =
     let options = Option.value ~default:Object.Put.default_options options in
     match validate_bucket_key bucket key with
@@ -74,23 +112,30 @@ module Object = struct
                 match ensure_read_preconditions obj options.preconditions with
                 | Error error -> Error error
                 | Ok () ->
+                    let* body, status, range_headers =
+                      ranged_body obj.body options.range
+                    in
                     let response =
-                      response 200
+                      response status
                         ~headers:
                           ([
                              ("etag", obj.etag);
                              ( "content-length",
-                               string_of_int (String.length obj.body) );
+                               string_of_int (String.length body) );
                            ]
+                          @ range_headers
                           @ checksum_response_headers obj.checksum)
                     in
-                    let info = info_of_object response obj in
+                    let info =
+                      info_of_object ~content_length:(String.length body)
+                        response obj
+                    in
                     Result.map
                       (fun value -> (info, value))
                       (Runtime.with_download_body
                          (Runtime.download_body
                             ~read_fault:(fault_error Response_lost)
-                            obj.body)
+                            body)
                          ~consume))
             | Some fault ->
                 record ~faulted:true conn `Get bucket (Some key);
@@ -100,21 +145,28 @@ module Object = struct
                 match ensure_read_preconditions obj options.preconditions with
                 | Error error -> Error error
                 | Ok () ->
+                    let* body, status, range_headers =
+                      ranged_body obj.body options.range
+                    in
                     let response =
-                      response 200
+                      response status
                         ~headers:
                           ([
                              ("etag", obj.etag);
                              ( "content-length",
-                               string_of_int (String.length obj.body) );
+                               string_of_int (String.length body) );
                            ]
+                          @ range_headers
                           @ checksum_response_headers obj.checksum)
                     in
-                    let info = info_of_object response obj in
+                    let info =
+                      info_of_object ~content_length:(String.length body)
+                        response obj
+                    in
                     Result.map
                       (fun value -> (info, value))
                       (Runtime.with_download_body
-                         (Runtime.download_body obj.body)
+                         (Runtime.download_body body)
                          ~consume))))
 
   let head conn ~bucket ~key ?options () =

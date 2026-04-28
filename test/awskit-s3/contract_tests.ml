@@ -24,6 +24,12 @@ let expect_status label status = function
 let expect_precondition_failed label result = expect_status label 412 result
 let expect_not_modified label result = expect_status label 304 result
 
+let expect_validation label = function
+  | Error (Awskit.Error.Validation _) -> ()
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected validation error" label
+
 let check_checksum label algorithm value = function
   | None -> Alcotest.failf "%s: expected checksum" label
   | Some (checksum : Object.Checksum.response) ->
@@ -154,6 +160,87 @@ module Make (Client : SUBJECT) = struct
       |> ok_or_fail "get streaming"
     in
     Alcotest.(check string) "partial body" "abcd" body
+
+  let test_range_reads_and_metadata_copy () =
+    let conn = Client.fresh () in
+    create_bucket conn;
+    let put_options =
+      {
+        Object.Put.default_options with
+        content_type = Some "text/plain";
+        metadata = [ ("origin", "source"); ("mode", "copy") ];
+      }
+    in
+    ignore
+      (Client.Object.Buffer.put_string conn ~bucket ~key:"range.txt"
+         ~options:put_options "abcdefghij"
+      |> ok_or_fail "put range source");
+    let range_options =
+      {
+        Object.Get.default_options with
+        range = Some (Range.bytes_exn ~start:2L ~finish:5L);
+      }
+    in
+    let info, body =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"range.txt"
+        ~options:range_options ~max_size:16L ()
+      |> ok_or_fail "get byte range"
+    in
+    Alcotest.(check string) "range body" "cdef" body;
+    Alcotest.(check int)
+      "range status" 206
+      (Awskit.Response.status info.request);
+    Alcotest.(check (option int64))
+      "range content length" (Some 4L) info.content_length;
+    Alcotest.(check (option string))
+      "range content range" (Some "bytes 2-5/10")
+      (Awskit.Response.header info.request "content-range");
+    let suffix_options =
+      { Object.Get.default_options with range = Some (Range.suffix_exn 3L) }
+    in
+    let _info, suffix =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"range.txt"
+        ~options:suffix_options ~max_size:16L ()
+      |> ok_or_fail "get suffix range"
+    in
+    Alcotest.(check string) "suffix body" "hij" suffix;
+    let invalid_range_options =
+      { Object.Get.default_options with range = Some (Range.from_exn 99L) }
+    in
+    expect_status "invalid range" 416
+      (Client.Object.Buffer.get_string conn ~bucket ~key:"range.txt"
+         ~options:invalid_range_options ~max_size:16L ());
+    ignore
+      (Client.Object.copy conn ~src_bucket:bucket ~src_key:"range.txt"
+         ~dst_bucket:bucket ~dst_key:"copied.txt" ()
+      |> ok_or_fail "copy metadata");
+    let copied =
+      Client.Object.head conn ~bucket ~key:"copied.txt" ()
+      |> ok_or_fail "head copied"
+    in
+    Alcotest.(check (option string))
+      "copied metadata" (Some "source")
+      (List.assoc_opt "origin" copied.metadata);
+    let replace_options =
+      {
+        Object.Copy.default_options with
+        metadata = Some (`Replace [ ("origin", "replacement") ]);
+      }
+    in
+    ignore
+      (Client.Object.copy conn ~src_bucket:bucket ~src_key:"range.txt"
+         ~dst_bucket:bucket ~dst_key:"replaced.txt" ~options:replace_options ()
+      |> ok_or_fail "copy replace metadata");
+    let replaced =
+      Client.Object.head conn ~bucket ~key:"replaced.txt" ()
+      |> ok_or_fail "head replaced"
+    in
+    Alcotest.(check (option string))
+      "replaced metadata" (Some "replacement")
+      (List.assoc_opt "origin" replaced.metadata);
+    Alcotest.(check (option string))
+      "removed copied metadata" None
+      (List.assoc_opt "mode" replaced.metadata)
 
   let test_list_copy_delete_many () =
     let conn = Client.fresh () in
@@ -684,6 +771,55 @@ module Make (Client : SUBJECT) = struct
         Alcotest.failf "unexpected abort list error: %a" Error.pp error
     | Ok _ -> Alcotest.fail "expected aborted upload to be unavailable"
 
+  let test_multipart_completion_edges () =
+    let conn = Client.fresh () in
+    create_bucket conn;
+    let upload =
+      Client.Multipart.create conn ~bucket ~key:"edges.bin" ()
+      |> ok_or_fail "create edge multipart"
+    in
+    let upload_id = upload.upload.upload_id in
+    let first =
+      Client.Multipart.upload_part conn ~bucket ~key:"edges.bin" ~upload_id
+        ~part_number:1
+        ~body:(Client.upload_body_of_string "first")
+        ()
+      |> ok_or_fail "upload first part"
+    in
+    let second =
+      Client.Multipart.upload_part conn ~bucket ~key:"edges.bin" ~upload_id
+        ~part_number:2
+        ~body:(Client.upload_body_of_string "second")
+        ()
+      |> ok_or_fail "upload second part"
+    in
+    let overwritten =
+      Client.Multipart.upload_part conn ~bucket ~key:"edges.bin" ~upload_id
+        ~part_number:1
+        ~body:(Client.upload_body_of_string "FIRST")
+        ()
+      |> ok_or_fail "overwrite first part"
+    in
+    expect_status "complete with stale part etag" 400
+      (Client.Multipart.complete conn ~bucket ~key:"edges.bin" ~upload_id
+         [ first.part; second.part ]);
+    expect_validation "complete with unsorted parts"
+      (Client.Multipart.complete conn ~bucket ~key:"edges.bin" ~upload_id
+         [ second.part; overwritten.part ]);
+    ignore
+      (Client.Multipart.complete conn ~bucket ~key:"edges.bin" ~upload_id
+         [ overwritten.part; second.part ]
+      |> ok_or_fail "complete overwritten parts");
+    let _info, body =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"edges.bin"
+        ~max_size:16L ()
+      |> ok_or_fail "get edge multipart object"
+    in
+    Alcotest.(check string) "completed overwritten body" "FIRSTsecond" body;
+    expect_status "complete already completed upload" 404
+      (Client.Multipart.complete conn ~bucket ~key:"edges.bin" ~upload_id
+         [ overwritten.part; second.part ])
+
   let test_managed_multipart_upload () =
     let conn = Client.fresh () in
     create_bucket conn;
@@ -725,6 +861,8 @@ module Make (Client : SUBJECT) = struct
       Alcotest.test_case "object buffer lifecycle" `Quick
         test_object_buffer_lifecycle;
       Alcotest.test_case "streaming get" `Quick test_streaming_get;
+      Alcotest.test_case "range reads and metadata copy" `Quick
+        test_range_reads_and_metadata_copy;
       Alcotest.test_case "list copy delete many" `Quick
         test_list_copy_delete_many;
       Alcotest.test_case "object tagging" `Quick test_object_tagging;
@@ -733,6 +871,8 @@ module Make (Client : SUBJECT) = struct
       Alcotest.test_case "buffer limit" `Quick test_buffer_limit;
       Alcotest.test_case "object preconditions" `Quick test_object_preconditions;
       Alcotest.test_case "multipart lifecycle" `Quick test_multipart_lifecycle;
+      Alcotest.test_case "multipart completion edges" `Quick
+        test_multipart_completion_edges;
       Alcotest.test_case "managed multipart upload" `Quick
         test_managed_multipart_upload;
     ]

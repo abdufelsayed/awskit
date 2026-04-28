@@ -451,11 +451,14 @@ let enable_buggify t ~seed ~prob =
 
 let disable_buggify t = t.buggify <- None
 
-let info_of_object response (obj : stored_object) =
+let info_of_object ?content_length response (obj : stored_object) =
   {
     Object.Get.etag = Some obj.etag;
     content_type = obj.content_type;
-    content_length = Some (Int64.of_int (String.length obj.body));
+    content_length =
+      Some
+        (Option.value ~default:(String.length obj.body) content_length
+        |> Int64.of_int);
     last_modified = Some obj.last_modified;
     metadata = obj.metadata;
     storage_class = obj.storage_class;
