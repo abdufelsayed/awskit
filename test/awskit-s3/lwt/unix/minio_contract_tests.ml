@@ -71,6 +71,23 @@ let cleanup_bucket conn ~bucket =
   let* _ = S3.Bucket.delete conn ~bucket in
   Lwt.return_unit
 
+let write_file path body =
+  let channel = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel body)
+
+let read_file path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () ->
+      let length = in_channel_length channel in
+      really_input_string channel length)
+
+let remove_file path = try Sys.remove path with Sys_error _ -> ()
+let first = function [] -> None | value :: _ -> Some value
+
 let with_bucket suffix f =
   let conn = connect () in
   let bucket = bucket_name suffix in
@@ -221,6 +238,96 @@ let test_multipart_edges () =
            (S3.Multipart.complete conn ~bucket ~key:"edges.bin" ~upload_id
               [ overwritten.part; second.part ])))
 
+let test_path_transfer_streams () =
+  with_bucket "transfer" (fun conn ~bucket ->
+      let upload_path = Filename.temp_file "awskit-upload" ".bin" in
+      let download_path = Filename.temp_file "awskit-download" ".bin" in
+      let body =
+        String.init
+          ((128 * 1024 * 2) + 17)
+          (fun index -> Char.chr ((index mod 26) + Char.code 'a'))
+      in
+      write_file upload_path body;
+      remove_file download_path;
+      let upload_progress = ref [] in
+      let download_progress = ref [] in
+      Fun.protect
+        ~finally:(fun () ->
+          remove_file upload_path;
+          remove_file download_path)
+        (fun () ->
+          ignore
+            (await "upload path"
+               (S3.Object.Transfer.upload_from_path conn ~bucket
+                  ~key:"transfer.bin" ~path:upload_path
+                  ~on_progress:(fun transferred ->
+                    upload_progress := transferred :: !upload_progress)
+                  ()));
+          ignore
+            (await "download path"
+               (S3.Object.Transfer.download_to_path conn ~bucket
+                  ~key:"transfer.bin" ~path:download_path
+                  ~on_progress:(fun transferred ->
+                    download_progress := transferred :: !download_progress)
+                  ()));
+          Alcotest.(check string) "download body" body (read_file download_path);
+          Alcotest.(check (option int64))
+            "upload final progress"
+            (Some (Int64.of_int (String.length body)))
+            (first !upload_progress);
+          Alcotest.(check (option int64))
+            "download final progress"
+            (Some (Int64.of_int (String.length body)))
+            (first !download_progress)))
+
+let test_multipart_path_transfer_resumes () =
+  with_bucket "transfer-multipart" (fun conn ~bucket ->
+      let part_size = Multipart.Managed.min_part_size in
+      let path = Filename.temp_file "awskit-multipart-upload" ".bin" in
+      let body =
+        String.init
+          ((part_size * 2) + 17)
+          (fun index -> Char.chr ((index mod 10) + Char.code '0'))
+      in
+      write_file path body;
+      let options = { Multipart.Managed.default_options with part_size } in
+      let progress = ref [] in
+      Fun.protect
+        ~finally:(fun () -> remove_file path)
+        (fun () ->
+          let created =
+            await "create multipart for resume"
+              (S3.Multipart.create conn ~bucket ~key:"resume.bin" ())
+          in
+          let upload_id = created.upload.upload_id in
+          let first_part = String.sub body 0 part_size in
+          ignore
+            (await "upload resume seed"
+               (S3.Multipart.upload_part conn ~bucket ~key:"resume.bin"
+                  ~upload_id ~part_number:1
+                  ~body:(S3.Runtime.string_body first_part)
+                  ()));
+          let result =
+            await "resume multipart path"
+              (S3.Object.Transfer.resume_multipart_upload_from_path conn ~bucket
+                 ~key:"resume.bin" ~upload_id ~options ~concurrency:2 ~path
+                 ~on_progress:(fun transferred ->
+                   progress := transferred :: !progress)
+                 ())
+          in
+          Alcotest.(check int) "completed parts" 3 (List.length result.parts);
+          let _info, downloaded =
+            await "get resumed multipart"
+              (S3.Object.Buffer.get_string conn ~bucket ~key:"resume.bin"
+                 ~max_size:(Int64.of_int (String.length body))
+                 ())
+          in
+          Alcotest.(check string) "resumed body" body downloaded;
+          Alcotest.(check (option int64))
+            "resume initial progress includes first part"
+            (Some (Int64.of_int (String.length body)))
+            (first !progress)))
+
 let suite () =
   [
     ( "minio contract",
@@ -228,6 +335,10 @@ let suite () =
         Alcotest.test_case "object range metadata copy" `Quick
           test_object_range_metadata_and_copy;
         Alcotest.test_case "multipart edges" `Quick test_multipart_edges;
+        Alcotest.test_case "path transfer streams" `Quick
+          test_path_transfer_streams;
+        Alcotest.test_case "multipart path transfer resumes" `Quick
+          test_multipart_path_transfer_resumes;
       ] );
   ]
 

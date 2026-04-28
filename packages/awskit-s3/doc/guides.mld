@@ -159,6 +159,7 @@ on filesystem APIs.
 Awskit_s3_eio.Object.Transfer.upload_from_path s3
   ~bucket:"my-bucket"
   ~key:"archive.tar"
+  ~on_progress:(fun bytes -> Fmt.pr "uploaded %Ld bytes@." bytes)
   ~path
   ()
 ]}
@@ -167,6 +168,7 @@ Awskit_s3_eio.Object.Transfer.upload_from_path s3
 Awskit_s3_eio.Object.Transfer.download_to_path s3
   ~bucket:"my-bucket"
   ~key:"archive.tar"
+  ~on_progress:(fun bytes -> Fmt.pr "downloaded %Ld bytes@." bytes)
   ~path
   ()
 ]}
@@ -182,9 +184,34 @@ let* result =
     ()
 ]}
 
-Current path transfer helpers are convenience helpers. Concurrent multipart
-transfer, progress callbacks, resumability, and runtime-native file streaming
-are future work.
+For larger files, use the multipart path helper. It uploads file parts with
+bounded concurrency and aborts the multipart upload if a fresh upload fails:
+
+{[
+let* result =
+  Awskit_s3_lwt_unix.Object.Transfer.upload_multipart_from_path s3
+    ~bucket:"my-bucket"
+    ~key:"large.tar"
+    ~path:"/tmp/large.tar"
+    ~concurrency:4
+    ~on_progress:(fun bytes -> Fmt.pr "uploaded %Ld bytes@." bytes)
+    ()
+]}
+
+To resume an interrupted multipart upload, keep the [upload_id]. The resume
+helper lists uploaded parts, skips matching part numbers and sizes, uploads the
+missing parts, and completes the upload. It does not abort the existing upload
+on failure, so the same upload ID can be retried:
+
+{[
+let* result =
+  Awskit_s3_lwt_unix.Object.Transfer.resume_multipart_upload_from_path s3
+    ~bucket:"my-bucket"
+    ~key:"large.tar"
+    ~upload_id
+    ~path:"/tmp/large.tar"
+    ()
+]}
 
 {1 AWS S3 Endpoint Configuration}
 

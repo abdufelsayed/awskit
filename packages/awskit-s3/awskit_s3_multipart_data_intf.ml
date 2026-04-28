@@ -15,6 +15,14 @@ module type MULTIPART_DATA = sig
 
   module Upload : sig
     type t = private { bucket : string; key : string; upload_id : Upload_id.t }
+
+    val create :
+      bucket:string ->
+      key:string ->
+      upload_id:Upload_id.t ->
+      (t, Error.t) result
+
+    val create_exn : bucket:string -> key:string -> upload_id:Upload_id.t -> t
   end
 
   module Part : sig

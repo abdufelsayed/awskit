@@ -16,6 +16,14 @@ end
 
 module Upload = struct
   type t = { bucket : string; key : string; upload_id : Upload_id.t }
+
+  let create ~bucket ~key ~upload_id =
+    match validate_bucket_key bucket key with
+    | Error _ as error -> error
+    | Ok () -> Ok { bucket; key; upload_id }
+
+  let create_exn ~bucket ~key ~upload_id =
+    result_exn (create ~bucket ~key ~upload_id)
 end
 
 module Part = struct

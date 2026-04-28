@@ -36,18 +36,53 @@ module Object : sig
       bucket:string ->
       key:string ->
       ?options:Awskit_s3.Object.Put.options ->
+      ?on_progress:(int64 -> unit) ->
       path:_ Eio.Path.t ->
       unit ->
       (Awskit_s3.Object.Put.result, Awskit_s3.Error.t) result
+    (** Stream a local file to S3. [on_progress], when provided, receives the
+        cumulative number of bytes written to the request body. *)
+
+    val upload_multipart_from_path :
+      t ->
+      bucket:string ->
+      key:string ->
+      ?options:Awskit_s3.Multipart.Managed.options ->
+      ?concurrency:int ->
+      ?on_progress:(int64 -> unit) ->
+      path:_ Eio.Path.t ->
+      unit ->
+      (Awskit_s3.Multipart.Managed.result, Awskit_s3.Error.t) result
+    (** Upload a local file with S3 multipart upload. [concurrency] defaults to
+        [4]. The helper aborts the multipart upload when a fresh upload fails.
+    *)
+
+    val resume_multipart_upload_from_path :
+      t ->
+      bucket:string ->
+      key:string ->
+      upload_id:Awskit_s3.Multipart.Upload_id.t ->
+      ?options:Awskit_s3.Multipart.Managed.options ->
+      ?concurrency:int ->
+      ?on_progress:(int64 -> unit) ->
+      path:_ Eio.Path.t ->
+      unit ->
+      (Awskit_s3.Multipart.Managed.result, Awskit_s3.Error.t) result
+    (** Resume an existing multipart upload by listing uploaded parts, skipping
+        matching part numbers and sizes, uploading missing parts, and completing
+        the upload. Existing uploads are not aborted on failure. *)
 
     val download_to_path :
       t ->
       bucket:string ->
       key:string ->
       ?options:Awskit_s3.Object.Get.options ->
+      ?on_progress:(int64 -> unit) ->
       path:_ Eio.Path.t ->
       unit ->
       (Awskit_s3.Object.Get.info, Awskit_s3.Error.t) result
+    (** Stream an S3 object to a local file. [on_progress], when provided,
+        receives the cumulative number of bytes written to disk. *)
   end
 end
 
