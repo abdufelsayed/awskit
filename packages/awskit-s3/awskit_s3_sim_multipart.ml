@@ -42,6 +42,7 @@ module Multipart = struct
                         metadata = options.metadata;
                         storage_class = options.storage_class;
                         tags = options.tags;
+                        checksum_request = options.checksum;
                         parts = Hashtbl.create 17;
                         created_at = now conn;
                       };
@@ -49,8 +50,10 @@ module Multipart = struct
                       { Public_multipart.Create.upload; request = response 200 }
                 )))
 
-  let upload_part conn ~bucket ~key ~upload_id ~part_number ~body ?options:_ ()
-      =
+  let upload_part conn ~bucket ~key ~upload_id ~part_number ~body ?options () =
+    let options =
+      Option.value ~default:Public_multipart.Upload_part.default_options options
+    in
     match validate_bucket_key bucket key with
     | Error error -> Error error
     | Ok () -> (
@@ -66,8 +69,15 @@ module Multipart = struct
                 | Some error -> Error error
                 | None ->
                     let etag = etag body in
+                    let checksum = checksum_for_body ~body options.checksum in
                     let part =
-                      { part_number; body; etag; last_modified = now conn }
+                      {
+                        part_number;
+                        body;
+                        etag;
+                        checksum;
+                        last_modified = now conn;
+                      }
                     in
                     Hashtbl.replace upload.parts part_number part;
                     let part =
@@ -76,8 +86,12 @@ module Multipart = struct
                     Ok
                       {
                         Public_multipart.Upload_part.part;
-                        checksum = None;
-                        request = response 200 ~headers:[ ("etag", etag) ];
+                        checksum;
+                        request =
+                          response 200
+                            ~headers:
+                              (("etag", etag)
+                              :: checksum_response_headers checksum);
                       })))
 
   let validate_complete_parts upload parts =
@@ -129,6 +143,9 @@ module Multipart = struct
                       |> String.concat ""
                     in
                     let etag = etag body in
+                    let checksum =
+                      checksum_for_body ~body upload.checksum_request
+                    in
                     let obj =
                       {
                         body;
@@ -137,6 +154,7 @@ module Multipart = struct
                         metadata = upload.metadata;
                         storage_class = upload.storage_class;
                         tags = upload.tags;
+                        checksum;
                         last_modified = now conn;
                       }
                     in
@@ -147,8 +165,10 @@ module Multipart = struct
                       {
                         Public_multipart.Complete.etag = Some etag;
                         version_id = None;
-                        checksum = None;
-                        request = response 200;
+                        checksum;
+                        request =
+                          response 200
+                            ~headers:(checksum_response_headers checksum);
                       })))
 
   let abort conn ~bucket ~key ~upload_id =
@@ -229,7 +249,7 @@ module Multipart = struct
                             etag = Some part.etag;
                             size = Some (Int64.of_int (String.length part.body));
                             last_modified = Some part.last_modified;
-                            checksum = None;
+                            checksum = part.checksum;
                           })
                         selected
                     in

@@ -23,6 +23,11 @@ module type OBJECT_DATA = sig
 
   module Checksum : sig
     type algorithm = [ `CRC32 | `CRC32C | `CRC64NVME | `SHA1 | `SHA256 ]
+    (** S3 object checksum algorithms accepted by object and multipart
+        operations. Requests may carry a precomputed [value], or only an
+        [algorithm] when AWS should calculate the checksum. Responses contain
+        checksum values returned by S3. *)
+
     type request = { algorithm : algorithm; value : string option }
     type response = { algorithm : algorithm; value : string }
   end

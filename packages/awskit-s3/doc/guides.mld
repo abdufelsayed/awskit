@@ -42,6 +42,25 @@ Awskit_s3_eio.Object.put s3
   ()
 ]}
 
+{2 Checksums}
+
+[Object.Checksum.request] supports the checksum algorithms exposed by classic
+S3 object and multipart operations: [CRC32], [CRC32C], [CRC64NVME], [SHA1],
+and [SHA256]. A request can provide both the algorithm and a precomputed
+checksum value, or provide only the algorithm and let AWS compute the stored
+checksum.
+
+Runtime-backed operations send the checksum algorithm/value headers and parse
+checksum response headers from [PutObject], [GetObject], [HeadObject],
+[UploadPart], and [CompleteMultipartUpload]. Presigned [PUT] URLs include
+checksum headers in the signed header set when configured.
+
+The simulator stores checksum metadata for objects and multipart parts. It
+computes [SHA1] and [SHA256] values when the request omits an explicit value,
+and preserves explicit values for all supported algorithms. It does not
+implement local CRC math for algorithm-only [CRC32], [CRC32C], or [CRC64NVME]
+requests.
+
 {2 Download}
 
 [Object.get] scopes the response body to the [consume] callback. Do not store

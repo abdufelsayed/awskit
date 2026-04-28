@@ -181,7 +181,11 @@ let head_object ~region ~credentials ~now ?provider ~bucket ~key ?options () =
 let put_object ~region ~credentials ~now ?provider ~bucket ~key ?options () =
   let options = Option.value ~default:Put_object.default_options options in
   let headers =
-    option_header "content-type" options.content_type @ options.headers
+    option_header "content-type" options.content_type
+    @ Awskit_s3_headers.checksum_request_headers options.checksum
+    @ Awskit_s3_headers.encryption_request_headers
+        options.server_side_encryption
+    @ options.headers
   in
   generate ~region ~credentials ~now ?provider ~bucket ~key ~method_:`PUT
     ~headers ~query:[] ?expires_in:options.expires_in ()

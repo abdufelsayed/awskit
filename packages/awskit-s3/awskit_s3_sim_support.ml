@@ -23,6 +23,7 @@ type stored_object = {
   mutable metadata : Metadata.t;
   mutable storage_class : Storage_class.t option;
   mutable tags : Tag.t list;
+  mutable checksum : Object.Checksum.response option;
   mutable last_modified : Ptime.t;
 }
 
@@ -30,6 +31,7 @@ type stored_part = {
   part_number : int;
   body : string;
   etag : Object.Etag.t;
+  checksum : Object.Checksum.response option;
   last_modified : Ptime.t;
 }
 
@@ -39,6 +41,7 @@ type multipart_upload = {
   metadata : Metadata.t;
   storage_class : Storage_class.t option;
   tags : Tag.t list;
+  checksum_request : Object.Checksum.request option;
   parts : (int, stored_part) Hashtbl.t;
   created_at : Ptime.t;
 }
@@ -189,6 +192,34 @@ let require_multipart_upload t ~bucket ~key ~upload_id =
   | _ -> Error (no_such_upload ())
 
 let etag body = "\"" ^ Digestif.MD5.(digest_string body |> to_hex) ^ "\""
+
+let checksum_of_request ~body (request : Object.Checksum.request) =
+  let value =
+    match request.value with
+    | Some value -> Some value
+    | None -> (
+        match request.algorithm with
+        | `SHA1 ->
+            Some
+              (Digestif.SHA1.(digest_string body |> to_raw_string)
+              |> Base64.encode_exn)
+        | `SHA256 ->
+            Some
+              (Digestif.SHA256.(digest_string body |> to_raw_string)
+              |> Base64.encode_exn)
+        | `CRC32 | `CRC32C | `CRC64NVME -> None)
+  in
+  Option.map
+    (fun value -> { Object.Checksum.algorithm = request.algorithm; value })
+    value
+
+let checksum_for_body ~body request =
+  Option.bind request (checksum_of_request ~body)
+
+let checksum_response_headers = function
+  | None -> []
+  | Some (checksum : Object.Checksum.response) ->
+      [ (checksum_header_name checksum.algorithm, checksum.value) ]
 
 let next_upload_id t =
   let id = t.store.next_upload_id in
@@ -345,7 +376,7 @@ let info_of_object response (obj : stored_object) =
     metadata = obj.metadata;
     storage_class = obj.storage_class;
     version_id = None;
-    checksum = None;
+    checksum = obj.checksum;
     server_side_encryption = None;
     request = response;
   }

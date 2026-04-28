@@ -11,6 +11,22 @@ let ok_or_fail label = function
   | Ok value -> value
   | Error error -> Alcotest.failf "%s: %a" label Error.pp error
 
+let header name headers = List.assoc_opt name headers
+
+let checksum_value = function
+  | None -> None
+  | Some (checksum : Object.Checksum.response) -> Some checksum.value
+
+let query_param name url = Uri.query (Uri.of_string url) |> List.assoc_opt name
+
+let check_checksum label algorithm value = function
+  | None -> Alcotest.failf "%s: expected checksum" label
+  | Some (checksum : Object.Checksum.response) ->
+      Alcotest.(check bool)
+        (label ^ " algorithm") true
+        (checksum.algorithm = algorithm);
+      Alcotest.(check string) (label ^ " value") value checksum.value
+
 let test_provider_resolution () =
   let provider = Provider.aws () in
   let request =
@@ -71,6 +87,38 @@ let test_presigned_result () =
     "virtual-hosted URL" true
     (String.starts_with ~prefix:"https://bucket.s3.us-east-1.amazonaws.com/"
        result.url)
+
+let test_presigned_put_checksum_headers () =
+  let checksum : Object.Checksum.request =
+    { Object.Checksum.algorithm = `SHA1; value = Some "provided-sha1" }
+  in
+  let options =
+    { Presigned.Put_object.default_options with checksum = Some checksum }
+  in
+  let result =
+    Presigned.put_object
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+      ~options ()
+    |> ok_or_fail "presigned put"
+  in
+  Alcotest.(check (option string))
+    "checksum algorithm header" (Some "SHA1")
+    (header "x-amz-checksum-algorithm" result.headers);
+  Alcotest.(check (option string))
+    "checksum value header" (Some "provided-sha1")
+    (header "x-amz-checksum-sha1" result.headers);
+  let signed_headers =
+    match query_param "X-Amz-SignedHeaders" result.url with
+    | Some [ value ] -> String.split_on_char ';' value
+    | _ -> Alcotest.fail "missing signed headers"
+  in
+  Alcotest.(check bool)
+    "signed checksum algorithm" true
+    (List.mem "x-amz-checksum-algorithm" signed_headers);
+  Alcotest.(check bool)
+    "signed checksum value" true
+    (List.mem "x-amz-checksum-sha1" signed_headers)
 
 module Recording_runtime = struct
   type response = {
@@ -361,6 +409,37 @@ let test_bucket_config_parse () =
       Alcotest.(check string) "logging prefix" "logs/" target.target_prefix
   | None -> Alcotest.fail "expected logging target"
 
+let test_object_checksum_headers_and_response () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:
+            [
+              ("etag", "\"etag\""); ("x-amz-checksum-sha256", "provided-sha256");
+            ]
+          "";
+      ]
+  in
+  let checksum : Object.Checksum.request =
+    { Object.Checksum.algorithm = `SHA256; value = Some "provided-sha256" }
+  in
+  let options = { Object.Put.default_options with checksum = Some checksum } in
+  let put =
+    Recording_s3.Object.Buffer.put_string conn ~bucket:"my-bucket" ~key:"file"
+      ~options "hello"
+    |> ok_or_fail "put checksum"
+  in
+  check_checksum "put response checksum" `SHA256 "provided-sha256" put.checksum;
+  let call = Recording_runtime.last_call conn in
+  Alcotest.(check string) "body" "hello" call.body;
+  Alcotest.(check (option string))
+    "checksum algorithm header" (Some "SHA256")
+    (header "x-amz-checksum-algorithm" call.request.headers);
+  Alcotest.(check (option string))
+    "checksum value header" (Some "provided-sha256")
+    (header "x-amz-checksum-sha256" call.request.headers)
+
 let test_retry_slow_down_then_success () =
   let slow_down =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
@@ -521,6 +600,38 @@ let test_multipart_paginator_follows_markers () =
         (List.assoc_opt "part-number-marker" second.request.target.query)
   | _ -> Alcotest.fail "expected two calls"
 
+let test_multipart_upload_part_checksum_headers () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:
+            [ ("etag", "\"etag-1\""); ("x-amz-checksum-sha1", "provided-sha1") ]
+          "";
+      ]
+  in
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let checksum : Object.Checksum.request =
+    { Object.Checksum.algorithm = `SHA1; value = Some "provided-sha1" }
+  in
+  let options = { Multipart.Upload_part.checksum = Some checksum } in
+  let part =
+    Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket" ~key:"large.bin"
+      ~upload_id ~part_number:1 ~body:"hello" ~options ()
+    |> ok_or_fail "upload part checksum"
+  in
+  check_checksum "part response checksum" `SHA1 "provided-sha1" part.checksum;
+  let call = Recording_runtime.last_call conn in
+  Alcotest.(check (option string))
+    "checksum algorithm header" (Some "SHA1")
+    (header "x-amz-checksum-algorithm" call.request.headers);
+  Alcotest.(check (option string))
+    "checksum value header" (Some "provided-sha1")
+    (header "x-amz-checksum-sha1" call.request.headers);
+  Alcotest.(check (option (list string)))
+    "part number" (Some [ "1" ])
+    (List.assoc_opt "partNumber" call.request.target.query)
+
 let make_sim () =
   let clock = Sim.Clock.create ~now:test_time () in
   let store = Sim.create_store ~clock () in
@@ -530,14 +641,23 @@ let make_sim () =
 
 let test_sim_buffer_roundtrip () =
   let conn = make_sim () in
+  let checksum : Object.Checksum.request =
+    { Object.Checksum.algorithm = `SHA256; value = None }
+  in
   let put =
     Sim.Object.Buffer.put_string conn ~bucket:"test-bucket" ~key:"hello.txt"
       ~options:
-        { Object.Put.default_options with content_type = Some "text/plain" }
+        {
+          Object.Put.default_options with
+          content_type = Some "text/plain";
+          checksum = Some checksum;
+        }
       "hello"
     |> ok_or_fail "put"
   in
   Alcotest.(check bool) "etag" true (Option.is_some put.etag);
+  check_checksum "put checksum" `SHA256
+    "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" put.checksum;
   let info, body =
     Sim.Object.Buffer.get_string conn ~bucket:"test-bucket" ~key:"hello.txt"
       ~max_size:16L ()
@@ -545,7 +665,26 @@ let test_sim_buffer_roundtrip () =
   in
   Alcotest.(check string) "body" "hello" body;
   Alcotest.(check (option string))
-    "content-type" (Some "text/plain") info.content_type
+    "content-type" (Some "text/plain") info.content_type;
+  check_checksum "get checksum" `SHA256
+    "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" info.checksum;
+  let head =
+    Sim.Object.head conn ~bucket:"test-bucket" ~key:"hello.txt" ()
+    |> ok_or_fail "head checksum"
+  in
+  check_checksum "head checksum" `SHA256
+    "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" head.checksum;
+  let page =
+    Sim.Object.list conn ~bucket:"test-bucket" () |> ok_or_fail "list checksum"
+  in
+  match page.objects with
+  | [ object_ ] ->
+      Alcotest.(check (option string))
+        "listed checksum" (Some "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=")
+        (List.find_map
+           (fun (checksum : Object.Checksum.response) -> Some checksum.value)
+           object_.checksums)
+  | _ -> Alcotest.fail "expected one listed object"
 
 let test_sim_streaming_get () =
   let conn = make_sim () in
@@ -611,11 +750,15 @@ let suite =
     ( "core",
       [
         Alcotest.test_case "presigned result" `Quick test_presigned_result;
+        Alcotest.test_case "presigned put checksum headers" `Quick
+          test_presigned_put_checksum_headers;
         Alcotest.test_case "provider resolution" `Quick test_provider_resolution;
         Alcotest.test_case "provider variants" `Quick test_provider_variants;
         Alcotest.test_case "bucket head request" `Quick test_bucket_head_request;
         Alcotest.test_case "bucket list parse" `Quick test_bucket_list_parse;
         Alcotest.test_case "bucket config parse" `Quick test_bucket_config_parse;
+        Alcotest.test_case "object checksum headers and response" `Quick
+          test_object_checksum_headers_and_response;
         Alcotest.test_case "retry slow down then success" `Quick
           test_retry_slow_down_then_success;
         Alcotest.test_case "retry fatal error not retried" `Quick
@@ -628,6 +771,8 @@ let suite =
           test_object_paginator_max_pages;
         Alcotest.test_case "multipart paginator follows markers" `Quick
           test_multipart_paginator_follows_markers;
+        Alcotest.test_case "multipart upload part checksum headers" `Quick
+          test_multipart_upload_part_checksum_headers;
         Alcotest.test_case "sim buffer roundtrip" `Quick
           test_sim_buffer_roundtrip;
         Alcotest.test_case "sim streaming get" `Quick test_sim_streaming_get;

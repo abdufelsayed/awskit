@@ -15,6 +15,14 @@ let expect_not_found label = function
       Alcotest.failf "%s: unexpected error: %a" label Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected not found" label
 
+let check_checksum label algorithm value = function
+  | None -> Alcotest.failf "%s: expected checksum" label
+  | Some (checksum : Object.Checksum.response) ->
+      Alcotest.(check bool)
+        (label ^ " algorithm") true
+        (checksum.algorithm = algorithm);
+      Alcotest.(check string) (label ^ " value") value checksum.value
+
 let tag key value = { Tag.key; value }
 
 module type SUBJECT = sig
@@ -73,6 +81,10 @@ module Make (Client : SUBJECT) = struct
         content_type = Some "text/plain";
         metadata = [ ("origin", "contract") ];
         tags = [ tag "env" "test" ];
+        checksum =
+          Some
+            ({ Object.Checksum.algorithm = `SHA256; value = None }
+              : Object.Checksum.request);
       }
     in
     let put =
@@ -81,6 +93,8 @@ module Make (Client : SUBJECT) = struct
       |> ok_or_fail "put object"
     in
     Alcotest.(check bool) "put etag" true (Option.is_some put.etag);
+    check_checksum "put checksum" `SHA256
+      "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" put.checksum;
     let info, body =
       Client.Object.Buffer.get_string conn ~bucket ~key:"hello.txt"
         ~max_size:16L ()
@@ -92,11 +106,15 @@ module Make (Client : SUBJECT) = struct
     Alcotest.(check (option string))
       "metadata" (Some "contract")
       (List.assoc_opt "origin" info.metadata);
+    check_checksum "get checksum" `SHA256
+      "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" info.checksum;
     let head =
       Client.Object.head conn ~bucket ~key:"hello.txt" () |> ok_or_fail "head"
     in
     Alcotest.(check (option int64))
       "content length" (Some 5L) head.content_length;
+    check_checksum "head checksum" `SHA256
+      "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" head.checksum;
     Alcotest.(check bool)
       "object exists" true
       (Client.Object.exists conn ~bucket ~key:"hello.txt" |> ok_or_fail "exists");
@@ -399,23 +417,41 @@ module Make (Client : SUBJECT) = struct
   let test_multipart_lifecycle () =
     let conn = Client.fresh () in
     create_bucket conn;
+    let upload_options =
+      {
+        Multipart.Create.default_options with
+        checksum =
+          Some
+            ({ Object.Checksum.algorithm = `SHA256; value = None }
+              : Object.Checksum.request);
+      }
+    in
     let upload =
-      Client.Multipart.create conn ~bucket ~key:"multi.bin" ()
+      Client.Multipart.create conn ~bucket ~key:"multi.bin"
+        ~options:upload_options ()
       |> ok_or_fail "create multipart"
     in
     let upload_id = upload.upload.upload_id in
+    let part_options =
+      {
+        Multipart.Upload_part.checksum =
+          Some
+            ({ Object.Checksum.algorithm = `SHA1; value = None }
+              : Object.Checksum.request);
+      }
+    in
     let part1 =
       Client.Multipart.upload_part conn ~bucket ~key:"multi.bin" ~upload_id
         ~part_number:1
         ~body:(Client.upload_body_of_string "hello-")
-        ()
+        ~options:part_options ()
       |> ok_or_fail "upload part 1"
     in
     let part2 =
       Client.Multipart.upload_part conn ~bucket ~key:"multi.bin" ~upload_id
         ~part_number:2
         ~body:(Client.upload_body_of_string "world")
-        ()
+        ~options:part_options ()
       |> ok_or_fail "upload part 2"
     in
     let list_options =
@@ -428,6 +464,11 @@ module Make (Client : SUBJECT) = struct
     in
     Alcotest.(check int) "first page count" 1 (List.length page.parts);
     Alcotest.(check bool) "parts truncated" true page.is_truncated;
+    (match page.parts with
+    | [ part ] ->
+        check_checksum "listed part checksum" `SHA1
+          "99fOUhWeYfviXce2x4zfE3HfH+I=" part.checksum
+    | _ -> Alcotest.fail "expected first multipart page");
     let parts =
       Client.Multipart.Paginator.parts conn ~bucket ~key:"multi.bin" ~upload_id
         ~options:list_options ()
@@ -444,12 +485,16 @@ module Make (Client : SUBJECT) = struct
       |> ok_or_fail "complete multipart"
     in
     Alcotest.(check bool) "complete etag" true (Option.is_some complete.etag);
-    let _info, body =
+    check_checksum "complete checksum" `SHA256
+      "r6J7RNQ7Aqn+pB0TztwuQBbPz4fF2/mQ5ZNmmqjOKG0=" complete.checksum;
+    let info, body =
       Client.Object.Buffer.get_string conn ~bucket ~key:"multi.bin"
         ~max_size:16L ()
       |> ok_or_fail "get completed multipart object"
     in
     Alcotest.(check string) "completed body" "hello-world" body;
+    check_checksum "completed object checksum" `SHA256
+      "r6J7RNQ7Aqn+pB0TztwuQBbPz4fF2/mQ5ZNmmqjOKG0=" info.checksum;
     let aborted =
       Client.Multipart.create conn ~bucket ~key:"abort.bin" ()
       |> ok_or_fail "create abort multipart"

@@ -25,6 +25,9 @@ module Object = struct
                     | Some error -> Error error
                     | None ->
                         let etag = etag body in
+                        let checksum =
+                          checksum_for_body ~body options.checksum
+                        in
                         let obj =
                           {
                             body;
@@ -33,6 +36,7 @@ module Object = struct
                             metadata = options.metadata;
                             storage_class = options.storage_class;
                             tags = options.tags;
+                            checksum;
                             last_modified = now conn;
                           }
                         in
@@ -41,8 +45,12 @@ module Object = struct
                           {
                             Object.Put.etag = Some etag;
                             version_id = None;
-                            checksum = None;
-                            request = response 200 ~headers:[ ("etag", etag) ];
+                            checksum;
+                            request =
+                              response 200
+                                ~headers:
+                                  (("etag", etag)
+                                  :: checksum_response_headers checksum);
                           }))))
 
   let get conn ~bucket ~key ?options ~consume () =
@@ -59,11 +67,12 @@ module Object = struct
                 let response =
                   response 200
                     ~headers:
-                      [
-                        ("etag", obj.etag);
-                        ( "content-length",
-                          string_of_int (String.length obj.body) );
-                      ]
+                      ([
+                         ("etag", obj.etag);
+                         ( "content-length",
+                           string_of_int (String.length obj.body) );
+                       ]
+                      @ checksum_response_headers obj.checksum)
                 in
                 let info = info_of_object response obj in
                 Result.map
@@ -81,11 +90,12 @@ module Object = struct
                 let response =
                   response 200
                     ~headers:
-                      [
-                        ("etag", obj.etag);
-                        ( "content-length",
-                          string_of_int (String.length obj.body) );
-                      ]
+                      ([
+                         ("etag", obj.etag);
+                         ( "content-length",
+                           string_of_int (String.length obj.body) );
+                       ]
+                      @ checksum_response_headers obj.checksum)
                 in
                 let info = info_of_object response obj in
                 Result.map
@@ -108,11 +118,12 @@ module Object = struct
                 let response =
                   response 200
                     ~headers:
-                      [
-                        ("etag", obj.etag);
-                        ( "content-length",
-                          string_of_int (String.length obj.body) );
-                      ]
+                      ([
+                         ("etag", obj.etag);
+                         ( "content-length",
+                           string_of_int (String.length obj.body) );
+                       ]
+                      @ checksum_response_headers obj.checksum)
                 in
                 Ok (info_of_object response obj)))
 
@@ -185,6 +196,11 @@ module Object = struct
                   | Some (`Replace metadata) -> metadata
                   | _ -> src.metadata
                 in
+                let checksum =
+                  match checksum_for_body ~body:src.body options.checksum with
+                  | Some checksum -> Some checksum
+                  | None -> src.checksum
+                in
                 let obj =
                   {
                     body = src.body;
@@ -199,6 +215,7 @@ module Object = struct
                       (match options.tags with
                       | Some tags -> tags
                       | None -> src.tags);
+                    checksum;
                     last_modified = now conn;
                   }
                 in
@@ -271,7 +288,7 @@ module Object = struct
                         last_modified = Some obj.last_modified;
                         storage_class = obj.storage_class;
                         owner = None;
-                        checksums = [];
+                        checksums = Option.to_list obj.checksum;
                       })
                     selected
                 in
