@@ -20,23 +20,26 @@ module Make (R : RUNTIME) = struct
     let return_ok value = R.return (Ok value)
     let return_error error = R.return (Error error)
     let empty_hash = Awskit.Body.Payload_hash.sha256_of_string ""
-    let provider conn = R.s3_provider conn
+    let endpoint_config conn = R.s3_endpoint_config conn
 
     let object_request conn ~bucket ~key =
-      Provider.resolve_object_request (provider conn) ~region:(R.region conn)
-        ~bucket ~key
+      Endpoint_resolver.resolve_object_request (endpoint_config conn)
+        ~region:(R.region conn) ~bucket ~key
 
     let bucket_request conn ~bucket ~suffix ~signing_suffix =
-      Provider.resolve_bucket_request (provider conn) ~region:(R.region conn)
-        ~bucket ~suffix ~signing_suffix
+      Endpoint_resolver.resolve_bucket_request (endpoint_config conn)
+        ~region:(R.region conn) ~bucket ~suffix ~signing_suffix
 
     let root_request conn =
-      match Provider.endpoint (provider conn) ~region:(R.region conn) with
+      match
+        Endpoint_resolver.endpoint (endpoint_config conn)
+          ~region:(R.region conn)
+      with
       | Error _ as error -> error
       | Ok endpoint ->
           Ok
             {
-              Provider.Request.endpoint;
+              Endpoint_resolver.Request.endpoint;
               path = "/";
               signing_path = "/";
               style = `Path;
@@ -86,8 +89,8 @@ module Make (R : RUNTIME) = struct
       | Error error -> return_error error
       | Ok body -> return_error (service_error response (Some body))
 
-    let signed_request conn ~method_ ~(request : Provider.Request.t) ~query
-        ~headers ~payload_hash =
+    let signed_request conn ~method_ ~(request : Endpoint_resolver.Request.t)
+        ~query ~headers ~payload_hash =
       let headers =
         ("host", Awskit.Endpoint.authority request.endpoint) :: headers
       in

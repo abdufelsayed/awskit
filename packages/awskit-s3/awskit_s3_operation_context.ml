@@ -12,22 +12,22 @@ module type S = sig
   val return : 'a -> 'a io
   val return_ok : 'a -> ('a, Error.t) result io
   val return_error : Error.t -> ('a, Error.t) result io
-  val provider : connection -> Provider.t
+  val endpoint_config : connection -> endpoint_config
 
   val object_request :
     connection ->
     bucket:string ->
     key:string ->
-    (Provider.Request.t, Error.t) result
+    (Endpoint_resolver.Request.t, Error.t) result
 
   val bucket_request :
     connection ->
     bucket:string ->
     suffix:string ->
     signing_suffix:string ->
-    (Provider.Request.t, Error.t) result
+    (Endpoint_resolver.Request.t, Error.t) result
 
-  val root_request : connection -> (Provider.Request.t, Error.t) result
+  val root_request : connection -> (Endpoint_resolver.Request.t, Error.t) result
 
   val read_body :
     download_reader -> max_size:int64 -> (string, Error.t) result io
@@ -43,7 +43,7 @@ module type S = sig
   val call :
     connection ->
     method_:Awskit.Request.Method.t ->
-    request:Provider.Request.t ->
+    request:Endpoint_resolver.Request.t ->
     query:(string * string list) list ->
     headers:(string * string) list ->
     payload_hash:Awskit.Body.Payload_hash.t ->
@@ -53,7 +53,7 @@ module type S = sig
   val call_empty :
     connection ->
     method_:Awskit.Request.Method.t ->
-    request:Provider.Request.t ->
+    request:Endpoint_resolver.Request.t ->
     query:(string * string list) list ->
     headers:(string * string) list ->
     (Awskit.Response.t * R.download_body, Error.t) result io

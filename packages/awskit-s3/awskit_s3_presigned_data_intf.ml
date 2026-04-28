@@ -2,10 +2,19 @@ open Awskit_s3_common
 
 open struct
   module Object = Awskit_s3_object
-  module Provider = Awskit_s3_provider
 end
 
 module type PRESIGNED_DATA = sig
+  type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
+
+  type endpoint_variant =
+    [ `Regional
+    | `Dualstack
+    | `Fips
+    | `Fips_dualstack
+    | `Accelerate
+    | `Accelerate_dualstack ]
+
   type method_ = [ `GET | `PUT | `HEAD | `DELETE ]
 
   type result = {
@@ -43,7 +52,10 @@ module type PRESIGNED_DATA = sig
     region:Awskit.Region.t ->
     credentials:Awskit.Credentials.t ->
     now:Ptime.t ->
-    ?provider:Provider.t ->
+    ?endpoint:Awskit.Endpoint.t ->
+    ?addressing_style:addressing_style ->
+    ?endpoint_variant:endpoint_variant ->
+    ?scheme:Awskit.Endpoint.Scheme.t ->
     bucket:string ->
     key:string ->
     ?options:Get_object.options ->
@@ -54,7 +66,10 @@ module type PRESIGNED_DATA = sig
     region:Awskit.Region.t ->
     credentials:Awskit.Credentials.t ->
     now:Ptime.t ->
-    ?provider:Provider.t ->
+    ?endpoint:Awskit.Endpoint.t ->
+    ?addressing_style:addressing_style ->
+    ?endpoint_variant:endpoint_variant ->
+    ?scheme:Awskit.Endpoint.Scheme.t ->
     bucket:string ->
     key:string ->
     ?options:Put_object.options ->
@@ -65,7 +80,10 @@ module type PRESIGNED_DATA = sig
     region:Awskit.Region.t ->
     credentials:Awskit.Credentials.t ->
     now:Ptime.t ->
-    ?provider:Provider.t ->
+    ?endpoint:Awskit.Endpoint.t ->
+    ?addressing_style:addressing_style ->
+    ?endpoint_variant:endpoint_variant ->
+    ?scheme:Awskit.Endpoint.Scheme.t ->
     bucket:string ->
     key:string ->
     ?options:Get_object.options ->
@@ -76,7 +94,10 @@ module type PRESIGNED_DATA = sig
     region:Awskit.Region.t ->
     credentials:Awskit.Credentials.t ->
     now:Ptime.t ->
-    ?provider:Provider.t ->
+    ?endpoint:Awskit.Endpoint.t ->
+    ?addressing_style:addressing_style ->
+    ?endpoint_variant:endpoint_variant ->
+    ?scheme:Awskit.Endpoint.Scheme.t ->
     bucket:string ->
     key:string ->
     ?expires_in:Ptime.Span.t ->

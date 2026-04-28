@@ -1,4 +1,4 @@
-type t = { aws : Awskit_eio.t; provider : Awskit_s3.Provider.t }
+type t = { aws : Awskit_eio.t; endpoint_config : Awskit_s3.endpoint_config }
 
 module Runtime = struct
   type connection = t
@@ -15,13 +15,8 @@ module Runtime = struct
   let credentials t = Awskit_eio.Runtime.credentials t.aws
   let retry_policy t = Awskit_eio.Runtime.retry_policy t.aws
   let sleep t = Awskit_eio.Runtime.sleep t.aws
-  let s3_provider t = t.provider
-
-  let endpoint t =
-    match Awskit_s3.Provider.endpoint t.provider ~region:(region t) with
-    | Ok endpoint -> Some endpoint
-    | Error _ -> None
-
+  let s3_endpoint_config t = t.endpoint_config
+  let endpoint _ = None
   let empty_body = Awskit_eio.Runtime.empty_body
   let string_body = Awskit_eio.Runtime.string_body
   let bytes_body = Awskit_eio.Runtime.bytes_body
@@ -36,10 +31,14 @@ end
 
 module S3 = Awskit_s3.Make (Runtime)
 
-let create ~sw ~env ~region ~credentials ?retry_policy
-    ?(provider = Awskit_s3.Provider.default) () =
+let create ~sw ~env ~region ~credentials ?retry_policy ?endpoint
+    ?addressing_style ?endpoint_variant ?scheme () =
   let aws = Awskit_eio.create ~sw ~env ~region ~credentials ?retry_policy () in
-  { aws; provider }
+  let endpoint_config =
+    Awskit_s3.endpoint_config ?addressing_style ?endpoint_variant ?scheme
+      ?endpoint ()
+  in
+  { aws; endpoint_config }
 
 module Object = struct
   include S3.Object

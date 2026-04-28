@@ -11,7 +11,10 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
 
   val create :
     ?ctx:Client.ctx ->
-    ?provider:Awskit_s3.Provider.t ->
+    ?endpoint:Awskit.Endpoint.t ->
+    ?addressing_style:Awskit_s3.addressing_style ->
+    ?endpoint_variant:Awskit_s3.endpoint_variant ->
+    ?scheme:Awskit.Endpoint.Scheme.t ->
     region:Awskit.Region.t ->
     credentials:Awskit.Credentials.t ->
     clock:(unit -> Ptime.t) ->

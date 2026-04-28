@@ -10,7 +10,10 @@ module Runtime :
 
 val create :
   ?ctx:Cohttp_lwt_unix.Client.ctx ->
-  ?provider:Awskit_s3.Provider.t ->
+  ?endpoint:Awskit.Endpoint.t ->
+  ?addressing_style:Awskit_s3.addressing_style ->
+  ?endpoint_variant:Awskit_s3.endpoint_variant ->
+  ?scheme:Awskit.Endpoint.Scheme.t ->
   ?region:Awskit.Region.t ->
   ?credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->

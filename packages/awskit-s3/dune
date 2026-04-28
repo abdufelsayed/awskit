@@ -3,13 +3,12 @@
  (public_name awskit-s3)
  (modules
   awskit_s3_common
-  awskit_s3_provider
+  awskit_s3_endpoint
   awskit_s3_object
   awskit_s3_bucket
   awskit_s3_multipart
   awskit_s3_policy
   awskit_s3_presigned
-  awskit_s3_provider_intf
   awskit_s3_object_data_intf
   awskit_s3_bucket_data_intf
   awskit_s3_multipart_data_intf
@@ -74,7 +73,6 @@
   awskit_s3_policy_intf
   awskit_s3_presigned_ops
   awskit_s3_presigned_data_intf
-  awskit_s3_provider_intf
   awskit_s3_response
   awskit_s3_sim_bucket
   awskit_s3_sim_multipart

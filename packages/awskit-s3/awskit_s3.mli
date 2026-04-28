@@ -70,14 +70,34 @@ module Range : sig
   val to_header : t -> string
 end
 
-(** AWS S3 endpoint and addressing resolution. *)
-module Provider :
-  Awskit_s3_intf.PROVIDER
-    with type addressing_style = Awskit_s3_provider.addressing_style
-     and type endpoint_variant = Awskit_s3_provider.endpoint_variant
-     and type resolved_style = Awskit_s3_provider.resolved_style
-     and type Request.t = Awskit_s3_provider.Request.t
-     and type t = Awskit_s3_provider.t
+type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
+(** S3 bucket addressing style. [`Auto] uses virtual-hosted addressing when the
+    bucket name is safe for the selected endpoint and path-style otherwise. *)
+
+type endpoint_variant =
+  [ `Regional
+  | `Dualstack
+  | `Fips
+  | `Fips_dualstack
+  | `Accelerate
+  | `Accelerate_dualstack ]
+(** AWS S3 endpoint variant. Ignored when an explicit [endpoint] is supplied. *)
+
+type endpoint_config = Awskit_s3_endpoint.t
+(** Opaque S3 endpoint and addressing configuration for custom runtimes. Most
+    callers pass endpoint options directly to an adapter [create] function. *)
+
+val endpoint_config :
+  ?addressing_style:addressing_style ->
+  ?endpoint_variant:endpoint_variant ->
+  ?scheme:Endpoint.Scheme.t ->
+  ?endpoint:Endpoint.t ->
+  unit ->
+  endpoint_config
+(** Build endpoint configuration for custom runtimes. *)
+
+val default_endpoint_config : endpoint_config
+(** Default AWS regional HTTPS endpoint configuration. *)
 
 (** Object data types and option records. *)
 module Object :

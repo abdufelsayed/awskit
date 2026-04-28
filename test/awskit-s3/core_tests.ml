@@ -27,45 +27,68 @@ let check_checksum label algorithm value = function
         (checksum.algorithm = algorithm);
       Alcotest.(check string) (label ^ " value") value checksum.value
 
-let test_provider_resolution () =
-  let provider = Provider.aws () in
-  let request =
-    Provider.resolve_object_request provider
+let test_endpoint_resolution () =
+  let result =
+    Presigned.get_object
       ~region:(Region.of_string_exn "us-east-1")
-      ~bucket:"my-bucket" ~key:"dir/file.txt"
-    |> ok_or_fail "resolve object"
+      ~credentials:creds ~now:test_time ~bucket:"my-bucket" ~key:"dir/file.txt"
+      ()
+    |> ok_or_fail "presigned default endpoint"
   in
-  Alcotest.(check string)
-    "virtual host" "my-bucket.s3.us-east-1.amazonaws.com"
-    (Endpoint.host request.endpoint);
-  Alcotest.(check string) "path" "/dir/file.txt" request.path;
+  Alcotest.(check bool)
+    "virtual-hosted default" true
+    (String.starts_with
+       ~prefix:"https://my-bucket.s3.us-east-1.amazonaws.com/dir/file.txt"
+       result.url);
   let dotted =
-    Provider.resolve_object_request provider
+    Presigned.get_object
       ~region:(Region.of_string_exn "us-east-1")
-      ~bucket:"my.bucket" ~key:"file.txt"
-    |> ok_or_fail "resolve dotted object"
+      ~credentials:creds ~now:test_time ~bucket:"my.bucket" ~key:"file.txt" ()
+    |> ok_or_fail "presigned dotted bucket"
   in
-  Alcotest.(check string)
-    "path style host" "s3.us-east-1.amazonaws.com"
-    (Endpoint.host dotted.endpoint);
-  Alcotest.(check string) "path style path" "/my.bucket/file.txt" dotted.path
+  Alcotest.(check bool)
+    "dotted bucket path-style" true
+    (String.starts_with
+       ~prefix:"https://s3.us-east-1.amazonaws.com/my.bucket/file.txt"
+       dotted.url);
+  let endpoint = Endpoint.http_exn ~host:"localhost" ~port:9000 () in
+  let result =
+    Presigned.get_object
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~endpoint ~addressing_style:`Path
+      ~bucket:"my-bucket" ~key:"dir/file.txt" ()
+    |> ok_or_fail "presigned endpoint override"
+  in
+  Alcotest.(check bool)
+    "endpoint override path-style" true
+    (String.starts_with ~prefix:"http://localhost:9000/my-bucket/dir/file.txt"
+       result.url)
 
-let test_provider_variants () =
-  let provider = Provider.aws ~endpoint_variant:`Dualstack () in
-  let endpoint =
-    Provider.endpoint provider ~region:(Region.of_string_exn "eu-west-1")
+let test_endpoint_variants () =
+  let dualstack =
+    Presigned.get_object
+      ~region:(Region.of_string_exn "eu-west-1")
+      ~credentials:creds ~now:test_time ~endpoint_variant:`Dualstack
+      ~bucket:"bucket" ~key:"file.txt" ()
     |> ok_or_fail "dualstack endpoint"
   in
-  Alcotest.(check string)
-    "dualstack" "s3.dualstack.eu-west-1.amazonaws.com" (Endpoint.host endpoint);
+  Alcotest.(check bool)
+    "dualstack" true
+    (String.starts_with
+       ~prefix:"https://bucket.s3.dualstack.eu-west-1.amazonaws.com/file.txt"
+       dualstack.url);
   let accelerate =
-    Provider.aws ~endpoint_variant:`Accelerate_dualstack ()
-    |> Provider.endpoint ~region:(Region.of_string_exn "us-west-2")
+    Presigned.get_object
+      ~region:(Region.of_string_exn "us-west-2")
+      ~credentials:creds ~now:test_time ~endpoint_variant:`Accelerate_dualstack
+      ~bucket:"bucket" ~key:"file.txt" ()
     |> ok_or_fail "accelerate endpoint"
   in
-  Alcotest.(check string)
-    "accelerate" "s3-accelerate.dualstack.amazonaws.com"
-    (Endpoint.host accelerate)
+  Alcotest.(check bool)
+    "accelerate" true
+    (String.starts_with
+       ~prefix:"https://bucket.s3-accelerate.dualstack.amazonaws.com/file.txt"
+       accelerate.url)
 
 let test_presigned_result () =
   let result =
@@ -132,7 +155,7 @@ module Recording_runtime = struct
   type connection = {
     region : Region.t;
     credentials : Credentials.t;
-    provider : Provider.t;
+    endpoint_config : Awskit_s3.endpoint_config;
     retry_policy : Awskit.Retry.t;
     mutable calls : call list;
     mutable responses : response list;
@@ -150,13 +173,13 @@ module Recording_runtime = struct
   type upload_writer = Buffer.t
   type download_reader = { body : string; mutable offset : int }
 
-  let connect ?(provider = Provider.default)
+  let connect ?(endpoint_config = Awskit_s3.default_endpoint_config)
       ?(region = Region.of_string_exn "us-east-1")
       ?(retry_policy = Awskit.Retry.default) responses =
     {
       region;
       credentials = creds;
-      provider;
+      endpoint_config;
       retry_policy;
       calls = [];
       responses;
@@ -172,12 +195,10 @@ module Recording_runtime = struct
   let now _ = test_time
   let region conn = conn.region
   let credentials conn = Ok conn.credentials
-  let s3_provider conn = conn.provider
+  let s3_endpoint_config conn = conn.endpoint_config
   let retry_policy conn = conn.retry_policy
   let sleep conn span = conn.sleeps <- span :: conn.sleeps
-
-  let endpoint conn =
-    Provider.endpoint conn.provider ~region:conn.region |> Result.to_option
+  let endpoint _ = None
 
   let descriptor body =
     {
@@ -975,8 +996,8 @@ let suite =
         Alcotest.test_case "presigned result" `Quick test_presigned_result;
         Alcotest.test_case "presigned put checksum headers" `Quick
           test_presigned_put_checksum_headers;
-        Alcotest.test_case "provider resolution" `Quick test_provider_resolution;
-        Alcotest.test_case "provider variants" `Quick test_provider_variants;
+        Alcotest.test_case "endpoint resolution" `Quick test_endpoint_resolution;
+        Alcotest.test_case "endpoint variants" `Quick test_endpoint_variants;
         Alcotest.test_case "bucket head request" `Quick test_bucket_head_request;
         Alcotest.test_case "bucket list parse" `Quick test_bucket_list_parse;
         Alcotest.test_case "bucket config parse" `Quick test_bucket_config_parse;

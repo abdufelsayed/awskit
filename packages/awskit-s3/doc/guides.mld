@@ -1,7 +1,7 @@
 {0 S3 Guides}
 
 Guides for the redesigned S3 API. The public surface is streaming-first,
-AWS-provider-aware, and result-returning.
+AWS S3-shaped, endpoint-configurable, and result-returning.
 
 {1 Object Operations}
 
@@ -186,20 +186,40 @@ Current path transfer helpers are convenience helpers. Concurrent multipart
 transfer, progress callbacks, resumability, and runtime-native file streaming
 are future work.
 
-{1 AWS S3 Provider Configuration}
+{1 AWS S3 Endpoint Configuration}
 
-S3 provider configuration is AWS-specific. Pass [provider] when constructing an
-adapter connection or using standalone presigned helpers.
+S3 endpoint configuration is part of client construction. The defaults use the
+standard regional AWS S3 endpoint for the selected region.
 
 {[
-let provider =
-  Awskit_s3.Provider.aws
+let s3 =
+  Awskit_s3_eio.create
+    ~sw
+    ~env
+    ~region
+    ~credentials
     ~endpoint_variant:`Dualstack
     ~addressing_style:`Auto
     ()
+]}
+
+Pass [endpoint] for S3 endpoints that are not the default AWS regional host,
+including local test services and S3-compatible services that implement the S3
+API:
+
+{[
+let endpoint =
+  Awskit.Endpoint.of_string_exn "https://fly.storage.tigris.dev"
 in
 let s3 =
-  Awskit_s3_eio.create ~sw ~env ~region ~credentials ~provider ()
+  Awskit_s3_eio.create
+    ~sw
+    ~env
+    ~region
+    ~credentials
+    ~endpoint
+    ~addressing_style:`Path
+    ()
 ]}
 
 Endpoint variants:
@@ -312,13 +332,14 @@ Awskit_s3.Presigned.put_object
   ~region
   ~credentials
   ~now
-  ~provider
+  ~endpoint
+  ~addressing_style:`Path
   ~bucket:"my-bucket"
   ~key:"upload.txt"
   ()
 ]}
 
-Presigned URLs use [UNSIGNED-PAYLOAD] and the same provider endpoint resolver
+Presigned URLs use [UNSIGNED-PAYLOAD] and the same endpoint/addressing options
 as normal operations.
 
 {1 Credentials}

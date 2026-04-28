@@ -1,4 +1,7 @@
-type t = { aws : Awskit_lwt_unix.t; provider : Awskit_s3.Provider.t }
+type t = {
+  aws : Awskit_lwt_unix.t;
+  endpoint_config : Awskit_s3.endpoint_config;
+}
 
 module Runtime = struct
   type connection = t
@@ -15,13 +18,8 @@ module Runtime = struct
   let credentials t = Awskit_lwt_unix.Runtime.credentials t.aws
   let retry_policy t = Awskit_lwt_unix.Runtime.retry_policy t.aws
   let sleep t = Awskit_lwt_unix.Runtime.sleep t.aws
-  let s3_provider t = t.provider
-
-  let endpoint t =
-    match Awskit_s3.Provider.endpoint t.provider ~region:(region t) with
-    | Ok endpoint -> Some endpoint
-    | Error _ -> None
-
+  let s3_endpoint_config t = t.endpoint_config
+  let endpoint _ = None
   let empty_body = Awskit_lwt_unix.Runtime.empty_body
   let string_body = Awskit_lwt_unix.Runtime.string_body
   let bytes_body = Awskit_lwt_unix.Runtime.bytes_body
@@ -36,14 +34,19 @@ end
 
 module S3 = Awskit_s3.Make (Runtime)
 
-let create ?ctx ?(provider = Awskit_s3.Provider.default) ?region ?credentials
-    ?clock ?retry_policy () =
+let create ?ctx ?endpoint ?addressing_style ?endpoint_variant ?scheme ?region
+    ?credentials ?clock ?retry_policy () =
   let region = Option.map Awskit.Region.to_string region in
   match
     Awskit_lwt_unix.create ?ctx ?region ?credentials ?clock ?retry_policy ()
   with
   | Error _ as error -> error
-  | Ok aws -> Ok { aws; provider }
+  | Ok aws ->
+      let endpoint_config =
+        Awskit_s3.endpoint_config ?addressing_style ?endpoint_variant ?scheme
+          ?endpoint ()
+      in
+      Ok { aws; endpoint_config }
 
 module Object = struct
   include S3.Object

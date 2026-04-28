@@ -1,5 +1,5 @@
 include Awskit_s3_common
-module Provider = Awskit_s3_provider
+module Endpoint_resolver = Awskit_s3_endpoint
 module Object = Awskit_s3_object
 module Bucket = Awskit_s3_bucket
 module Multipart = Awskit_s3_multipart

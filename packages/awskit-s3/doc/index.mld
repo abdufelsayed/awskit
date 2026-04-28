@@ -57,7 +57,7 @@ bodies and download readers come from the selected runtime adapter.
 
 {2 awskit-s3}
 
-{!module:Awskit_s3} contains pure types, provider resolution, standalone
+{!module:Awskit_s3} contains pure types, S3 endpoint configuration, standalone
 presigned URL helpers, the runtime functor, and the deterministic simulator.
 
 Main modules:
@@ -70,8 +70,6 @@ Main modules:
   {li {!module:Awskit_s3.Multipart} — multipart upload identifiers, parts,
     options, and result records}
   {li {!module:Awskit_s3.Presigned} — pure presigned URL generation}
-  {li {!module:Awskit_s3.Provider} — AWS S3 endpoint variants and addressing
-    behavior}
   {li {!module:Awskit_s3.Policy} — validated opaque bucket policy JSON
     payloads}
   {li {!module:Awskit_s3.Sim} — in-memory S3 test surface}
@@ -144,6 +142,6 @@ let run () =
 {1 Guides}
 
 {ul
-  {li {{!page-guides}S3 Guides} — objects, buffers, transfers, providers,
+  {li {{!page-guides}S3 Guides} — objects, buffers, transfers, endpoint setup,
     buckets, multipart, presigning, errors, and simulator testing}
 }

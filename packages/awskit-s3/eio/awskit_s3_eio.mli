@@ -13,7 +13,10 @@ val create :
   region:Awskit.Region.t ->
   credentials:Awskit.Credentials.t ->
   ?retry_policy:Awskit.Retry.t ->
-  ?provider:Awskit_s3.Provider.t ->
+  ?endpoint:Awskit.Endpoint.t ->
+  ?addressing_style:Awskit_s3.addressing_style ->
+  ?endpoint_variant:Awskit_s3.endpoint_variant ->
+  ?scheme:Awskit.Endpoint.Scheme.t ->
   unit ->
   t
 (** Create an Eio S3 client. [retry_policy] defaults to

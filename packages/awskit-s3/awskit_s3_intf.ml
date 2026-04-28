@@ -2,7 +2,7 @@ open Awskit_s3_common
 include Awskit_s3_data_intf
 
 open struct
-  module Provider = Awskit_s3_provider
+  module Endpoint_resolver = Awskit_s3_endpoint
   module Object = Awskit_s3_object
   module Bucket = Awskit_s3_bucket
   module Multipart = Awskit_s3_multipart
@@ -10,10 +10,28 @@ open struct
   module Presigned = Awskit_s3_presigned
 end
 
+type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
+
+type endpoint_variant =
+  [ `Regional
+  | `Dualstack
+  | `Fips
+  | `Fips_dualstack
+  | `Accelerate
+  | `Accelerate_dualstack ]
+
+type endpoint_config = Endpoint_resolver.t
+
+let endpoint_config ?addressing_style ?endpoint_variant ?scheme ?endpoint () =
+  Endpoint_resolver.create ?addressing_style ?endpoint_variant ?scheme ?endpoint
+    ()
+
+let default_endpoint_config = Endpoint_resolver.default
+
 module type RUNTIME = sig
   include Awskit.Runtime.S
 
-  val s3_provider : connection -> Provider.t
+  val s3_endpoint_config : connection -> endpoint_config
 end
 
 module type OBJECT = sig

@@ -25,16 +25,21 @@ type t = {
   addressing_style : addressing_style;
   endpoint_variant : endpoint_variant;
   scheme : Endpoint.Scheme.t;
+  endpoint_override : Endpoint.t option;
 }
 
-let aws ?(addressing_style = `Auto) ?(endpoint_variant = `Regional)
-    ?(scheme = `Https) () =
-  { addressing_style; endpoint_variant; scheme }
+let create ?(addressing_style = `Auto) ?(endpoint_variant = `Regional)
+    ?(scheme = `Https) ?endpoint () =
+  { addressing_style; endpoint_variant; scheme; endpoint_override = endpoint }
 
-let default = aws ()
+let default = create ()
 let addressing_style t = t.addressing_style
 let endpoint_variant t = t.endpoint_variant
-let scheme t = t.scheme
+
+let scheme t =
+  match t.endpoint_override with
+  | Some endpoint -> Endpoint.scheme endpoint
+  | None -> t.scheme
 
 let endpoint_host t ~region =
   let region = Region.to_string region in
@@ -47,7 +52,9 @@ let endpoint_host t ~region =
   | `Accelerate_dualstack -> "s3-accelerate.dualstack.amazonaws.com"
 
 let endpoint t ~region =
-  Endpoint.create ~scheme:t.scheme ~host:(endpoint_host t ~region) ()
+  match t.endpoint_override with
+  | Some endpoint -> Ok endpoint
+  | None -> Endpoint.create ~scheme:t.scheme ~host:(endpoint_host t ~region) ()
 
 let bucket_has_dot bucket = String.contains bucket '.'
 

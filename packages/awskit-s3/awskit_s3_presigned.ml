@@ -1,6 +1,16 @@
 open Awskit_s3_common
 module Object = Awskit_s3_object
-module Provider = Awskit_s3_provider
+module Endpoint_resolver = Awskit_s3_endpoint
+
+type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
+
+type endpoint_variant =
+  [ `Regional
+  | `Dualstack
+  | `Fips
+  | `Fips_dualstack
+  | `Accelerate
+  | `Accelerate_dualstack ]
 
 type method_ = [ `GET | `PUT | `HEAD | `DELETE ]
 
@@ -88,12 +98,17 @@ let expires_seconds span =
       invalid ~field:"expires_in" "expires_in must be <= %d seconds" max_expires
   | Some seconds -> Ok seconds
 
-let generate ~region ~credentials ~now ?(provider = Provider.default) ~bucket
-    ~key ~method_ ~headers ~query ?expires_in () =
+let endpoint_config ?addressing_style ?endpoint_variant ?scheme ?endpoint () =
+  Endpoint_resolver.create ?addressing_style ?endpoint_variant ?scheme ?endpoint
+    ()
+
+let generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ~method_ ~headers ~query ?expires_in () =
   let expires_span = Option.value ~default:default_expires expires_in in
   let* expires = expires_seconds expires_span in
   let* request =
-    Provider.resolve_object_request provider ~region ~bucket ~key
+    Endpoint_resolver.resolve_object_request endpoint_config ~region ~bucket
+      ~key
   in
   let datestamp, amz_date = Awskit.Signing.ptime_to_date_time now in
   let scope =
@@ -156,6 +171,15 @@ let generate ~region ~credentials ~now ?(provider = Provider.default) ~bucket
   in
   Ok { url; method_; headers; expires_at = Ptime.add_span now expires_span }
 
+let generate ~region ~credentials ~now ?endpoint ?addressing_style
+    ?endpoint_variant ?scheme ~bucket ~key ~method_ ~headers ~query ?expires_in
+    () =
+  let endpoint_config =
+    endpoint_config ?addressing_style ?endpoint_variant ?scheme ?endpoint ()
+  in
+  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ~method_ ~headers ~query ?expires_in ()
+
 let get_query (options : Get_object.options) =
   let add_opt key value acc =
     match value with None -> acc | Some v -> (key, [ v ]) :: acc
@@ -166,19 +190,24 @@ let get_query (options : Get_object.options) =
   |> add_opt "versionId"
        (Option.map Object.Version_id.to_string options.version_id)
 
-let get_object ~region ~credentials ~now ?provider ~bucket ~key ?options () =
+let get_object ~region ~credentials ~now ?endpoint ?addressing_style
+    ?endpoint_variant ?scheme ~bucket ~key ?options () =
   let options = Option.value ~default:Get_object.default_options options in
-  generate ~region ~credentials ~now ?provider ~bucket ~key ~method_:`GET
+  generate ~region ~credentials ~now ?endpoint ?addressing_style
+    ?endpoint_variant ?scheme ~bucket ~key ~method_:`GET
     ~headers:options.headers ~query:(get_query options)
     ?expires_in:options.expires_in ()
 
-let head_object ~region ~credentials ~now ?provider ~bucket ~key ?options () =
+let head_object ~region ~credentials ~now ?endpoint ?addressing_style
+    ?endpoint_variant ?scheme ~bucket ~key ?options () =
   let options = Option.value ~default:Get_object.default_options options in
-  generate ~region ~credentials ~now ?provider ~bucket ~key ~method_:`HEAD
+  generate ~region ~credentials ~now ?endpoint ?addressing_style
+    ?endpoint_variant ?scheme ~bucket ~key ~method_:`HEAD
     ~headers:options.headers ~query:(get_query options)
     ?expires_in:options.expires_in ()
 
-let put_object ~region ~credentials ~now ?provider ~bucket ~key ?options () =
+let put_object ~region ~credentials ~now ?endpoint ?addressing_style
+    ?endpoint_variant ?scheme ~bucket ~key ?options () =
   let options = Option.value ~default:Put_object.default_options options in
   let headers =
     option_header "content-type" options.content_type
@@ -187,10 +216,45 @@ let put_object ~region ~credentials ~now ?provider ~bucket ~key ?options () =
         options.server_side_encryption
     @ options.headers
   in
-  generate ~region ~credentials ~now ?provider ~bucket ~key ~method_:`PUT
-    ~headers ~query:[] ?expires_in:options.expires_in ()
+  generate ~region ~credentials ~now ?endpoint ?addressing_style
+    ?endpoint_variant ?scheme ~bucket ~key ~method_:`PUT ~headers ~query:[]
+    ?expires_in:options.expires_in ()
 
-let delete_object ~region ~credentials ~now ?provider ~bucket ~key ?expires_in
-    () =
-  generate ~region ~credentials ~now ?provider ~bucket ~key ~method_:`DELETE
-    ~headers:[] ~query:[] ?expires_in ()
+let delete_object ~region ~credentials ~now ?endpoint ?addressing_style
+    ?endpoint_variant ?scheme ~bucket ~key ?expires_in () =
+  generate ~region ~credentials ~now ?endpoint ?addressing_style
+    ?endpoint_variant ?scheme ~bucket ~key ~method_:`DELETE ~headers:[]
+    ~query:[] ?expires_in ()
+
+let get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ?options () =
+  let options = Option.value ~default:Get_object.default_options options in
+  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ~method_:`GET ~headers:options.headers
+    ~query:(get_query options) ?expires_in:options.expires_in ()
+
+let head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ?options () =
+  let options = Option.value ~default:Get_object.default_options options in
+  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ~method_:`HEAD ~headers:options.headers
+    ~query:(get_query options) ?expires_in:options.expires_in ()
+
+let put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ?options () =
+  let options = Option.value ~default:Put_object.default_options options in
+  let headers =
+    option_header "content-type" options.content_type
+    @ Awskit_s3_headers.checksum_request_headers options.checksum
+    @ Awskit_s3_headers.encryption_request_headers
+        options.server_side_encryption
+    @ options.headers
+  in
+  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ~method_:`PUT ~headers ~query:[] ?expires_in:options.expires_in
+    ()
+
+let delete_object_with_endpoint_config ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?expires_in () =
+  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ~method_:`DELETE ~headers:[] ~query:[] ?expires_in ()

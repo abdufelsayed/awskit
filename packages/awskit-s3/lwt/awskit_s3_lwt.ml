@@ -1,7 +1,7 @@
 module Make (Client : Cohttp_lwt.S.Client) = struct
   module Aws = Awskit_lwt.Make (Client)
 
-  type t = { aws : Aws.t; provider : Awskit_s3.Provider.t }
+  type t = { aws : Aws.t; endpoint_config : Awskit_s3.endpoint_config }
 
   module Runtime = struct
     type connection = t
@@ -18,13 +18,8 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let credentials t = Aws.Runtime.credentials t.aws
     let retry_policy t = Aws.Runtime.retry_policy t.aws
     let sleep t = Aws.Runtime.sleep t.aws
-    let s3_provider t = t.provider
-
-    let endpoint t =
-      match Awskit_s3.Provider.endpoint t.provider ~region:(region t) with
-      | Ok endpoint -> Some endpoint
-      | Error _ -> None
-
+    let s3_endpoint_config t = t.endpoint_config
+    let endpoint _ = None
     let empty_body = Aws.Runtime.empty_body
     let string_body = Aws.Runtime.string_body
     let bytes_body = Aws.Runtime.bytes_body
@@ -39,12 +34,16 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
   module S3 = Awskit_s3.Make (Runtime)
 
-  let create ?ctx ?(provider = Awskit_s3.Provider.default) ~region ~credentials
-      ~clock ?retry_policy ?sleep () =
+  let create ?ctx ?endpoint ?addressing_style ?endpoint_variant ?scheme ~region
+      ~credentials ~clock ?retry_policy ?sleep () =
     let aws =
       Aws.create ?ctx ~region ~credentials ~clock ?retry_policy ?sleep ()
     in
-    { aws; provider }
+    let endpoint_config =
+      Awskit_s3.endpoint_config ?addressing_style ?endpoint_variant ?scheme
+        ?endpoint ()
+    in
+    { aws; endpoint_config }
 
   module Object = S3.Object
   module Bucket = S3.Bucket
