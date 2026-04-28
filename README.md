@@ -112,12 +112,17 @@ dune build
 dune test
 ```
 
-Integration tests need MinIO:
+Optional local MinIO contract tests:
 
 ```bash
 docker compose up -d
-dune test
+dune build @minio-contract
 ```
+
+The MinIO contract runner defaults to `http://127.0.0.1:9000` with
+`minioadmin` credentials from `docker-compose.yml`. Override with
+`AWSKIT_S3_MINIO_ENDPOINT`, `AWSKIT_S3_MINIO_ACCESS_KEY_ID`,
+`AWSKIT_S3_MINIO_SECRET_ACCESS_KEY`, and `AWSKIT_S3_MINIO_REGION`.
 
 ## Project layout
 

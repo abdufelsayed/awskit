@@ -12,3 +12,21 @@
   lwt.unix
   fmt
   alcotest))
+
+(executable
+ (name minio_contract_tests)
+ (modules minio_contract_tests)
+ (libraries
+  awskit
+  awskit_lwt_unix
+  awskit_s3
+  awskit_s3_lwt_unix
+  lwt
+  lwt.unix
+  ptime.clock.os
+  alcotest))
+
+(rule
+ (alias minio-contract)
+ (action
+  (run ./minio_contract_tests.exe)))
