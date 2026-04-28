@@ -61,6 +61,20 @@ and preserves explicit values for all supported algorithms. It does not
 implement local CRC math for algorithm-only [CRC32], [CRC32C], or [CRC64NVME]
 requests.
 
+{2 Preconditions}
+
+Object write, read, delete, and copy operations expose S3 conditional request
+records under [Object.Preconditions]. Runtime-backed clients map those records
+to the AWS headers for [If-Match], [If-None-Match],
+[If-Modified-Since], [If-Unmodified-Since], copy-source preconditions, and
+S3 conditional delete headers.
+
+The simulator enforces these conditions for object [put], [get], [head],
+[delete], and [copy]. Failed write, delete, and copy-source conditions return
+service status [412] with code [PreconditionFailed]. Read [If-None-Match] and
+[If-Modified-Since] cache-hit conditions return service status [304] with code
+[NotModified].
+
 {2 Download}
 
 [Object.get] scopes the response body to the [consume] callback. Do not store

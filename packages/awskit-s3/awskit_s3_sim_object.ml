@@ -23,38 +23,45 @@ module Object = struct
                 | Ok () -> (
                     match operation_fault conn `Put bucket (Some key) with
                     | Some error -> Error error
-                    | None ->
-                        let etag = etag body in
-                        let checksum =
-                          checksum_for_body ~body options.checksum
-                        in
-                        let obj =
-                          {
-                            body;
-                            etag;
-                            content_type = options.content_type;
-                            metadata = options.metadata;
-                            storage_class = options.storage_class;
-                            tags = options.tags;
-                            checksum;
-                            last_modified = now conn;
-                          }
-                        in
-                        Hashtbl.replace bucket_state.objects key obj;
-                        Ok
-                          {
-                            Object.Put.etag = Some etag;
-                            version_id = None;
-                            checksum;
-                            request =
-                              response 200
-                                ~headers:
-                                  (("etag", etag)
-                                  :: checksum_response_headers checksum);
-                          }))))
+                    | None -> (
+                        match
+                          ensure_write_preconditions
+                            (Hashtbl.find_opt bucket_state.objects key)
+                            options.preconditions
+                        with
+                        | Error error -> Error error
+                        | Ok () ->
+                            let etag = etag body in
+                            let checksum =
+                              checksum_for_body ~body options.checksum
+                            in
+                            let obj =
+                              {
+                                body;
+                                etag;
+                                content_type = options.content_type;
+                                metadata = options.metadata;
+                                storage_class = options.storage_class;
+                                tags = options.tags;
+                                checksum;
+                                last_modified = now conn;
+                              }
+                            in
+                            Hashtbl.replace bucket_state.objects key obj;
+                            Ok
+                              {
+                                Object.Put.etag = Some etag;
+                                version_id = None;
+                                checksum;
+                                request =
+                                  response 200
+                                    ~headers:
+                                      (("etag", etag)
+                                      :: checksum_response_headers checksum);
+                              })))))
 
   let get conn ~bucket ~key ?options ~consume () =
-    ignore options;
+    let options = Option.value ~default:Object.Get.default_options options in
     match validate_bucket_key bucket key with
     | Error error -> Error error
     | Ok () -> (
@@ -62,50 +69,56 @@ module Object = struct
         | Error error -> Error error
         | Ok obj -> (
             match take_fault conn with
-            | Some Response_lost ->
+            | Some Response_lost -> (
                 record ~faulted:true conn `Get bucket (Some key);
-                let response =
-                  response 200
-                    ~headers:
-                      ([
-                         ("etag", obj.etag);
-                         ( "content-length",
-                           string_of_int (String.length obj.body) );
-                       ]
-                      @ checksum_response_headers obj.checksum)
-                in
-                let info = info_of_object response obj in
-                Result.map
-                  (fun value -> (info, value))
-                  (Runtime.with_download_body
-                     (Runtime.download_body
-                        ~read_fault:(fault_error Response_lost)
-                        obj.body)
-                     ~consume)
+                match ensure_read_preconditions obj options.preconditions with
+                | Error error -> Error error
+                | Ok () ->
+                    let response =
+                      response 200
+                        ~headers:
+                          ([
+                             ("etag", obj.etag);
+                             ( "content-length",
+                               string_of_int (String.length obj.body) );
+                           ]
+                          @ checksum_response_headers obj.checksum)
+                    in
+                    let info = info_of_object response obj in
+                    Result.map
+                      (fun value -> (info, value))
+                      (Runtime.with_download_body
+                         (Runtime.download_body
+                            ~read_fault:(fault_error Response_lost)
+                            obj.body)
+                         ~consume))
             | Some fault ->
                 record ~faulted:true conn `Get bucket (Some key);
                 Error (fault_error fault)
-            | None ->
+            | None -> (
                 record conn `Get bucket (Some key);
-                let response =
-                  response 200
-                    ~headers:
-                      ([
-                         ("etag", obj.etag);
-                         ( "content-length",
-                           string_of_int (String.length obj.body) );
-                       ]
-                      @ checksum_response_headers obj.checksum)
-                in
-                let info = info_of_object response obj in
-                Result.map
-                  (fun value -> (info, value))
-                  (Runtime.with_download_body
-                     (Runtime.download_body obj.body)
-                     ~consume)))
+                match ensure_read_preconditions obj options.preconditions with
+                | Error error -> Error error
+                | Ok () ->
+                    let response =
+                      response 200
+                        ~headers:
+                          ([
+                             ("etag", obj.etag);
+                             ( "content-length",
+                               string_of_int (String.length obj.body) );
+                           ]
+                          @ checksum_response_headers obj.checksum)
+                    in
+                    let info = info_of_object response obj in
+                    Result.map
+                      (fun value -> (info, value))
+                      (Runtime.with_download_body
+                         (Runtime.download_body obj.body)
+                         ~consume))))
 
   let head conn ~bucket ~key ?options () =
-    ignore options;
+    let options = Option.value ~default:Object.Head.default_options options in
     match validate_bucket_key bucket key with
     | Error error -> Error error
     | Ok () -> (
@@ -114,18 +127,21 @@ module Object = struct
         | Ok obj -> (
             match operation_fault conn `Head bucket (Some key) with
             | Some error -> Error error
-            | None ->
-                let response =
-                  response 200
-                    ~headers:
-                      ([
-                         ("etag", obj.etag);
-                         ( "content-length",
-                           string_of_int (String.length obj.body) );
-                       ]
-                      @ checksum_response_headers obj.checksum)
-                in
-                Ok (info_of_object response obj)))
+            | None -> (
+                match ensure_read_preconditions obj options.preconditions with
+                | Error error -> Error error
+                | Ok () ->
+                    let response =
+                      response 200
+                        ~headers:
+                          ([
+                             ("etag", obj.etag);
+                             ( "content-length",
+                               string_of_int (String.length obj.body) );
+                           ]
+                          @ checksum_response_headers obj.checksum)
+                    in
+                    Ok (info_of_object response obj))))
 
   let exists conn ~bucket ~key =
     match head conn ~bucket ~key () with
@@ -134,7 +150,7 @@ module Object = struct
     | Error error -> Error error
 
   let delete conn ~bucket ~key ?options () =
-    ignore options;
+    let options = Option.value ~default:Object.Delete.default_options options in
     match validate_bucket_key bucket key with
     | Error error -> Error error
     | Ok () -> (
@@ -143,14 +159,31 @@ module Object = struct
         | Ok bucket_state -> (
             match operation_fault conn `Delete bucket (Some key) with
             | Some error -> Error error
-            | None ->
-                Hashtbl.remove bucket_state.objects key;
-                Ok
-                  {
-                    Object.Delete.delete_marker = None;
-                    version_id = None;
-                    request = response 204;
-                  }))
+            | None -> (
+                match Hashtbl.find_opt bucket_state.objects key with
+                | None when delete_preconditions_are_empty options.preconditions
+                  ->
+                    Hashtbl.remove bucket_state.objects key;
+                    Ok
+                      {
+                        Object.Delete.delete_marker = None;
+                        version_id = None;
+                        request = response 204;
+                      }
+                | None -> Error (precondition_failed ())
+                | Some obj -> (
+                    match
+                      ensure_delete_preconditions obj options.preconditions
+                    with
+                    | Error error -> Error error
+                    | Ok () ->
+                        Hashtbl.remove bucket_state.objects key;
+                        Ok
+                          {
+                            Object.Delete.delete_marker = None;
+                            version_id = None;
+                            request = response 204;
+                          }))))
 
   let delete_many conn ~bucket ~objects =
     match validate_bucket bucket with
@@ -190,44 +223,52 @@ module Object = struct
         | Ok dst_bucket_state -> (
             match operation_fault conn `Copy dst_bucket (Some dst_key) with
             | Some error -> Error error
-            | None ->
-                let metadata =
-                  match options.metadata with
-                  | Some (`Replace metadata) -> metadata
-                  | _ -> src.metadata
-                in
-                let checksum =
-                  match checksum_for_body ~body:src.body options.checksum with
-                  | Some checksum -> Some checksum
-                  | None -> src.checksum
-                in
-                let obj =
-                  {
-                    body = src.body;
-                    etag = src.etag;
-                    content_type = src.content_type;
-                    metadata;
-                    storage_class =
-                      (match options.storage_class with
-                      | Some sc -> Some sc
-                      | None -> src.storage_class);
-                    tags =
-                      (match options.tags with
-                      | Some tags -> tags
-                      | None -> src.tags);
-                    checksum;
-                    last_modified = now conn;
-                  }
-                in
-                Hashtbl.replace dst_bucket_state.objects dst_key obj;
-                Ok
-                  {
-                    Object.Copy.etag = Some obj.etag;
-                    last_modified = Some obj.last_modified;
-                    version_id = None;
-                    copy_source_version_id = None;
-                    request = response 200;
-                  }))
+            | None -> (
+                match
+                  ensure_copy_source_preconditions src
+                    options.source_preconditions
+                with
+                | Error error -> Error error
+                | Ok () ->
+                    let metadata =
+                      match options.metadata with
+                      | Some (`Replace metadata) -> metadata
+                      | _ -> src.metadata
+                    in
+                    let checksum =
+                      match
+                        checksum_for_body ~body:src.body options.checksum
+                      with
+                      | Some checksum -> Some checksum
+                      | None -> src.checksum
+                    in
+                    let obj =
+                      {
+                        body = src.body;
+                        etag = src.etag;
+                        content_type = src.content_type;
+                        metadata;
+                        storage_class =
+                          (match options.storage_class with
+                          | Some sc -> Some sc
+                          | None -> src.storage_class);
+                        tags =
+                          (match options.tags with
+                          | Some tags -> tags
+                          | None -> src.tags);
+                        checksum;
+                        last_modified = now conn;
+                      }
+                    in
+                    Hashtbl.replace dst_bucket_state.objects dst_key obj;
+                    Ok
+                      {
+                        Object.Copy.etag = Some obj.etag;
+                        last_modified = Some obj.last_modified;
+                        version_id = None;
+                        copy_source_version_id = None;
+                        request = response 200;
+                      })))
 
   let list conn ~bucket ?options () =
     let options = Option.value ~default:Object.List.default_options options in

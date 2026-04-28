@@ -440,6 +440,141 @@ let test_object_checksum_headers_and_response () =
     "checksum value header" (Some "provided-sha256")
     (header "x-amz-checksum-sha256" call.request.headers)
 
+let test_object_precondition_headers () =
+  let time = Ptime.to_rfc3339 test_time in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 ~headers:[ ("etag", "\"put\"") ] "";
+        response 200
+          ~headers:[ ("etag", "\"get\""); ("content-length", "0") ]
+          "";
+        response 200
+          ~headers:[ ("etag", "\"head\""); ("content-length", "0") ]
+          "";
+        response 204 "";
+        response 200
+          {|<CopyObjectResult><ETag>"copy"</ETag></CopyObjectResult>|};
+      ]
+  in
+  let etag = Object.Etag.of_string_exn "\"etag\"" in
+  let write_preconditions =
+    {
+      Object.Preconditions.Write.if_match =
+        Some (Object.Etag_condition.etag etag);
+      if_none_match = Some Object.Etag_condition.any;
+    }
+  in
+  let put_options =
+    { Object.Put.default_options with preconditions = write_preconditions }
+  in
+  ignore
+    (Recording_s3.Object.Buffer.put_string conn ~bucket:"my-bucket" ~key:"file"
+       ~options:put_options "body"
+    |> ok_or_fail "put preconditions");
+  let read_preconditions =
+    {
+      Object.Preconditions.Read.if_match =
+        Some (Object.Etag_condition.etag etag);
+      if_none_match = Some Object.Etag_condition.any;
+      if_modified_since = Some test_time;
+      if_unmodified_since = Some test_time;
+    }
+  in
+  let get_options =
+    { Object.Get.default_options with preconditions = read_preconditions }
+  in
+  ignore
+    (Recording_s3.Object.Buffer.get_string conn ~bucket:"my-bucket" ~key:"file"
+       ~options:get_options ~max_size:16L ()
+    |> ok_or_fail "get preconditions");
+  let head_options =
+    { Object.Head.default_options with preconditions = read_preconditions }
+  in
+  ignore
+    (Recording_s3.Object.head conn ~bucket:"my-bucket" ~key:"file"
+       ~options:head_options ()
+    |> ok_or_fail "head preconditions");
+  let delete_preconditions =
+    {
+      Object.Preconditions.Delete.if_match =
+        Some (Object.Etag_condition.etag etag);
+      if_match_last_modified_time = Some test_time;
+      if_match_size = Some 4L;
+    }
+  in
+  let delete_options =
+    { Object.Delete.default_options with preconditions = delete_preconditions }
+  in
+  ignore
+    (Recording_s3.Object.delete conn ~bucket:"my-bucket" ~key:"file"
+       ~options:delete_options ()
+    |> ok_or_fail "delete preconditions");
+  let copy_preconditions =
+    {
+      Object.Preconditions.Copy_source.if_match =
+        Some (Object.Etag_condition.etag etag);
+      if_none_match = Some Object.Etag_condition.any;
+      if_modified_since = Some test_time;
+      if_unmodified_since = Some test_time;
+    }
+  in
+  let copy_options =
+    {
+      Object.Copy.default_options with
+      source_preconditions = copy_preconditions;
+    }
+  in
+  ignore
+    (Recording_s3.Object.copy conn ~src_bucket:"my-bucket" ~src_key:"file"
+       ~dst_bucket:"my-bucket" ~dst_key:"copy" ~options:copy_options ()
+    |> ok_or_fail "copy preconditions");
+  match List.rev conn.calls with
+  | [ put; get; head; delete; copy ] ->
+      Alcotest.(check (option string))
+        "put if-match" (Some "\"etag\"")
+        (header "if-match" put.request.headers);
+      Alcotest.(check (option string))
+        "put if-none-match" (Some "*")
+        (header "if-none-match" put.request.headers);
+      List.iter
+        (fun (call : Recording_runtime.call) ->
+          Alcotest.(check (option string))
+            "read if-match" (Some "\"etag\"")
+            (header "if-match" call.request.headers);
+          Alcotest.(check (option string))
+            "read if-none-match" (Some "*")
+            (header "if-none-match" call.request.headers);
+          Alcotest.(check (option string))
+            "read if-modified-since" (Some time)
+            (header "if-modified-since" call.request.headers);
+          Alcotest.(check (option string))
+            "read if-unmodified-since" (Some time)
+            (header "if-unmodified-since" call.request.headers))
+        [ get; head ];
+      Alcotest.(check (option string))
+        "delete if-match" (Some "\"etag\"")
+        (header "if-match" delete.request.headers);
+      Alcotest.(check (option string))
+        "delete last modified" (Some time)
+        (header "x-amz-if-match-last-modified-time" delete.request.headers);
+      Alcotest.(check (option string))
+        "delete size" (Some "4")
+        (header "x-amz-if-match-size" delete.request.headers);
+      Alcotest.(check (option string))
+        "copy source if-match" (Some "\"etag\"")
+        (header "x-amz-copy-source-if-match" copy.request.headers);
+      Alcotest.(check (option string))
+        "copy source if-none-match" (Some "*")
+        (header "x-amz-copy-source-if-none-match" copy.request.headers);
+      Alcotest.(check (option string))
+        "copy source modified since" (Some time)
+        (header "x-amz-copy-source-if-modified-since" copy.request.headers);
+      Alcotest.(check (option string))
+        "copy source unmodified since" (Some time)
+        (header "x-amz-copy-source-if-unmodified-since" copy.request.headers)
+  | _ -> Alcotest.fail "expected five recorded calls"
+
 let test_retry_slow_down_then_success () =
   let slow_down =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
@@ -759,6 +894,8 @@ let suite =
         Alcotest.test_case "bucket config parse" `Quick test_bucket_config_parse;
         Alcotest.test_case "object checksum headers and response" `Quick
           test_object_checksum_headers_and_response;
+        Alcotest.test_case "object precondition headers" `Quick
+          test_object_precondition_headers;
         Alcotest.test_case "retry slow down then success" `Quick
           test_retry_slow_down_then_success;
         Alcotest.test_case "retry fatal error not retried" `Quick

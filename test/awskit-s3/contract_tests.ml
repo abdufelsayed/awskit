@@ -15,6 +15,15 @@ let expect_not_found label = function
       Alcotest.failf "%s: unexpected error: %a" label Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected not found" label
 
+let expect_status label status = function
+  | Error (Awskit.Error.Service service) when service.status = status -> ()
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected service status %d" label status
+
+let expect_precondition_failed label result = expect_status label 412 result
+let expect_not_modified label result = expect_status label 304 result
+
 let check_checksum label algorithm value = function
   | None -> Alcotest.failf "%s: expected checksum" label
   | Some (checksum : Object.Checksum.response) ->
@@ -414,6 +423,162 @@ module Make (Client : SUBJECT) = struct
     | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
     | Ok _ -> Alcotest.fail "expected max_size failure"
 
+  let test_object_preconditions () =
+    let conn = Client.fresh () in
+    create_bucket conn;
+    let put =
+      Client.Object.Buffer.put_string conn ~bucket ~key:"conditional.txt" "body"
+      |> ok_or_fail "put conditional"
+    in
+    let etag =
+      match put.etag with
+      | Some etag -> etag
+      | None -> Alcotest.fail "expected put etag"
+    in
+    let bad_etag = Object.Etag.of_string_exn "\"bad\"" in
+    let absent_options =
+      {
+        Object.Put.default_options with
+        preconditions = Object.Preconditions.Write.if_absent;
+      }
+    in
+    expect_precondition_failed "put if absent existing"
+      (Client.Object.Buffer.put_string conn ~bucket ~key:"conditional.txt"
+         ~options:absent_options "new-body");
+    let match_options =
+      {
+        Object.Put.default_options with
+        preconditions = Object.Preconditions.Write.if_etag bad_etag;
+      }
+    in
+    expect_precondition_failed "put if match bad etag"
+      (Client.Object.Buffer.put_string conn ~bucket ~key:"conditional.txt"
+         ~options:match_options "new-body");
+    let read_options =
+      {
+        Object.Get.default_options with
+        preconditions =
+          {
+            Object.Preconditions.Read.none with
+            if_match = Some (Object.Etag_condition.Etag bad_etag);
+          };
+      }
+    in
+    expect_precondition_failed "get if match bad etag"
+      (Client.Object.Buffer.get_string conn ~bucket ~key:"conditional.txt"
+         ~options:read_options ~max_size:16L ());
+    let not_modified_options =
+      {
+        Object.Get.default_options with
+        preconditions =
+          {
+            Object.Preconditions.Read.none with
+            if_none_match = Some (Object.Etag_condition.Etag etag);
+          };
+      }
+    in
+    expect_not_modified "get if none match etag"
+      (Client.Object.Buffer.get_string conn ~bucket ~key:"conditional.txt"
+         ~options:not_modified_options ~max_size:16L ());
+    let head_not_modified_options =
+      {
+        Object.Head.default_options with
+        preconditions =
+          {
+            Object.Preconditions.Read.none with
+            if_modified_since = Some test_time;
+          };
+      }
+    in
+    expect_not_modified "head if modified since same time"
+      (Client.Object.head conn ~bucket ~key:"conditional.txt"
+         ~options:head_not_modified_options ());
+    let stale_options =
+      {
+        Object.Head.default_options with
+        preconditions =
+          {
+            Object.Preconditions.Read.none with
+            if_unmodified_since = Some Ptime.epoch;
+          };
+      }
+    in
+    expect_precondition_failed "head if unmodified since stale"
+      (Client.Object.head conn ~bucket ~key:"conditional.txt"
+         ~options:stale_options ());
+    let copy_options =
+      {
+        Object.Copy.default_options with
+        source_preconditions =
+          {
+            Object.Preconditions.Copy_source.none with
+            if_match = Some (Object.Etag_condition.Etag etag);
+          };
+      }
+    in
+    ignore
+      (Client.Object.copy conn ~src_bucket:bucket ~src_key:"conditional.txt"
+         ~dst_bucket:bucket ~dst_key:"conditional-copy.txt"
+         ~options:copy_options ()
+      |> ok_or_fail "copy if match etag");
+    let copy_fail_options =
+      {
+        Object.Copy.default_options with
+        source_preconditions =
+          {
+            Object.Preconditions.Copy_source.none with
+            if_none_match = Some (Object.Etag_condition.Etag etag);
+          };
+      }
+    in
+    expect_precondition_failed "copy if none match etag"
+      (Client.Object.copy conn ~src_bucket:bucket ~src_key:"conditional.txt"
+         ~dst_bucket:bucket ~dst_key:"conditional-copy-fail.txt"
+         ~options:copy_fail_options ());
+    let delete_key = "delete-conditional.txt" in
+    let delete_put =
+      Client.Object.Buffer.put_string conn ~bucket ~key:delete_key "abc"
+      |> ok_or_fail "put delete conditional"
+    in
+    let delete_etag =
+      match delete_put.etag with
+      | Some etag -> etag
+      | None -> Alcotest.fail "expected delete put etag"
+    in
+    let delete_options =
+      {
+        Object.Delete.default_options with
+        preconditions =
+          {
+            Object.Preconditions.Delete.if_match =
+              Some (Object.Etag_condition.Etag delete_etag);
+            if_match_last_modified_time = Some test_time;
+            if_match_size = Some 3L;
+          };
+      }
+    in
+    ignore
+      (Client.Object.delete conn ~bucket ~key:delete_key ~options:delete_options
+         ()
+      |> ok_or_fail "delete preconditions");
+    let delete_fail_key = "delete-conditional-fail.txt" in
+    ignore
+      (Client.Object.Buffer.put_string conn ~bucket ~key:delete_fail_key "abc"
+      |> ok_or_fail "put delete fail conditional");
+    let delete_fail_options =
+      {
+        Object.Delete.default_options with
+        preconditions =
+          { Object.Preconditions.Delete.none with if_match_size = Some 4L };
+      }
+    in
+    expect_precondition_failed "delete if size mismatch"
+      (Client.Object.delete conn ~bucket ~key:delete_fail_key
+         ~options:delete_fail_options ());
+    expect_precondition_failed "delete missing with precondition"
+      (Client.Object.delete conn ~bucket ~key:"missing-delete-conditional.txt"
+         ~options:delete_fail_options ())
+
   let test_multipart_lifecycle () =
     let conn = Client.fresh () in
     create_bucket conn;
@@ -531,6 +696,7 @@ module Make (Client : SUBJECT) = struct
       Alcotest.test_case "bucket config roundtrips" `Quick
         test_bucket_config_roundtrips;
       Alcotest.test_case "buffer limit" `Quick test_buffer_limit;
+      Alcotest.test_case "object preconditions" `Quick test_object_preconditions;
       Alcotest.test_case "multipart lifecycle" `Quick test_multipart_lifecycle;
     ]
 end

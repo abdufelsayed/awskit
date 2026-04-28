@@ -132,6 +132,7 @@ let no_such_bucket () = service ~status:404 ~code:"NoSuchBucket" ()
 let no_such_key () = service ~status:404 ~code:"NoSuchKey" ()
 let no_such_upload () = service ~status:404 ~code:"NoSuchUpload" ()
 let precondition_failed () = service ~status:412 ~code:"PreconditionFailed" ()
+let not_modified () = service ~status:304 ~code:"NotModified" ()
 let response ?headers status = Awskit.Response.create_exn ~status ?headers ()
 
 let record ?(faulted = false) t op bucket key =
@@ -179,6 +180,89 @@ let require_object t bucket key =
   match Hashtbl.find_opt bucket.objects key with
   | Some object_ -> Ok object_
   | None -> Error (no_such_key ())
+
+let object_size (obj : stored_object) = Int64.of_int (String.length obj.body)
+
+let etag_condition_matches (obj : stored_object) = function
+  | Object.Etag_condition.Any -> true
+  | Etag etag -> Object.Etag.equal obj.etag etag
+
+let etag_condition_matches_opt obj condition =
+  match obj with
+  | None -> false
+  | Some obj -> etag_condition_matches obj condition
+
+let ensure_write_preconditions obj (p : Object.Preconditions.Write.t) =
+  match p.if_match with
+  | Some condition when not (etag_condition_matches_opt obj condition) ->
+      Error (precondition_failed ())
+  | _ -> (
+      match (p.if_none_match, obj) with
+      | Some Object.Etag_condition.Any, Some _ -> Error (precondition_failed ())
+      | Some (Etag etag), Some obj when Object.Etag.equal obj.etag etag ->
+          Error (precondition_failed ())
+      | _ -> Ok ())
+
+let time_leq left right = Ptime.compare left right <= 0
+let time_gt left right = Ptime.compare left right > 0
+
+let ensure_read_preconditions (obj : stored_object)
+    (p : Object.Preconditions.Read.t) =
+  match p.if_match with
+  | Some condition when not (etag_condition_matches obj condition) ->
+      Error (precondition_failed ())
+  | _ -> (
+      match p.if_unmodified_since with
+      | Some time when time_gt obj.last_modified time ->
+          Error (precondition_failed ())
+      | _ -> (
+          match p.if_none_match with
+          | Some condition when etag_condition_matches obj condition ->
+              Error (not_modified ())
+          | _ -> (
+              match p.if_modified_since with
+              | Some time when time_leq obj.last_modified time ->
+                  Error (not_modified ())
+              | _ -> Ok ())))
+
+let ensure_delete_preconditions (obj : stored_object)
+    (p : Object.Preconditions.Delete.t) =
+  match p.if_match with
+  | Some condition when not (etag_condition_matches obj condition) ->
+      Error (precondition_failed ())
+  | _ -> (
+      match p.if_match_last_modified_time with
+      | Some time when Ptime.compare obj.last_modified time <> 0 ->
+          Error (precondition_failed ())
+      | _ -> (
+          match p.if_match_size with
+          | Some size when Int64.compare (object_size obj) size <> 0 ->
+              Error (precondition_failed ())
+          | _ -> Ok ()))
+
+let delete_preconditions_are_empty (p : Object.Preconditions.Delete.t) =
+  Option.is_none p.if_match
+  && Option.is_none p.if_match_last_modified_time
+  && Option.is_none p.if_match_size
+
+let ensure_copy_source_preconditions (obj : stored_object)
+    (p : Object.Preconditions.Copy_source.t) =
+  match p.if_match with
+  | Some condition when not (etag_condition_matches obj condition) ->
+      Error (precondition_failed ())
+  | _ -> (
+      match p.if_unmodified_since with
+      | Some time when time_gt obj.last_modified time ->
+          Error (precondition_failed ())
+      | _ -> (
+          match p.if_none_match with
+          | Some condition when etag_condition_matches obj condition ->
+              Error (precondition_failed ())
+          | _ -> (
+              match p.if_modified_since with
+              | Some time when time_leq obj.last_modified time ->
+                  Error (precondition_failed ())
+              | _ -> Ok ())))
 
 let upload_key upload_id = Multipart.Upload_id.to_string upload_id
 
