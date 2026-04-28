@@ -257,77 +257,175 @@ module Make (C : Awskit_s3_operation_context.S) = struct
                 | Error error -> return_error error
                 | Ok () -> return_ok response)))
 
-  let list_parts conn ~bucket ~key ~upload_id =
+  let validate_list_parts_options
+      (options : Public_multipart.List_parts.options) =
+    match options.max_parts with
+    | Some value when value <= 0 ->
+        invalid ~field:"max_parts" "max_parts must be greater than zero"
+    | _ -> (
+        match options.part_number_marker with
+        | Some value when value < 0 ->
+            invalid ~field:"part_number_marker"
+              "part_number_marker must be non-negative"
+        | _ -> Ok ())
+
+  let list_parts conn ~bucket ~key ~upload_id ?options () =
+    let options =
+      Option.value ~default:Public_multipart.List_parts.default_options options
+    in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        match object_request conn ~bucket ~key with
+        match validate_list_parts_options options with
         | Error error -> return_error error
-        | Ok request -> (
-            let* result =
-              call_empty conn ~method_:`GET ~request
-                ~query:
+        | Ok () -> (
+            match object_request conn ~bucket ~key with
+            | Error error -> return_error error
+            | Ok request -> (
+                let add name = function
+                  | None -> []
+                  | Some value -> [ (name, [ string_of_int value ]) ]
+                in
+                let query =
                   [
                     ( "uploadId",
                       [ Public_multipart.Upload_id.to_string upload_id ] );
                   ]
-                ~headers:[]
-            in
-            match result with
-            | Error error -> return_error error
-            | Ok (response, body) -> (
-                if not (Awskit.Response.is_success response) then
-                  error_response response body
-                else
-                  let* body = read_download_body body ~max_size:1_048_576L in
-                  match body with
-                  | Error error -> return_error error
-                  | Ok body -> (
-                      match Xml.decode_root body ~name:"ListPartsResult" with
+                  @ add "max-parts" options.max_parts
+                  @ add "part-number-marker" options.part_number_marker
+                in
+                let* result =
+                  call_empty conn ~method_:`GET ~request ~query ~headers:[]
+                in
+                match result with
+                | Error error -> return_error error
+                | Ok (response, body) -> (
+                    if not (Awskit.Response.is_success response) then
+                      error_response response body
+                    else
+                      let* body =
+                        read_download_body body ~max_size:1_048_576L
+                      in
+                      match body with
                       | Error error -> return_error error
-                      | Ok nodes ->
-                          let parts =
-                            Xml.children "Part" nodes
-                            |> List.filter_map (fun nodes ->
-                                match
-                                  Option.bind
-                                    (Xml.child_text "PartNumber" nodes)
-                                    int_of_string_opt
-                                with
-                                | None -> None
-                                | Some part_number ->
-                                    Some
-                                      {
-                                        Public_multipart.List_parts.part_number;
-                                        etag =
-                                          Option.bind
-                                            (Xml.child_text "ETag" nodes)
-                                            (fun v ->
-                                              Result.to_option
-                                                (Public_object.Etag.of_string v));
-                                        size =
-                                          Option.bind
-                                            (Xml.child_text "Size" nodes)
-                                            int64_of_string_opt;
-                                        last_modified =
-                                          Option.bind
-                                            (Xml.child_text "LastModified" nodes)
-                                            ptime_of_string;
-                                        checksum = None;
-                                      })
-                          in
-                          return_ok
-                            {
-                              Public_multipart.List_parts.parts;
-                              is_truncated =
-                                Option.value ~default:false
-                                  (Option.bind
-                                     (Xml.child_text "IsTruncated" nodes)
-                                     parse_bool);
-                              next_part_number_marker =
-                                Option.bind
-                                  (Xml.child_text "NextPartNumberMarker" nodes)
-                                  int_of_string_opt;
-                              request = response;
-                            }))))
+                      | Ok body -> (
+                          match
+                            Xml.decode_root body ~name:"ListPartsResult"
+                          with
+                          | Error error -> return_error error
+                          | Ok nodes ->
+                              let parts =
+                                Xml.children "Part" nodes
+                                |> List.filter_map (fun nodes ->
+                                    match
+                                      Option.bind
+                                        (Xml.child_text "PartNumber" nodes)
+                                        int_of_string_opt
+                                    with
+                                    | None -> None
+                                    | Some part_number ->
+                                        Some
+                                          {
+                                            Public_multipart.List_parts
+                                            .part_number;
+                                            etag =
+                                              Option.bind
+                                                (Xml.child_text "ETag" nodes)
+                                                (fun v ->
+                                                  Result.to_option
+                                                    (Public_object.Etag
+                                                     .of_string v));
+                                            size =
+                                              Option.bind
+                                                (Xml.child_text "Size" nodes)
+                                                int64_of_string_opt;
+                                            last_modified =
+                                              Option.bind
+                                                (Xml.child_text "LastModified"
+                                                   nodes)
+                                                ptime_of_string;
+                                            checksum = None;
+                                          })
+                              in
+                              return_ok
+                                {
+                                  Public_multipart.List_parts.parts;
+                                  is_truncated =
+                                    Option.value ~default:false
+                                      (Option.bind
+                                         (Xml.child_text "IsTruncated" nodes)
+                                         parse_bool);
+                                  next_part_number_marker =
+                                    Option.bind
+                                      (Xml.child_text "NextPartNumberMarker"
+                                         nodes)
+                                      int_of_string_opt;
+                                  request = response;
+                                })))))
+
+  module Paginator = struct
+    let validate_max_pages = function
+      | None -> Ok ()
+      | Some value when value > 0 -> Ok ()
+      | Some _ ->
+          invalid ~field:"max_pages" "max_pages must be greater than zero"
+
+    let options_for_page (base : Public_multipart.List_parts.options)
+        part_number_marker =
+      { base with Public_multipart.List_parts.part_number_marker }
+
+    let fold_pages conn ~bucket ~key ~upload_id ?options ?max_pages ~init ~f ()
+        =
+      match validate_max_pages max_pages with
+      | Error error -> return_error error
+      | Ok () ->
+          let base =
+            Option.value ~default:Public_multipart.List_parts.default_options
+              options
+          in
+          let rec loop part_number_marker page_count acc =
+            let options = options_for_page base part_number_marker in
+            let* page = list_parts conn ~bucket ~key ~upload_id ~options () in
+            match page with
+            | Error error -> return_error error
+            | Ok page -> (
+                let* next_acc = f acc page in
+                match next_acc with
+                | Error error -> return_error error
+                | Ok acc -> (
+                    let page_count = page_count + 1 in
+                    if not page.is_truncated then return_ok acc
+                    else
+                      match max_pages with
+                      | Some max_pages when page_count >= max_pages ->
+                          return_ok acc
+                      | _ -> (
+                          match page.next_part_number_marker with
+                          | Some marker -> loop (Some marker) page_count acc
+                          | None ->
+                              return_error
+                                (decode
+                                   "truncated list-parts response missing \
+                                    NextPartNumberMarker"))))
+          in
+          loop base.part_number_marker 0 init
+
+    let pages conn ~bucket ~key ~upload_id ?options ?max_pages () =
+      let f pages page = return_ok (page :: pages) in
+      let* result =
+        fold_pages conn ~bucket ~key ~upload_id ?options ?max_pages ~init:[] ~f
+          ()
+      in
+      return (Result.map List.rev result)
+
+    let parts conn ~bucket ~key ~upload_id ?options ?max_pages () =
+      let f parts (page : Public_multipart.List_parts.page) =
+        return_ok (List.rev_append page.parts parts)
+      in
+      let* result =
+        fold_pages conn ~bucket ~key ~upload_id ?options ?max_pages ~init:[] ~f
+          ()
+      in
+      return (Result.map List.rev result)
+  end
 end

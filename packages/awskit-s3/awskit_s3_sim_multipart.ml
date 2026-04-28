@@ -31,9 +31,29 @@ module Multipart = struct
       (Awskit.Error.validation ~field:"multipart"
          "multipart simulator port is deferred")
 
-  let list_parts _conn ~bucket ~key ~upload_id:_ =
+  let list_parts _conn ~bucket ~key ~upload_id:_ ?options:_ () =
     let* () = validate_bucket_key bucket key in
     Error
       (Awskit.Error.validation ~field:"multipart"
          "multipart simulator port is deferred")
+
+  module Paginator = struct
+    let fold_pages _conn ~bucket ~key ~upload_id:_ ?options:_ ?max_pages:_
+        ~init:_ ~f:_ () =
+      let* () = validate_bucket_key bucket key in
+      Error
+        (Awskit.Error.validation ~field:"multipart"
+           "multipart simulator port is deferred")
+
+    let pages conn ~bucket ~key ~upload_id ?options ?max_pages () =
+      fold_pages conn ~bucket ~key ~upload_id ?options ?max_pages ~init:[]
+        ~f:(fun pages page -> Ok (page :: pages))
+        ()
+
+    let parts conn ~bucket ~key ~upload_id ?options ?max_pages () =
+      fold_pages conn ~bucket ~key ~upload_id ?options ?max_pages ~init:[]
+        ~f:(fun parts (page : Multipart.List_parts.page) ->
+          Ok (List.rev_append page.parts parts))
+        ()
+  end
 end

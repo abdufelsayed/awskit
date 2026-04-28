@@ -411,6 +411,116 @@ let test_retry_disabled_policy () =
   Alcotest.(check int) "attempts" 1 (List.length conn.calls);
   Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
 
+let list_page ?continuation_token ?next_continuation_token ~truncated keys =
+  let token_xml name = function
+    | None -> ""
+    | Some value -> Fmt.str "<%s>%s</%s>" name value name
+  in
+  let contents =
+    keys
+    |> List.map (fun key ->
+        Fmt.str
+          "<Contents><Key>%s</Key><Size>1</Size><ETag>\"etag\"</ETag></Contents>"
+          key)
+    |> String.concat ""
+  in
+  Fmt.str
+    "<ListBucketResult><Name>my-bucket</Name><IsTruncated>%b</IsTruncated>%s%s%s</ListBucketResult>"
+    truncated
+    (token_xml "ContinuationToken" continuation_token)
+    (token_xml "NextContinuationToken" next_continuation_token)
+    contents
+
+let test_object_paginator_follows_tokens () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          (list_page ~next_continuation_token:"token-1" ~truncated:true
+             [ "a.txt" ]);
+        response 200
+          (list_page ~continuation_token:"token-1" ~truncated:false [ "b.txt" ]);
+      ]
+  in
+  let options = { Object.List.default_options with max_keys = Some 1 } in
+  let keys =
+    Recording_s3.Object.Paginator.keys conn ~bucket:"my-bucket" ~options ()
+    |> ok_or_fail "paginator keys"
+  in
+  Alcotest.(check (list string)) "keys" [ "a.txt"; "b.txt" ] keys;
+  let calls = List.rev conn.calls in
+  Alcotest.(check int) "calls" 2 (List.length calls);
+  match calls with
+  | [ _first; second ] ->
+      Alcotest.(check (option (list string)))
+        "continuation token" (Some [ "token-1" ])
+        (List.assoc_opt "continuation-token" second.request.target.query)
+  | _ -> Alcotest.fail "expected two calls"
+
+let test_object_paginator_max_pages () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          (list_page ~next_continuation_token:"token-1" ~truncated:true
+             [ "a.txt" ]);
+        response 200 (list_page ~truncated:false [ "b.txt" ]);
+      ]
+  in
+  let pages =
+    Recording_s3.Object.Paginator.pages conn ~bucket:"my-bucket" ~max_pages:1 ()
+    |> ok_or_fail "paginator pages"
+  in
+  Alcotest.(check int) "page count" 1 (List.length pages);
+  Alcotest.(check int) "calls" 1 (List.length conn.calls)
+
+let list_parts_page ?next_part_number_marker ~truncated part_numbers =
+  let next_marker_xml =
+    match next_part_number_marker with
+    | None -> ""
+    | Some marker ->
+        Fmt.str "<NextPartNumberMarker>%d</NextPartNumberMarker>" marker
+  in
+  let parts =
+    part_numbers
+    |> List.map (fun part_number ->
+        Fmt.str
+          "<Part><PartNumber>%d</PartNumber><ETag>\"etag-%d\"</ETag><Size>1</Size></Part>"
+          part_number part_number)
+    |> String.concat ""
+  in
+  Fmt.str "<ListPartsResult><IsTruncated>%b</IsTruncated>%s%s</ListPartsResult>"
+    truncated next_marker_xml parts
+
+let test_multipart_paginator_follows_markers () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          (list_parts_page ~next_part_number_marker:1 ~truncated:true [ 1 ]);
+        response 200 (list_parts_page ~truncated:false [ 2 ]);
+      ]
+  in
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let parts =
+    Recording_s3.Multipart.Paginator.parts conn ~bucket:"my-bucket"
+      ~key:"large.bin" ~upload_id ()
+    |> ok_or_fail "multipart paginator parts"
+  in
+  Alcotest.(check (list int))
+    "parts" [ 1; 2 ]
+    (List.map
+       (fun (part : Multipart.List_parts.part_info) -> part.part_number)
+       parts);
+  let calls = List.rev conn.calls in
+  Alcotest.(check int) "calls" 2 (List.length calls);
+  match calls with
+  | [ _first; second ] ->
+      Alcotest.(check (option (list string)))
+        "part marker" (Some [ "1" ])
+        (List.assoc_opt "part-number-marker" second.request.target.query)
+  | _ -> Alcotest.fail "expected two calls"
+
 let make_sim () =
   let clock = Sim.Clock.create ~now:test_time () in
   let store = Sim.create_store ~clock () in
@@ -469,6 +579,33 @@ let test_buffer_limit () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected max_size failure"
 
+let test_sim_paginator_keys () =
+  let conn = make_sim () in
+  ignore
+    (Sim.Object.Buffer.put_string conn ~bucket:"test-bucket" ~key:"logs/a.txt"
+       "a"
+    |> ok_or_fail "put a");
+  ignore
+    (Sim.Object.Buffer.put_string conn ~bucket:"test-bucket" ~key:"logs/b.txt"
+       "b"
+    |> ok_or_fail "put b");
+  ignore
+    (Sim.Object.Buffer.put_string conn ~bucket:"test-bucket" ~key:"other.txt"
+       "other"
+    |> ok_or_fail "put other");
+  let options =
+    {
+      Object.List.default_options with
+      prefix = Some "logs/";
+      max_keys = Some 1;
+    }
+  in
+  let keys =
+    Sim.Object.Paginator.keys conn ~bucket:"test-bucket" ~options ()
+    |> ok_or_fail "sim paginator keys"
+  in
+  Alcotest.(check (list string)) "keys" [ "logs/a.txt"; "logs/b.txt" ] keys
+
 let suite =
   [
     ( "core",
@@ -485,9 +622,16 @@ let suite =
           test_retry_fatal_error_not_retried;
         Alcotest.test_case "retry disabled policy" `Quick
           test_retry_disabled_policy;
+        Alcotest.test_case "object paginator follows tokens" `Quick
+          test_object_paginator_follows_tokens;
+        Alcotest.test_case "object paginator max pages" `Quick
+          test_object_paginator_max_pages;
+        Alcotest.test_case "multipart paginator follows markers" `Quick
+          test_multipart_paginator_follows_markers;
         Alcotest.test_case "sim buffer roundtrip" `Quick
           test_sim_buffer_roundtrip;
         Alcotest.test_case "sim streaming get" `Quick test_sim_streaming_get;
         Alcotest.test_case "buffer limit" `Quick test_buffer_limit;
+        Alcotest.test_case "sim paginator keys" `Quick test_sim_paginator_keys;
       ] );
   ]

@@ -73,8 +73,22 @@ The object surface also includes:
   {li [Object.delete] and [Object.delete_many]}
   {li [Object.copy]}
   {li [Object.list] for rich pages and [Object.list_keys] for key-only pages}
+  {li [Object.Paginator.pages], [objects], and [keys] for following
+    [ListObjectsV2] continuation tokens}
   {li [Object.Tagging.get], [put], and [delete]}
 }
+
+Paginator helpers preserve the regular [Object.List.options] record and update
+only the continuation token between requests. Use [max_pages] to cap traversal:
+
+{[
+let keys =
+  Awskit_s3_eio.Object.Paginator.keys s3
+    ~bucket:"my-bucket"
+    ~options:{ Awskit_s3.Object.List.default_options with prefix = Some "logs/" }
+    ~max_pages:10
+    ()
+]}
 
 {1 Object.Buffer}
 
@@ -229,7 +243,9 @@ Awskit_s3_eio.Bucket.Encryption.put s3
   {li [Multipart.upload_part] uploads a known-length part.}
   {li [Multipart.complete] completes the upload with ordered parts.}
   {li [Multipart.abort] cancels an upload.}
-  {li [Multipart.list_parts] inspects uploaded parts.}
+  {li [Multipart.list_parts] inspects one page of uploaded parts.}
+  {li [Multipart.Paginator.pages] and [parts] follow [ListParts] part-number
+    markers.}
 }
 
 Managed high-level multipart transfer is not implemented yet.

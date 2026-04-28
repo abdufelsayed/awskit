@@ -232,12 +232,34 @@ module Object = struct
                   |> List.of_seq
                   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
                 in
+                let all =
+                  match options.continuation_token with
+                  | Some token ->
+                      List.filter
+                        (fun (key, _) -> String.compare key token > 0)
+                        all
+                  | None -> (
+                      match options.start_after with
+                      | None -> all
+                      | Some start_after ->
+                          List.filter
+                            (fun (key, _) -> String.compare key start_after > 0)
+                            all)
+                in
                 let max_keys =
                   Option.value ~default:conn.store.config.max_list_keys
                     options.max_keys
                 in
                 let selected =
                   all |> List.to_seq |> Seq.take max_keys |> List.of_seq
+                in
+                let is_truncated = List.length all > List.length selected in
+                let next_continuation_token =
+                  if not is_truncated then None
+                  else
+                    match List.rev selected with
+                    | [] -> None
+                    | (key, _) :: _ -> Some key
                 in
                 let objects =
                   List.map
@@ -261,9 +283,9 @@ module Object = struct
                     objects;
                     common_prefixes = [];
                     key_count = Some (List.length objects);
-                    is_truncated = List.length all > List.length selected;
+                    is_truncated;
                     continuation_token = options.continuation_token;
-                    next_continuation_token = None;
+                    next_continuation_token;
                     request = response 200;
                   }))
 
@@ -272,6 +294,80 @@ module Object = struct
       (fun (page : Object.List.page) ->
         List.map (fun (o : Object.List.object_summary) -> o.key) page.objects)
       (list conn ~bucket ?options ())
+
+  module Paginator = struct
+    let validate_max_pages = function
+      | None -> Ok ()
+      | Some value when value > 0 -> Ok ()
+      | Some _ ->
+          invalid ~field:"max_pages" "max_pages must be greater than zero"
+
+    let options_for_page (base : Object.List.options) continuation_token =
+      {
+        base with
+        Object.List.continuation_token;
+        start_after =
+          (match continuation_token with
+          | None -> base.start_after
+          | Some _ -> None);
+      }
+
+    let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
+      match validate_max_pages max_pages with
+      | Error error -> Error error
+      | Ok () ->
+          let base =
+            Option.value ~default:Object.List.default_options options
+          in
+          let rec loop continuation_token page_count acc =
+            let options = options_for_page base continuation_token in
+            match list conn ~bucket ~options () with
+            | Error error -> Error error
+            | Ok page -> (
+                match f acc page with
+                | Error error -> Error error
+                | Ok acc -> (
+                    let page_count = page_count + 1 in
+                    if not page.is_truncated then Ok acc
+                    else
+                      match max_pages with
+                      | Some max_pages when page_count >= max_pages -> Ok acc
+                      | _ -> (
+                          match page.next_continuation_token with
+                          | Some token -> loop (Some token) page_count acc
+                          | None ->
+                              Error
+                                (decode
+                                   "truncated list response missing \
+                                    NextContinuationToken"))))
+          in
+          loop base.continuation_token 0 init
+
+    let pages conn ~bucket ?options ?max_pages () =
+      Result.map List.rev
+        (fold_pages conn ~bucket ?options ?max_pages ~init:[]
+           ~f:(fun pages page -> Ok (page :: pages))
+           ())
+
+    let objects conn ~bucket ?options ?max_pages () =
+      Result.map List.rev
+        (fold_pages conn ~bucket ?options ?max_pages ~init:[]
+           ~f:(fun objects (page : Object.List.page) ->
+             Ok (List.rev_append page.objects objects))
+           ())
+
+    let keys conn ~bucket ?options ?max_pages () =
+      Result.map List.rev
+        (fold_pages conn ~bucket ?options ?max_pages ~init:[]
+           ~f:(fun keys (page : Object.List.page) ->
+             let page_keys =
+               List.map
+                 (fun (object_ : Object.List.object_summary) -> object_.key)
+                 page.objects
+             in
+             Ok (List.rev_append page_keys keys))
+           ())
+  end
 
   module Buffer = struct
     let put_string conn ~bucket ~key ?options body =

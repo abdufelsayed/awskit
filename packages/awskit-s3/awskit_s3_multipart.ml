@@ -76,6 +76,8 @@ module Complete = struct
 end
 
 module List_parts = struct
+  type options = { max_parts : int option; part_number_marker : int option }
+
   type part_info = {
     part_number : int;
     etag : Object.Etag.t option;
@@ -90,4 +92,6 @@ module List_parts = struct
     next_part_number_marker : int option;
     request : Awskit.Response.t;
   }
+
+  let default_options = { max_parts = None; part_number_marker = None }
 end

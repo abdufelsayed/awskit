@@ -89,6 +89,42 @@ module type OBJECT = sig
     unit ->
     (string list, Error.t) result io
 
+  module Paginator : sig
+    val fold_pages :
+      connection ->
+      bucket:string ->
+      ?options:Object.List.options ->
+      ?max_pages:int ->
+      init:'acc ->
+      f:('acc -> Object.List.page -> ('acc, Error.t) result io) ->
+      unit ->
+      ('acc, Error.t) result io
+
+    val pages :
+      connection ->
+      bucket:string ->
+      ?options:Object.List.options ->
+      ?max_pages:int ->
+      unit ->
+      (Object.List.page list, Error.t) result io
+
+    val objects :
+      connection ->
+      bucket:string ->
+      ?options:Object.List.options ->
+      ?max_pages:int ->
+      unit ->
+      (Object.List.object_summary list, Error.t) result io
+
+    val keys :
+      connection ->
+      bucket:string ->
+      ?options:Object.List.options ->
+      ?max_pages:int ->
+      unit ->
+      (string list, Error.t) result io
+  end
+
   module Buffer : sig
     val put_string :
       connection ->
@@ -375,7 +411,43 @@ module type MULTIPART = sig
     bucket:string ->
     key:string ->
     upload_id:Multipart.Upload_id.t ->
+    ?options:Multipart.List_parts.options ->
+    unit ->
     (Multipart.List_parts.page, Error.t) result io
+
+  module Paginator : sig
+    val fold_pages :
+      connection ->
+      bucket:string ->
+      key:string ->
+      upload_id:Multipart.Upload_id.t ->
+      ?options:Multipart.List_parts.options ->
+      ?max_pages:int ->
+      init:'acc ->
+      f:('acc -> Multipart.List_parts.page -> ('acc, Error.t) result io) ->
+      unit ->
+      ('acc, Error.t) result io
+
+    val pages :
+      connection ->
+      bucket:string ->
+      key:string ->
+      upload_id:Multipart.Upload_id.t ->
+      ?options:Multipart.List_parts.options ->
+      ?max_pages:int ->
+      unit ->
+      (Multipart.List_parts.page list, Error.t) result io
+
+    val parts :
+      connection ->
+      bucket:string ->
+      key:string ->
+      upload_id:Multipart.Upload_id.t ->
+      ?options:Multipart.List_parts.options ->
+      ?max_pages:int ->
+      unit ->
+      (Multipart.List_parts.part_info list, Error.t) result io
+  end
 end
 
 module type PRESIGNED = sig

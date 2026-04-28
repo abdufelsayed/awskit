@@ -167,6 +167,7 @@ module Multipart :
      and type Upload_part.options = Awskit_s3_multipart.Upload_part.options
      and type Upload_part.result = Awskit_s3_multipart.Upload_part.result
      and type Complete.result = Awskit_s3_multipart.Complete.result
+     and type List_parts.options = Awskit_s3_multipart.List_parts.options
      and type List_parts.part_info = Awskit_s3_multipart.List_parts.part_info
      and type List_parts.page = Awskit_s3_multipart.List_parts.page
 

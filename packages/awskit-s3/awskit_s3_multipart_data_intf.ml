@@ -61,6 +61,8 @@ module type MULTIPART_DATA = sig
   end
 
   module List_parts : sig
+    type options = { max_parts : int option; part_number_marker : int option }
+
     type part_info = {
       part_number : int;
       etag : Object.Etag.t option;
@@ -75,5 +77,7 @@ module type MULTIPART_DATA = sig
       next_part_number_marker : int option;
       request : Awskit.Response.t;
     }
+
+    val default_options : options
   end
 end
