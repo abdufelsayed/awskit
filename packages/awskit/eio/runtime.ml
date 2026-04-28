@@ -198,7 +198,7 @@ let do_call (conn : conn) (request : Awskit.Request.t) upload_body =
   with exn ->
     let message = Exn.to_string exn in
     Log.warn (fun m -> m "HTTP call failed: %s" message);
-    Error (Awskit.Error.transport ~retryable:false message)
+    Error (Awskit.Error.transport ~retryable:true message)
 
 type +'a t = 'a
 

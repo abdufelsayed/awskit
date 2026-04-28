@@ -759,6 +759,37 @@ let test_retry_jitter_bounds () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected invalid jitter"
 
+let test_upload_descriptor_validation () =
+  let invalid_descriptor : Awskit.Body.Upload.descriptor =
+    {
+      content_length = Some (-1L);
+      payload_hash = Awskit.Body.Payload_hash.sha256_of_string "";
+      replayable = true;
+    }
+  in
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  let body =
+    Recording_runtime.stream_body invalid_descriptor ~write:(fun _writer ->
+        Ok ())
+  in
+  (match
+     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~body ()
+   with
+  | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected descriptor validation failure");
+  Alcotest.(check int) "object put not called" 0 (List.length conn.calls);
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  (match
+     Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket"
+       ~key:"large.bin" ~upload_id ~part_number:1 ~body ()
+   with
+  | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected multipart error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected multipart descriptor validation failure");
+  Alcotest.(check int) "multipart put not called" 0 (List.length conn.calls)
+
 let list_page ?continuation_token ?next_continuation_token ~truncated keys =
   let token_xml name = function
     | None -> ""
@@ -1131,6 +1162,8 @@ let suite =
         Alcotest.test_case "non-replayable upload not retried" `Quick
           test_non_replayable_upload_not_retried;
         Alcotest.test_case "retry jitter bounds" `Quick test_retry_jitter_bounds;
+        Alcotest.test_case "upload descriptor validation" `Quick
+          test_upload_descriptor_validation;
         Alcotest.test_case "object paginator follows tokens" `Quick
           test_object_paginator_follows_tokens;
         Alcotest.test_case "object paginator max pages" `Quick

@@ -38,35 +38,42 @@ module Make (C : Awskit_s3_operation_context.S) = struct
                      "S3 uploads require a known content length before SigV4 \
                       chunked streaming")
             | Some content_length -> (
-                let headers =
-                  [ ("content-length", Int64.to_string content_length) ]
-                  @ Metadata_headers.to_headers options.metadata
-                  @ write_precondition_headers options.preconditions
-                  @ checksum_request_headers options.checksum
-                  @ encryption_request_headers options.server_side_encryption
-                  |> add_opt_header "content-type" options.content_type
-                  |> add_opt_header "cache-control" options.cache_control
-                  |> add_opt_header "content-encoding" options.content_encoding
-                  |> add_opt_header "content-disposition"
-                       options.content_disposition
-                  |> add_opt_header "x-amz-storage-class"
-                       (Option.map Storage_class.to_string options.storage_class)
-                  |> add_opt_header "x-amz-tagging" (tags_header options.tags)
-                in
-                match object_request conn ~bucket ~key with
+                match Awskit.Body.Upload.validate_descriptor descriptor with
                 | Error error -> return_error error
-                | Ok request -> (
-                    let* result =
-                      call conn ~method_:`PUT ~request ~query:[] ~headers
-                        ~payload_hash:descriptor.payload_hash body
+                | Ok () -> (
+                    let headers =
+                      [ ("content-length", Int64.to_string content_length) ]
+                      @ Metadata_headers.to_headers options.metadata
+                      @ write_precondition_headers options.preconditions
+                      @ checksum_request_headers options.checksum
+                      @ encryption_request_headers
+                          options.server_side_encryption
+                      |> add_opt_header "content-type" options.content_type
+                      |> add_opt_header "cache-control" options.cache_control
+                      |> add_opt_header "content-encoding"
+                           options.content_encoding
+                      |> add_opt_header "content-disposition"
+                           options.content_disposition
+                      |> add_opt_header "x-amz-storage-class"
+                           (Option.map Storage_class.to_string
+                              options.storage_class)
+                      |> add_opt_header "x-amz-tagging"
+                           (tags_header options.tags)
                     in
-                    match result with
+                    match object_request conn ~bucket ~key with
                     | Error error -> return_error error
-                    | Ok (response, body) -> (
-                        let* discarded = discard_download_body body in
-                        match discarded with
+                    | Ok request -> (
+                        let* result =
+                          call conn ~method_:`PUT ~request ~query:[] ~headers
+                            ~payload_hash:descriptor.payload_hash body
+                        in
+                        match result with
                         | Error error -> return_error error
-                        | Ok () -> return (put_result response))))))
+                        | Ok (response, body) -> (
+                            let* discarded = discard_download_body body in
+                            match discarded with
+                            | Error error -> return_error error
+                            | Ok () -> return (put_result response)))))))
 
   let get conn ~bucket ~key ?options ~consume () =
     let options = Option.value ~default:Object.Get.default_options options in

@@ -161,7 +161,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       (fun exn ->
         let message = Exn.to_string exn in
         Log.warn (fun m -> m "HTTP call failed: %s" message);
-        Lwt.return_error (Awskit.Error.transport ~retryable:false message))
+        Lwt.return_error (Awskit.Error.transport ~retryable:true message))
 
   (* Module satisfying Awskit.Runtime.S *)
 

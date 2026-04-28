@@ -161,6 +161,46 @@ module Make (Client : SUBJECT) = struct
     in
     Alcotest.(check string) "partial body" "abcd" body
 
+  let test_large_streaming_roundtrip () =
+    let conn = Client.fresh () in
+    create_bucket conn;
+    let chunk = String.make 8192 'x' in
+    let chunks = 320 in
+    let body = String.concat "" (List.init chunks (fun _ -> chunk)) in
+    ignore
+      (Client.Object.put conn ~bucket ~key:"large-stream.bin"
+         ~body:(Client.upload_body_of_string body)
+         ()
+      |> ok_or_fail "put large stream");
+    let consume reader =
+      let bytes = Bytes.create 16384 in
+      let rec loop total first last =
+        match Client.read reader bytes ~off:0 ~len:(Bytes.length bytes) with
+        | Error _ as error -> error
+        | Ok 0 -> Ok (total, first, last)
+        | Ok read ->
+            let first =
+              match first with
+              | Some _ -> first
+              | None -> Some (Bytes.get bytes 0)
+            in
+            let last = Some (Bytes.get bytes (read - 1)) in
+            loop (total + read) first last
+      in
+      loop 0 None None
+    in
+    let info, (length, first, last) =
+      Client.Object.get conn ~bucket ~key:"large-stream.bin" ~consume ()
+      |> ok_or_fail "get large stream"
+    in
+    Alcotest.(check int) "large stream bytes" (String.length body) length;
+    Alcotest.(check (option char)) "first byte" (Some 'x') first;
+    Alcotest.(check (option char)) "last byte" (Some 'x') last;
+    Alcotest.(check (option int64))
+      "large content length"
+      (Some (Int64.of_int (String.length body)))
+      info.content_length
+
   let test_range_reads_and_metadata_copy () =
     let conn = Client.fresh () in
     create_bucket conn;
@@ -861,6 +901,8 @@ module Make (Client : SUBJECT) = struct
       Alcotest.test_case "object buffer lifecycle" `Quick
         test_object_buffer_lifecycle;
       Alcotest.test_case "streaming get" `Quick test_streaming_get;
+      Alcotest.test_case "large streaming roundtrip" `Quick
+        test_large_streaming_roundtrip;
       Alcotest.test_case "range reads and metadata copy" `Quick
         test_range_reads_and_metadata_copy;
       Alcotest.test_case "list copy delete many" `Quick
