@@ -42,10 +42,18 @@ AWS_SECRET_ACCESS_KEY
 AWS_SESSION_TOKEN
 AWS_REGION
 AWS_DEFAULT_REGION
+AWS_PROFILE
+AWS_SHARED_CREDENTIALS_FILE
+AWS_CONFIG_FILE
 ]}
 
-The current credential support is intentionally small: static credentials and
-environment variables. Shared AWS config files, named profiles, process
+[awskit.unix] also reads static shared AWS profiles from
+[$HOME/.aws/credentials] and [$HOME/.aws/config]. Named profiles use
+[AWS_PROFILE], defaulting to ["default"]. Environment credentials win over
+profile files when present.
+
+The current credential support covers static credentials, environment
+variables, shared AWS config files, and named static profiles. Process
 providers, web identity, ECS/EC2 metadata, STS assume-role, and refreshable
 credentials are future work.
 

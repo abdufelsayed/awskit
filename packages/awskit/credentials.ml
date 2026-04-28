@@ -49,6 +49,35 @@ let hmac_sha256 ~key data =
 let access_key_id t = t.access_key_id
 let session_token t = t.session_token
 
+module Provider = struct
+  type credentials = t
+  type t = unit -> (credentials, Aws_error.t) Result.t
+
+  let create f = f
+  let resolve t = t ()
+  let static credentials = fun () -> Ok credentials
+
+  let chain providers =
+   fun () ->
+    let rec loop errors = function
+      | [] ->
+          let message =
+            match List.rev errors with
+            | [] -> "no credential providers configured"
+            | errors ->
+                "no credential provider resolved credentials: "
+                ^ String.concat ~sep:"; "
+                    (List.map errors ~f:Aws_error.to_string_hum)
+          in
+          Error (Aws_error.validation ~field:"credentials" message)
+      | provider :: rest -> (
+          match provider () with
+          | Ok _ as ok -> ok
+          | Error error -> loop (error :: errors) rest)
+    in
+    loop [] providers
+end
+
 let signing_key t ~datestamp ~region ~service =
   hmac_sha256 ~key:("AWS4" ^ t.secret_access_key) datestamp |> fun key ->
   hmac_sha256 ~key (Region.to_string region) |> fun key ->

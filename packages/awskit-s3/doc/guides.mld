@@ -301,15 +301,18 @@ AWS_SECRET_ACCESS_KEY
 AWS_SESSION_TOKEN
 AWS_REGION
 AWS_DEFAULT_REGION
+AWS_PROFILE
+AWS_SHARED_CREDENTIALS_FILE
+AWS_CONFIG_FILE
 ]}
 
 {[
 Awskit_s3_lwt_unix.create ()
 ]}
 
-The current credential helpers cover static credentials and environment
-variables. Shared AWS config files, named profiles, ECS/EC2 metadata, web
-identity, STS assume-role, and refreshable credentials remain future work.
+The Unix adapters cover static credentials, environment variables, shared AWS
+config files, and named static profiles. ECS/EC2 metadata, web identity, STS
+assume-role, and refreshable credentials remain future work.
 
 {1 Errors}
 

@@ -42,9 +42,9 @@ val create :
       AWS region (e.g., ["us-east-1"]). If omitted, reads [AWS_REGION] and then
       [AWS_DEFAULT_REGION].
     @param credentials
-      AWS credentials for request signing. If omitted, reads
-      [AWS_ACCESS_KEY_ID], [AWS_SECRET_ACCESS_KEY], and optional
-      [AWS_SESSION_TOKEN].
+      AWS credentials for request signing. If omitted, resolves the
+      [awskit.unix] default credential chain: static AWS environment variables,
+      then shared AWS profile files.
     @param clock Time source for signing timestamps (default: OS clock)
     @param retry_policy
       Retry behavior for retryable AWS errors and transient transport failures

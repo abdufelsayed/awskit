@@ -9,7 +9,7 @@ let create ?ctx ?endpoint ?region ?credentials ?(clock = Ptime_clock.now)
       | None -> Awskit_unix.Region.from_env ()),
       match credentials with
       | Some credentials -> Ok credentials
-      | None -> Awskit_unix.Credentials.from_env () )
+      | None -> Awskit_unix.Credentials.default_chain () )
   with
   | Ok region, Ok credentials ->
       let sleep span = Lwt_unix.sleep (Ptime.Span.to_float_s span) in
