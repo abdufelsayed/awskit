@@ -80,4 +80,25 @@ module type MULTIPART_DATA = sig
 
     val default_options : options
   end
+
+  module Managed : sig
+    val min_part_size : int
+    val default_part_size : int
+    val max_parts : int
+
+    type options = {
+      part_size : int;
+      create_options : Create.options;
+      upload_part_options : Upload_part.options;
+    }
+
+    type result = {
+      upload : Upload.t;
+      parts : Part.t list;
+      complete : Complete.result;
+    }
+
+    val default_options : options
+    val validate_options : options -> (unit, Error.t) Stdlib.result
+  end
 end

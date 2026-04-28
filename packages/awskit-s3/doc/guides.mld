@@ -182,7 +182,7 @@ let* result =
     ()
 ]}
 
-Current transfer helpers are convenience helpers. Managed concurrent multipart
+Current path transfer helpers are convenience helpers. Concurrent multipart
 transfer, progress callbacks, resumability, and runtime-native file streaming
 are future work.
 
@@ -281,7 +281,18 @@ Awskit_s3_eio.Bucket.Encryption.put s3
     markers.}
 }
 
-Managed high-level multipart transfer is not implemented yet.
+[Multipart.Managed.upload_string] and [upload_bytes] provide a higher-level
+sequential multipart upload helper. The helper creates the upload, splits the
+body into AWS-safe parts, uploads each part, completes the upload, and attempts
+to abort if a part upload or completion fails. Defaults use 8 MiB parts, with
+the AWS minimum 5 MiB enforced for configured part sizes.
+
+{[
+Awskit_s3_eio.Multipart.Managed.upload_string s3
+  ~bucket:"my-bucket"
+  ~key:"large.bin"
+  large_body
+]}
 
 {1 Presigned URLs}
 

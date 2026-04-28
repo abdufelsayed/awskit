@@ -767,6 +767,94 @@ let test_multipart_upload_part_checksum_headers () =
     "part number" (Some [ "1" ])
     (List.assoc_opt "partNumber" call.request.target.query)
 
+let multipart_create_body upload_id =
+  Fmt.str
+    "<InitiateMultipartUploadResult><UploadId>%s</UploadId></InitiateMultipartUploadResult>"
+    upload_id
+
+let multipart_complete_body etag =
+  Fmt.str
+    "<CompleteMultipartUploadResult><ETag>%s</ETag></CompleteMultipartUploadResult>"
+    etag
+
+let test_managed_multipart_upload_string () =
+  let part_size = Multipart.Managed.min_part_size in
+  let body = String.make part_size 'a' ^ "end" in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 (multipart_create_body "upload-1");
+        response 200 ~headers:[ ("etag", "\"part-1\"") ] "";
+        response 200 ~headers:[ ("etag", "\"part-2\"") ] "";
+        response 200 (multipart_complete_body "\"complete\"");
+      ]
+  in
+  let options = { Multipart.Managed.default_options with part_size } in
+  let result =
+    Recording_s3.Multipart.Managed.upload_string conn ~bucket:"my-bucket"
+      ~key:"large.bin" ~options body
+    |> ok_or_fail "managed multipart upload"
+  in
+  Alcotest.(check (list int))
+    "uploaded parts" [ 1; 2 ]
+    (List.map (fun (part : Multipart.Part.t) -> part.part_number) result.parts);
+  Alcotest.(check bool)
+    "complete etag" true
+    (Option.is_some result.complete.etag);
+  match List.rev conn.calls with
+  | [ create; part1; part2; complete ] ->
+      Alcotest.(check string)
+        "create method" "POST"
+        (Awskit.Request.Method.to_string create.request.method_);
+      Alcotest.(check (option (list string)))
+        "create uploads query" (Some [])
+        (List.assoc_opt "uploads" create.request.target.query);
+      Alcotest.(check int) "part 1 body" part_size (String.length part1.body);
+      Alcotest.(check string) "part 2 body" "end" part2.body;
+      Alcotest.(check (option (list string)))
+        "part 1 number" (Some [ "1" ])
+        (List.assoc_opt "partNumber" part1.request.target.query);
+      Alcotest.(check (option (list string)))
+        "part 2 number" (Some [ "2" ])
+        (List.assoc_opt "partNumber" part2.request.target.query);
+      Alcotest.(check bool)
+        "complete includes first part" true
+        (String.contains complete.body '1');
+      Alcotest.(check bool)
+        "complete includes second etag" true
+        (String.contains complete.body '2')
+  | _ -> Alcotest.fail "expected create, two parts, complete"
+
+let test_managed_multipart_aborts_on_part_failure () =
+  let part_size = Multipart.Managed.min_part_size in
+  let body = String.make part_size 'x' in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 (multipart_create_body "upload-1");
+        response 400
+          {|<Error><Code>InvalidRequest</Code><Message>bad part</Message></Error>|};
+        response 204 "";
+      ]
+  in
+  let options = { Multipart.Managed.default_options with part_size } in
+  (match
+     Recording_s3.Multipart.Managed.upload_string conn ~bucket:"my-bucket"
+       ~key:"large.bin" ~options body
+   with
+  | Error error when Error.service_code error = Some "InvalidRequest" -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected managed upload failure");
+  match List.rev conn.calls with
+  | [ _create; _part1; abort ] ->
+      Alcotest.(check string)
+        "abort method" "DELETE"
+        (Awskit.Request.Method.to_string abort.request.method_);
+      Alcotest.(check (option (list string)))
+        "abort upload id" (Some [ "upload-1" ])
+        (List.assoc_opt "uploadId" abort.request.target.query)
+  | _ -> Alcotest.fail "expected create, failed part, abort"
+
 let make_sim () =
   let clock = Sim.Clock.create ~now:test_time () in
   let store = Sim.create_store ~clock () in
@@ -910,6 +998,10 @@ let suite =
           test_multipart_paginator_follows_markers;
         Alcotest.test_case "multipart upload part checksum headers" `Quick
           test_multipart_upload_part_checksum_headers;
+        Alcotest.test_case "managed multipart upload string" `Quick
+          test_managed_multipart_upload_string;
+        Alcotest.test_case "managed multipart aborts on part failure" `Quick
+          test_managed_multipart_aborts_on_part_failure;
         Alcotest.test_case "sim buffer roundtrip" `Quick
           test_sim_buffer_roundtrip;
         Alcotest.test_case "sim streaming get" `Quick test_sim_streaming_get;

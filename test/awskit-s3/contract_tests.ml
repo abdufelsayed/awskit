@@ -684,6 +684,41 @@ module Make (Client : SUBJECT) = struct
         Alcotest.failf "unexpected abort list error: %a" Error.pp error
     | Ok _ -> Alcotest.fail "expected aborted upload to be unavailable"
 
+  let test_managed_multipart_upload () =
+    let conn = Client.fresh () in
+    create_bucket conn;
+    let part_size = Multipart.Managed.min_part_size in
+    let body = String.make part_size 'a' ^ "end" in
+    let options = { Multipart.Managed.default_options with part_size } in
+    let result =
+      Client.Multipart.Managed.upload_string conn ~bucket ~key:"managed.bin"
+        ~options body
+      |> ok_or_fail "managed multipart upload"
+    in
+    Alcotest.(check (list int))
+      "managed part numbers" [ 1; 2 ]
+      (List.map
+         (fun (part : Multipart.Part.t) -> part.part_number)
+         result.parts);
+    let _info, stored =
+      Client.Object.Buffer.get_string conn ~bucket ~key:"managed.bin"
+        ~max_size:(Int64.of_int (String.length body + 1))
+        ()
+      |> ok_or_fail "get managed multipart"
+    in
+    Alcotest.(check int)
+      "managed body size" (String.length body) (String.length stored);
+    Alcotest.(check string)
+      "managed body suffix" "end"
+      (String.sub stored (String.length stored - 3) 3);
+    match
+      Client.Multipart.Managed.upload_string conn ~bucket ~key:"empty.bin" ""
+    with
+    | Error (Awskit.Error.Validation _) -> ()
+    | Error error ->
+        Alcotest.failf "unexpected empty body error: %a" Error.pp error
+    | Ok _ -> Alcotest.fail "expected empty managed multipart failure"
+
   let cases =
     [
       Alcotest.test_case "bucket lifecycle" `Quick test_bucket_lifecycle;
@@ -698,6 +733,8 @@ module Make (Client : SUBJECT) = struct
       Alcotest.test_case "buffer limit" `Quick test_buffer_limit;
       Alcotest.test_case "object preconditions" `Quick test_object_preconditions;
       Alcotest.test_case "multipart lifecycle" `Quick test_multipart_lifecycle;
+      Alcotest.test_case "managed multipart upload" `Quick
+        test_managed_multipart_upload;
     ]
 end
 

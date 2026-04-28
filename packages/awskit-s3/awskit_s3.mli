@@ -170,6 +170,8 @@ module Multipart :
      and type List_parts.options = Awskit_s3_multipart.List_parts.options
      and type List_parts.part_info = Awskit_s3_multipart.List_parts.part_info
      and type List_parts.page = Awskit_s3_multipart.List_parts.page
+     and type Managed.options = Awskit_s3_multipart.Managed.options
+     and type Managed.result = Awskit_s3_multipart.Managed.result
 
 module Policy : Awskit_s3_intf.POLICY with type t = Awskit_s3_policy.t
 (** Opaque validated bucket-policy JSON payloads. *)

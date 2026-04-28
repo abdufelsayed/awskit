@@ -448,6 +448,24 @@ module type MULTIPART = sig
       unit ->
       (Multipart.List_parts.part_info list, Error.t) result io
   end
+
+  module Managed : sig
+    val upload_string :
+      connection ->
+      bucket:string ->
+      key:string ->
+      ?options:Multipart.Managed.options ->
+      string ->
+      (Multipart.Managed.result, Error.t) result io
+
+    val upload_bytes :
+      connection ->
+      bucket:string ->
+      key:string ->
+      ?options:Multipart.Managed.options ->
+      bytes ->
+      (Multipart.Managed.result, Error.t) result io
+  end
 end
 
 module type PRESIGNED = sig
