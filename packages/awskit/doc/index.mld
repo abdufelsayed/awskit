@@ -37,26 +37,26 @@ Core modules:
     packages}
 }
 
-{2 awskit.eio}
+{2 awskit-eio}
 
-{!module:Awskit_eio} is the direct-style Eio runtime adapter. Its monad type
+[Awskit_eio] is the direct-style Eio runtime adapter. Its monad type
 is [type 'a t = 'a]. Response bodies are scoped to [with_download_body].
 
-{2 awskit.lwt}
+{2 awskit-lwt}
 
-{!module:Awskit_lwt} is a generic Lwt runtime functor over
+[Awskit_lwt] is a generic Lwt runtime functor over
 [Cohttp_lwt.S.Client]. Use it for custom Lwt HTTP backends.
 
-{2 awskit.lwt_unix}
+{2 awskit-lwt-unix}
 
-{!module:Awskit_lwt_unix} is the ready-to-use Lwt + Unix runtime adapter. It
+[Awskit_lwt_unix] is the ready-to-use Lwt + Unix runtime adapter. It
 can load credentials from standard AWS environment variables, shared AWS
 profile files, ECS/container metadata, or EC2 instance metadata, and region from
 standard AWS environment variables when arguments are omitted.
 
-{2 awskit.unix}
+{2 awskit-unix}
 
-{!module:Awskit_unix} contains Unix-specific credential and region sources. It
+[Awskit_unix] contains Unix-specific credential and region sources. It
 does not perform HTTP calls.
 
 {1 Minimal Signing Example}
@@ -112,7 +112,7 @@ in
 ignore conn
 ]}
 
-When omitted, [awskit.lwt_unix] reads:
+When omitted, [awskit-lwt-unix] reads:
 
 {[
 AWS_ACCESS_KEY_ID

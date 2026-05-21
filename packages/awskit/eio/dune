@@ -1,7 +1,6 @@
 (library
  (name awskit_eio)
- (public_name awskit.eio)
- (optional)
+ (public_name awskit-eio)
  (libraries
   base
   awskit

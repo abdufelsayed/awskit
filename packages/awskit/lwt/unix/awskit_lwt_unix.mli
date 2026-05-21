@@ -97,7 +97,7 @@ val create :
       [AWS_DEFAULT_REGION].
     @param credentials
       AWS credentials for request signing. If omitted, resolves the
-      [awskit.unix] default credential chain: static AWS environment variables,
+      [awskit-unix] default credential chain: static AWS environment variables,
       shared AWS profile files, ECS/container credentials, then EC2 instance
       profile credentials.
     @param clock Time source for signing timestamps (default: OS clock)

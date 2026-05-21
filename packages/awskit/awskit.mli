@@ -2,10 +2,10 @@
     body metadata, HTTP metadata, and the {!Runtime} module type.
 
     No IO. Concurrency/platform code lives in sub-libraries:
-    - [awskit.eio] — Eio runtime adapter
-    - [awskit.lwt] — generic Lwt runtime functor
-    - [awskit.lwt_unix] — ready-to-use Lwt + Unix backend
-    - [awskit.unix] — Unix credential sources and clock *)
+    - [awskit-eio] — Eio runtime adapter
+    - [awskit-lwt] — generic Lwt runtime functor
+    - [awskit-lwt-unix] — ready-to-use Lwt + Unix backend
+    - [awskit-unix] — Unix credential sources and clock *)
 
 module Credentials = Credentials
 (** AWS credentials for request signing. *)

@@ -91,6 +91,40 @@ let test_endpoint_variants () =
        ~prefix:"https://bucket.s3-accelerate.dualstack.amazonaws.com/file.txt"
        accelerate.url)
 
+let service_error ?code ?message status =
+  Awskit.Error.service
+    {
+      status;
+      code;
+      message;
+      request_id = None;
+      host_id = None;
+      headers = [];
+      body = None;
+    }
+
+let test_error_classifiers () =
+  let precondition = service_error ~code:"PreconditionFailed" 412 in
+  let conditional_conflict =
+    service_error ~code:"ConditionalRequestConflict" 409
+  in
+  let generic_conflict = service_error 409 in
+  Alcotest.(check bool)
+    "precondition failed" true
+    (Error.is_precondition_failed precondition);
+  Alcotest.(check bool)
+    "conditional request conflict by code" true
+    (Error.is_conditional_request_conflict conditional_conflict);
+  Alcotest.(check bool)
+    "generic 409 is not conditional conflict" false
+    (Error.is_conditional_request_conflict generic_conflict);
+  Alcotest.(check bool)
+    "conditional failure includes precondition" true
+    (Error.is_conditional_failure precondition);
+  Alcotest.(check bool)
+    "conditional failure includes conflict" true
+    (Error.is_conditional_failure conditional_conflict)
+
 let test_presigned_result () =
   let result =
     Presigned.get_object
@@ -1302,6 +1336,7 @@ let suite =
           test_presigned_upload_part;
         Alcotest.test_case "endpoint resolution" `Quick test_endpoint_resolution;
         Alcotest.test_case "endpoint variants" `Quick test_endpoint_variants;
+        Alcotest.test_case "error classifiers" `Quick test_error_classifiers;
         Alcotest.test_case "bucket head request" `Quick test_bucket_head_request;
         Alcotest.test_case "bucket list parse" `Quick test_bucket_list_parse;
         Alcotest.test_case "bucket config parse" `Quick test_bucket_config_parse;

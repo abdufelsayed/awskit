@@ -28,6 +28,8 @@ module Error : sig
   val is_no_such_bucket : t -> bool
   val is_no_such_key : t -> bool
   val is_precondition_failed : t -> bool
+  val is_conditional_request_conflict : t -> bool
+  val is_conditional_failure : t -> bool
 end
 
 (** User metadata represented as unprefixed [x-amz-meta-*] key/value pairs. *)

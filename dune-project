@@ -16,9 +16,9 @@
 (package
  (name awskit)
  (synopsis
-  "AWS infrastructure — signing, credentials, endpoints, and runtime adapters")
+  "AWS infrastructure — signing, credentials, endpoints, and core types")
  (description
-  "SigV4 signing, credentials, endpoints, error types, request/response types, and the Runtime module type. An Eio runtime adapter, a generic Lwt runtime layer, and ready-to-use Unix backends are available as separate sub-libraries.")
+  "SigV4 signing, credentials, endpoints, error types, request/response types, and the Runtime module type. Runtime adapters are available as separate packages.")
  (depends
   ocaml
   base
@@ -29,43 +29,110 @@
   ppx_deriving
   (alcotest :with-test)
   (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)
-  (eio :with-test)
-  (eio_main :with-test)
-  (cohttp :with-test)
-  (cohttp-eio :with-test)
-  (ca-certs :with-test)
-  (domain-name :with-test)
-  (tls :with-test)
-  (tls-eio :with-test)
-  (mirage-crypto-rng :with-test)
-  (lwt :with-test)
-  (cohttp-lwt :with-test)
-  (cohttp-lwt-unix :with-test))
- (depopts
+  (qcheck-alcotest :with-test)))
+
+(package
+ (name awskit-unix)
+ (synopsis "Unix helpers for Awskit")
+ (description
+  "Unix-specific AWS helpers for wall-clock time, environment variables, and shared credential files.")
+ (depends
+  ocaml
+  (awskit
+   (= :version))
+  base
+  ptime
+  fmt))
+
+(package
+ (name awskit-lwt)
+ (synopsis "Lwt runtime adapter for Awskit")
+ (description
+  "Generic Lwt runtime adapter for Awskit over a caller-supplied Cohttp Lwt client.")
+ (depends
+  ocaml
+  (awskit
+   (= :version))
+  base
+  lwt
+  (cohttp
+   (>= 6.2.1))
+  (cohttp-lwt
+   (>= 6.2.1))
+  uri
+  ptime
+  fmt
+  logs
+  ppx_deriving
+  (cohttp-lwt-unix
+   (and
+    :with-test
+    (>= 6.2.1)))
+  (alcotest :with-test)))
+
+(package
+ (name awskit-lwt-unix)
+ (synopsis "Lwt Unix runtime adapter for Awskit")
+ (description
+  "Ready-to-use Lwt and Unix runtime adapter for Awskit using Cohttp Lwt Unix.")
+ (depends
+  ocaml
+  (awskit
+   (= :version))
+  (awskit-unix
+   (= :version))
+  (awskit-lwt
+   (= :version))
+  (cohttp
+   (>= 6.2.1))
+  (cohttp-lwt
+   (>= 6.2.1))
+  (cohttp-lwt-unix
+   (>= 6.2.1))
+  lwt
+  uri
+  ptime
+  yojson
+  (alcotest :with-test)))
+
+(package
+ (name awskit-eio)
+ (synopsis "Eio runtime adapter for Awskit")
+ (description
+  "Direct-style Eio runtime adapter for Awskit using Cohttp Eio.")
+ (depends
+  ocaml
+  (awskit
+   (= :version))
+  base
   eio
-  cohttp
-  cohttp-eio
+  (cohttp
+   (>= 6.2.1))
+  (cohttp-eio
+   (>= 6.2.1))
+  uri
+  ptime
+  fmt
+  logs
   ca-certs
   domain-name
   tls
   tls-eio
   mirage-crypto-rng
-  lwt
-  cohttp-lwt
-  cohttp-lwt-unix
-  yojson
-  uri))
+  ppx_deriving
+  (eio_main :with-test)
+  (alcotest :with-test)))
 
 (package
  (name awskit-s3)
  (synopsis
-  "S3 client — objects, buckets, multipart, policies, and simulation")
+  "S3 client core — objects, buckets, multipart, policies, and simulation")
  (description
-  "S3 operations, bucket configuration, multipart uploads, presigned URLs, policies, simulation, and XML wire types. Eio, generic Lwt, and Lwt + Unix adapters are available as separate sub-libraries.")
+  "S3 operations, bucket configuration, multipart uploads, presigned URLs, policies, simulation, and XML wire types. Runtime adapters are available as separate packages.")
  (depends
   ocaml
-  awskit
+  (awskit
+   (= :version))
   base
   digestif
   ptime
@@ -80,8 +147,73 @@
   ppx_yojson_conv
   (alcotest :with-test)
   (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)
+  (qcheck-alcotest :with-test)))
+
+(package
+ (name awskit-s3-lwt)
+ (synopsis "Lwt adapter for Awskit S3")
+ (description
+  "S3 client adapter over the generic Awskit Lwt runtime.")
+ (depends
+  ocaml
+  (awskit
+   (= :version))
+  (awskit-lwt
+   (= :version))
+  (awskit-s3
+   (= :version))
+  (cohttp-lwt
+   (>= 6.2.1))
+  lwt
+  ptime
+  (cohttp-lwt-unix
+   (and
+    :with-test
+    (>= 6.2.1)))
+  (alcotest :with-test)))
+
+(package
+ (name awskit-s3-lwt-unix)
+ (synopsis "Lwt Unix adapter for Awskit S3")
+ (description
+  "Ready-to-use S3 client adapter over the Awskit Lwt Unix runtime.")
+ (depends
+  ocaml
+  (awskit
+   (= :version))
+  (awskit-lwt-unix
+   (= :version))
+  (awskit-s3
+   (= :version))
+  (awskit-s3-lwt
+   (= :version))
+  (cohttp-lwt-unix
+   (>= 6.2.1))
+  lwt
+  fmt
+  ptime
+  (alcotest :with-test)))
+
+(package
+ (name awskit-s3-eio)
+ (synopsis "Eio adapter for Awskit S3")
+ (description
+  "S3 client adapter over the Awskit Eio runtime.")
+ (depends
+  ocaml
+  (awskit
+   (= :version))
+  (awskit-eio
+   (= :version))
+  (awskit-s3
+   (= :version))
+  fmt
+  eio
+  ptime
+  (awskit-unix
+   (and
+    :with-test
+    (= :version)))
   (eio_main :with-test)
-  (cohttp-eio :with-test)
-  (lwt :with-test)
-  (cohttp-lwt-unix :with-test)))
+  (digestif :with-test)
+  (alcotest :with-test)))

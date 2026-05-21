@@ -1,13 +1,13 @@
 (test
  (name test_awskit_s3_eio)
- (package awskit-s3)
+ (package awskit-s3-eio)
  (modules test_awskit_s3_eio integration_tests)
  (libraries
   awskit
-  awskit_eio
-  awskit_unix
-  awskit_s3
-  awskit_s3_eio
+  awskit-eio
+  awskit-unix
+  awskit-s3
+  awskit-s3-eio
   fmt
   alcotest
   eio

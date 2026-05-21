@@ -1,5 +1,5 @@
 (test
  (name test_awskit_eio)
- (package awskit)
+ (package awskit-eio)
  (modules test_awskit_eio integration_tests)
- (libraries awskit awskit_eio eio eio_main ptime alcotest))
+ (libraries awskit awskit-eio eio eio_main ptime alcotest))

@@ -71,21 +71,21 @@ Main modules:
     {!module-type:Awskit.Runtime.S} implementation}
 }
 
-{2 awskit-s3.eio}
+{2 awskit-s3-eio}
 
-{!module:Awskit_s3_eio} provides a direct-style Eio adapter. Operations return
+[Awskit_s3_eio] provides a direct-style Eio adapter. Operations return
 plain results. It also exposes local-path helpers under [Object.Transfer].
 
-{2 awskit-s3.lwt}
+{2 awskit-s3-lwt}
 
-{!module:Awskit_s3_lwt} provides a functor over [Cohttp_lwt.S.Client].
+[Awskit_s3_lwt] provides a functor over [Cohttp_lwt.S.Client].
 Operations return [Lwt.t].
 
-{2 awskit-s3.lwt_unix}
+{2 awskit-s3-lwt-unix}
 
-{!module:Awskit_s3_lwt_unix} provides the ready-to-use Lwt + Unix adapter.
+[Awskit_s3_lwt_unix] provides the ready-to-use Lwt + Unix adapter.
 It can read credentials and region from the standard AWS environment variables
-through the underlying [awskit.lwt_unix] runtime.
+through the underlying [awskit-lwt-unix] runtime.
 
 {1 Minimal Eio Example}
 

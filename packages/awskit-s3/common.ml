@@ -126,6 +126,12 @@ module Error = struct
   let is_precondition_failed = function
     | Awskit.Error.Service { status = 412; _ } -> true
     | error -> code_is "PreconditionFailed" error
+
+  let is_conditional_request_conflict error =
+    code_is "ConditionalRequestConflict" error
+
+  let is_conditional_failure error =
+    is_precondition_failed error || is_conditional_request_conflict error
 end
 
 module Metadata = struct

@@ -1,7 +1,7 @@
 (** Lwt S3 adapter functor.
 
     This package exposes streaming primitive operations and in-memory buffer
-    helpers. Unix local-path helpers are provided by [awskit-s3.lwt_unix]. *)
+    helpers. Unix local-path helpers are provided by [awskit-s3-lwt-unix]. *)
 
 module Make (Client : Cohttp_lwt.S.Client) : sig
   type t

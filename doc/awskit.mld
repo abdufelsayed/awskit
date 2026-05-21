@@ -16,13 +16,13 @@ Every module in [awskit] is pure — no IO, no OS dependencies. Adapter
 sub-libraries are chosen at the edge of your application:
 
 {ul
-{li [awskit.eio] — Eio adapter (direct-style, OCaml 5)}
-{li [awskit.lwt] — Generic Lwt functor (for MirageOS or custom backends)}
-{li [awskit.lwt_unix] — Ready-to-use Lwt + Cohttp + Unix adapter}
-{li [awskit.unix] — OS helpers (wall clock, standard AWS env variables)}
-{li [awskit-s3.eio] — S3 via Eio}
-{li [awskit-s3.lwt] — S3 via generic Lwt adapter}
-{li [awskit-s3.lwt_unix] — S3 via Lwt + Unix}
+{li [awskit-eio] — Eio adapter (direct-style, OCaml 5)}
+{li [awskit-lwt] — Generic Lwt functor (for MirageOS or custom backends)}
+{li [awskit-lwt-unix] — Ready-to-use Lwt + Cohttp + Unix adapter}
+{li [awskit-unix] — OS helpers (wall clock, standard AWS env variables)}
+{li [awskit-s3-eio] — S3 via Eio}
+{li [awskit-s3-lwt] — S3 via generic Lwt adapter}
+{li [awskit-s3-lwt-unix] — S3 via Lwt + Unix}
 }
 
 Service packages like [awskit-s3] depend on the {!module-type:Awskit.Runtime.S}

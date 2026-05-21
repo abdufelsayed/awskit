@@ -7,8 +7,8 @@ runtime adapters, deterministic simulation, and local MinIO contract tests.
 
 | Package | Description |
 |---------|-------------|
-| **awskit** | Pure AWS infrastructure — SigV4 signing, credentials, regions, endpoints, error types, HTTP request/response types, `Runtime` module type. Optional `awskit.eio`, `awskit.lwt`, `awskit.lwt_unix`, `awskit.unix` adapters. |
-| **awskit-s3** | AWS S3 client core — objects, buckets, multipart uploads, presigned URLs, policies, simulation. Optional `awskit-s3.eio`, `awskit-s3.lwt`, and `awskit-s3.lwt_unix` adapters. |
+| **awskit** | Pure AWS infrastructure — SigV4 signing, credentials, regions, endpoints, error types, HTTP request/response types, `Runtime` module type. Optional `awskit-eio`, `awskit-lwt`, `awskit-lwt-unix`, `awskit-unix` adapters. |
+| **awskit-s3** | AWS S3 client core — objects, buckets, multipart uploads, presigned URLs, policies, simulation. Optional `awskit-s3-eio`, `awskit-s3-lwt`, and `awskit-s3-lwt-unix` adapters. |
 
 ## S3 client surface
 
@@ -29,7 +29,7 @@ opam install awskit-s3 cohttp-lwt-unix   # Lwt + Unix
 
 ```lisp
 ; dune
-(libraries awskit-s3 awskit-s3.eio eio_main)
+(libraries awskit-s3 awskit-s3-eio eio_main)
 ```
 
 ```ocaml
@@ -64,7 +64,7 @@ let () =
 
 ```lisp
 ; dune
-(libraries awskit-s3 awskit-s3.lwt_unix)
+(libraries awskit-s3 awskit-s3-lwt-unix)
 ```
 
 ```ocaml

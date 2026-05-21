@@ -1,6 +1,6 @@
 (** Lwt runtime adapter functor. Plug in any [Cohttp_lwt.S.Client].
 
-    Most users should use {!Awskit_lwt_unix} directly.
+    Most users should use [Awskit_lwt_unix] directly.
 
     {[
     module My_runtime = Awskit_lwt.Make (Cohttp_lwt_unix.Client)

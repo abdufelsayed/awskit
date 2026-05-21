@@ -436,8 +436,8 @@ let region = Awskit.Region.of_string_exn "us-east-1" in
 Awskit_s3_eio.create ~sw ~env ~region ~credentials ()
 ]}
 
-[awskit-s3.lwt_unix] can use explicit values or load the standard environment
-variables through [awskit.lwt_unix]:
+[awskit-s3-lwt-unix] can use explicit values or load the standard environment
+variables through [awskit-lwt-unix]:
 
 {[
 AWS_ACCESS_KEY_ID

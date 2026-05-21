@@ -1,11 +1,13 @@
 (library
  (name awskit_lwt_unix)
- (public_name awskit.lwt_unix)
- (optional)
+ (public_name awskit-lwt-unix)
  (libraries
-  awskit_lwt
-  awskit.unix
+  awskit-lwt
+  awskit-unix
+  cohttp
+  cohttp-lwt
   cohttp-lwt-unix
   lwt.unix
   ptime.clock.os
+  uri
   yojson))

@@ -1,5 +1,4 @@
 (library
  (name awskit_s3_lwt)
- (public_name awskit-s3.lwt)
- (optional)
- (libraries awskit_s3 awskit_lwt))
+ (public_name awskit-s3-lwt)
+ (libraries awskit-s3 awskit-lwt cohttp-lwt lwt ptime))
