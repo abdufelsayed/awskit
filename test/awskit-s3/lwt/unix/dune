@@ -1,7 +1,7 @@
 (test
  (name test_awskit_s3_lwt_unix)
  (package awskit-s3-lwt-unix)
- (modules test_awskit_s3_lwt_unix integration_tests)
+ (modules test_awskit_s3_lwt_unix integration_tests transfer_tests)
  (libraries
   awskit
   awskit-lwt-unix

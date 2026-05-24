@@ -381,7 +381,7 @@ struct
     let consume reader =
       Lwt.catch
         (fun () ->
-          Lwt_io.with_file ~mode:Lwt_io.Output path (fun channel ->
+          Lwt_io.with_file ~mode:Lwt_io.Output ~perm:0o600 path (fun channel ->
               let bytes = Bytes.create buffer_size in
               let rec loop transferred =
                 Lwt.bind (Runtime.read reader bytes ~off:0 ~len:buffer_size)
