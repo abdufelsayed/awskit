@@ -1195,6 +1195,24 @@ let test_managed_multipart_upload_string () =
         (String.contains complete.body '2')
   | _ -> Alcotest.fail "expected create, two parts, complete"
 
+let test_complete_multipart_embedded_error () =
+  let body =
+    {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
+  in
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let part =
+    Multipart.Part.create_exn ~part_number:1
+      ~etag:(Object.Etag.of_string_exn "\"part-1\"")
+  in
+  match
+    Recording_s3.Multipart.complete conn ~bucket:"my-bucket" ~key:"large.bin"
+      ~upload_id [ part ]
+  with
+  | Error error when Error.service_code error = Some "SlowDown" -> ()
+  | Error error -> Alcotest.failf "unexpected complete error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected embedded complete error"
+
 let test_managed_multipart_aborts_on_part_failure () =
   let part_size = Multipart.Managed.min_part_size in
   let body = String.make part_size 'x' in
@@ -1386,6 +1404,8 @@ let suite =
           test_multipart_upload_part_checksum_headers;
         Alcotest.test_case "managed multipart upload string" `Quick
           test_managed_multipart_upload_string;
+        Alcotest.test_case "complete multipart embedded error" `Quick
+          test_complete_multipart_embedded_error;
         Alcotest.test_case "managed multipart aborts on part failure" `Quick
           test_managed_multipart_aborts_on_part_failure;
         Alcotest.test_case "sim buffer roundtrip" `Quick
