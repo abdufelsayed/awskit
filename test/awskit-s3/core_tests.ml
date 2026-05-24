@@ -229,6 +229,23 @@ let test_presigned_upload_part () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "expected invalid part number"
 
+let test_presigned_rejects_header_newline () =
+  let options =
+    {
+      Presigned.Put_object.default_options with
+      headers = [ ("x-test", "ok\r\nInjected: yes") ];
+    }
+  in
+  match
+    Presigned.put_object
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+      ~options ()
+  with
+  | Error (Awskit.Error.Validation _) -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected header validation error"
+
 module Recording_runtime = struct
   type response = {
     status : int;
@@ -1365,6 +1382,8 @@ let suite =
           test_presigned_put_checksum_headers;
         Alcotest.test_case "presigned multipart upload part" `Quick
           test_presigned_upload_part;
+        Alcotest.test_case "presigned rejects header newline" `Quick
+          test_presigned_rejects_header_newline;
         Alcotest.test_case "endpoint resolution" `Quick test_endpoint_resolution;
         Alcotest.test_case "endpoint variants" `Quick test_endpoint_variants;
         Alcotest.test_case "error classifiers" `Quick test_error_classifiers;

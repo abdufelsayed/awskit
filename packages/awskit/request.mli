@@ -48,6 +48,8 @@ type t = private {
   headers : (string * string) list;
 }
 
+val validate_headers : (string * string) list -> (unit, Error.t) result
+
 val create :
   method_:Method.t ->
   target:Target.t ->
