@@ -16,6 +16,8 @@ module Credentials = struct
     Uri.t ->
     (http_response, Awskit.Error.t) result Lwt.t
 
+  type imdsv1_fallback = [ `Enabled | `Disabled ]
+
   module Result_syntax = struct
     let ( let* ) = Result.bind
   end
@@ -233,7 +235,17 @@ module Credentials = struct
       (function
         | Ok response when response.status >= 200 && response.status < 300 ->
             Lwt.return_ok (Some response.body)
-        | Ok _ | Error _ -> Lwt.return_ok None)
+        | Ok response
+          when response.status = 403
+               || response.status = 404
+               || response.status = 405 ->
+            Lwt.return_ok None
+        | Ok response ->
+            Lwt.return_error
+              (validation ~field:"instance metadata token"
+                 (Printf.sprintf "metadata token service returned HTTP %d"
+                    response.status))
+        | Error _ as error -> Lwt.return error)
 
   let imds_headers token =
     match token with
@@ -244,6 +256,16 @@ module Credentials = struct
     http_call ~meth:`GET ~headers:(imds_headers token) (imds_base_uri path)
 
   let truthy value = String.equal (String.lowercase_ascii value) "true"
+
+  let imdsv1_fallback_from_env ?(getenv = getenv_opt) () =
+    match getenv "AWS_EC2_METADATA_V1_DISABLED" with
+    | Some value when truthy (trim value) -> `Disabled
+    | _ -> `Enabled
+
+  let imdsv1_fallback_policy ?imdsv1_fallback ?getenv () =
+    match imdsv1_fallback with
+    | Some policy -> policy
+    | None -> imdsv1_fallback_from_env ?getenv ()
 
   let first_non_empty_line body =
     String.split_on_char '\n' body
@@ -282,7 +304,7 @@ module Credentials = struct
                      ~field:"instance metadata credentials" response.body)))
 
   let instance_metadata_provider ?(getenv = getenv_opt) ?(http_call = http_call)
-      ?(clock = Ptime_clock.now) () =
+      ?(clock = Ptime_clock.now) ?imdsv1_fallback () =
     cached ~clock (fun () ->
         match getenv "AWS_EC2_METADATA_DISABLED" with
         | Some value when truthy (trim value) ->
@@ -290,28 +312,42 @@ module Credentials = struct
               (validation ~field:"AWS_EC2_METADATA_DISABLED"
                  "EC2 instance metadata credentials are disabled")
         | _ ->
-            Lwt.bind (imds_token ~http_call ()) (fun token_result ->
-                let token = Result.to_option token_result |> Option.join in
-                Lwt.bind (fetch_imds_role ~http_call ?token ()) (function
-                  | Error _ as error -> Lwt.return error
-                  | Ok role -> fetch_imds_credentials ~http_call ?token role)))
+            Lwt.bind (imds_token ~http_call ()) (function
+              | Error _ as error -> Lwt.return error
+              | Ok token -> (
+                  let fetch ?token () =
+                    Lwt.bind (fetch_imds_role ~http_call ?token ()) (function
+                      | Error _ as error -> Lwt.return error
+                      | Ok role -> fetch_imds_credentials ~http_call ?token role)
+                  in
+                  match token with
+                  | Some token -> fetch ~token ()
+                  | None -> (
+                      match
+                        imdsv1_fallback_policy ~getenv ?imdsv1_fallback ()
+                      with
+                      | `Enabled -> fetch ()
+                      | `Disabled ->
+                          Lwt.return_error
+                            (validation ~field:"AWS_EC2_METADATA_V1_DISABLED"
+                               "IMDSv1 fallback is disabled")))))
 
   let local_provider ?getenv ?home () =
     let provider = Awskit_unix.Credentials.default_provider ?getenv ?home () in
     Provider.create (fun () ->
         Lwt.return (Awskit.Credentials.Provider.resolve provider))
 
-  let default_provider ?getenv ?home ?http_call ?clock () =
+  let default_provider ?getenv ?home ?http_call ?clock ?imdsv1_fallback () =
     Provider.chain
       [
         local_provider ?getenv ?home ();
         container_provider ?getenv ?http_call ?clock ();
-        instance_metadata_provider ?getenv ?http_call ?clock ();
+        instance_metadata_provider ?getenv ?http_call ?clock ?imdsv1_fallback ();
       ]
 end
 
 let create ?ctx ?endpoint ?region ?credentials ?(clock = Ptime_clock.now)
-    ?retry_policy ?max_response_body_bytes () =
+    ?retry_policy ?max_response_body_bytes ?imdsv1_fallback () =
   match
     ( (match region with
       | Some region -> Awskit.Region.of_string region
@@ -319,7 +355,7 @@ let create ?ctx ?endpoint ?region ?credentials ?(clock = Ptime_clock.now)
       match credentials with
       | Some credentials ->
           Ok (Awskit_lwt.Credentials.Provider.static credentials)
-      | None -> Ok (Credentials.default_provider ~clock ()) )
+      | None -> Ok (Credentials.default_provider ~clock ?imdsv1_fallback ()) )
   with
   | Ok region, Ok credentials_provider ->
       let sleep span = Lwt_unix.sleep (Ptime.Span.to_float_s span) in

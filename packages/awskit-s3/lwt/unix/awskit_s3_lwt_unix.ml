@@ -35,10 +35,11 @@ end
 module S3 = Awskit_s3.Make (Runtime)
 
 let create ?ctx ?endpoint ?addressing_style ?endpoint_variant ?scheme ?region
-    ?credentials ?clock ?retry_policy () =
+    ?credentials ?clock ?retry_policy ?imdsv1_fallback () =
   let region = Option.map Awskit.Region.to_string region in
   match
-    Awskit_lwt_unix.create ?ctx ?region ?credentials ?clock ?retry_policy ()
+    Awskit_lwt_unix.create ?ctx ?region ?credentials ?clock ?retry_policy
+      ?imdsv1_fallback ()
   with
   | Error _ as error -> error
   | Ok aws ->

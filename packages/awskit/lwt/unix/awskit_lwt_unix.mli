@@ -39,6 +39,8 @@ module Credentials : sig
     Uri.t ->
     (http_response, Awskit.Error.t) result Lwt.t
 
+  type imdsv1_fallback = [ `Enabled | `Disabled ]
+
   val local_provider :
     ?getenv:Awskit_unix.Credentials.Env.getenv ->
     ?home:string ->
@@ -61,15 +63,20 @@ module Credentials : sig
     ?getenv:Awskit_unix.Credentials.Env.getenv ->
     ?http_call:http_call ->
     ?clock:(unit -> Ptime.t) ->
+    ?imdsv1_fallback:imdsv1_fallback ->
     unit ->
     Provider.t
-  (** EC2 instance profile credential provider using IMDSv2 when available. *)
+  (** EC2 instance profile credential provider using IMDSv2 when available.
+      Tokenless IMDSv1 fallback is attempted only for IMDS token endpoint HTTP
+      403, 404, or 405 responses. Set [imdsv1_fallback] to [`Disabled] or
+      [AWS_EC2_METADATA_V1_DISABLED=true] to reject tokenless fallback. *)
 
   val default_provider :
     ?getenv:Awskit_unix.Credentials.Env.getenv ->
     ?home:string ->
     ?http_call:http_call ->
     ?clock:(unit -> Ptime.t) ->
+    ?imdsv1_fallback:imdsv1_fallback ->
     unit ->
     Provider.t
   (** AWS-style Unix credential chain: local static sources, container
@@ -84,6 +91,7 @@ val create :
   ?clock:(unit -> Ptime.t) ->
   ?retry_policy:Awskit.Retry.t ->
   ?max_response_body_bytes:int ->
+  ?imdsv1_fallback:Credentials.imdsv1_fallback ->
   unit ->
   (t, Awskit.Error.t) result
 (** Create a connection to AWS.
@@ -105,4 +113,7 @@ val create :
       Retry behavior for retryable AWS errors and transient transport failures
       (default: {!val:Awskit.Retry.default})
     @param max_response_body_bytes
-      Maximum response size to buffer in memory (default: 64 MiB) *)
+      Maximum response size to buffer in memory (default: 64 MiB)
+    @param imdsv1_fallback
+      Controls tokenless IMDSv1 fallback when the default credential chain uses
+      EC2 instance metadata credentials. *)
