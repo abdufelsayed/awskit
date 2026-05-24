@@ -52,6 +52,29 @@ let test_runtime_bodies env =
     (Option.value (Awskit_eio.Runtime.upload_descriptor body).content_length
        ~default:(-1L))
 
+let eio_download_body ~max_response_body_bytes body =
+  {
+    Awskit_eio__Runtime.body = Cohttp_eio.Body.of_string body;
+    max_response_body_bytes;
+  }
+
+let expect_body_limit label expected = function
+  | Error (Awskit.Error.Body { limit = Some limit; _ }) ->
+      Alcotest.(check int64) label expected limit
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected body limit error" label
+
+let test_discard_download_body_enforces_limit _env =
+  eio_download_body ~max_response_body_bytes:3 "abcdef"
+  |> Awskit_eio__Runtime.discard_download_body
+  |> expect_body_limit "discard limit" 3L
+
+let test_with_download_body_drain_enforces_limit _env =
+  let body = eio_download_body ~max_response_body_bytes:3 "abcdef" in
+  Awskit_eio__Runtime.with_download_body body ~consume:(fun _ -> Ok ())
+  |> expect_body_limit "scoped drain limit" 3L
+
 let suite env =
   [
     ( "integration:connection",
@@ -62,5 +85,9 @@ let suite env =
             test_connection_defaults env);
         Alcotest.test_case "runtime bodies" `Quick (fun () ->
             test_runtime_bodies env);
+        Alcotest.test_case "discard body limit" `Quick (fun () ->
+            test_discard_download_body_enforces_limit env);
+        Alcotest.test_case "scoped drain body limit" `Quick (fun () ->
+            test_with_download_body_drain_enforces_limit env);
       ] );
   ]

@@ -27,7 +27,10 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         Awskit.Body.Upload.descriptor
         * (upload_writer -> (unit, Awskit.Error.t) Result.t Lwt.t)
 
-  type download_body = Cohttp_lwt.Body.t
+  type download_body = {
+    body : Cohttp_lwt.Body.t;
+    max_response_body_bytes : int;
+  }
 
   type download_reader = {
     stream : string Lwt_stream.t;
@@ -157,7 +160,12 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
             Log.debug (fun m ->
                 m "HTTP %d"
                   (Cohttp.Response.status response |> Cohttp.Code.code_of_status));
-            Lwt.return_ok (to_aws_response response, response_body)))
+            Lwt.return_ok
+              ( to_aws_response response,
+                {
+                  body = response_body;
+                  max_response_body_bytes = conn.max_response_body_bytes;
+                } )))
       (fun exn ->
         let message = Exn.to_string exn in
         Log.warn (fun m -> m "HTTP call failed: %s" message);
@@ -212,26 +220,44 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         (fun () -> read_from_current reader bytes ~off ~len)
         (fun exn -> Lwt.return_error (Awskit.Error.body (Exn.to_string exn)))
 
-    let rec drain_reader reader =
+    let drain_limit_error max_response_body_bytes =
+      Awskit.Error.body
+        ~limit:(Int64.of_int max_response_body_bytes)
+        "response body exceeded max_response_body_bytes"
+
+    let rec drain_reader reader ~remaining ~max_response_body_bytes =
       let buffer = Bytes.create 8192 in
-      Lwt.bind
-        (read reader buffer ~off:0 ~len:(Bytes.length buffer))
-        (function
-          | Error _ as error -> Lwt.return error
-          | Ok 0 -> Lwt.return_ok ()
-          | Ok _ -> drain_reader reader)
+      let len =
+        if remaining <= 0 then 1 else min (Bytes.length buffer) remaining
+      in
+      Lwt.bind (read reader buffer ~off:0 ~len) (function
+        | Error _ as error -> Lwt.return error
+        | Ok 0 -> Lwt.return_ok ()
+        | Ok n ->
+            if n > remaining then
+              Lwt.return_error (drain_limit_error max_response_body_bytes)
+            else
+              drain_reader reader ~remaining:(remaining - n)
+                ~max_response_body_bytes)
+
+    let drain_download_reader reader body =
+      drain_reader reader ~remaining:body.max_response_body_bytes
+        ~max_response_body_bytes:body.max_response_body_bytes
 
     let with_download_body body ~consume =
       let reader =
-        { stream = Cohttp_lwt.Body.to_stream body; chunk = ""; offset = 0 }
+        { stream = Cohttp_lwt.Body.to_stream body.body; chunk = ""; offset = 0 }
       in
       Lwt.bind (consume reader) (fun result ->
-          Lwt.bind (drain_reader reader) (function
+          Lwt.bind (drain_download_reader reader body) (function
             | Ok () -> Lwt.return result
             | Error error -> Lwt.return_error error))
 
     let discard_download_body body =
-      with_download_body body ~consume:(fun reader -> drain_reader reader)
+      let reader =
+        { stream = Cohttp_lwt.Body.to_stream body.body; chunk = ""; offset = 0 }
+      in
+      drain_download_reader reader body
 
     let call = do_call
   end
