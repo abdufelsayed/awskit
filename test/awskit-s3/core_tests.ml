@@ -980,6 +980,19 @@ let test_malformed_xml_responses () =
       Alcotest.failf "unexpected multipart decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected list parts decode error"
 
+let test_copy_object_embedded_error () =
+  let body =
+    {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
+  in
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  match
+    Recording_s3.Object.copy conn ~src_bucket:"my-bucket" ~src_key:"file"
+      ~dst_bucket:"my-bucket" ~dst_key:"copy" ()
+  with
+  | Error error when Error.service_code error = Some "SlowDown" -> ()
+  | Error error -> Alcotest.failf "unexpected copy error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected embedded copy error"
+
 let list_page ?continuation_token ?next_continuation_token ~truncated keys =
   let token_xml name = function
     | None -> ""
@@ -1361,6 +1374,8 @@ let suite =
           test_download_body_drain_errors;
         Alcotest.test_case "malformed xml responses" `Quick
           test_malformed_xml_responses;
+        Alcotest.test_case "copy object embedded error" `Quick
+          test_copy_object_embedded_error;
         Alcotest.test_case "object paginator follows tokens" `Quick
           test_object_paginator_follows_tokens;
         Alcotest.test_case "object paginator max pages" `Quick
