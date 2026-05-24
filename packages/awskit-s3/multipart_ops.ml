@@ -9,6 +9,30 @@ module Make (C : Operation_context.S) = struct
   type 'a io = 'a R.t
   type nonrec upload_body = upload_body
 
+  let complete_result response body =
+    match Xml.root body with
+    | Error _ as error -> error
+    | Ok ("Error", _) -> Error (embedded_service_error response body)
+    | Ok ("CompleteMultipartUploadResult", nodes) -> (
+        let etag = Xml.child_text "ETag" nodes in
+        let etag = option_map_result Public_object.Etag.of_string etag in
+        let version_id = response_version response in
+        match (etag, version_id) with
+        | Error error, _ | _, Error error -> Error error
+        | Ok etag, Ok version_id ->
+            Ok
+              {
+                Public_multipart.Complete.etag;
+                version_id;
+                checksum = response_checksum response;
+                request = response;
+              })
+    | Ok (actual, _) ->
+        Error
+          (Awskit.Error.decode
+             (Fmt.str "expected CompleteMultipartUploadResult XML, got %s"
+                actual))
+
   let create conn ~bucket ~key ?options () =
     let options =
       Option.value ~default:Public_multipart.Create.default_options options
@@ -208,34 +232,9 @@ module Make (C : Operation_context.S) = struct
                           match body with
                           | Error error -> return_error error
                           | Ok body -> (
-                              let etag =
-                                match
-                                  Xml.decode_root body
-                                    ~name:"CompleteMultipartUploadResult"
-                                with
-                                | Ok nodes -> Xml.child_text "ETag" nodes
-                                | Error _ -> None
-                              in
-                              let etag =
-                                option_map_result Public_object.Etag.of_string
-                                  etag
-                              in
-                              match etag with
+                              match complete_result response body with
                               | Error error -> return_error error
-                              | Ok etag -> (
-                                  let* version_id =
-                                    return (response_version response)
-                                  in
-                                  match version_id with
-                                  | Error error -> return_error error
-                                  | Ok version_id ->
-                                      return_ok
-                                        {
-                                          Public_multipart.Complete.etag;
-                                          version_id;
-                                          checksum = response_checksum response;
-                                          request = response;
-                                        })))))))
+                              | Ok result -> return_ok result))))))
 
   let abort conn ~bucket ~key ~upload_id =
     match validate_bucket_key bucket key with

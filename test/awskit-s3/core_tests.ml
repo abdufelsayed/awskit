@@ -229,6 +229,23 @@ let test_presigned_upload_part () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "expected invalid part number"
 
+let test_presigned_rejects_header_newline () =
+  let options =
+    {
+      Presigned.Put_object.default_options with
+      headers = [ ("x-test", "ok\r\nInjected: yes") ];
+    }
+  in
+  match
+    Presigned.put_object
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+      ~options ()
+  with
+  | Error (Awskit.Error.Validation _) -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected header validation error"
+
 module Recording_runtime = struct
   type response = {
     status : int;
@@ -980,6 +997,19 @@ let test_malformed_xml_responses () =
       Alcotest.failf "unexpected multipart decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected list parts decode error"
 
+let test_copy_object_embedded_error () =
+  let body =
+    {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
+  in
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  match
+    Recording_s3.Object.copy conn ~src_bucket:"my-bucket" ~src_key:"file"
+      ~dst_bucket:"my-bucket" ~dst_key:"copy" ()
+  with
+  | Error error when Error.service_code error = Some "SlowDown" -> ()
+  | Error error -> Alcotest.failf "unexpected copy error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected embedded copy error"
+
 let list_page ?continuation_token ?next_continuation_token ~truncated keys =
   let token_xml name = function
     | None -> ""
@@ -1182,6 +1212,24 @@ let test_managed_multipart_upload_string () =
         (String.contains complete.body '2')
   | _ -> Alcotest.fail "expected create, two parts, complete"
 
+let test_complete_multipart_embedded_error () =
+  let body =
+    {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
+  in
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let part =
+    Multipart.Part.create_exn ~part_number:1
+      ~etag:(Object.Etag.of_string_exn "\"part-1\"")
+  in
+  match
+    Recording_s3.Multipart.complete conn ~bucket:"my-bucket" ~key:"large.bin"
+      ~upload_id [ part ]
+  with
+  | Error error when Error.service_code error = Some "SlowDown" -> ()
+  | Error error -> Alcotest.failf "unexpected complete error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected embedded complete error"
+
 let test_managed_multipart_aborts_on_part_failure () =
   let part_size = Multipart.Managed.min_part_size in
   let body = String.make part_size 'x' in
@@ -1334,6 +1382,8 @@ let suite =
           test_presigned_put_checksum_headers;
         Alcotest.test_case "presigned multipart upload part" `Quick
           test_presigned_upload_part;
+        Alcotest.test_case "presigned rejects header newline" `Quick
+          test_presigned_rejects_header_newline;
         Alcotest.test_case "endpoint resolution" `Quick test_endpoint_resolution;
         Alcotest.test_case "endpoint variants" `Quick test_endpoint_variants;
         Alcotest.test_case "error classifiers" `Quick test_error_classifiers;
@@ -1361,6 +1411,8 @@ let suite =
           test_download_body_drain_errors;
         Alcotest.test_case "malformed xml responses" `Quick
           test_malformed_xml_responses;
+        Alcotest.test_case "copy object embedded error" `Quick
+          test_copy_object_embedded_error;
         Alcotest.test_case "object paginator follows tokens" `Quick
           test_object_paginator_follows_tokens;
         Alcotest.test_case "object paginator max pages" `Quick
@@ -1371,6 +1423,8 @@ let suite =
           test_multipart_upload_part_checksum_headers;
         Alcotest.test_case "managed multipart upload string" `Quick
           test_managed_multipart_upload_string;
+        Alcotest.test_case "complete multipart embedded error" `Quick
+          test_complete_multipart_embedded_error;
         Alcotest.test_case "managed multipart aborts on part failure" `Quick
           test_managed_multipart_aborts_on_part_failure;
         Alcotest.test_case "sim buffer roundtrip" `Quick

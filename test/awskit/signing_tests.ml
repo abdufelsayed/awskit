@@ -224,6 +224,21 @@ let test_sign_different_payloads =
       not
         (String.equal (get_auth (sign p1).headers) (get_auth (sign p2).headers)))
 
+let expect_validation label = function
+  | Error (Awskit.Error.Validation _) -> ()
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected validation error" label
+
+let test_sign_rejects_header_newline () =
+  expect_validation "sign header newline"
+    (Signing.sign_request ~credentials:creds ~region ~service:"s3" ~method_:`GET
+       ~path:"/bucket/key" ~query:""
+       ~headers:
+         [ ("host", "s3.amazonaws.com"); ("x-test", "ok\r\nInjected: yes") ]
+       ~payload_hash:(Payload_hash.sha256_of_string "")
+       ~now:fixed_time)
+
 (* ── ptime_to_date_time ──────────────────────────────────────────── *)
 
 let test_ptime_datestamp_format =
@@ -280,6 +295,11 @@ let suite =
           test_sign_signature_is_hex;
           test_sign_different_payloads;
         ] );
+    ( "signing:validation",
+      [
+        Alcotest.test_case "rejects header newline" `Quick
+          test_sign_rejects_header_newline;
+      ] );
     ( "pbt:signing:ptime",
       List.map QCheck_alcotest.to_alcotest
         [ test_ptime_datestamp_format; test_ptime_amzdate_format ] );

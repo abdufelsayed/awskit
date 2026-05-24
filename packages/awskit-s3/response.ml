@@ -110,25 +110,42 @@ let delete_result response =
       request = response;
     }
 
-let copy_result response body =
-  let etag, last_modified =
-    match Xml.decode_root body ~name:"CopyObjectResult" with
-    | Error _ -> (None, None)
-    | Ok nodes ->
-        ( Xml.child_text "ETag" nodes,
-          Option.bind (Xml.child_text "LastModified" nodes) ptime_of_string )
-  in
-  let* etag = option_map_result Object.Etag.of_string etag in
-  let* version_id = response_version response in
-  let* copy_source_version_id =
-    option_map_result Object.Version_id.of_string
-      (Awskit.Response.header response "x-amz-copy-source-version-id")
-  in
-  Ok
+let embedded_service_error response body =
+  Awskit.Error.service
     {
-      Object.Copy.etag;
-      last_modified;
-      version_id;
-      copy_source_version_id;
-      request = response;
+      status = Awskit.Response.status response;
+      code = Xml.service_code body;
+      message = Xml.service_message body;
+      request_id = Awskit.Response.request_id response;
+      host_id = Awskit.Response.host_id response;
+      headers = Awskit.Response.headers response;
+      body = Some body;
     }
+
+let copy_result response body =
+  match Xml.root body with
+  | Error _ as error -> error
+  | Ok ("Error", _) -> Error (embedded_service_error response body)
+  | Ok ("CopyObjectResult", nodes) ->
+      let etag = Xml.child_text "ETag" nodes in
+      let last_modified =
+        Option.bind (Xml.child_text "LastModified" nodes) ptime_of_string
+      in
+      let* etag = option_map_result Object.Etag.of_string etag in
+      let* version_id = response_version response in
+      let* copy_source_version_id =
+        option_map_result Object.Version_id.of_string
+          (Awskit.Response.header response "x-amz-copy-source-version-id")
+      in
+      Ok
+        {
+          Object.Copy.etag;
+          last_modified;
+          version_id;
+          copy_source_version_id;
+          request = response;
+        }
+  | Ok (actual, _) ->
+      Error
+        (Awskit.Error.decode
+           (Fmt.str "expected CopyObjectResult XML, got %s" actual))

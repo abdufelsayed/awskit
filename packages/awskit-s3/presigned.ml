@@ -137,8 +137,9 @@ let generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
   in
   let signed_header_values =
     ("host", Awskit.Endpoint.authority request.endpoint) :: headers
-    |> canonical_headers
   in
+  let* () = Awskit.Request.validate_headers signed_header_values in
+  let signed_header_values = canonical_headers signed_header_values in
   let signed_headers = signed_headers_str signed_header_values in
   let query =
     [

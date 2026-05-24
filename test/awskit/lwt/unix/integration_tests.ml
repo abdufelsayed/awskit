@@ -273,6 +273,157 @@ let test_instance_metadata_provider_uses_imdsv2 () =
   check_access_key "imds access key" "IMDS_AK" credentials;
   Alcotest.(check int) "imds call count" 3 (List.length !calls)
 
+let expect_validation label = function
+  | Error (Awskit.Error.Validation _) -> ()
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected validation error" label
+
+let expect_transport label = function
+  | Error (Awskit.Error.Transport _) -> ()
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected transport error" label
+
+let imds_role_headers headers =
+  List.Assoc.find headers "X-aws-ec2-metadata-token" ~equal:String.equal
+
+let test_instance_metadata_provider_falls_back_on_token_404 () =
+  let calls = ref [] in
+  let http_call ~meth ~headers uri =
+    calls := (meth, headers, Uri.to_string uri) :: !calls;
+    match (meth, Uri.path uri) with
+    | `PUT, "/latest/api/token" ->
+        Lwt.return_ok
+          { Awskit_lwt_unix.Credentials.status = 404; headers = []; body = "" }
+    | `GET, "/latest/meta-data/iam/security-credentials/" ->
+        Alcotest.(check (option string))
+          "role request tokenless" None
+          (imds_role_headers headers);
+        Lwt.return_ok
+          {
+            Awskit_lwt_unix.Credentials.status = 200;
+            headers = [];
+            body = "instance-role\n";
+          }
+    | `GET, "/latest/meta-data/iam/security-credentials/instance-role" ->
+        Alcotest.(check (option string))
+          "credential request tokenless" None
+          (imds_role_headers headers);
+        Lwt.return_ok
+          {
+            Awskit_lwt_unix.Credentials.status = 200;
+            headers = [];
+            body = metadata_json ~access_key_id:"IMDSV1_AK" ();
+          }
+    | _ ->
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"metadata" "unexpected request")
+  in
+  let provider =
+    Awskit_lwt_unix.Credentials.instance_metadata_provider ~http_call ()
+  in
+  let credentials =
+    resolve_provider provider |> credentials_or_fail "imds fallback"
+  in
+  check_access_key "imds fallback access key" "IMDSV1_AK" credentials;
+  Alcotest.(check int) "imds fallback call count" 3 (List.length !calls)
+
+let test_instance_metadata_provider_rejects_disabled_imdsv1_fallback () =
+  let get_attempted = ref false in
+  let calls = ref [] in
+  let http_call ~meth ~headers:_ uri =
+    calls := (meth, Uri.to_string uri) :: !calls;
+    match (meth, Uri.path uri) with
+    | `PUT, "/latest/api/token" ->
+        Lwt.return_ok
+          { Awskit_lwt_unix.Credentials.status = 404; headers = []; body = "" }
+    | `GET, _ ->
+        get_attempted := true;
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"metadata" "unexpected IMDSv1 GET")
+    | _ ->
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"metadata" "unexpected request")
+  in
+  let provider =
+    Awskit_lwt_unix.Credentials.instance_metadata_provider ~http_call
+      ~imdsv1_fallback:`Disabled ()
+  in
+  expect_validation "disabled IMDSv1 fallback" (resolve_provider provider);
+  Alcotest.(check bool) "no IMDSv1 GET" false !get_attempted;
+  Alcotest.(check int) "token call only" 1 (List.length !calls)
+
+let test_instance_metadata_provider_rejects_env_disabled_imdsv1_fallback () =
+  let get_attempted = ref false in
+  let getenv = getenv_of_assoc [ ("AWS_EC2_METADATA_V1_DISABLED", "true") ] in
+  let http_call ~meth ~headers:_ uri =
+    match (meth, Uri.path uri) with
+    | `PUT, "/latest/api/token" ->
+        Lwt.return_ok
+          { Awskit_lwt_unix.Credentials.status = 404; headers = []; body = "" }
+    | `GET, _ ->
+        get_attempted := true;
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"metadata" "unexpected IMDSv1 GET")
+    | _ ->
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"metadata" "unexpected request")
+  in
+  let provider =
+    Awskit_lwt_unix.Credentials.instance_metadata_provider ~getenv ~http_call ()
+  in
+  expect_validation "env disabled IMDSv1 fallback" (resolve_provider provider);
+  Alcotest.(check bool) "no env-disabled IMDSv1 GET" false !get_attempted
+
+let test_instance_metadata_provider_token_500_does_not_fallback () =
+  let get_attempted = ref false in
+  let calls = ref 0 in
+  let http_call ~meth ~headers:_ uri =
+    Int.incr calls;
+    match (meth, Uri.path uri) with
+    | `PUT, "/latest/api/token" ->
+        Lwt.return_ok
+          { Awskit_lwt_unix.Credentials.status = 500; headers = []; body = "" }
+    | `GET, _ ->
+        get_attempted := true;
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"metadata" "unexpected IMDSv1 GET")
+    | _ ->
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"metadata" "unexpected request")
+  in
+  let provider =
+    Awskit_lwt_unix.Credentials.instance_metadata_provider ~http_call ()
+  in
+  expect_validation "token 500" (resolve_provider provider);
+  Alcotest.(check bool) "no token-500 IMDSv1 GET" false !get_attempted;
+  Alcotest.(check int) "token 500 call count" 1 !calls
+
+let test_instance_metadata_provider_token_error_does_not_fallback () =
+  let get_attempted = ref false in
+  let calls = ref 0 in
+  let http_call ~meth ~headers:_ uri =
+    Int.incr calls;
+    match (meth, Uri.path uri) with
+    | `PUT, "/latest/api/token" ->
+        Lwt.return_error
+          (Awskit.Error.transport ~retryable:true "metadata token failed")
+    | `GET, _ ->
+        get_attempted := true;
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"metadata" "unexpected IMDSv1 GET")
+    | _ ->
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"metadata" "unexpected request")
+  in
+  let provider =
+    Awskit_lwt_unix.Credentials.instance_metadata_provider ~http_call ()
+  in
+  expect_transport "token transport error" (resolve_provider provider);
+  Alcotest.(check bool) "no token-error IMDSv1 GET" false !get_attempted;
+  Alcotest.(check int) "token error call count" 1 !calls
+
 let ptime_of_rfc3339 value =
   match Ptime.of_rfc3339 ~strict:false value with
   | Ok (time, _, _) -> time
@@ -336,6 +487,18 @@ let suite () =
           test_container_full_uri_rejects_untrusted_http;
         Alcotest.test_case "instance metadata provider uses imdsv2" `Quick
           test_instance_metadata_provider_uses_imdsv2;
+        Alcotest.test_case "instance metadata falls back on token 404" `Quick
+          test_instance_metadata_provider_falls_back_on_token_404;
+        Alcotest.test_case "instance metadata rejects disabled imdsv1 fallback"
+          `Quick
+          test_instance_metadata_provider_rejects_disabled_imdsv1_fallback;
+        Alcotest.test_case "instance metadata rejects env-disabled imdsv1"
+          `Quick
+          test_instance_metadata_provider_rejects_env_disabled_imdsv1_fallback;
+        Alcotest.test_case "instance metadata token 500 does not fallback"
+          `Quick test_instance_metadata_provider_token_500_does_not_fallback;
+        Alcotest.test_case "instance metadata token error does not fallback"
+          `Quick test_instance_metadata_provider_token_error_does_not_fallback;
         Alcotest.test_case "metadata provider refreshes before expiration"
           `Quick test_metadata_provider_refreshes_before_expiration;
       ] );

@@ -60,7 +60,7 @@ type upload_body =
       Awskit.Body.Upload.descriptor
       * (upload_writer -> (unit, Awskit.Error.t) Result.t)
 
-type download_body = Cohttp_eio.Body.t
+type download_body = { body : Cohttp_eio.Body.t; max_response_body_bytes : int }
 type download_reader = Cohttp_eio.Body.t
 
 let default_max_response_body_bytes = 64 * 1024 * 1024
@@ -194,7 +194,9 @@ let do_call (conn : conn) (request : Awskit.Request.t) upload_body =
     in
     Log.debug (fun m ->
         m "HTTP %d" (Http.Response.status response |> Http.Status.to_int));
-    Ok (to_aws_response response, body)
+    Ok
+      ( to_aws_response response,
+        { body; max_response_body_bytes = conn.max_response_body_bytes } )
   with exn ->
     let message = Exn.to_string exn in
     Log.warn (fun m -> m "HTTP call failed: %s" message);
@@ -224,23 +226,37 @@ let read source bytes ~off ~len =
     | End_of_file -> Ok 0
     | exn -> Error (Awskit.Error.body (Exn.to_string exn))
 
-let rec discard_reader reader =
+let drain_limit_error max_response_body_bytes =
+  Awskit.Error.body
+    ~limit:(Int64.of_int max_response_body_bytes)
+    "response body exceeded max_response_body_bytes"
+
+let rec discard_reader reader ~remaining ~max_response_body_bytes =
   let buffer = Bytes.create 8192 in
-  match read reader buffer ~off:0 ~len:(Bytes.length buffer) with
+  let len = if remaining <= 0 then 1 else min (Bytes.length buffer) remaining in
+  match read reader buffer ~off:0 ~len with
   | Error _ as error -> error
   | Ok 0 -> Ok ()
-  | Ok _ -> discard_reader reader
+  | Ok n ->
+      if n > remaining then Error (drain_limit_error max_response_body_bytes)
+      else
+        discard_reader reader ~remaining:(remaining - n)
+          ~max_response_body_bytes
+
+let discard_download_reader reader body =
+  discard_reader reader ~remaining:body.max_response_body_bytes
+    ~max_response_body_bytes:body.max_response_body_bytes
 
 let with_download_body body ~consume =
-  match consume body with
+  match consume body.body with
   | Ok _ as result -> (
-      match discard_reader body with
+      match discard_download_reader body.body body with
       | Ok () -> result
       | Error _ as error -> error)
   | Error _ as error -> (
-      match discard_reader body with
+      match discard_download_reader body.body body with
       | Ok () -> error
       | Error _ as drain_error -> drain_error)
 
-let discard_download_body body = discard_reader body
+let discard_download_body body = discard_download_reader body.body body
 let call = do_call
