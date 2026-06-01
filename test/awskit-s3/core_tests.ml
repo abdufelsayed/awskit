@@ -743,8 +743,9 @@ let test_object_precondition_headers () =
     }
   in
   ignore
-    (Recording_s3.Object.copy conn ~src_bucket:"my-bucket" ~src_key:"file"
-       ~dst_bucket:"my-bucket" ~dst_key:"copy" ~options:copy_options ()
+    (Recording_s3.Object.copy conn ~source_bucket:"my-bucket" ~source_key:"file"
+       ~destination_bucket:"my-bucket" ~destination_key:"copy"
+       ~options:copy_options ()
     |> ok_or_fail "copy preconditions");
   match List.rev conn.calls with
   | [ put; get; head; delete; copy ] ->
@@ -848,8 +849,9 @@ let test_object_versioning_requests_and_parse () =
     { Copy_object.default_options with source_version_id = Some version_id }
   in
   let copy =
-    Recording_s3.Object.copy conn ~src_bucket:"my-bucket" ~src_key:"file"
-      ~dst_bucket:"my-bucket" ~dst_key:"copy" ~options:copy_options ()
+    Recording_s3.Object.copy conn ~source_bucket:"my-bucket" ~source_key:"file"
+      ~destination_bucket:"my-bucket" ~destination_key:"copy"
+      ~options:copy_options ()
     |> ok_or_fail "copy source version"
   in
   Alcotest.(check (option string))
@@ -883,6 +885,9 @@ let test_object_versioning_requests_and_parse () =
       Alcotest.(check (option string))
         "copy source header" (Some "/my-bucket/file?versionId=version-1")
         (header "x-amz-copy-source" copy_call.request.headers);
+      Alcotest.(check (option string))
+        "copy tagging header omitted" None
+        (header "x-amz-tagging" copy_call.request.headers);
       Alcotest.(check (option (list string)))
         "versions query" (Some [])
         (List.assoc_opt "versions" versions_call.request.target.query);
@@ -1334,8 +1339,8 @@ let test_copy_object_embedded_error () =
   in
   let conn = Recording_runtime.connect [ response 200 body ] in
   match
-    Recording_s3.Object.copy conn ~src_bucket:"my-bucket" ~src_key:"file"
-      ~dst_bucket:"my-bucket" ~dst_key:"copy" ()
+    Recording_s3.Object.copy conn ~source_bucket:"my-bucket" ~source_key:"file"
+      ~destination_bucket:"my-bucket" ~destination_key:"copy" ()
   with
   | Error error when Error.service_code error = Some "SlowDown" -> ()
   | Error error -> Alcotest.failf "unexpected copy error: %a" Error.pp error

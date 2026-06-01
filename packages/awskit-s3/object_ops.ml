@@ -183,17 +183,18 @@ module Make (C : Operation_context.S) = struct
                         return (Object_delete_xml.parse_result ~response body)))
         )
 
-  let copy conn ~src_bucket ~src_key ~dst_bucket ~dst_key ?options () =
+  let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
+      ?options () =
     let options = Option.value ~default:Copy_object.default_options options in
-    match validate_bucket_key src_bucket src_key with
+    match validate_bucket_key source_bucket source_key with
     | Error error -> return_error error
     | Ok () -> (
-        match validate_bucket_key dst_bucket dst_key with
+        match validate_bucket_key destination_bucket destination_key with
         | Error error -> return_error error
         | Ok () -> (
             let copy_source =
               Awskit.Signing.uri_encode ~encode_slash:false
-                (Fmt.str "/%s/%s" src_bucket src_key)
+                (Fmt.str "/%s/%s" source_bucket source_key)
             in
             let copy_source =
               match options.source_version_id with
@@ -210,7 +211,7 @@ module Make (C : Operation_context.S) = struct
               @ encryption_request_headers options.server_side_encryption
             in
             let headers =
-              match options.metadata with
+              match options.metadata_directive with
               | None -> headers
               | Some `Copy -> ("x-amz-metadata-directive", "COPY") :: headers
               | Some (`Replace metadata) ->
@@ -222,10 +223,11 @@ module Make (C : Operation_context.S) = struct
               headers
               |> add_opt_header "x-amz-storage-class"
                    (Option.map Storage_class.to_string options.storage_class)
-              |> add_opt_header "x-amz-tagging"
-                   (Option.bind options.tags tags_header)
             in
-            match object_request conn ~bucket:dst_bucket ~key:dst_key with
+            match
+              object_request conn ~bucket:destination_bucket
+                ~key:destination_key
+            with
             | Error error -> return_error error
             | Ok request ->
                 with_empty_response conn ~method_:`PUT ~request ~query:[]

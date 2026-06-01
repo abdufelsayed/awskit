@@ -295,9 +295,8 @@ module Copy_object : sig
   type options = {
     source_version_id : Object.Version_id.t option;
     source_preconditions : Object.Preconditions.Copy_source.t;
-    metadata : metadata_directive option;
+    metadata_directive : metadata_directive option;
     storage_class : Storage_class.t option;
-    tags : Tag.t list option;
     checksum : Object.Checksum.request option;
     server_side_encryption : Object.Encryption.request option;
   }
@@ -863,10 +862,10 @@ module type OBJECT = sig
 
   val copy :
     connection ->
-    src_bucket:string ->
-    src_key:string ->
-    dst_bucket:string ->
-    dst_key:string ->
+    source_bucket:string ->
+    source_key:string ->
+    destination_bucket:string ->
+    destination_key:string ->
     ?options:Copy_object.options ->
     unit ->
     (Copy_object.result, Error.t) result io

@@ -401,69 +401,82 @@ module Object = struct
                 in
                 Ok { Delete_objects.deleted; errors; response = response 200 }))
 
-  let copy conn ~src_bucket ~src_key ~dst_bucket ~dst_key ?options () =
+  let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
+      ?options () =
     let options = Option.value ~default:Copy_object.default_options options in
-    match
-      require_object_version conn src_bucket src_key options.source_version_id
-    with
+    match validate_bucket_key source_bucket source_key with
     | Error error -> Error error
-    | Ok src -> (
-        match require_bucket conn dst_bucket with
+    | Ok () -> (
+        match validate_bucket_key destination_bucket destination_key with
         | Error error -> Error error
-        | Ok dst_bucket_state -> (
-            match operation_fault conn `Copy dst_bucket (Some dst_key) with
-            | Some error -> Error error
-            | None -> (
-                match
-                  ensure_copy_source_preconditions src
-                    options.source_preconditions
-                with
+        | Ok () -> (
+            match
+              require_object_version conn source_bucket source_key
+                options.source_version_id
+            with
+            | Error error -> Error error
+            | Ok src -> (
+                match require_bucket conn destination_bucket with
                 | Error error -> Error error
-                | Ok () ->
-                    let metadata =
-                      match options.metadata with
-                      | Some (`Replace metadata) -> metadata
-                      | _ -> src.metadata
-                    in
-                    let checksum =
-                      match
-                        checksum_for_body ~body:src.body options.checksum
-                      with
-                      | Some checksum -> Some checksum
-                      | None -> src.checksum
-                    in
-                    let obj =
-                      {
-                        body = src.body;
-                        etag = src.etag;
-                        version_id = None;
-                        content_type = src.content_type;
-                        metadata;
-                        storage_class =
-                          (match options.storage_class with
-                          | Some sc -> Some sc
-                          | None -> src.storage_class);
-                        tags =
-                          (match options.tags with
-                          | Some tags -> tags
-                          | None -> src.tags);
-                        checksum;
-                        last_modified = now conn;
-                      }
-                    in
-                    let obj = store_object conn dst_bucket_state dst_key obj in
-                    Ok
-                      {
-                        Copy_object.etag = Some obj.etag;
-                        last_modified = Some obj.last_modified;
-                        version_id = obj.version_id;
-                        copy_source_version_id = src.version_id;
-                        response =
-                          response 200
-                            ~headers:
-                              (version_headers obj.version_id
-                              @ copy_source_version_headers src.version_id);
-                      })))
+                | Ok destination_bucket_state -> (
+                    match
+                      operation_fault conn `Copy destination_bucket
+                        (Some destination_key)
+                    with
+                    | Some error -> Error error
+                    | None -> (
+                        match
+                          ensure_copy_source_preconditions src
+                            options.source_preconditions
+                        with
+                        | Error error -> Error error
+                        | Ok () ->
+                            let metadata =
+                              match options.metadata_directive with
+                              | Some (`Replace metadata) -> metadata
+                              | _ -> src.metadata
+                            in
+                            let checksum =
+                              match
+                                checksum_for_body ~body:src.body
+                                  options.checksum
+                              with
+                              | Some checksum -> Some checksum
+                              | None -> src.checksum
+                            in
+                            let obj =
+                              {
+                                body = src.body;
+                                etag = src.etag;
+                                version_id = None;
+                                content_type = src.content_type;
+                                metadata;
+                                storage_class =
+                                  (match options.storage_class with
+                                  | Some sc -> Some sc
+                                  | None -> src.storage_class);
+                                tags = src.tags;
+                                checksum;
+                                last_modified = now conn;
+                              }
+                            in
+                            let obj =
+                              store_object conn destination_bucket_state
+                                destination_key obj
+                            in
+                            Ok
+                              {
+                                Copy_object.etag = Some obj.etag;
+                                last_modified = Some obj.last_modified;
+                                version_id = obj.version_id;
+                                copy_source_version_id = src.version_id;
+                                response =
+                                  response 200
+                                    ~headers:
+                                      (version_headers obj.version_id
+                                      @ copy_source_version_headers
+                                          src.version_id);
+                              })))))
 
   type version_entry =
     | Object_version of List_object_versions.object_version

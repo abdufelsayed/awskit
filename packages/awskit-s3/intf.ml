@@ -137,10 +137,10 @@ module type OBJECT = sig
 
   val copy :
     connection ->
-    src_bucket:string ->
-    src_key:string ->
-    dst_bucket:string ->
-    dst_key:string ->
+    source_bucket:string ->
+    source_key:string ->
+    destination_bucket:string ->
+    destination_key:string ->
     ?options:Copy_object.options ->
     unit ->
     (Copy_object.result, Error.t) result io

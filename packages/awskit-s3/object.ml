@@ -223,9 +223,8 @@ module Copy = struct
   type options = {
     source_version_id : Version_id.t option;
     source_preconditions : Preconditions.Copy_source.t;
-    metadata : metadata_directive option;
+    metadata_directive : metadata_directive option;
     storage_class : Storage_class.t option;
-    tags : Tag.t list option;
     checksum : Checksum.request option;
     server_side_encryption : Encryption.request option;
   }
@@ -242,9 +241,8 @@ module Copy = struct
     {
       source_version_id = None;
       source_preconditions = Preconditions.Copy_source.none;
-      metadata = None;
+      metadata_directive = None;
       storage_class = None;
-      tags = None;
       checksum = None;
       server_side_encryption = None;
     }

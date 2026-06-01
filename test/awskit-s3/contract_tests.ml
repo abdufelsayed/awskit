@@ -259,8 +259,8 @@ module Make (Client : SUBJECT) = struct
       (Client.Object.get_as_string conn ~bucket ~key:"range.txt"
          ~options:invalid_range_options ~max_bytes:16L ());
     ignore
-      (Client.Object.copy conn ~src_bucket:bucket ~src_key:"range.txt"
-         ~dst_bucket:bucket ~dst_key:"copied.txt" ()
+      (Client.Object.copy conn ~source_bucket:bucket ~source_key:"range.txt"
+         ~destination_bucket:bucket ~destination_key:"copied.txt" ()
       |> ok_or_fail "copy metadata");
     let copied =
       Client.Object.head conn ~bucket ~key:"copied.txt" ()
@@ -272,12 +272,13 @@ module Make (Client : SUBJECT) = struct
     let replace_options =
       {
         Copy_object.default_options with
-        metadata = Some (`Replace [ ("origin", "replacement") ]);
+        metadata_directive = Some (`Replace [ ("origin", "replacement") ]);
       }
     in
     ignore
-      (Client.Object.copy conn ~src_bucket:bucket ~src_key:"range.txt"
-         ~dst_bucket:bucket ~dst_key:"replaced.txt" ~options:replace_options ()
+      (Client.Object.copy conn ~source_bucket:bucket ~source_key:"range.txt"
+         ~destination_bucket:bucket ~destination_key:"replaced.txt"
+         ~options:replace_options ()
       |> ok_or_fail "copy replace metadata");
     let replaced =
       Client.Object.head conn ~bucket ~key:"replaced.txt" ()
@@ -297,8 +298,8 @@ module Make (Client : SUBJECT) = struct
     put_string conn "logs/b.txt" "b";
     put_string conn "other.txt" "other";
     ignore
-      (Client.Object.copy conn ~src_bucket:bucket ~src_key:"logs/a.txt"
-         ~dst_bucket:bucket ~dst_key:"copy/a.txt" ()
+      (Client.Object.copy conn ~source_bucket:bucket ~source_key:"logs/a.txt"
+         ~destination_bucket:bucket ~destination_key:"copy/a.txt" ()
       |> ok_or_fail "copy");
     let list_options =
       {
@@ -325,6 +326,24 @@ module Make (Client : SUBJECT) = struct
       "remaining keys"
       [ "copy/a.txt"; "other.txt" ]
       keys
+
+  let test_copy_validates_source_and_destination () =
+    let conn = Client.fresh () in
+    create_bucket conn;
+    put_string conn "source.txt" "body";
+    expect_validation "copy invalid source bucket"
+      (Client.Object.copy conn ~source_bucket:"BadBucket"
+         ~source_key:"source.txt" ~destination_bucket:bucket
+         ~destination_key:"copy.txt" ());
+    expect_validation "copy invalid source key"
+      (Client.Object.copy conn ~source_bucket:bucket ~source_key:""
+         ~destination_bucket:bucket ~destination_key:"copy.txt" ());
+    expect_validation "copy invalid destination bucket"
+      (Client.Object.copy conn ~source_bucket:bucket ~source_key:"source.txt"
+         ~destination_bucket:"BadBucket" ~destination_key:"copy.txt" ());
+    expect_validation "copy invalid destination key"
+      (Client.Object.copy conn ~source_bucket:bucket ~source_key:"source.txt"
+         ~destination_bucket:bucket ~destination_key:"" ())
 
   let test_object_tagging () =
     let conn = Client.fresh () in
@@ -403,8 +422,8 @@ module Make (Client : SUBJECT) = struct
       (Some (Object.Version_id.to_string v1))
       (version_string head.version_id);
     let copy =
-      Client.Object.copy conn ~src_bucket:bucket ~src_key:"versioned.txt"
-        ~dst_bucket:bucket ~dst_key:"copy.txt" ()
+      Client.Object.copy conn ~source_bucket:bucket ~source_key:"versioned.txt"
+        ~destination_bucket:bucket ~destination_key:"copy.txt" ()
       |> ok_or_fail "copy versioned object"
     in
     ignore (require_version "copy destination version" copy.version_id);
@@ -416,8 +435,8 @@ module Make (Client : SUBJECT) = struct
       { Copy_object.default_options with source_version_id = Some v1 }
     in
     let copy_previous =
-      Client.Object.copy conn ~src_bucket:bucket ~src_key:"versioned.txt"
-        ~dst_bucket:bucket ~dst_key:"copy-previous.txt"
+      Client.Object.copy conn ~source_bucket:bucket ~source_key:"versioned.txt"
+        ~destination_bucket:bucket ~destination_key:"copy-previous.txt"
         ~options:copy_previous_options ()
       |> ok_or_fail "copy previous version"
     in
@@ -965,9 +984,9 @@ module Make (Client : SUBJECT) = struct
       }
     in
     ignore
-      (Client.Object.copy conn ~src_bucket:bucket ~src_key:"conditional.txt"
-         ~dst_bucket:bucket ~dst_key:"conditional-copy.txt"
-         ~options:copy_options ()
+      (Client.Object.copy conn ~source_bucket:bucket
+         ~source_key:"conditional.txt" ~destination_bucket:bucket
+         ~destination_key:"conditional-copy.txt" ~options:copy_options ()
       |> ok_or_fail "copy if match etag");
     let copy_fail_options =
       {
@@ -980,9 +999,10 @@ module Make (Client : SUBJECT) = struct
       }
     in
     expect_precondition_failed "copy if none match etag"
-      (Client.Object.copy conn ~src_bucket:bucket ~src_key:"conditional.txt"
-         ~dst_bucket:bucket ~dst_key:"conditional-copy-fail.txt"
-         ~options:copy_fail_options ());
+      (Client.Object.copy conn ~source_bucket:bucket
+         ~source_key:"conditional.txt" ~destination_bucket:bucket
+         ~destination_key:"conditional-copy-fail.txt" ~options:copy_fail_options
+         ());
     let delete_key = "delete-conditional.txt" in
     let delete_put =
       Client.Object.put_string conn ~bucket ~key:delete_key "abc"
@@ -1225,6 +1245,8 @@ module Make (Client : SUBJECT) = struct
         test_range_reads_and_metadata_copy;
       Alcotest.test_case "list copy delete objects" `Quick
         test_list_copy_delete_objects;
+      Alcotest.test_case "copy validates source and destination" `Quick
+        test_copy_validates_source_and_destination;
       Alcotest.test_case "object tagging" `Quick test_object_tagging;
       Alcotest.test_case "object versioning" `Quick test_object_versioning;
       Alcotest.test_case "bucket config roundtrips" `Quick

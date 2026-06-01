@@ -181,8 +181,8 @@ let test_object_range_metadata_and_copy () =
               ~options:invalid_range_options ~max_bytes:16L ()));
       ignore
         (await "copy object"
-           (S3.Object.copy conn ~src_bucket:bucket ~src_key:"range.txt"
-              ~dst_bucket:bucket ~dst_key:"copied.txt" ()));
+           (S3.Object.copy conn ~source_bucket:bucket ~source_key:"range.txt"
+              ~destination_bucket:bucket ~destination_key:"copied.txt" ()));
       let copied =
         await "head copied" (S3.Object.head conn ~bucket ~key:"copied.txt" ())
       in
@@ -192,13 +192,13 @@ let test_object_range_metadata_and_copy () =
       let replace_options =
         {
           Copy_object.default_options with
-          metadata = Some (`Replace [ ("origin", "replacement") ]);
+          metadata_directive = Some (`Replace [ ("origin", "replacement") ]);
         }
       in
       ignore
         (await "copy replace"
-           (S3.Object.copy conn ~src_bucket:bucket ~src_key:"range.txt"
-              ~dst_bucket:bucket ~dst_key:"replaced.txt"
+           (S3.Object.copy conn ~source_bucket:bucket ~source_key:"range.txt"
+              ~destination_bucket:bucket ~destination_key:"replaced.txt"
               ~options:replace_options ()));
       let replaced =
         await "head replaced"
@@ -241,8 +241,8 @@ let test_object_versioning () =
       in
       let copied =
         await "copy previous version"
-          (S3.Object.copy conn ~src_bucket:bucket ~src_key:"versioned.txt"
-             ~dst_bucket:bucket ~dst_key:"copy-previous.txt"
+          (S3.Object.copy conn ~source_bucket:bucket ~source_key:"versioned.txt"
+             ~destination_bucket:bucket ~destination_key:"copy-previous.txt"
              ~options:copy_previous_options ())
       in
       Alcotest.(check (option string))

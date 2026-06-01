@@ -166,7 +166,8 @@ module S3 = struct
     let delete _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
     let delete_objects _ ~bucket:_ ~objects:_ = unsupported ()
 
-    let copy _ ~src_bucket:_ ~src_key:_ ~dst_bucket:_ ~dst_key:_ ?options:_ () =
+    let copy _ ~source_bucket:_ ~source_key:_ ~destination_bucket:_
+        ~destination_key:_ ?options:_ () =
       unsupported ()
 
     let list_versions _ ~bucket:_ ?options:_ () = unsupported ()
