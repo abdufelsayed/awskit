@@ -1389,7 +1389,7 @@ module Make (R : RUNTIME) :
      and type response_body_reader = R.response_body_reader
 
 (** In-memory S3 simulator for contract tests. *)
-module Sim : sig
+module Simulator : sig
   module Clock : sig
     type t
 
@@ -1419,10 +1419,10 @@ module Sim : sig
   val inject_fault : t -> fault -> unit
   val inject_faults : t -> fault list -> unit
   val clear_faults : t -> unit
-  val enable_buggify : t -> seed:int -> prob:float -> unit
-  val disable_buggify : t -> unit
+  val enable_random_faults : t -> seed:int -> prob:float -> unit
+  val disable_random_faults : t -> unit
 
-  type op_record = {
+  type operation_record = {
     op :
       [ `Put
       | `Get
@@ -1443,17 +1443,19 @@ module Sim : sig
     faulted : bool;
   }
 
-  type object_meta = {
+  type object_metadata = {
     etag : Object.Etag.t option;
     size : int64 option;
     last_modified : Ptime.t option;
   }
 
-  val object_meta : store -> bucket:string -> key:string -> object_meta option
+  val object_metadata :
+    store -> bucket:string -> key:string -> object_metadata option
+
   val keys : store -> bucket:string -> string list
-  val history : store -> op_record list
+  val history : store -> operation_record list
   val clear_history : store -> unit
-  val dump_strings : store -> bucket:string -> (string * string) list
+  val objects_as_strings : store -> bucket:string -> (string * string) list
 
   include
     S

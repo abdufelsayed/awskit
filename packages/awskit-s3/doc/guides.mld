@@ -545,7 +545,7 @@ The contract runner defaults to [http://127.0.0.1:9000] with the
 
 {1 Simulator Testing}
 
-{!module:Awskit_s3.Sim} exposes the same synchronous S3 operation shape as the
+{!module:Awskit_s3.Simulator} exposes the same synchronous S3 operation shape as the
 runtime-backed client and adds test-only helpers:
 
 {ul
@@ -556,24 +556,24 @@ runtime-backed client and adds test-only helpers:
 }
 
 {[
-let clock = Awskit_s3.Sim.Clock.create () in
-let store = Awskit_s3.Sim.create_store ~clock () in
-let conn = Awskit_s3.Sim.connect store ~credentials in
+let clock = Awskit_s3.Simulator.Clock.create () in
+let store = Awskit_s3.Simulator.create_store ~clock () in
+let conn = Awskit_s3.Simulator.connect store ~credentials in
 
 ignore
-  (Awskit_s3.Sim.Bucket.create conn ~bucket:"test-bucket" ()
+  (Awskit_s3.Simulator.Bucket.create conn ~bucket:"test-bucket" ()
    |> Result.get_ok);
 
 ignore
-  (Awskit_s3.Sim.Object.put_string conn
+  (Awskit_s3.Simulator.Object.put_string conn
      ~bucket:"test-bucket"
      ~key:"hello.txt"
      "hello"
    |> Result.get_ok)
 ]}
 
-[Sim.Response_lost] is modeled as a body-read failure. [Sim.Slow_down],
-[Sim.Internal_error], and [Sim.Connection_reset] fail object and multipart
+[Simulator.Response_lost] is modeled as a body-read failure. [Simulator.Slow_down],
+[Simulator.Internal_error], and [Simulator.Connection_reset] fail object and multipart
 operations before mutation. The simulator models enabled bucket versioning for
 object puts, gets, heads, deletes, copies, multipart completion, and delete
 markers. Suspended bucket versioning models the S3 [null] object version and

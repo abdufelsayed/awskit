@@ -74,7 +74,7 @@ type bucket_state = {
   mutable logging : Bucket.Logging.config;
 }
 
-type op_record = {
+type operation_record = {
   op :
     [ `Put
     | `Get
@@ -99,7 +99,7 @@ type store = {
   config : config;
   clock : Clock.t;
   buckets : (string, bucket_state) Hashtbl.t;
-  mutable history : op_record list;
+  mutable history : operation_record list;
   mutable next_upload_id : int;
   mutable next_version_id : int;
 }
@@ -115,17 +115,17 @@ let create_store ?(config = default_config) ~clock () =
   }
 
 type fault = Slow_down | Internal_error | Connection_reset | Response_lost
-type buggify = { random : Random.State.t; prob : float }
+type random_faults = { random : Random.State.t; prob : float }
 
 type t = {
   store : store;
   credentials : Awskit.Credentials.t;
   mutable faults : fault list;
-  mutable buggify : buggify option;
+  mutable random_faults : random_faults option;
 }
 
 let connect store ~credentials =
-  { store; credentials; faults = []; buggify = None }
+  { store; credentials; faults = []; random_faults = None }
 
 let store t = t.store
 let now t = Clock.now t.store.clock
@@ -170,11 +170,11 @@ let take_fault t =
       t.faults <- rest;
       Some fault
   | [] -> (
-      match t.buggify with
+      match t.random_faults with
       | None -> None
-      | Some buggify ->
-          if Random.State.float buggify.random 1.0 < buggify.prob then
-            Some Internal_error
+      | Some random_faults ->
+          if Random.State.float random_faults.random 1.0 < random_faults.prob
+          then Some Internal_error
           else None)
 
 let operation_fault t op bucket key =
@@ -640,16 +640,16 @@ module Runtime = struct
   let with_response _ _ _ ~f:_ =
     Error
       (Awskit.Error.transport ~retryable:false
-         "Sim.Runtime.with_response is not an HTTP transport")
+         "Simulator.Runtime.with_response is not an HTTP transport")
 end
 
-type object_meta = {
+type object_metadata = {
   etag : Object.Etag.t option;
   size : int64 option;
   last_modified : Ptime.t option;
 }
 
-let object_meta store ~bucket ~key =
+let object_metadata store ~bucket ~key =
   match bucket_state store bucket with
   | None -> None
   | Some bucket -> (
@@ -678,7 +678,7 @@ let keys store ~bucket =
 let history store = List.rev store.history
 let clear_history store = store.history <- []
 
-let dump_strings store ~bucket =
+let objects_as_strings store ~bucket =
   match bucket_state store bucket with
   | None -> []
   | Some (bucket : bucket_state) ->
@@ -693,10 +693,10 @@ let inject_fault t fault = t.faults <- t.faults @ [ fault ]
 let inject_faults t faults = t.faults <- t.faults @ faults
 let clear_faults t = t.faults <- []
 
-let enable_buggify t ~seed ~prob =
-  t.buggify <- Some { random = Random.State.make [| seed |]; prob }
+let enable_random_faults t ~seed ~prob =
+  t.random_faults <- Some { random = Random.State.make [| seed |]; prob }
 
-let disable_buggify t = t.buggify <- None
+let disable_random_faults t = t.random_faults <- None
 
 let info_of_object ?content_length response (obj : stored_object) =
   {

@@ -115,12 +115,12 @@ let credentials =
     ~secret_access_key:"SK"
     ()
 in
-let clock = Awskit_s3.Sim.Clock.create () in
-let store = Awskit_s3.Sim.create_store ~clock () in
-let conn = Awskit_s3.Sim.connect store ~credentials in
+let clock = Awskit_s3.Simulator.Clock.create () in
+let store = Awskit_s3.Simulator.create_store ~clock () in
+let conn = Awskit_s3.Simulator.connect store ~credentials in
 
-Awskit_s3.Sim.Bucket.create conn ~bucket:"test" () |> ignore;
-Awskit_s3.Sim.Object.put_string conn
+Awskit_s3.Simulator.Bucket.create conn ~bucket:"test" () |> ignore;
+Awskit_s3.Simulator.Object.put_string conn
   ~bucket:"test"
   ~key:"hello"
   "world"

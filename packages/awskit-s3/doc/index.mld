@@ -68,7 +68,7 @@ Main modules:
   {li {!module:Awskit_s3.Presigned} — pure presigned URL generation}
   {li {!module:Awskit_s3.Policy} — validated opaque bucket policy JSON
     payloads}
-  {li {!module:Awskit_s3.Sim} — in-memory S3 test surface}
+  {li {!module:Awskit_s3.Simulator} — in-memory S3 test surface}
   {li {!module:Awskit_s3.Make} — functor for wiring S3 operations to a custom
     {!module-type:Awskit.Runtime.S} implementation}
 }

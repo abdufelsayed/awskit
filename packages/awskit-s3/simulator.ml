@@ -1,4 +1,4 @@
-module Sim = struct
+module Public = struct
   include Sim_support
   module Multipart = Sim_multipart.Multipart
 

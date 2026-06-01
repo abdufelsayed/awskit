@@ -1083,10 +1083,12 @@ let test_request_body_descriptor_validation () =
     "unknown-length upload not called" 0 (List.length conn.calls)
 
 let test_sim_request_body_requires_known_length () =
-  let clock = Sim.Clock.create ~now:test_time () in
-  let store = Sim.create_store ~clock () in
-  let conn = Sim.connect store ~credentials:creds in
-  ignore (Sim.Bucket.create conn ~bucket:"test-bucket" () |> ok_or_fail "bucket");
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials:creds in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "bucket");
   let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = None;
@@ -1095,26 +1097,29 @@ let test_sim_request_body_requires_known_length () =
     }
   in
   let body =
-    Sim.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
-        Sim.Runtime.Request_body.write_string writer "body")
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        Simulator.Runtime.Request_body.write_string writer "body")
   in
-  (match Sim.Object.put conn ~bucket:"test-bucket" ~key:"unknown" ~body () with
+  (match
+     Simulator.Object.put conn ~bucket:"test-bucket" ~key:"unknown" ~body ()
+   with
   | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
   | Error error ->
       Alcotest.failf "unexpected sim unknown-length put error: %a" Error.pp
         error
   | Ok _ -> Alcotest.fail "expected sim unknown-length object failure");
-  (match Sim.Object.head conn ~bucket:"test-bucket" ~key:"unknown" () with
+  (match Simulator.Object.head conn ~bucket:"test-bucket" ~key:"unknown" () with
   | Error error when Error.is_not_found error -> ()
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected unknown-length object to be absent");
   let created =
-    Sim.Multipart.create_upload conn ~bucket:"test-bucket" ~key:"large.bin" ()
+    Simulator.Multipart.create_upload conn ~bucket:"test-bucket"
+      ~key:"large.bin" ()
     |> ok_or_fail "create multipart upload"
   in
   let upload_id = created.upload.upload_id in
   (match
-     Sim.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"large.bin"
+     Simulator.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"large.bin"
        ~upload_id ~part_number:1 ~body ()
    with
   | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
@@ -1123,7 +1128,7 @@ let test_sim_request_body_requires_known_length () =
         error
   | Ok _ -> Alcotest.fail "expected sim unknown-length multipart failure");
   let listed =
-    Sim.Multipart.list_parts conn ~bucket:"test-bucket" ~key:"large.bin"
+    Simulator.Multipart.list_parts conn ~bucket:"test-bucket" ~key:"large.bin"
       ~upload_id ()
     |> ok_or_fail "list multipart parts"
   in
@@ -1133,11 +1138,11 @@ let test_sim_stream_request_body_error_propagates () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
-  let clock = Sim.Clock.create ~now:test_time () in
-  let store = Sim.create_store ~clock () in
-  let conn = Sim.connect store ~credentials in
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials in
   let bucket = "stream-error-bucket" in
-  ignore (Sim.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
+  ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
   let stream_error = Awskit.Error.body "sim stream request body failed" in
   let descriptor : Awskit.Body.Request.descriptor =
     {
@@ -1147,16 +1152,16 @@ let test_sim_stream_request_body_error_propagates () =
     }
   in
   let body =
-    Sim.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
-        match Sim.Runtime.Request_body.write_string writer "ab" with
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        match Simulator.Runtime.Request_body.write_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
-  (match Sim.Object.put conn ~bucket ~key:"bad" ~body () with
+  (match Simulator.Object.put conn ~bucket ~key:"bad" ~body () with
   | Error error when Awskit.Error.equal error stream_error -> ()
   | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream request body error");
-  match Sim.Object.head conn ~bucket ~key:"bad" () with
+  match Simulator.Object.head conn ~bucket ~key:"bad" () with
   | Error error when Error.is_not_found error -> ()
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream error object to be absent"
@@ -1165,11 +1170,11 @@ let test_sim_stream_request_body_rejects_length_mismatch () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
-  let clock = Sim.Clock.create ~now:test_time () in
-  let store = Sim.create_store ~clock () in
-  let conn = Sim.connect store ~credentials in
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials in
   let bucket = "stream-length-bucket" in
-  ignore (Sim.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
+  ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
   let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
@@ -1178,42 +1183,45 @@ let test_sim_stream_request_body_rejects_length_mismatch () =
     }
   in
   let short_body =
-    Sim.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
-        Sim.Runtime.Request_body.write_string writer "ab")
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        Simulator.Runtime.Request_body.write_string writer "ab")
   in
-  (match Sim.Object.put conn ~bucket ~key:"short" ~body:short_body () with
+  (match Simulator.Object.put conn ~bucket ~key:"short" ~body:short_body () with
   | Error (Awskit.Error.Body _) -> ()
   | Error error ->
       Alcotest.failf "unexpected short put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected short request body error");
   let long_body =
-    Sim.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
-        match Sim.Runtime.Request_body.write_string writer "abcd" with
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        match Simulator.Runtime.Request_body.write_string writer "abcd" with
         | Error _ as error -> error
-        | Ok () -> Sim.Runtime.Request_body.write_string writer "e")
+        | Ok () -> Simulator.Runtime.Request_body.write_string writer "e")
   in
-  (match Sim.Object.put conn ~bucket ~key:"long" ~body:long_body () with
+  (match Simulator.Object.put conn ~bucket ~key:"long" ~body:long_body () with
   | Error (Awskit.Error.Body _) -> ()
   | Error error -> Alcotest.failf "unexpected long put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected long request body error");
-  (match Sim.Object.head conn ~bucket ~key:"short" () with
+  (match Simulator.Object.head conn ~bucket ~key:"short" () with
   | Error error when Error.is_not_found error -> ()
   | Error error ->
       Alcotest.failf "unexpected short head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected short body object to be absent");
-  match Sim.Object.head conn ~bucket ~key:"long" () with
+  match Simulator.Object.head conn ~bucket ~key:"long" () with
   | Error error when Error.is_not_found error -> ()
   | Error error ->
       Alcotest.failf "unexpected long head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected long body object to be absent"
 
 let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
-  let clock = Sim.Clock.create ~now:test_time () in
-  let store = Sim.create_store ~clock () in
-  let conn = Sim.connect store ~credentials:creds in
-  ignore (Sim.Bucket.create conn ~bucket:"test-bucket" () |> ok_or_fail "bucket");
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials:creds in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "bucket");
   let created =
-    Sim.Multipart.create_upload conn ~bucket:"test-bucket" ~key:"large.bin" ()
+    Simulator.Multipart.create_upload conn ~bucket:"test-bucket"
+      ~key:"large.bin" ()
     |> ok_or_fail "create multipart upload"
   in
   let upload_id = created.upload.upload_id in
@@ -1226,13 +1234,13 @@ let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
     }
   in
   let body =
-    Sim.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
-        match Sim.Runtime.Request_body.write_string writer "ab" with
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        match Simulator.Runtime.Request_body.write_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
   (match
-     Sim.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"large.bin"
+     Simulator.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"large.bin"
        ~upload_id ~part_number:1 ~body ()
    with
   | Error error when Error.equal error stream_error -> ()
@@ -1240,7 +1248,7 @@ let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
       Alcotest.failf "unexpected upload part error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream request body error");
   let listed =
-    Sim.Multipart.list_parts conn ~bucket:"test-bucket" ~key:"large.bin"
+    Simulator.Multipart.list_parts conn ~bucket:"test-bucket" ~key:"large.bin"
       ~upload_id ()
     |> ok_or_fail "list multipart parts"
   in
@@ -1625,11 +1633,60 @@ let test_object_transfer_aborts_on_complete_failure () =
   | _ -> Alcotest.fail "expected create, part, failed complete, abort"
 
 let make_sim () =
-  let clock = Sim.Clock.create ~now:test_time () in
-  let store = Sim.create_store ~clock () in
-  let conn = Sim.connect store ~credentials:creds in
-  ignore (Sim.Bucket.create conn ~bucket:"test-bucket" () |> ok_or_fail "bucket");
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials:creds in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "bucket");
   conn
+
+let test_sim_public_helper_surface () =
+  let conn = make_sim () in
+  let store = Simulator.store conn in
+  let put =
+    Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"ok.txt" "hello"
+    |> ok_or_fail "put ok"
+  in
+  (match
+     (Simulator.object_metadata store ~bucket:"test-bucket" ~key:"ok.txt"
+       : Simulator.object_metadata option)
+   with
+  | None -> Alcotest.fail "expected object metadata"
+  | Some metadata -> (
+      Alcotest.(check (option int64)) "metadata size" (Some 5L) metadata.size;
+      Alcotest.(check (option string))
+        "metadata etag"
+        (Option.map Object.Etag.to_string put.etag)
+        (Option.map Object.Etag.to_string metadata.etag);
+      match metadata.last_modified with
+      | Some last_modified when Ptime.equal last_modified test_time -> ()
+      | _ -> Alcotest.fail "expected metadata last modified"));
+  Alcotest.(check (list (pair string string)))
+    "objects as strings"
+    [ ("ok.txt", "hello") ]
+    (Simulator.objects_as_strings store ~bucket:"test-bucket");
+  Alcotest.(check bool)
+    "missing object metadata" true
+    (Option.is_none
+       (Simulator.object_metadata store ~bucket:"test-bucket" ~key:"missing"));
+  Simulator.enable_random_faults conn ~seed:7 ~prob:1.0;
+  (match
+     Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"faulted.txt"
+       "faulted"
+   with
+  | Error error when Error.service_code error = Some "InternalError" -> ()
+  | Error error -> Alcotest.failf "unexpected random fault: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected random fault");
+  Simulator.disable_random_faults conn;
+  ignore
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"after.txt"
+       "after"
+    |> ok_or_fail "put after disabling random faults");
+  Alcotest.(check (list (pair string string)))
+    "objects after random fault"
+    [ ("after.txt", "after"); ("ok.txt", "hello") ]
+    (Simulator.objects_as_strings store ~bucket:"test-bucket")
 
 let test_sim_buffer_roundtrip () =
   let conn = make_sim () in
@@ -1637,7 +1694,7 @@ let test_sim_buffer_roundtrip () =
     { Object.Checksum.algorithm = `SHA256; value = None }
   in
   let put =
-    Sim.Object.put_string conn ~bucket:"test-bucket" ~key:"hello.txt"
+    Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"hello.txt"
       ~options:
         {
           Put_object.default_options with
@@ -1651,7 +1708,7 @@ let test_sim_buffer_roundtrip () =
   check_checksum "put checksum" `SHA256
     "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" put.checksum;
   let info, body =
-    Sim.Object.get_as_string conn ~bucket:"test-bucket" ~key:"hello.txt"
+    Simulator.Object.get_as_string conn ~bucket:"test-bucket" ~key:"hello.txt"
       ~max_bytes:16L ()
     |> ok_or_fail "get"
   in
@@ -1661,13 +1718,14 @@ let test_sim_buffer_roundtrip () =
   check_checksum "get checksum" `SHA256
     "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" info.checksum;
   let head =
-    Sim.Object.head conn ~bucket:"test-bucket" ~key:"hello.txt" ()
+    Simulator.Object.head conn ~bucket:"test-bucket" ~key:"hello.txt" ()
     |> ok_or_fail "head checksum"
   in
   check_checksum "head checksum" `SHA256
     "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" head.checksum;
   let page =
-    Sim.Object.list conn ~bucket:"test-bucket" () |> ok_or_fail "list checksum"
+    Simulator.Object.list conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "list checksum"
   in
   match page.objects with
   | [ object_ ] ->
@@ -1681,16 +1739,17 @@ let test_sim_buffer_roundtrip () =
 let test_sim_streaming_get () =
   let conn = make_sim () in
   ignore
-    (Sim.Object.put_string conn ~bucket:"test-bucket" ~key:"stream" "abcdef"
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"stream"
+       "abcdef"
     |> ok_or_fail "put");
   let consume reader =
     let bytes = Bytes.create 3 in
-    match Sim.Runtime.Response_body.read reader bytes ~off:0 ~len:3 with
+    match Simulator.Runtime.Response_body.read reader bytes ~off:0 ~len:3 with
     | Error _ as error -> error
     | Ok read -> Ok (Bytes.sub_string bytes 0 read)
   in
   let _info, body =
-    Sim.Object.get conn ~bucket:"test-bucket" ~key:"stream" ~consume ()
+    Simulator.Object.get conn ~bucket:"test-bucket" ~key:"stream" ~consume ()
     |> ok_or_fail "stream get"
   in
   Alcotest.(check string) "partial body" "abc" body
@@ -1698,10 +1757,11 @@ let test_sim_streaming_get () =
 let test_buffer_limit () =
   let conn = make_sim () in
   ignore
-    (Sim.Object.put_string conn ~bucket:"test-bucket" ~key:"large" "abcdef"
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"large"
+       "abcdef"
     |> ok_or_fail "put");
   match
-    Sim.Object.get_as_string conn ~bucket:"test-bucket" ~key:"large"
+    Simulator.Object.get_as_string conn ~bucket:"test-bucket" ~key:"large"
       ~max_bytes:3L ()
   with
   | Error (Awskit.Error.Body _) -> ()
@@ -1711,13 +1771,16 @@ let test_buffer_limit () =
 let test_sim_paginator_keys () =
   let conn = make_sim () in
   ignore
-    (Sim.Object.put_string conn ~bucket:"test-bucket" ~key:"logs/a.txt" "a"
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"logs/a.txt"
+       "a"
     |> ok_or_fail "put a");
   ignore
-    (Sim.Object.put_string conn ~bucket:"test-bucket" ~key:"logs/b.txt" "b"
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"logs/b.txt"
+       "b"
     |> ok_or_fail "put b");
   ignore
-    (Sim.Object.put_string conn ~bucket:"test-bucket" ~key:"other.txt" "other"
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"other.txt"
+       "other"
     |> ok_or_fail "put other");
   let options =
     {
@@ -1727,7 +1790,7 @@ let test_sim_paginator_keys () =
     }
   in
   let keys =
-    Sim.Object.List_objects_v2.keys conn ~bucket:"test-bucket" ~options ()
+    Simulator.Object.List_objects_v2.keys conn ~bucket:"test-bucket" ~options ()
     |> ok_or_fail "sim paginator keys"
   in
   Alcotest.(check (list string)) "keys" [ "logs/a.txt"; "logs/b.txt" ] keys
@@ -1805,6 +1868,8 @@ let suite =
           test_object_transfer_aborts_on_part_failure;
         Alcotest.test_case "object transfer aborts on complete failure" `Quick
           test_object_transfer_aborts_on_complete_failure;
+        Alcotest.test_case "sim public helper surface" `Quick
+          test_sim_public_helper_surface;
         Alcotest.test_case "sim in-memory roundtrip" `Quick
           test_sim_buffer_roundtrip;
         Alcotest.test_case "sim streaming get" `Quick test_sim_streaming_get;

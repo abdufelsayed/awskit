@@ -1262,7 +1262,7 @@ module Make (Client : SUBJECT) = struct
 end
 
 module Sim_subject = struct
-  include Sim
+  include Simulator
 
   type connection = t
   type request_body = Runtime.request_body
@@ -1282,16 +1282,17 @@ module Sim_contract = Make (Sim_subject)
 let test_sim_slow_down_fault () =
   let conn = Sim_subject.fresh () in
   ignore
-    (Sim.Bucket.create conn ~bucket:"contract-bucket" ()
+    (Simulator.Bucket.create conn ~bucket:"contract-bucket" ()
     |> ok_or_fail "create bucket");
-  Sim.inject_fault conn Sim.Slow_down;
+  Simulator.inject_fault conn Simulator.Slow_down;
   (match
-     Sim.Object.put_string conn ~bucket:"contract-bucket" ~key:"fault" "body"
+     Simulator.Object.put_string conn ~bucket:"contract-bucket" ~key:"fault"
+       "body"
    with
   | Error error when Error.service_code error = Some "SlowDown" -> ()
   | Error error -> Alcotest.failf "unexpected fault: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected injected SlowDown");
-  match Sim.history (Sim.store conn) with
+  match Simulator.history (Simulator.store conn) with
   | [ record ] ->
       Alcotest.(check bool) "faulted" true record.faulted;
       Alcotest.(check string) "fault key" "fault" (Option.get record.key)
@@ -1300,14 +1301,15 @@ let test_sim_slow_down_fault () =
 let test_sim_response_lost_fault () =
   let conn = Sim_subject.fresh () in
   ignore
-    (Sim.Bucket.create conn ~bucket:"contract-bucket" ()
+    (Simulator.Bucket.create conn ~bucket:"contract-bucket" ()
     |> ok_or_fail "create bucket");
   ignore
-    (Sim.Object.put_string conn ~bucket:"contract-bucket" ~key:"body" "abcdef"
+    (Simulator.Object.put_string conn ~bucket:"contract-bucket" ~key:"body"
+       "abcdef"
     |> ok_or_fail "put body");
-  Sim.inject_fault conn Sim.Response_lost;
+  Simulator.inject_fault conn Simulator.Response_lost;
   match
-    Sim.Object.get_as_string conn ~bucket:"contract-bucket" ~key:"body"
+    Simulator.Object.get_as_string conn ~bucket:"contract-bucket" ~key:"body"
       ~max_bytes:16L ()
   with
   | Error (Awskit.Error.Body _) -> ()
