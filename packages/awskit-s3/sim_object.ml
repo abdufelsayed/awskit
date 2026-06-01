@@ -4,8 +4,8 @@ open Sim_support
 module Object = struct
   type connection = t
   type 'a io = 'a
-  type upload_body = Runtime.upload_body
-  type download_reader = Runtime.download_reader
+  type request_body = Runtime.request_body
+  type response_body_reader = Runtime.response_body_reader
 
   let invalid_range () = service ~status:416 ~code:"InvalidRange" ()
 
@@ -46,7 +46,7 @@ module Object = struct
             Ok (String.sub body start_int slice_length, 206, headers))
 
   let put conn ~bucket ~key ?options ~body () =
-    let options = Option.value ~default:Object.Put.default_options options in
+    let options = Option.value ~default:Put_object.default_options options in
     match validate_bucket_key bucket key with
     | Error error -> Error error
     | Ok () -> (
@@ -69,7 +69,7 @@ module Object = struct
                         with
                         | Error error -> Error error
                         | Ok () -> (
-                            match Runtime.upload_body_result body with
+                            match Runtime.request_body_result body with
                             | Error error -> Error error
                             | Ok body ->
                                 let etag = etag body in
@@ -94,10 +94,10 @@ module Object = struct
                                 in
                                 Ok
                                   {
-                                    Object.Put.etag = Some etag;
+                                    Put_object.etag = Some etag;
                                     version_id = obj.version_id;
                                     checksum;
-                                    request =
+                                    response =
                                       response 200
                                         ~headers:
                                           (("etag", etag)
@@ -107,7 +107,7 @@ module Object = struct
                                   }))))))
 
   let get conn ~bucket ~key ?options ~consume () =
-    let options = Option.value ~default:Object.Get.default_options options in
+    let options = Option.value ~default:Get_object.default_options options in
     match validate_bucket_key bucket key with
     | Error error -> Error error
     | Ok () -> (
@@ -151,8 +151,8 @@ module Object = struct
                         in
                         Result.map
                           (fun value -> (info, value))
-                          (Runtime.with_download_body
-                             (Runtime.download_body
+                          (Runtime.with_response_body
+                             (Runtime.response_body
                                 ~read_fault:(fault_error Response_lost)
                                 body)
                              ~consume))
@@ -187,12 +187,12 @@ module Object = struct
                         in
                         Result.map
                           (fun value -> (info, value))
-                          (Runtime.with_download_body
-                             (Runtime.download_body body)
+                          (Runtime.with_response_body
+                             (Runtime.response_body body)
                              ~consume)))))
 
   let head conn ~bucket ~key ?options () =
-    let options = Option.value ~default:Object.Head.default_options options in
+    let options = Option.value ~default:Head_object.default_options options in
     match validate_bucket_key bucket key with
     | Error error -> Error error
     | Ok () -> (
@@ -236,21 +236,21 @@ module Object = struct
 
   let delete_result ?delete_marker ?version_id () =
     {
-      Object.Delete.delete_marker;
+      Delete_object.delete_marker;
       version_id;
-      request =
+      response =
         response 204
           ~headers:
             (version_headers version_id @ delete_marker_headers delete_marker);
     }
 
-  let delete_many_error key code message =
-    { Object.Delete_many.key; code; message = Some message }
+  let delete_objects_error key code message =
+    { Delete_objects.key; code; message = Some message }
 
-  let delete_many_conditions_match object_ = function
+  let delete_objects_conditions_match object_ = function
     | Some (Stored_object obj) ->
         let etag_matches =
-          match object_.Object.Delete_many.etag with
+          match object_.Delete_objects.etag with
           | None -> true
           | Some etag -> Object.Etag.equal obj.etag etag
         in
@@ -271,7 +271,7 @@ module Object = struct
         && Option.is_none object_.size
 
   let delete conn ~bucket ~key ?options () =
-    let options = Option.value ~default:Object.Delete.default_options options in
+    let options = Option.value ~default:Delete_object.default_options options in
     match validate_bucket_key bucket key with
     | Error error -> Error error
     | Ok () -> (
@@ -341,19 +341,19 @@ module Object = struct
                             Hashtbl.remove bucket_state.objects key;
                             Ok (delete_result ()))))))
 
-  let delete_many conn ~bucket ~objects =
+  let delete_objects conn ~bucket ~objects =
     match validate_bucket bucket with
     | Error error -> Error error
     | Ok () -> (
         match require_bucket conn bucket with
         | Error error -> Error error
         | Ok bucket_state -> (
-            match operation_fault conn `Delete_many bucket None with
+            match operation_fault conn `Delete_objects bucket None with
             | Some error -> Error error
             | None ->
                 let deleted, errors =
                   List.fold_right
-                    (fun (object_ : Object.Delete_many.object_) ->
+                    (fun (object_ : Delete_objects.object_) ->
                       fun (deleted, errors) ->
                        let target =
                          match object_.version_id with
@@ -362,9 +362,10 @@ module Object = struct
                          | None ->
                              Hashtbl.find_opt bucket_state.objects object_.key
                        in
-                       if not (delete_many_conditions_match object_ target) then
+                       if not (delete_objects_conditions_match object_ target)
+                       then
                          ( deleted,
-                           delete_many_error object_.key "PreconditionFailed"
+                           delete_objects_error object_.key "PreconditionFailed"
                              "delete preconditions did not match"
                            :: errors )
                        else
@@ -390,7 +391,7 @@ module Object = struct
                                (None, None)
                          in
                          ( {
-                             Object.Delete_many.key = object_.key;
+                             Delete_objects.key = object_.key;
                              version_id;
                              delete_marker;
                            }
@@ -398,12 +399,10 @@ module Object = struct
                            errors ))
                     objects ([], [])
                 in
-                Ok
-                  { Object.Delete_many.deleted; errors; request = response 200 }
-            ))
+                Ok { Delete_objects.deleted; errors; response = response 200 }))
 
   let copy conn ~src_bucket ~src_key ~dst_bucket ~dst_key ?options () =
-    let options = Option.value ~default:Object.Copy.default_options options in
+    let options = Option.value ~default:Copy_object.default_options options in
     match
       require_object_version conn src_bucket src_key options.source_version_id
     with
@@ -455,11 +454,11 @@ module Object = struct
                     let obj = store_object conn dst_bucket_state dst_key obj in
                     Ok
                       {
-                        Object.Copy.etag = Some obj.etag;
+                        Copy_object.etag = Some obj.etag;
                         last_modified = Some obj.last_modified;
                         version_id = obj.version_id;
                         copy_source_version_id = src.version_id;
-                        request =
+                        response =
                           response 200
                             ~headers:
                               (version_headers obj.version_id
@@ -467,8 +466,8 @@ module Object = struct
                       })))
 
   type version_entry =
-    | Object_version of Object.Versions.object_version
-    | Delete_marker of Object.Versions.delete_marker
+    | Object_version of List_object_versions.object_version
+    | Delete_marker of List_object_versions.delete_marker
 
   let version_entry_key = function
     | Object_version version -> version.key
@@ -508,14 +507,14 @@ module Object = struct
         Object.Version_id.equal current.version_id marker.version_id
     | _ -> false
 
-  let version_entries bucket (options : Object.Versions.options) =
+  let version_entries bucket (options : List_object_versions.options) =
     let from_version key version =
       let is_latest = Some (version_entry_is_current bucket key version) in
       match version with
       | Stored_object obj ->
           Object_version
             {
-              Object.Versions.key;
+              List_object_versions.key;
               version_id = obj.version_id;
               is_latest;
               last_modified = Some obj.last_modified;
@@ -527,7 +526,7 @@ module Object = struct
       | Stored_delete_marker marker ->
           Delete_marker
             {
-              Object.Versions.key;
+              List_object_versions.key;
               version_id = Some marker.version_id;
               is_latest;
               last_modified = Some marker.last_modified;
@@ -548,7 +547,7 @@ module Object = struct
     in
     versioned @ unversioned
     |> List.filter (fun (key, _) ->
-        match options.Object.Versions.prefix with
+        match options.List_object_versions.prefix with
         | None -> true
         | Some prefix -> is_prefix ~prefix key)
     |> List.sort (fun (left_key, left_version) (right_key, right_version) ->
@@ -567,7 +566,7 @@ module Object = struct
 
   let list_versions conn ~bucket ?options () =
     let options =
-      Option.value ~default:Object.Versions.default_options options
+      Option.value ~default:List_object_versions.default_options options
     in
     match validate_bucket bucket with
     | Error error -> Error error
@@ -607,7 +606,7 @@ module Object = struct
                 in
                 Ok
                   {
-                    Object.Versions.bucket = Some bucket;
+                    List_object_versions.bucket = Some bucket;
                     prefix = options.prefix;
                     delimiter = options.delimiter;
                     versions;
@@ -618,11 +617,13 @@ module Object = struct
                     version_id_marker = options.version_id_marker;
                     next_key_marker;
                     next_version_id_marker;
-                    request = response 200;
+                    response = response 200;
                   }))
 
   let list conn ~bucket ?options () =
-    let options = Option.value ~default:Object.List.default_options options in
+    let options =
+      Option.value ~default:List_objects_v2.default_options options
+    in
     match validate_bucket bucket with
     | Error error -> Error error
     | Ok () -> (
@@ -678,7 +679,7 @@ module Object = struct
                   List.map
                     (fun (key, (obj : stored_object)) ->
                       {
-                        Object.List.key;
+                        List_objects_v2.key;
                         size = Some (Int64.of_int (String.length obj.body));
                         etag = Some obj.etag;
                         last_modified = Some obj.last_modified;
@@ -690,7 +691,7 @@ module Object = struct
                 in
                 Ok
                   {
-                    Object.List.bucket = Some bucket;
+                    List_objects_v2.bucket = Some bucket;
                     prefix = options.prefix;
                     delimiter = options.delimiter;
                     objects;
@@ -699,13 +700,15 @@ module Object = struct
                     is_truncated;
                     continuation_token = options.continuation_token;
                     next_continuation_token;
-                    request = response 200;
+                    response = response 200;
                   }))
 
   let list_keys conn ~bucket ?options () =
     Result.map
-      (fun (page : Object.List.page) ->
-        List.map (fun (o : Object.List.object_summary) -> o.key) page.objects)
+      (fun (page : List_objects_v2.page) ->
+        List.map
+          (fun (o : List_objects_v2.object_summary) -> o.key)
+          page.objects)
       (list conn ~bucket ?options ())
 
   module Paginator = struct
@@ -715,10 +718,10 @@ module Object = struct
       | Some _ ->
           invalid ~field:"max_pages" "max_pages must be greater than zero"
 
-    let options_for_page (base : Object.List.options) continuation_token =
+    let options_for_page (base : List_objects_v2.options) continuation_token =
       {
         base with
-        Object.List.continuation_token;
+        List_objects_v2.continuation_token;
         start_after =
           (match continuation_token with
           | None -> base.start_after
@@ -730,7 +733,7 @@ module Object = struct
       | Error error -> Error error
       | Ok () ->
           let base =
-            Option.value ~default:Object.List.default_options options
+            Option.value ~default:List_objects_v2.default_options options
           in
           let rec loop continuation_token page_count acc =
             let options = options_for_page base continuation_token in
@@ -765,17 +768,17 @@ module Object = struct
     let objects conn ~bucket ?options ?max_pages () =
       Result.map List.rev
         (fold_pages conn ~bucket ?options ?max_pages ~init:[]
-           ~f:(fun objects (page : Object.List.page) ->
+           ~f:(fun objects (page : List_objects_v2.page) ->
              Ok (List.rev_append page.objects objects))
            ())
 
     let keys conn ~bucket ?options ?max_pages () =
       Result.map List.rev
         (fold_pages conn ~bucket ?options ?max_pages ~init:[]
-           ~f:(fun keys (page : Object.List.page) ->
+           ~f:(fun keys (page : List_objects_v2.page) ->
              let page_keys =
                List.map
-                 (fun (object_ : Object.List.object_summary) -> object_.key)
+                 (fun (object_ : List_objects_v2.object_summary) -> object_.key)
                  page.objects
              in
              Ok (List.rev_append page_keys keys))
@@ -789,10 +792,11 @@ module Object = struct
       | Some _ ->
           invalid ~field:"max_pages" "max_pages must be greater than zero"
 
-    let options_for_page (base : Object.Versions.options) page =
+    let options_for_page (base : List_object_versions.options) page =
       {
         base with
-        Object.Versions.key_marker = page.Object.Versions.next_key_marker;
+        List_object_versions.key_marker =
+          page.List_object_versions.next_key_marker;
         version_id_marker = page.next_version_id_marker;
       }
 
@@ -801,7 +805,7 @@ module Object = struct
       | Error error -> Error error
       | Ok () ->
           let base =
-            Option.value ~default:Object.Versions.default_options options
+            Option.value ~default:List_object_versions.default_options options
           in
           let rec loop options page_count acc =
             match list_versions conn ~bucket ~options () with
@@ -836,30 +840,33 @@ module Object = struct
     let object_versions conn ~bucket ?options ?max_pages () =
       Result.map List.rev
         (fold_pages conn ~bucket ?options ?max_pages ~init:[]
-           ~f:(fun versions (page : Object.Versions.page) ->
+           ~f:(fun versions (page : List_object_versions.page) ->
              Ok (List.rev_append page.versions versions))
            ())
 
     let delete_markers conn ~bucket ?options ?max_pages () =
       Result.map List.rev
         (fold_pages conn ~bucket ?options ?max_pages ~init:[]
-           ~f:(fun markers (page : Object.Versions.page) ->
+           ~f:(fun markers (page : List_object_versions.page) ->
              Ok (List.rev_append page.delete_markers markers))
            ())
   end
 
   module Buffer = struct
     let put_string conn ~bucket ~key ?options body =
-      put conn ~bucket ~key ?options ~body:(Runtime.string_body body) ()
+      put conn ~bucket ~key ?options ~body:(Runtime.string_request_body body) ()
 
     let put_bytes conn ~bucket ~key ?options body =
-      put conn ~bucket ~key ?options ~body:(Runtime.bytes_body body) ()
+      put conn ~bucket ~key ?options ~body:(Runtime.bytes_request_body body) ()
 
     let consume_string ~max_size reader =
       let chunk = Bytes.create 8192 in
       let buffer = Buffer.create 128 in
       let rec loop total =
-        match Runtime.read reader chunk ~off:0 ~len:(Bytes.length chunk) with
+        match
+          Runtime.read_response_body reader chunk ~off:0
+            ~len:(Bytes.length chunk)
+        with
         | Error error -> Error error
         | Ok 0 -> Ok (Buffer.contents buffer)
         | Ok n ->
@@ -867,7 +874,7 @@ module Object = struct
             if Int64.compare total max_size > 0 then
               Error
                 (Awskit.Error.body ~limit:max_size
-                   "download body exceeded max_size")
+                   "response body exceeded max_size")
             else begin
               Buffer.add_subbytes buffer chunk 0 n;
               loop total
@@ -888,7 +895,7 @@ module Object = struct
     let get conn ~bucket ~key =
       match require_object conn bucket key with
       | Error error -> Error error
-      | Ok obj -> Ok { Object.Tagging.tags = obj.tags; request = response 200 }
+      | Ok obj -> Ok { Object.Tagging.tags = obj.tags; response = response 200 }
 
     let put conn ~bucket ~key tags =
       match require_object conn bucket key with

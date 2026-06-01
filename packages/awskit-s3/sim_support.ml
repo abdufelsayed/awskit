@@ -83,7 +83,7 @@ type op_record = {
     | `List
     | `List_versions
     | `Copy
-    | `Delete_many
+    | `Delete_objects
     | `Multipart_create
     | `Multipart_upload_part
     | `Multipart_complete
@@ -491,20 +491,20 @@ module Runtime = struct
   let return x = x
   let bind x f = f x
 
-  type upload_body = {
-    descriptor : Awskit.Body.Upload.descriptor;
+  type request_body = {
+    descriptor : Awskit.Body.Request.descriptor;
     body : (string, Awskit.Error.t) result;
   }
 
-  type download_body = { body : string; read_fault : Awskit.Error.t option }
+  type response_body = { body : string; read_fault : Awskit.Error.t option }
 
-  type upload_writer = {
+  type request_body_writer = {
     buffer : Buffer.t;
     remaining : int64 option ref;
     mutable write_error : Awskit.Error.t option;
   }
 
-  type download_reader = {
+  type response_body_reader = {
     body : string;
     mutable offset : int;
     mutable read_fault : Awskit.Error.t option;
@@ -520,24 +520,25 @@ module Runtime = struct
 
   let descriptor_for_string body =
     {
-      Awskit.Body.Upload.content_length =
+      Awskit.Body.Request.content_length =
         Some (Int64.of_int (String.length body));
       payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
       replayable = true;
     }
 
-  let empty_body = { descriptor = descriptor_for_string ""; body = Ok "" }
+  let empty_request_body =
+    { descriptor = descriptor_for_string ""; body = Ok "" }
 
-  let string_body value =
+  let string_request_body value =
     { descriptor = descriptor_for_string value; body = Ok value }
 
-  let bytes_body value = string_body (Bytes.to_string value)
+  let bytes_request_body value = string_request_body (Bytes.to_string value)
   let body_error message = Awskit.Error.body message
 
   let writer_for descriptor =
     {
       buffer = Buffer.create 1024;
-      remaining = ref descriptor.Awskit.Body.Upload.content_length;
+      remaining = ref descriptor.Awskit.Body.Request.content_length;
       write_error = None;
     }
 
@@ -547,7 +548,7 @@ module Runtime = struct
     | Some remaining ->
         let length = Int64.of_int (String.length value) in
         if Stdlib.Int64.compare length remaining > 0 then
-          Error (body_error "upload body exceeded declared content_length")
+          Error (body_error "request body exceeded declared content_length")
         else (
           writer.remaining := Some (Stdlib.Int64.sub remaining length);
           Ok ())
@@ -560,9 +561,9 @@ module Runtime = struct
         | None | Some 0L -> Ok (Buffer.contents writer.buffer)
         | Some _ ->
             Error
-              (body_error "upload body ended before declared content_length"))
+              (body_error "request body ended before declared content_length"))
 
-  let stream_body descriptor ~write =
+  let stream_request_body descriptor ~write =
     let writer = writer_for descriptor in
     let body =
       match write writer with
@@ -571,10 +572,10 @@ module Runtime = struct
     in
     { descriptor; body }
 
-  let upload_descriptor (body : upload_body) = body.descriptor
-  let upload_body_result (body : upload_body) = body.body
+  let request_body_descriptor (body : request_body) = body.descriptor
+  let request_body_result (body : request_body) = body.body
 
-  let write_string writer value =
+  let write_request_body_string writer value =
     match writer.write_error with
     | Some error -> Error error
     | None -> (
@@ -586,7 +587,7 @@ module Runtime = struct
             Buffer.add_string writer.buffer value;
             Ok ())
 
-  let read (reader : download_reader) bytes ~off ~len =
+  let read_response_body (reader : response_body_reader) bytes ~off ~len =
     match reader.read_fault with
     | Some error ->
         reader.read_fault <- None;
@@ -602,16 +603,18 @@ module Runtime = struct
             reader.offset <- reader.offset + copied;
             Ok copied
 
-  let download_body ?read_fault body : download_body = { body; read_fault }
+  let response_body ?read_fault body : response_body = { body; read_fault }
 
   let rec discard_reader reader =
     let buffer = Bytes.create 8192 in
-    match read reader buffer ~off:0 ~len:(Bytes.length buffer) with
+    match
+      read_response_body reader buffer ~off:0 ~len:(Bytes.length buffer)
+    with
     | Error _ as error -> error
     | Ok 0 -> Ok ()
     | Ok _ -> discard_reader reader
 
-  let with_download_body (body : download_body) ~consume =
+  let with_response_body (body : response_body) ~consume =
     let reader =
       { body = body.body; offset = 0; read_fault = body.read_fault }
     in
@@ -625,8 +628,8 @@ module Runtime = struct
         | Ok () -> error
         | Error _ as drain_error -> drain_error)
 
-  let discard_download_body body =
-    with_download_body body ~consume:(fun reader -> discard_reader reader)
+  let discard_response_body body =
+    with_response_body body ~consume:(fun reader -> discard_reader reader)
 
   let with_response _ _ _ ~f:_ =
     Error
@@ -691,7 +694,7 @@ let disable_buggify t = t.buggify <- None
 
 let info_of_object ?content_length response (obj : stored_object) =
   {
-    Object.Get.etag = Some obj.etag;
+    Get_object.etag = Some obj.etag;
     content_type = obj.content_type;
     content_length =
       Some
@@ -703,5 +706,5 @@ let info_of_object ?content_length response (obj : stored_object) =
     version_id = obj.version_id;
     checksum = obj.checksum;
     server_side_encryption = None;
-    request = response;
+    response;
   }

@@ -7,7 +7,7 @@ module Make (C : Operation_context.S) = struct
 
   type nonrec connection = connection
   type 'a io = 'a R.t
-  type nonrec upload_body = upload_body
+  type nonrec request_body = request_body
 
   let complete_result response body =
     match Xml.root body with
@@ -22,10 +22,10 @@ module Make (C : Operation_context.S) = struct
         | Ok etag, Ok version_id ->
             Ok
               {
-                Public_multipart.Complete.etag;
+                Complete_multipart_upload.etag;
                 version_id;
                 checksum = response_checksum response;
-                request = response;
+                response;
               })
     | Ok (actual, _) ->
         Error
@@ -35,7 +35,7 @@ module Make (C : Operation_context.S) = struct
 
   let create conn ~bucket ~key ?options () =
     let options =
-      Option.value ~default:Public_multipart.Create.default_options options
+      Option.value ~default:Create_multipart_upload.default_options options
     in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -63,7 +63,7 @@ module Make (C : Operation_context.S) = struct
                       ~headers
                       ~f:(fun response body ->
                         let* body =
-                          read_download_body body ~max_size:1_048_576L
+                          read_response_body body ~max_size:1_048_576L
                         in
                         match body with
                         | Error error -> return_error error
@@ -86,29 +86,27 @@ module Make (C : Operation_context.S) = struct
                                     | Ok upload_id ->
                                         return_ok
                                           {
-                                            Public_multipart.Create.upload =
+                                            Create_multipart_upload.upload =
                                               { bucket; key; upload_id };
-                                            request = response;
+                                            response;
                                           })))))))
 
   let upload_part conn ~bucket ~key ~upload_id ~part_number ~body ?options () =
-    let options =
-      Option.value ~default:Public_multipart.Upload_part.default_options options
-    in
+    let options = Option.value ~default:Upload_part.default_options options in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         match Public_multipart.Part.create ~part_number ~etag:"unused" with
         | Error error -> return_error error
         | Ok _ -> (
-            let descriptor = R.upload_descriptor body in
+            let descriptor = R.request_body_descriptor body in
             match descriptor.content_length with
             | None ->
                 return_error
                   (Awskit.Error.validation ~field:"content_length"
                      "S3 multipart uploads require a known content length")
             | Some content_length -> (
-                match Awskit.Body.Upload.validate_descriptor descriptor with
+                match Awskit.Body.Request.validate_descriptor descriptor with
                 | Error error -> return_error error
                 | Ok () -> (
                     let headers =
@@ -128,7 +126,7 @@ module Make (C : Operation_context.S) = struct
                         with_response conn ~method_:`PUT ~request ~query
                           ~headers ~payload_hash:descriptor.payload_hash body
                           ~f:(fun response body ->
-                            let* discarded = discard_download_body body in
+                            let* discarded = discard_response_body body in
                             match discarded with
                             | Error error -> return_error error
                             | Ok () -> (
@@ -146,10 +144,10 @@ module Make (C : Operation_context.S) = struct
                                     | Ok part ->
                                         return_ok
                                           {
-                                            Public_multipart.Upload_part.part;
+                                            Upload_part.part;
                                             checksum =
                                               response_checksum response;
-                                            request = response;
+                                            response;
                                           })))))))
 
   let complete conn ~bucket ~key ~upload_id parts =
@@ -193,7 +191,7 @@ module Make (C : Operation_context.S) = struct
                        parts)
                   |> Xml.to_string
                 in
-                let upload = R.string_body body in
+                let upload = R.string_request_body body in
                 match object_request conn ~bucket ~key with
                 | Error error -> return_error error
                 | Ok request ->
@@ -205,11 +203,11 @@ module Make (C : Operation_context.S) = struct
                           );
                         ]
                       ~headers:[ ("content-type", "application/xml") ]
-                      ~payload_hash:(R.upload_descriptor upload).payload_hash
-                      upload
+                      ~payload_hash:
+                        (R.request_body_descriptor upload).payload_hash upload
                       ~f:(fun response body ->
                         let* body =
-                          read_download_body body ~max_size:1_048_576L
+                          read_response_body body ~max_size:1_048_576L
                         in
                         match body with
                         | Error error -> return_error error
@@ -233,13 +231,12 @@ module Make (C : Operation_context.S) = struct
                 ]
               ~headers:[]
               ~f:(fun response body ->
-                let* discarded = discard_download_body body in
+                let* discarded = discard_response_body body in
                 match discarded with
                 | Error error -> return_error error
                 | Ok () -> return_ok response))
 
-  let validate_list_parts_options
-      (options : Public_multipart.List_parts.options) =
+  let validate_list_parts_options (options : List_parts.options) =
     match options.max_parts with
     | Some value when value <= 0 ->
         invalid ~field:"max_parts" "max_parts must be greater than zero"
@@ -251,9 +248,7 @@ module Make (C : Operation_context.S) = struct
         | _ -> Ok ())
 
   let list_parts conn ~bucket ~key ~upload_id ?options () =
-    let options =
-      Option.value ~default:Public_multipart.List_parts.default_options options
-    in
+    let options = Option.value ~default:List_parts.default_options options in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
@@ -277,7 +272,7 @@ module Make (C : Operation_context.S) = struct
                 in
                 with_empty_response conn ~method_:`GET ~request ~query
                   ~headers:[] ~f:(fun response body ->
-                    let* body = read_download_body body ~max_size:1_048_576L in
+                    let* body = read_response_body body ~max_size:1_048_576L in
                     match body with
                     | Error error -> return_error error
                     | Ok body -> (
@@ -296,8 +291,7 @@ module Make (C : Operation_context.S) = struct
                                   | Some part_number ->
                                       Some
                                         {
-                                          Public_multipart.List_parts
-                                          .part_number;
+                                          List_parts.part_number;
                                           etag =
                                             Option.bind
                                               (Xml.child_text "ETag" nodes)
@@ -319,7 +313,7 @@ module Make (C : Operation_context.S) = struct
                             in
                             return_ok
                               {
-                                Public_multipart.List_parts.parts;
+                                List_parts.parts;
                                 is_truncated =
                                   Option.value ~default:false
                                     (Option.bind
@@ -329,7 +323,7 @@ module Make (C : Operation_context.S) = struct
                                   Option.bind
                                     (Xml.child_text "NextPartNumberMarker" nodes)
                                     int_of_string_opt;
-                                request = response;
+                                response;
                               }))))
 
   module Paginator = struct
@@ -339,19 +333,15 @@ module Make (C : Operation_context.S) = struct
       | Some _ ->
           invalid ~field:"max_pages" "max_pages must be greater than zero"
 
-    let options_for_page (base : Public_multipart.List_parts.options)
-        part_number_marker =
-      { base with Public_multipart.List_parts.part_number_marker }
+    let options_for_page (base : List_parts.options) part_number_marker =
+      { base with List_parts.part_number_marker }
 
     let fold_pages conn ~bucket ~key ~upload_id ?options ?max_pages ~init ~f ()
         =
       match validate_max_pages max_pages with
       | Error error -> return_error error
       | Ok () ->
-          let base =
-            Option.value ~default:Public_multipart.List_parts.default_options
-              options
-          in
+          let base = Option.value ~default:List_parts.default_options options in
           let rec loop part_number_marker page_count acc =
             let options = options_for_page base part_number_marker in
             let* page = list_parts conn ~bucket ~key ~upload_id ~options () in
@@ -388,7 +378,7 @@ module Make (C : Operation_context.S) = struct
       return (Result.map List.rev result)
 
     let parts conn ~bucket ~key ~upload_id ?options ?max_pages () =
-      let f parts (page : Public_multipart.List_parts.page) =
+      let f parts (page : List_parts.page) =
         return_ok (List.rev_append page.parts parts)
       in
       let* result =
@@ -446,7 +436,7 @@ module Make (C : Operation_context.S) = struct
                       let part_body = String.sub body offset length in
                       let* uploaded =
                         upload_part conn ~bucket ~key ~upload_id ~part_number
-                          ~body:(R.string_body part_body)
+                          ~body:(R.string_request_body part_body)
                           ~options:options.upload_part_options ()
                       in
                       match uploaded with

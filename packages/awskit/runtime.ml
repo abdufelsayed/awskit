@@ -5,10 +5,10 @@ module type S = sig
   val bind : 'a t -> ('a -> 'b t) -> 'b t
 
   type connection
-  type upload_body
-  type download_body
-  type upload_writer
-  type download_reader
+  type request_body
+  type response_body
+  type request_body_writer
+  type response_body_reader
 
   val now : connection -> Ptime.t
   val region : connection -> Region.t
@@ -16,32 +16,38 @@ module type S = sig
   val endpoint : connection -> Endpoint.t option
   val retry_policy : connection -> Retry.t
   val sleep : connection -> Ptime.Span.t -> unit t
-  val empty_body : upload_body
-  val string_body : string -> upload_body
-  val bytes_body : bytes -> upload_body
+  val empty_request_body : request_body
+  val string_request_body : string -> request_body
+  val bytes_request_body : bytes -> request_body
 
-  val stream_body :
-    Body.Upload.descriptor ->
-    write:(upload_writer -> (unit, Error.t) result t) ->
-    upload_body
+  val stream_request_body :
+    Body.Request.descriptor ->
+    write:(request_body_writer -> (unit, Error.t) result t) ->
+    request_body
 
-  val upload_descriptor : upload_body -> Body.Upload.descriptor
-  val write_string : upload_writer -> string -> (unit, Error.t) result t
+  val request_body_descriptor : request_body -> Body.Request.descriptor
 
-  val read :
-    download_reader -> bytes -> off:int -> len:int -> (int, Error.t) result t
+  val write_request_body_string :
+    request_body_writer -> string -> (unit, Error.t) result t
 
-  val with_download_body :
-    download_body ->
-    consume:(download_reader -> ('a, Error.t) result t) ->
+  val read_response_body :
+    response_body_reader ->
+    bytes ->
+    off:int ->
+    len:int ->
+    (int, Error.t) result t
+
+  val with_response_body :
+    response_body ->
+    consume:(response_body_reader -> ('a, Error.t) result t) ->
     ('a, Error.t) result t
 
-  val discard_download_body : download_body -> (unit, Error.t) result t
+  val discard_response_body : response_body -> (unit, Error.t) result t
 
   val with_response :
     connection ->
     Request.t ->
-    upload_body ->
-    f:(Response.t -> download_body -> ('a, Error.t) result t) ->
+    request_body ->
+    f:(Response.t -> response_body -> ('a, Error.t) result t) ->
     ('a, Error.t) result t
 end

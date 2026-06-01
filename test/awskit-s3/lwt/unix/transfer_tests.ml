@@ -1,25 +1,26 @@
 module Runtime = struct
   type connection = {
-    download_body : string;
+    response_body : string;
     mutable uploaded_body : string option;
   }
 
   type 'a t = 'a Lwt.t
 
-  type upload_writer = {
+  type request_body_writer = {
     buffer : Buffer.t;
     fail_after_bytes : int option;
     mutable written : int;
   }
 
-  type upload_body =
-    | Body of Awskit.Body.Upload.descriptor * (string, Awskit_s3.Error.t) result
+  type request_body =
+    | Body of
+        Awskit.Body.Request.descriptor * (string, Awskit_s3.Error.t) result
     | Stream of
-        Awskit.Body.Upload.descriptor
-        * (upload_writer -> (unit, Awskit_s3.Error.t) result Lwt.t)
+        Awskit.Body.Request.descriptor
+        * (request_body_writer -> (unit, Awskit_s3.Error.t) result Lwt.t)
 
-  type download_body = string
-  type download_reader = { body : string; mutable offset : int }
+  type response_body = string
+  type response_body_reader = { body : string; mutable offset : int }
 
   let write_error_after_bytes = ref None
   let reset_write_fault () = write_error_after_bytes := None
@@ -40,18 +41,18 @@ module Runtime = struct
 
   let descriptor_for_string body =
     {
-      Awskit.Body.Upload.content_length =
+      Awskit.Body.Request.content_length =
         Some (Int64.of_int (String.length body));
       payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
       replayable = true;
     }
 
-  let empty_body = Body (descriptor_for_string "", Ok "")
-  let string_body value = Body (descriptor_for_string value, Ok value)
-  let bytes_body value = string_body (Bytes.to_string value)
-  let stream_body descriptor ~write = Stream (descriptor, write)
+  let empty_request_body = Body (descriptor_for_string "", Ok "")
+  let string_request_body value = Body (descriptor_for_string value, Ok value)
+  let bytes_request_body value = string_request_body (Bytes.to_string value)
+  let stream_request_body descriptor ~write = Stream (descriptor, write)
 
-  let drain_upload_body = function
+  let drain_request_body = function
     | Body (_, body) -> Lwt.return body
     | Stream (_, write) ->
         let writer =
@@ -65,10 +66,10 @@ module Runtime = struct
           | Ok () -> Lwt.return_ok (Buffer.contents writer.buffer)
           | Error _ as error -> Lwt.return error)
 
-  let upload_descriptor = function
+  let request_body_descriptor = function
     | Body (descriptor, _) | Stream (descriptor, _) -> descriptor
 
-  let write_string writer value =
+  let write_request_body_string writer value =
     let length = String.length value in
     match writer.fail_after_bytes with
     | Some limit when writer.written + length > limit ->
@@ -78,7 +79,7 @@ module Runtime = struct
         writer.written <- writer.written + length;
         Lwt.return_ok ()
 
-  let read reader bytes ~off ~len =
+  let read_response_body reader bytes ~off ~len =
     if len = 0 then Lwt.return_ok 0
     else
       let remaining = String.length reader.body - reader.offset in
@@ -89,8 +90,8 @@ module Runtime = struct
         reader.offset <- reader.offset + copied;
         Lwt.return_ok copied
 
-  let with_download_body body ~consume = consume { body; offset = 0 }
-  let discard_download_body _ = Lwt.return_ok ()
+  let with_response_body body ~consume = consume { body; offset = 0 }
+  let discard_response_body _ = Lwt.return_ok ()
 
   let with_response _ _ _ ~f:_ =
     Lwt.return_error (Awskit.Error.transport ~retryable:false "not implemented")
@@ -103,52 +104,52 @@ module S3 = struct
   module Object = struct
     type connection = Runtime.connection
     type 'a io = 'a Lwt.t
-    type upload_body = Runtime.upload_body
-    type download_reader = Runtime.download_reader
+    type request_body = Runtime.request_body
+    type response_body_reader = Runtime.response_body_reader
 
     let put conn ~bucket:_ ~key:_ ?options:_ ~body () =
-      Lwt.bind (Runtime.drain_upload_body body) (function
+      Lwt.bind (Runtime.drain_request_body body) (function
         | Error _ as error -> Lwt.return error
         | Ok body ->
             conn.Runtime.uploaded_body <- Some body;
-            let request = Awskit.Response.create_exn ~status:200 () in
+            let response = Awskit.Response.create_exn ~status:200 () in
             Lwt.return_ok
               {
-                Awskit_s3.Object.Put.etag = None;
+                Awskit_s3.Put_object.etag = None;
                 version_id = None;
                 checksum = None;
-                request;
+                response;
               })
 
     let get conn ~bucket:_ ~key:_ ?options:_ ~consume () =
       Lwt.bind
-        (consume { Runtime.body = conn.Runtime.download_body; offset = 0 })
+        (consume { Runtime.body = conn.Runtime.response_body; offset = 0 })
         (function
           | Error _ as error -> Lwt.return error
           | Ok value ->
-              let request = Awskit.Response.create_exn ~status:200 () in
+              let response = Awskit.Response.create_exn ~status:200 () in
               Lwt.return_ok
                 ( {
-                    Awskit_s3.Object.Get.etag = None;
+                    Awskit_s3.Get_object.etag = None;
                     content_type = None;
                     content_length =
                       Some
                         (Int64.of_int
-                           (String.length conn.Runtime.download_body));
+                           (String.length conn.Runtime.response_body));
                     last_modified = None;
                     metadata = [];
                     storage_class = None;
                     version_id = None;
                     checksum = None;
                     server_side_encryption = None;
-                    request;
+                    response;
                   },
                   value ))
 
     let head _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
     let exists _ ~bucket:_ ~key:_ = unsupported ()
     let delete _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
-    let delete_many _ ~bucket:_ ~objects:_ = unsupported ()
+    let delete_objects _ ~bucket:_ ~objects:_ = unsupported ()
 
     let copy _ ~src_bucket:_ ~src_key:_ ~dst_bucket:_ ~dst_key:_ ?options:_ () =
       unsupported ()
@@ -199,7 +200,7 @@ module S3 = struct
   module Multipart = struct
     type connection = Runtime.connection
     type 'a io = 'a Lwt.t
-    type upload_body = Runtime.upload_body
+    type request_body = Runtime.request_body
 
     let create _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
 
@@ -242,7 +243,7 @@ let with_umask mask f =
 
 let test_download_to_path_creates_private_file () =
   let path = Filename.temp_file "awskit-download-perm" ".bin" in
-  let body = "secret download body" in
+  let body = "secret downloaded file body" in
   remove_file path;
   Fun.protect
     ~finally:(fun () -> remove_file path)
@@ -251,7 +252,7 @@ let test_download_to_path_creates_private_file () =
           match
             Lwt_main.run
               (Transfer.download_to_path
-                 { Runtime.download_body = body; uploaded_body = None }
+                 { Runtime.response_body = body; uploaded_body = None }
                  ~bucket:"bucket" ~key:"key" ~path ())
           with
           | Error error ->
@@ -274,7 +275,7 @@ let test_upload_from_path_streams_file_body () =
   Fun.protect
     ~finally:(fun () -> remove_file path)
     (fun () ->
-      let conn = { Runtime.download_body = ""; uploaded_body = None } in
+      let conn = { Runtime.response_body = ""; uploaded_body = None } in
       let progress = ref [] in
       match
         Lwt_main.run
@@ -302,7 +303,7 @@ let test_upload_from_path_returns_stream_write_error () =
       Runtime.reset_write_fault ();
       remove_file path)
     (fun () ->
-      let conn = { Runtime.download_body = ""; uploaded_body = None } in
+      let conn = { Runtime.response_body = ""; uploaded_body = None } in
       match
         Lwt_main.run
           (Transfer.upload_from_path conn ~bucket:"bucket" ~key:"key" ~path ())

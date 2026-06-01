@@ -39,12 +39,7 @@ let xml (config : Bucket.Encryption.config) =
 let parse body response =
   let* nodes = Xml.decode_root body ~name:"ServerSideEncryptionConfiguration" in
   let rec loop acc = function
-    | [] ->
-        Ok
-          {
-            Bucket.Encryption.config = { rules = List.rev acc };
-            request = response;
-          }
+    | [] -> Ok { Bucket.Encryption.config = { rules = List.rev acc }; response }
     | nodes :: rest -> (
         match Xml.child "ApplyServerSideEncryptionByDefault" nodes with
         | None -> Error (decode "missing ApplyServerSideEncryptionByDefault")

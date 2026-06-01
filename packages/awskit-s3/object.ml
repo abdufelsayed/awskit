@@ -132,7 +132,7 @@ module Put = struct
     etag : Etag.t option;
     version_id : Version_id.t option;
     checksum : Checksum.response option;
-    request : Awskit.Response.t;
+    response : Awskit.Response.t;
   }
 
   let default_options =
@@ -157,7 +157,7 @@ module Get = struct
     version_id : Version_id.t option;
   }
 
-  type info = {
+  type result = {
     etag : Etag.t option;
     content_type : string option;
     content_length : int64 option;
@@ -167,8 +167,10 @@ module Get = struct
     version_id : Version_id.t option;
     checksum : Checksum.response option;
     server_side_encryption : Encryption.response option;
-    request : Awskit.Response.t;
+    response : Awskit.Response.t;
   }
+
+  type info = result
 
   let default_options =
     { range = None; preconditions = Preconditions.Read.none; version_id = None }
@@ -180,7 +182,8 @@ module Head = struct
     version_id : Version_id.t option;
   }
 
-  type info = Get.info
+  type info = Get.result
+  type result = info
 
   let default_options =
     { preconditions = Preconditions.Read.none; version_id = None }
@@ -195,7 +198,7 @@ module Delete = struct
   type result = {
     delete_marker : bool option;
     version_id : Version_id.t option;
-    request : Awskit.Response.t;
+    response : Awskit.Response.t;
   }
 
   let default_options =
@@ -222,7 +225,7 @@ module Delete_many = struct
   type result = {
     deleted : deleted list;
     errors : item_error list;
-    request : Awskit.Response.t;
+    response : Awskit.Response.t;
   }
 end
 
@@ -244,7 +247,7 @@ module Copy = struct
     last_modified : Ptime.t option;
     version_id : Version_id.t option;
     copy_source_version_id : Version_id.t option;
-    request : Awskit.Response.t;
+    response : Awskit.Response.t;
   }
 
   let default_options =
@@ -299,7 +302,7 @@ module Versions = struct
     version_id_marker : Version_id.t option;
     next_key_marker : string option;
     next_version_id_marker : Version_id.t option;
-    request : Awskit.Response.t;
+    response : Awskit.Response.t;
   }
 
   let default_options =
@@ -341,7 +344,7 @@ module List = struct
     is_truncated : bool;
     continuation_token : string option;
     next_continuation_token : string option;
-    request : Awskit.Response.t;
+    response : Awskit.Response.t;
   }
 
   let default_options =
@@ -355,5 +358,5 @@ module List = struct
 end
 
 module Tagging = struct
-  type result = { tags : Tag.t list; request : Awskit.Response.t }
+  type result = { tags : Tag.t list; response : Awskit.Response.t }
 end

@@ -5,13 +5,13 @@ client surface is streaming-first, endpoint-configurable, and result-returning.
 
 {1 Object Operations}
 
-Primitive object operations live under [Object]. They use runtime-owned upload
-bodies and scoped download readers.
+Primitive object operations live under [Object]. They use runtime-owned request
+bodies and scoped response body readers.
 
 {2 Upload}
 
 {[
-let body = Awskit_s3_eio.Runtime.string_body "hello" in
+let body = Awskit_s3_eio.Runtime.string_request_body "hello" in
 Awskit_s3_eio.Object.put s3
   ~bucket:"my-bucket"
   ~key:"hello.txt"
@@ -20,12 +20,12 @@ Awskit_s3_eio.Object.put s3
 ]}
 
 Primitive uploads require a known content length. The runtime records length
-and payload hash in its upload-body descriptor before signing. Unknown-length
+and payload hash in its request-body descriptor before signing. Unknown-length
 SigV4 aws-chunked streaming is not implemented today.
 
-For custom [Runtime.stream_body] uploads, declare the exact [content_length]
+For custom [Runtime.stream_request_body] values, declare the exact [content_length]
 and emit exactly that number of bytes. Producer callback errors are returned as
-upload failures. Prefer [Runtime.string_body] or [Runtime.bytes_body] when the
+request body failures. Prefer [Runtime.string_request_body] or [Runtime.bytes_request_body] when the
 body is already buffered.
 
 Options carry object metadata, content type, storage class, tags,
@@ -34,7 +34,7 @@ preconditions, checksum headers, and server-side encryption headers:
 {[
 let options =
   {
-    Awskit_s3.Object.Put.default_options with
+    Awskit_s3.Put_object.default_options with
     content_type = Some "text/plain";
     metadata = [ ("origin", "example") ];
     tags = [ { Awskit_s3.Tag.key = "env"; value = "dev" } ];
@@ -44,7 +44,7 @@ Awskit_s3_eio.Object.put s3
   ~bucket:"my-bucket"
   ~key:"hello.txt"
   ~options
-  ~body:(Awskit_s3_eio.Runtime.string_body "hello")
+  ~body:(Awskit_s3_eio.Runtime.string_request_body "hello")
   ()
 ]}
 
@@ -89,7 +89,7 @@ the reader outside that callback. Buffering helpers such as
 {[
 let consume reader =
   let bytes = Bytes.create 8192 in
-  match Awskit_s3_eio.Runtime.read reader bytes ~off:0 ~len:8192 with
+  match Awskit_s3_eio.Runtime.read_response_body reader bytes ~off:0 ~len:8192 with
   | Error _ as error -> error
   | Ok n -> Ok (Bytes.sub_string bytes 0 n)
 in
@@ -109,7 +109,7 @@ structured service errors by primitive operations.
 The object surface also includes:
 
 {ul
-  {li [Object.delete] and [Object.delete_many]}
+  {li [Object.delete] and [Object.delete_objects]}
   {li [Object.copy]}
   {li [Object.list] for rich pages and [Object.list_keys] for key-only pages}
   {li [Object.list_versions] for [ListObjectVersions] pages, including object
@@ -121,14 +121,14 @@ The object surface also includes:
   {li [Object.Tagging.get], [put], and [delete]}
 }
 
-Paginator helpers preserve the regular [Object.List.options] record and update
+Paginator helpers preserve the regular [List_objects_v2.options] record and update
 only the continuation token between requests. Use [max_pages] to cap traversal:
 
 {[
 let keys =
   Awskit_s3_eio.Object.Paginator.keys s3
     ~bucket:"my-bucket"
-    ~options:{ Awskit_s3.Object.List.default_options with prefix = Some "logs/" }
+    ~options:{ Awskit_s3.List_objects_v2.default_options with prefix = Some "logs/" }
     ~max_pages:10
     ()
 ]}
@@ -138,16 +138,17 @@ let keys =
 [Bucket.Versioning.put] enables bucket versioning. Object writes, copies, and
 multipart completion return version IDs when the bucket is versioned. Reads,
 heads, and deletes accept a [version_id] option. Copy requests can select a
-source version with [Object.Copy.source_version_id].
+source version with [Copy_object.source_version_id].
 
 Deleting the current object in a versioned bucket creates a delete marker.
 [Object.list_versions] returns object versions and delete markers, and
-[Object.Versions] provides paginator helpers for traversing the full history:
+[Object.Versions] provides paginator helpers for traversing the full history.
+[List_object_versions] is the operation data module for options and page types:
 
 {[
 let options =
   {
-    Awskit_s3.Object.Versions.default_options with
+    Awskit_s3.List_object_versions.default_options with
     prefix = Some "logs/";
   }
 in
@@ -362,7 +363,7 @@ Awskit_s3_eio.Bucket.Encryption.put s3
     markers.}
 }
 
-[Multipart.upload_part] follows the same upload body contract as [Object.put]:
+[Multipart.upload_part] follows the same request body contract as [Object.put]:
 parts require a known exact length, and custom stream producer errors are part
 of the upload result.
 
@@ -502,9 +503,9 @@ adapter receives a custom [retry_policy]. Retries are centralized around the
 signed S3 request, so retryable service responses are classified before being
 returned to callers.
 
-Only replayable upload bodies are retried. In-memory bodies created with
-[Runtime.string_body] and [Runtime.bytes_body] are replayable. Custom stream
-bodies are retried only when their {!type:Awskit.Body.Upload.descriptor}
+Only replayable request bodies are retried. In-memory bodies created with
+[Runtime.string_request_body] and [Runtime.bytes_request_body] are replayable. Custom stream
+bodies are retried only when their {!type:Awskit.Body.Request.descriptor}
 marks them replayable. Do not mark a stream replayable unless retrying can
 recreate the same bytes from the beginning.
 

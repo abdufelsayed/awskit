@@ -7,25 +7,6 @@ end
 module type BUCKET_DATA = sig
   type info = { name : string; creation_date : Ptime.t option }
 
-  module Create : sig
-    type options = { region : Awskit.Region.t option }
-    type result = { request : Awskit.Response.t }
-
-    val default_options : options
-  end
-
-  module Delete : sig
-    type result = { request : Awskit.Response.t }
-  end
-
-  module Head : sig
-    type info = {
-      name : string;
-      region : Awskit.Region.t option;
-      request : Awskit.Response.t;
-    }
-  end
-
   module Versioning : sig
     module Status : sig
       type t = Enabled | Suspended
@@ -34,11 +15,11 @@ module type BUCKET_DATA = sig
       val of_string : string -> t option
     end
 
-    type result = { status : Status.t option; request : Awskit.Response.t }
+    type result = { status : Status.t option; response : Awskit.Response.t }
   end
 
   module Tagging : sig
-    type result = { tags : Tag.t list; request : Awskit.Response.t }
+    type result = { tags : Tag.t list; response : Awskit.Response.t }
   end
 
   module Encryption : sig
@@ -57,7 +38,7 @@ module type BUCKET_DATA = sig
     end
 
     type config = { rules : Rule.t list }
-    type result = { config : config; request : Awskit.Response.t }
+    type result = { config : config; response : Awskit.Response.t }
   end
 
   module Cors : sig
@@ -78,7 +59,7 @@ module type BUCKET_DATA = sig
     }
 
     type config = { rules : rule list }
-    type result = { config : config; request : Awskit.Response.t }
+    type result = { config : config; response : Awskit.Response.t }
   end
 
   module Website : sig
@@ -87,7 +68,7 @@ module type BUCKET_DATA = sig
       error_document_key : string option;
     }
 
-    type result = { config : config; request : Awskit.Response.t }
+    type result = { config : config; response : Awskit.Response.t }
   end
 
   module Public_access_block : sig
@@ -98,7 +79,7 @@ module type BUCKET_DATA = sig
       restrict_public_buckets : bool;
     }
 
-    type result = { config : config; request : Awskit.Response.t }
+    type result = { config : config; response : Awskit.Response.t }
 
     val all_false : config
   end
@@ -112,7 +93,7 @@ module type BUCKET_DATA = sig
     end
 
     type config = { object_ownership : Object_ownership.t }
-    type result = { config : config; request : Awskit.Response.t }
+    type result = { config : config; response : Awskit.Response.t }
   end
 
   module Request_payment : sig
@@ -123,7 +104,7 @@ module type BUCKET_DATA = sig
       val of_string : string -> t option
     end
 
-    type result = { payer : Payer.t option; request : Awskit.Response.t }
+    type result = { payer : Payer.t option; response : Awskit.Response.t }
   end
 
   module Accelerate : sig
@@ -134,17 +115,17 @@ module type BUCKET_DATA = sig
       val of_string : string -> t option
     end
 
-    type result = { status : Status.t option; request : Awskit.Response.t }
+    type result = { status : Status.t option; response : Awskit.Response.t }
   end
 
   module Policy_status : sig
-    type result = { is_public : bool option; request : Awskit.Response.t }
+    type result = { is_public : bool option; response : Awskit.Response.t }
   end
 
   module Logging : sig
     type target = { target_bucket : string; target_prefix : string }
     type config = { logging : target option }
-    type result = { config : config; request : Awskit.Response.t }
+    type result = { config : config; response : Awskit.Response.t }
 
     val disabled : config
     val enabled : target_bucket:string -> target_prefix:string -> config

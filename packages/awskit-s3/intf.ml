@@ -10,6 +10,58 @@ open struct
   module Presigned = Presigned
 end
 
+include Operation_data
+
+module type MULTIPART_DATA = sig
+  module Upload_id : sig
+    type t
+
+    val of_string : string -> (t, Error.t) result
+    val of_string_exn : string -> t
+    val to_string : t -> string
+  end
+
+  module Upload : sig
+    type t = private { bucket : string; key : string; upload_id : Upload_id.t }
+
+    val create :
+      bucket:string ->
+      key:string ->
+      upload_id:Upload_id.t ->
+      (t, Error.t) result
+
+    val create_exn : bucket:string -> key:string -> upload_id:Upload_id.t -> t
+  end
+
+  module Part : sig
+    type t = private { part_number : int; etag : Object.Etag.t }
+
+    val create : part_number:int -> etag:Object.Etag.t -> (t, Error.t) result
+    val create_exn : part_number:int -> etag:Object.Etag.t -> t
+  end
+
+  module Managed : sig
+    val min_part_size : int
+    val default_part_size : int
+    val max_parts : int
+
+    type options = {
+      part_size : int;
+      create_options : Create_multipart_upload.options;
+      upload_part_options : Upload_part.options;
+    }
+
+    type result = {
+      upload : Upload.t;
+      parts : Part.t list;
+      complete : Complete_multipart_upload.result;
+    }
+
+    val default_options : options
+    val validate_options : options -> (unit, Error.t) Stdlib.result
+  end
+end
+
 type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
 
 type endpoint_variant =
@@ -37,34 +89,34 @@ end
 module type OBJECT = sig
   type connection
   type +'a io
-  type upload_body
-  type download_reader
+  type request_body
+  type response_body_reader
 
   val put :
     connection ->
     bucket:string ->
     key:string ->
-    ?options:Object.Put.options ->
-    body:upload_body ->
+    ?options:Put_object.options ->
+    body:request_body ->
     unit ->
-    (Object.Put.result, Error.t) result io
+    (Put_object.result, Error.t) result io
 
   val get :
     connection ->
     bucket:string ->
     key:string ->
-    ?options:Object.Get.options ->
-    consume:(download_reader -> ('a, Error.t) result io) ->
+    ?options:Get_object.options ->
+    consume:(response_body_reader -> ('a, Error.t) result io) ->
     unit ->
-    (Object.Get.info * 'a, Error.t) result io
+    (Get_object.result * 'a, Error.t) result io
 
   val head :
     connection ->
     bucket:string ->
     key:string ->
-    ?options:Object.Head.options ->
+    ?options:Head_object.options ->
     unit ->
-    (Object.Head.info, Error.t) result io
+    (Head_object.result, Error.t) result io
 
   val exists :
     connection -> bucket:string -> key:string -> (bool, Error.t) result io
@@ -73,15 +125,15 @@ module type OBJECT = sig
     connection ->
     bucket:string ->
     key:string ->
-    ?options:Object.Delete.options ->
+    ?options:Delete_object.options ->
     unit ->
-    (Object.Delete.result, Error.t) result io
+    (Delete_object.result, Error.t) result io
 
-  val delete_many :
+  val delete_objects :
     connection ->
     bucket:string ->
-    objects:Object.Delete_many.object_ list ->
-    (Object.Delete_many.result, Error.t) result io
+    objects:Delete_objects.object_ list ->
+    (Delete_objects.result, Error.t) result io
 
   val copy :
     connection ->
@@ -89,28 +141,28 @@ module type OBJECT = sig
     src_key:string ->
     dst_bucket:string ->
     dst_key:string ->
-    ?options:Object.Copy.options ->
+    ?options:Copy_object.options ->
     unit ->
-    (Object.Copy.result, Error.t) result io
+    (Copy_object.result, Error.t) result io
 
   val list_versions :
     connection ->
     bucket:string ->
-    ?options:Object.Versions.options ->
+    ?options:List_object_versions.options ->
     unit ->
-    (Object.Versions.page, Error.t) result io
+    (List_object_versions.page, Error.t) result io
 
   val list :
     connection ->
     bucket:string ->
-    ?options:Object.List.options ->
+    ?options:List_objects_v2.options ->
     unit ->
-    (Object.List.page, Error.t) result io
+    (List_objects_v2.page, Error.t) result io
 
   val list_keys :
     connection ->
     bucket:string ->
-    ?options:Object.List.options ->
+    ?options:List_objects_v2.options ->
     unit ->
     (string list, Error.t) result io
 
@@ -118,33 +170,33 @@ module type OBJECT = sig
     val fold_pages :
       connection ->
       bucket:string ->
-      ?options:Object.List.options ->
+      ?options:List_objects_v2.options ->
       ?max_pages:int ->
       init:'acc ->
-      f:('acc -> Object.List.page -> ('acc, Error.t) result io) ->
+      f:('acc -> List_objects_v2.page -> ('acc, Error.t) result io) ->
       unit ->
       ('acc, Error.t) result io
 
     val pages :
       connection ->
       bucket:string ->
-      ?options:Object.List.options ->
+      ?options:List_objects_v2.options ->
       ?max_pages:int ->
       unit ->
-      (Object.List.page list, Error.t) result io
+      (List_objects_v2.page list, Error.t) result io
 
     val objects :
       connection ->
       bucket:string ->
-      ?options:Object.List.options ->
+      ?options:List_objects_v2.options ->
       ?max_pages:int ->
       unit ->
-      (Object.List.object_summary list, Error.t) result io
+      (List_objects_v2.object_summary list, Error.t) result io
 
     val keys :
       connection ->
       bucket:string ->
-      ?options:Object.List.options ->
+      ?options:List_objects_v2.options ->
       ?max_pages:int ->
       unit ->
       (string list, Error.t) result io
@@ -154,36 +206,36 @@ module type OBJECT = sig
     val fold_pages :
       connection ->
       bucket:string ->
-      ?options:Object.Versions.options ->
+      ?options:List_object_versions.options ->
       ?max_pages:int ->
       init:'acc ->
-      f:('acc -> Object.Versions.page -> ('acc, Error.t) result io) ->
+      f:('acc -> List_object_versions.page -> ('acc, Error.t) result io) ->
       unit ->
       ('acc, Error.t) result io
 
     val pages :
       connection ->
       bucket:string ->
-      ?options:Object.Versions.options ->
+      ?options:List_object_versions.options ->
       ?max_pages:int ->
       unit ->
-      (Object.Versions.page list, Error.t) result io
+      (List_object_versions.page list, Error.t) result io
 
     val object_versions :
       connection ->
       bucket:string ->
-      ?options:Object.Versions.options ->
+      ?options:List_object_versions.options ->
       ?max_pages:int ->
       unit ->
-      (Object.Versions.object_version list, Error.t) result io
+      (List_object_versions.object_version list, Error.t) result io
 
     val delete_markers :
       connection ->
       bucket:string ->
-      ?options:Object.Versions.options ->
+      ?options:List_object_versions.options ->
       ?max_pages:int ->
       unit ->
-      (Object.Versions.delete_marker list, Error.t) result io
+      (List_object_versions.delete_marker list, Error.t) result io
   end
 
   module Buffer : sig
@@ -191,35 +243,35 @@ module type OBJECT = sig
       connection ->
       bucket:string ->
       key:string ->
-      ?options:Object.Put.options ->
+      ?options:Put_object.options ->
       string ->
-      (Object.Put.result, Error.t) result io
+      (Put_object.result, Error.t) result io
 
     val put_bytes :
       connection ->
       bucket:string ->
       key:string ->
-      ?options:Object.Put.options ->
+      ?options:Put_object.options ->
       bytes ->
-      (Object.Put.result, Error.t) result io
+      (Put_object.result, Error.t) result io
 
     val get_string :
       connection ->
       bucket:string ->
       key:string ->
       max_size:int64 ->
-      ?options:Object.Get.options ->
+      ?options:Get_object.options ->
       unit ->
-      (Object.Get.info * string, Error.t) result io
+      (Get_object.result * string, Error.t) result io
 
     val get_bytes :
       connection ->
       bucket:string ->
       key:string ->
       max_size:int64 ->
-      ?options:Object.Get.options ->
+      ?options:Get_object.options ->
       unit ->
-      (Object.Get.info * bytes, Error.t) result io
+      (Get_object.result * bytes, Error.t) result io
   end
 
   module Tagging : sig
@@ -251,21 +303,23 @@ module type BUCKET = sig
   val create :
     connection ->
     bucket:string ->
-    ?options:Bucket.Create.options ->
+    ?options:Create_bucket.options ->
     unit ->
-    (Bucket.Create.result, Error.t) result io
+    (Create_bucket.result, Error.t) result io
 
   val delete :
-    connection -> bucket:string -> (Bucket.Delete.result, Error.t) result io
+    connection -> bucket:string -> (Delete_bucket.result, Error.t) result io
 
   val head :
-    connection -> bucket:string -> (Bucket.Head.info, Error.t) result io
+    connection -> bucket:string -> (Head_bucket.result, Error.t) result io
 
   val exists : connection -> bucket:string -> (bool, Error.t) result io
-  val list : connection -> (Bucket.info list, Error.t) result io
+  val list : connection -> (List_buckets.result, Error.t) result io
 
   val get_location :
-    connection -> bucket:string -> (Awskit.Region.t option, Error.t) result io
+    connection ->
+    bucket:string ->
+    (Get_bucket_location.result, Error.t) result io
 
   module Policy : sig
     val get : connection -> bucket:string -> (Policy.t, Error.t) result io
@@ -431,15 +485,15 @@ end
 module type MULTIPART = sig
   type connection
   type +'a io
-  type upload_body
+  type request_body
 
   val create :
     connection ->
     bucket:string ->
     key:string ->
-    ?options:Multipart.Create.options ->
+    ?options:Create_multipart_upload.options ->
     unit ->
-    (Multipart.Create.result, Error.t) result io
+    (Create_multipart_upload.result, Error.t) result io
 
   val upload_part :
     connection ->
@@ -447,10 +501,10 @@ module type MULTIPART = sig
     key:string ->
     upload_id:Multipart.Upload_id.t ->
     part_number:int ->
-    body:upload_body ->
-    ?options:Multipart.Upload_part.options ->
+    body:request_body ->
+    ?options:Upload_part.options ->
     unit ->
-    (Multipart.Upload_part.result, Error.t) result io
+    (Upload_part.result, Error.t) result io
 
   val complete :
     connection ->
@@ -458,23 +512,23 @@ module type MULTIPART = sig
     key:string ->
     upload_id:Multipart.Upload_id.t ->
     Multipart.Part.t list ->
-    (Multipart.Complete.result, Error.t) result io
+    (Complete_multipart_upload.result, Error.t) result io
 
   val abort :
     connection ->
     bucket:string ->
     key:string ->
     upload_id:Multipart.Upload_id.t ->
-    (Awskit.Response.t, Error.t) result io
+    (Abort_multipart_upload.result, Error.t) result io
 
   val list_parts :
     connection ->
     bucket:string ->
     key:string ->
     upload_id:Multipart.Upload_id.t ->
-    ?options:Multipart.List_parts.options ->
+    ?options:List_parts.options ->
     unit ->
-    (Multipart.List_parts.page, Error.t) result io
+    (List_parts.page, Error.t) result io
 
   module Paginator : sig
     val fold_pages :
@@ -482,10 +536,10 @@ module type MULTIPART = sig
       bucket:string ->
       key:string ->
       upload_id:Multipart.Upload_id.t ->
-      ?options:Multipart.List_parts.options ->
+      ?options:List_parts.options ->
       ?max_pages:int ->
       init:'acc ->
-      f:('acc -> Multipart.List_parts.page -> ('acc, Error.t) result io) ->
+      f:('acc -> List_parts.page -> ('acc, Error.t) result io) ->
       unit ->
       ('acc, Error.t) result io
 
@@ -494,20 +548,20 @@ module type MULTIPART = sig
       bucket:string ->
       key:string ->
       upload_id:Multipart.Upload_id.t ->
-      ?options:Multipart.List_parts.options ->
+      ?options:List_parts.options ->
       ?max_pages:int ->
       unit ->
-      (Multipart.List_parts.page list, Error.t) result io
+      (List_parts.page list, Error.t) result io
 
     val parts :
       connection ->
       bucket:string ->
       key:string ->
       upload_id:Multipart.Upload_id.t ->
-      ?options:Multipart.List_parts.options ->
+      ?options:List_parts.options ->
       ?max_pages:int ->
       unit ->
-      (Multipart.List_parts.part_info list, Error.t) result io
+      (List_parts.part_info list, Error.t) result io
   end
 
   module Managed : sig
@@ -579,15 +633,15 @@ end
 module type S = sig
   type connection
   type +'a io
-  type upload_body
-  type download_reader
+  type request_body
+  type response_body_reader
 
   module Object :
     OBJECT
       with type connection = connection
        and type 'a io = 'a io
-       and type upload_body = upload_body
-       and type download_reader = download_reader
+       and type request_body = request_body
+       and type response_body_reader = response_body_reader
 
   module Bucket :
     BUCKET with type connection = connection and type 'a io = 'a io
@@ -596,7 +650,7 @@ module type S = sig
     MULTIPART
       with type connection = connection
        and type 'a io = 'a io
-       and type upload_body = upload_body
+       and type request_body = request_body
 
   module Presigned :
     PRESIGNED with type connection = connection and type 'a io = 'a io

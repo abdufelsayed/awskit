@@ -48,19 +48,19 @@ unless it matches AWS S3.
 
 ## Streaming Contract
 
-Runtime upload bodies carry an upload descriptor with `content_length`,
+Runtime request bodies carry a request descriptor with `content_length`,
 `payload_hash`, and `replayable` metadata. S3 `PutObject` and `UploadPart`
 currently require a known `content_length`; Awskit does not implement
 unknown-length SigV4 aws-chunked streaming.
 
 For already-buffered data, prefer string or bytes body helpers. Custom stream
 bodies must emit exactly the declared number of bytes, and producer callback
-errors are reported as upload failures. Mark custom streams replayable only
+errors are reported as request body failures. Mark custom streams replayable only
 when the stream can actually be replayed for a retry.
 
 Response bodies are streaming and scoped to the runtime response callback.
 Runtime adapters expose `with_response`; inside that callback, consume bodies
-through `with_download_body` or S3 helper APIs such as
+through `with_response_body` or S3 helper APIs such as
 `Object.Buffer.get_string ~max_size`. Buffering and draining helpers apply
 their documented response-size limits.
 

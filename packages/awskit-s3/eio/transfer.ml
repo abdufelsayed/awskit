@@ -5,14 +5,14 @@ module Make
         Awskit_s3.OBJECT
           with type connection := Runtime.connection
            and type 'a io := 'a
-           and type upload_body := Runtime.upload_body
-           and type download_reader := Runtime.download_reader
+           and type request_body := Runtime.request_body
+           and type response_body_reader := Runtime.response_body_reader
 
       module Multipart :
         Awskit_s3.MULTIPART
           with type connection := Runtime.connection
            and type 'a io := 'a
-           and type upload_body := Runtime.upload_body
+           and type request_body := Runtime.request_body
     end) =
 struct
   let buffer_size = 128 * 1024
@@ -39,13 +39,13 @@ struct
                   kind))
     with exn -> Error (body_error "stat upload" path exn)
 
-  let upload_body_of_path ?on_progress path =
+  let request_body_of_path ?on_progress path =
     match regular_file_length path with
     | Error _ as error -> error
     | Ok content_length ->
         let descriptor =
           {
-            Awskit.Body.Upload.content_length = Some content_length;
+            Awskit.Body.Request.content_length = Some content_length;
             payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
             replayable = true;
           }
@@ -59,7 +59,7 @@ struct
                   match Eio.Flow.single_read file cstruct with
                   | n -> (
                       let chunk = Bytes.sub_string bytes 0 n in
-                      match Runtime.write_string writer chunk with
+                      match Runtime.write_request_body_string writer chunk with
                       | Error _ as error -> error
                       | Ok () ->
                           let transferred =
@@ -72,10 +72,10 @@ struct
                 loop 0L)
           with exn -> Error (body_error "read upload" path exn)
         in
-        Ok (Runtime.stream_body descriptor ~write)
+        Ok (Runtime.stream_request_body descriptor ~write)
 
   let upload_from_path conn ~bucket ~key ?options ?on_progress ~path () =
-    match upload_body_of_path ?on_progress path with
+    match request_body_of_path ?on_progress path with
     | Error _ as error -> error
     | Ok body -> S3.Object.put conn ~bucket ~key ?options ~body ()
 
@@ -121,7 +121,7 @@ struct
   let range_body_of_path path spec =
     let descriptor =
       {
-        Awskit.Body.Upload.content_length = Some (Int64.of_int spec.length);
+        Awskit.Body.Request.content_length = Some (Int64.of_int spec.length);
         payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
         replayable = true;
       }
@@ -139,7 +139,7 @@ struct
                 match Eio.Flow.single_read file cstruct with
                 | n -> (
                     let chunk = Bytes.sub_string bytes 0 n in
-                    match Runtime.write_string writer chunk with
+                    match Runtime.write_request_body_string writer chunk with
                     | Error _ as error -> error
                     | Ok () -> loop (remaining - n))
                 | exception End_of_file ->
@@ -153,7 +153,7 @@ struct
             loop spec.length)
       with exn -> Error (body_error "read multipart upload" path exn)
     in
-    Runtime.stream_body descriptor ~write
+    Runtime.stream_request_body descriptor ~write
 
   let split_batch ~concurrency specs =
     let rec loop remaining acc = function
@@ -241,7 +241,7 @@ struct
         let part_for_spec spec =
           match
             List.find_opt
-              (fun (part : Awskit_s3.Multipart.List_parts.part_info) ->
+              (fun (part : Awskit_s3.List_parts.part_info) ->
                 part.part_number = spec.part_number)
               uploaded
           with
@@ -329,7 +329,9 @@ struct
         Eio.Path.with_open_out ~create:(`Or_truncate 0o600) path (fun file ->
             let bytes = Bytes.create buffer_size in
             let rec loop transferred =
-              match Runtime.read reader bytes ~off:0 ~len:buffer_size with
+              match
+                Runtime.read_response_body reader bytes ~off:0 ~len:buffer_size
+              with
               | Error _ as error -> error
               | Ok 0 -> Ok ()
               | Ok n ->

@@ -1,6 +1,6 @@
 (** Runtime-neutral body metadata.
 
-    Runtime adapters own concrete upload and download body values. Core modules
+    Runtime adapters own concrete request and response body values. Core modules
     use this metadata for signing, headers, retry planning, and buffer limits.
 *)
 
@@ -14,7 +14,7 @@ module Payload_hash : sig
   val to_header_value : t -> string
 end
 
-module Upload : sig
+module Request : sig
   type descriptor = {
     content_length : int64 option;
     payload_hash : Payload_hash.t;
@@ -24,7 +24,7 @@ module Upload : sig
   val validate_descriptor : descriptor -> (unit, Error.t) result
 end
 
-module Download : sig
+module Response : sig
   type descriptor = {
     content_length : int64 option;
     content_type : string option;

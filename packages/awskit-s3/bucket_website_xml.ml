@@ -36,5 +36,5 @@ let parse body response =
           error_document_key =
             Option.bind (Xml.child "ErrorDocument" nodes) (Xml.child_text "Key");
         };
-      request = response;
+      response;
     }

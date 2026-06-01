@@ -4,21 +4,31 @@ type info = { name : string; creation_date : Ptime.t option }
 
 module Create = struct
   type options = { region : Awskit.Region.t option }
-  type result = { request : Awskit.Response.t }
+  type result = { response : Awskit.Response.t }
 
   let default_options = { region = None }
 end
 
 module Delete = struct
-  type result = { request : Awskit.Response.t }
+  type result = { response : Awskit.Response.t }
 end
 
 module Head = struct
-  type info = {
+  type result = {
     name : string;
     region : Awskit.Region.t option;
-    request : Awskit.Response.t;
+    response : Awskit.Response.t;
   }
+
+  type info = result
+end
+
+module List_buckets = struct
+  type result = info list
+end
+
+module Get_location = struct
+  type result = Awskit.Region.t option
 end
 
 module Versioning = struct
@@ -33,11 +43,11 @@ module Versioning = struct
       | _ -> None
   end
 
-  type result = { status : Status.t option; request : Awskit.Response.t }
+  type result = { status : Status.t option; response : Awskit.Response.t }
 end
 
 module Tagging = struct
-  type result = { tags : Tag.t list; request : Awskit.Response.t }
+  type result = { tags : Tag.t list; response : Awskit.Response.t }
 end
 
 module Encryption = struct
@@ -57,7 +67,7 @@ module Encryption = struct
   end
 
   type config = { rules : Rule.t list }
-  type result = { config : config; request : Awskit.Response.t }
+  type result = { config : config; response : Awskit.Response.t }
 end
 
 module Cors = struct
@@ -90,7 +100,7 @@ module Cors = struct
   }
 
   type config = { rules : rule list }
-  type result = { config : config; request : Awskit.Response.t }
+  type result = { config : config; response : Awskit.Response.t }
 end
 
 module Website = struct
@@ -99,7 +109,7 @@ module Website = struct
     error_document_key : string option;
   }
 
-  type result = { config : config; request : Awskit.Response.t }
+  type result = { config : config; response : Awskit.Response.t }
 end
 
 module Public_access_block = struct
@@ -110,7 +120,7 @@ module Public_access_block = struct
     restrict_public_buckets : bool;
   }
 
-  type result = { config : config; request : Awskit.Response.t }
+  type result = { config : config; response : Awskit.Response.t }
 
   let all_false =
     {
@@ -138,7 +148,7 @@ module Ownership_controls = struct
   end
 
   type config = { object_ownership : Object_ownership.t }
-  type result = { config : config; request : Awskit.Response.t }
+  type result = { config : config; response : Awskit.Response.t }
 end
 
 module Request_payment = struct
@@ -155,7 +165,7 @@ module Request_payment = struct
       | _ -> None
   end
 
-  type result = { payer : Payer.t option; request : Awskit.Response.t }
+  type result = { payer : Payer.t option; response : Awskit.Response.t }
 end
 
 module Accelerate = struct
@@ -170,17 +180,17 @@ module Accelerate = struct
       | _ -> None
   end
 
-  type result = { status : Status.t option; request : Awskit.Response.t }
+  type result = { status : Status.t option; response : Awskit.Response.t }
 end
 
 module Policy_status = struct
-  type result = { is_public : bool option; request : Awskit.Response.t }
+  type result = { is_public : bool option; response : Awskit.Response.t }
 end
 
 module Logging = struct
   type target = { target_bucket : string; target_prefix : string }
   type config = { logging : target option }
-  type result = { config : config; request : Awskit.Response.t }
+  type result = { config : config; response : Awskit.Response.t }
 
   let disabled = { logging = None }
 

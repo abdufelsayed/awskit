@@ -5,8 +5,8 @@ module type S = sig
 
   type connection = R.connection
   type 'a io = 'a R.t
-  type upload_body = R.upload_body
-  type download_reader = R.download_reader
+  type request_body = R.request_body
+  type response_body_reader = R.response_body_reader
 
   val bind : 'a io -> ('a -> 'b io) -> 'b io
   val return : 'a -> 'a io
@@ -30,12 +30,12 @@ module type S = sig
   val root_request : connection -> (Endpoint_resolver.Request.t, Error.t) result
 
   val read_body :
-    download_reader -> max_size:int64 -> (string, Error.t) result io
+    response_body_reader -> max_size:int64 -> (string, Error.t) result io
 
-  val read_download_body :
-    R.download_body -> max_size:int64 -> (string, Error.t) result io
+  val read_response_body :
+    R.response_body -> max_size:int64 -> (string, Error.t) result io
 
-  val discard_download_body : R.download_body -> (unit, Error.t) result io
+  val discard_response_body : R.response_body -> (unit, Error.t) result io
 
   val with_response :
     connection ->
@@ -44,8 +44,8 @@ module type S = sig
     query:(string * string list) list ->
     headers:(string * string) list ->
     payload_hash:Awskit.Body.Payload_hash.t ->
-    upload_body ->
-    f:(Awskit.Response.t -> R.download_body -> ('a, Error.t) result io) ->
+    request_body ->
+    f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
     ('a, Error.t) result io
 
   val with_empty_response :
@@ -54,7 +54,7 @@ module type S = sig
     request:Endpoint_resolver.Request.t ->
     query:(string * string list) list ->
     headers:(string * string) list ->
-    f:(Awskit.Response.t -> R.download_body -> ('a, Error.t) result io) ->
+    f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
     ('a, Error.t) result io
 
   val content_md5 : string -> string

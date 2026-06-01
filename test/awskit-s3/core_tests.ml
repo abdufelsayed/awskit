@@ -28,6 +28,43 @@ let check_checksum label algorithm value = function
         (checksum.algorithm = algorithm);
       Alcotest.(check string) (label ^ " value") value checksum.value
 
+let test_operation_data_module_names () =
+  ignore (Put_object.default_options : Put_object.options);
+  ignore (Get_object.default_options : Get_object.options);
+  ignore (Head_object.default_options : Head_object.options);
+  ignore (Delete_object.default_options : Delete_object.options);
+  let delete_object : Delete_objects.object_ =
+    {
+      key = "file.txt";
+      version_id = None;
+      etag = None;
+      last_modified_time = None;
+      size = None;
+    }
+  in
+  ignore (delete_object : Delete_objects.object_);
+  ignore (None : Get_object.result option);
+  ignore (Copy_object.default_options : Copy_object.options);
+  ignore (List_objects_v2.default_options : List_objects_v2.options);
+  ignore (List_object_versions.default_options : List_object_versions.options);
+  ignore (Create_bucket.default_options : Create_bucket.options);
+  ignore (None : Delete_bucket.result option);
+  ignore (None : Head_bucket.result option);
+  ignore (None : List_buckets.result option);
+  ignore (None : Get_bucket_location.result option);
+  ignore
+    (Create_multipart_upload.default_options : Create_multipart_upload.options);
+  ignore (Upload_part.default_options : Upload_part.options);
+  ignore
+    (Multipart.Managed.default_options.create_options
+      : Create_multipart_upload.options);
+  ignore
+    (Multipart.Managed.default_options.upload_part_options
+      : Upload_part.options);
+  ignore (None : Complete_multipart_upload.result option);
+  ignore (None : Abort_multipart_upload.result option);
+  ignore (List_parts.default_options : List_parts.options)
+
 let test_endpoint_resolution () =
   let result =
     Presigned.get_object
@@ -256,9 +293,9 @@ module Recording_runtime = struct
 
   type call = { request : Awskit.Request.t; body : string }
 
-  type upload_body = {
+  type request_body = {
     body : (string, Awskit.Error.t) result;
-    descriptor : Awskit.Body.Upload.descriptor;
+    descriptor : Awskit.Body.Request.descriptor;
   }
 
   type connection = {
@@ -277,10 +314,10 @@ module Recording_runtime = struct
   let return value = value
   let bind value f = f value
 
-  type download_body = { body : string; read_error_after : int option }
-  type upload_writer = Buffer.t
+  type response_body = { body : string; read_error_after : int option }
+  type request_body_writer = Buffer.t
 
-  type download_reader = {
+  type response_body_reader = {
     body : string;
     read_error_after : int option;
     mutable offset : int;
@@ -315,41 +352,41 @@ module Recording_runtime = struct
 
   let descriptor ?(replayable = true) body =
     {
-      Awskit.Body.Upload.content_length =
+      Awskit.Body.Request.content_length =
         Some (Int64.of_int (String.length body));
       payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
       replayable;
     }
 
-  let upload_body ?replayable body =
+  let request_body ?replayable body =
     { body = Ok body; descriptor = descriptor ?replayable body }
 
-  let empty_body = upload_body ""
-  let string_body body = upload_body body
-  let bytes_body body = upload_body (Bytes.to_string body)
+  let empty_request_body = request_body ""
+  let string_request_body body = request_body body
+  let bytes_request_body body = request_body (Bytes.to_string body)
 
-  let stream_body descriptor ~write =
+  let stream_request_body descriptor ~write =
     let buffer = Buffer.create 128 in
     let body =
       match write buffer with
       | Ok () -> (
           let body = Buffer.contents buffer in
           let length = Int64.of_int (String.length body) in
-          match descriptor.Awskit.Body.Upload.content_length with
+          match descriptor.Awskit.Body.Request.content_length with
           | Some declared when not (Stdlib.Int64.equal declared length) ->
-              Error (Awskit.Error.body "upload body length mismatch")
+              Error (Awskit.Error.body "request body length mismatch")
           | _ -> Ok body)
       | Error _ as error -> error
     in
     { body; descriptor }
 
-  let upload_descriptor body = body.descriptor
+  let request_body_descriptor body = body.descriptor
 
-  let write_string writer body =
+  let write_request_body_string writer body =
     Buffer.add_string writer body;
     Ok ()
 
-  let read reader bytes ~off ~len =
+  let read_response_body reader bytes ~off ~len =
     if len = 0 then Ok 0
     else if
       match reader.read_error_after with
@@ -367,12 +404,12 @@ module Recording_runtime = struct
 
   let rec drain reader =
     let bytes = Bytes.create 8 in
-    match read reader bytes ~off:0 ~len:(Bytes.length bytes) with
+    match read_response_body reader bytes ~off:0 ~len:(Bytes.length bytes) with
     | Error _ as error -> error
     | Ok 0 -> Ok ()
     | Ok _ -> drain reader
 
-  let with_download_body (body : download_body) ~consume =
+  let with_response_body (body : response_body) ~consume =
     let reader =
       { body = body.body; read_error_after = body.read_error_after; offset = 0 }
     in
@@ -384,14 +421,14 @@ module Recording_runtime = struct
         | Ok () -> error
         | Error _ as drain_error -> drain_error)
 
-  let discard_download_body (body : download_body) =
+  let discard_response_body (body : response_body) =
     let reader =
       { body = body.body; read_error_after = body.read_error_after; offset = 0 }
     in
     let result = drain reader in
     result
 
-  let with_response conn request (body : upload_body) ~f =
+  let with_response conn request (body : request_body) ~f =
     match body.body with
     | Error _ as error -> error
     | Ok body -> (
@@ -588,7 +625,7 @@ let test_object_checksum_headers_and_response () =
   let checksum : Object.Checksum.request =
     { Object.Checksum.algorithm = `SHA256; value = Some "provided-sha256" }
   in
-  let options = { Object.Put.default_options with checksum = Some checksum } in
+  let options = { Put_object.default_options with checksum = Some checksum } in
   let put =
     Recording_s3.Object.Buffer.put_string conn ~bucket:"my-bucket" ~key:"file"
       ~options "hello"
@@ -630,7 +667,7 @@ let test_object_precondition_headers () =
     }
   in
   let put_options =
-    { Object.Put.default_options with preconditions = write_preconditions }
+    { Put_object.default_options with preconditions = write_preconditions }
   in
   ignore
     (Recording_s3.Object.Buffer.put_string conn ~bucket:"my-bucket" ~key:"file"
@@ -646,14 +683,14 @@ let test_object_precondition_headers () =
     }
   in
   let get_options =
-    { Object.Get.default_options with preconditions = read_preconditions }
+    { Get_object.default_options with preconditions = read_preconditions }
   in
   ignore
     (Recording_s3.Object.Buffer.get_string conn ~bucket:"my-bucket" ~key:"file"
        ~options:get_options ~max_size:16L ()
     |> ok_or_fail "get preconditions");
   let head_options =
-    { Object.Head.default_options with preconditions = read_preconditions }
+    { Head_object.default_options with preconditions = read_preconditions }
   in
   ignore
     (Recording_s3.Object.head conn ~bucket:"my-bucket" ~key:"file"
@@ -668,7 +705,7 @@ let test_object_precondition_headers () =
     }
   in
   let delete_options =
-    { Object.Delete.default_options with preconditions = delete_preconditions }
+    { Delete_object.default_options with preconditions = delete_preconditions }
   in
   ignore
     (Recording_s3.Object.delete conn ~bucket:"my-bucket" ~key:"file"
@@ -685,7 +722,7 @@ let test_object_precondition_headers () =
   in
   let copy_options =
     {
-      Object.Copy.default_options with
+      Copy_object.default_options with
       source_preconditions = copy_preconditions;
     }
   in
@@ -759,7 +796,7 @@ let test_object_versioning_requests_and_parse () =
       ]
   in
   let copy_options =
-    { Object.Copy.default_options with source_version_id = Some version_id }
+    { Copy_object.default_options with source_version_id = Some version_id }
   in
   let copy =
     Recording_s3.Object.copy conn ~src_bucket:"my-bucket" ~src_key:"file"
@@ -771,7 +808,7 @@ let test_object_versioning_requests_and_parse () =
     (version_string copy.copy_source_version_id);
   let list_options =
     {
-      Object.Versions.default_options with
+      List_object_versions.default_options with
       prefix = Some "logs/";
       max_keys = Some 10;
       key_marker = Some "logs/a.txt";
@@ -861,11 +898,11 @@ let test_retry_disabled_policy () =
   Alcotest.(check int) "attempts" 1 (List.length conn.calls);
   Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
 
-let test_non_replayable_upload_not_retried () =
+let test_non_replayable_request_body_not_retried () =
   let slow_down =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
   in
-  let descriptor : Awskit.Body.Upload.descriptor =
+  let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
       payload_hash = Awskit.Body.Payload_hash.sha256_of_string "body";
@@ -876,8 +913,8 @@ let test_non_replayable_upload_not_retried () =
     Recording_runtime.connect [ response 503 slow_down; response 200 "" ]
   in
   let body =
-    Recording_runtime.stream_body descriptor ~write:(fun writer ->
-        Recording_runtime.write_string writer "body")
+    Recording_runtime.stream_request_body descriptor ~write:(fun writer ->
+        Recording_runtime.write_request_body_string writer "body")
   in
   (match
      Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~body ()
@@ -888,19 +925,19 @@ let test_non_replayable_upload_not_retried () =
   Alcotest.(check int) "attempts" 1 (List.length conn.calls);
   Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
 
-let test_runtime_stream_upload_error_propagates () =
-  let descriptor : Awskit.Body.Upload.descriptor =
+let test_runtime_stream_request_body_error_propagates () =
+  let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
       payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
       replayable = false;
     }
   in
-  let stream_error = Awskit.Error.body "runtime stream upload failed" in
+  let stream_error = Awskit.Error.body "runtime stream request body failed" in
   let conn = Recording_runtime.connect [ response 200 "" ] in
   let body =
-    Recording_runtime.stream_body descriptor ~write:(fun writer ->
-        match Recording_runtime.write_string writer "ab" with
+    Recording_runtime.stream_request_body descriptor ~write:(fun writer ->
+        match Recording_runtime.write_request_body_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
@@ -909,7 +946,7 @@ let test_runtime_stream_upload_error_propagates () =
   with
   | Error error when Error.equal error stream_error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected stream upload error"
+  | Ok _ -> Alcotest.fail "expected stream request body error"
 
 let test_retry_jitter_bounds () =
   let policy =
@@ -936,8 +973,8 @@ let test_retry_jitter_bounds () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected invalid jitter"
 
-let test_upload_descriptor_validation () =
-  let invalid_descriptor : Awskit.Body.Upload.descriptor =
+let test_request_body_descriptor_validation () =
+  let invalid_descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some (-1L);
       payload_hash = Awskit.Body.Payload_hash.sha256_of_string "";
@@ -946,8 +983,8 @@ let test_upload_descriptor_validation () =
   in
   let conn = Recording_runtime.connect [ response 200 "" ] in
   let body =
-    Recording_runtime.stream_body invalid_descriptor ~write:(fun _writer ->
-        Ok ())
+    Recording_runtime.stream_request_body invalid_descriptor
+      ~write:(fun _writer -> Ok ())
   in
   (match
      Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~body ()
@@ -967,7 +1004,7 @@ let test_upload_descriptor_validation () =
   | Ok _ -> Alcotest.fail "expected multipart descriptor validation failure");
   Alcotest.(check int) "multipart put not called" 0 (List.length conn.calls)
 
-let test_sim_stream_upload_error_propagates () =
+let test_sim_stream_request_body_error_propagates () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
@@ -976,8 +1013,8 @@ let test_sim_stream_upload_error_propagates () =
   let conn = Sim.connect store ~credentials in
   let bucket = "stream-error-bucket" in
   ignore (Sim.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
-  let stream_error = Awskit.Error.body "sim stream upload failed" in
-  let descriptor : Awskit.Body.Upload.descriptor =
+  let stream_error = Awskit.Error.body "sim stream request body failed" in
+  let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
       payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
@@ -985,21 +1022,21 @@ let test_sim_stream_upload_error_propagates () =
     }
   in
   let body =
-    Sim.Runtime.stream_body descriptor ~write:(fun writer ->
-        match Sim.Runtime.write_string writer "ab" with
+    Sim.Runtime.stream_request_body descriptor ~write:(fun writer ->
+        match Sim.Runtime.write_request_body_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
   (match Sim.Object.put conn ~bucket ~key:"bad" ~body () with
   | Error error when Awskit.Error.equal error stream_error -> ()
   | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected stream upload error");
+  | Ok _ -> Alcotest.fail "expected stream request body error");
   match Sim.Object.head conn ~bucket ~key:"bad" () with
   | Error error when Error.is_not_found error -> ()
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream error object to be absent"
 
-let test_sim_stream_upload_rejects_length_mismatch () =
+let test_sim_stream_request_body_rejects_length_mismatch () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
@@ -1008,7 +1045,7 @@ let test_sim_stream_upload_rejects_length_mismatch () =
   let conn = Sim.connect store ~credentials in
   let bucket = "stream-length-bucket" in
   ignore (Sim.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
-  let descriptor : Awskit.Body.Upload.descriptor =
+  let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
       payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
@@ -1016,24 +1053,24 @@ let test_sim_stream_upload_rejects_length_mismatch () =
     }
   in
   let short_body =
-    Sim.Runtime.stream_body descriptor ~write:(fun writer ->
-        Sim.Runtime.write_string writer "ab")
+    Sim.Runtime.stream_request_body descriptor ~write:(fun writer ->
+        Sim.Runtime.write_request_body_string writer "ab")
   in
   (match Sim.Object.put conn ~bucket ~key:"short" ~body:short_body () with
   | Error (Awskit.Error.Body _) -> ()
   | Error error ->
       Alcotest.failf "unexpected short put error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected short upload body error");
+  | Ok _ -> Alcotest.fail "expected short request body error");
   let long_body =
-    Sim.Runtime.stream_body descriptor ~write:(fun writer ->
-        match Sim.Runtime.write_string writer "abcd" with
+    Sim.Runtime.stream_request_body descriptor ~write:(fun writer ->
+        match Sim.Runtime.write_request_body_string writer "abcd" with
         | Error _ as error -> error
-        | Ok () -> Sim.Runtime.write_string writer "e")
+        | Ok () -> Sim.Runtime.write_request_body_string writer "e")
   in
   (match Sim.Object.put conn ~bucket ~key:"long" ~body:long_body () with
   | Error (Awskit.Error.Body _) -> ()
   | Error error -> Alcotest.failf "unexpected long put error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected long upload body error");
+  | Ok _ -> Alcotest.fail "expected long request body error");
   (match Sim.Object.head conn ~bucket ~key:"short" () with
   | Error error when Error.is_not_found error -> ()
   | Error error ->
@@ -1055,8 +1092,8 @@ let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
     |> ok_or_fail "create multipart upload"
   in
   let upload_id = created.upload.upload_id in
-  let stream_error = Awskit.Error.body "sim multipart stream upload failed" in
-  let descriptor : Awskit.Body.Upload.descriptor =
+  let stream_error = Awskit.Error.body "sim multipart request body failed" in
+  let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
       payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
@@ -1064,8 +1101,8 @@ let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
     }
   in
   let body =
-    Sim.Runtime.stream_body descriptor ~write:(fun writer ->
-        match Sim.Runtime.write_string writer "ab" with
+    Sim.Runtime.stream_request_body descriptor ~write:(fun writer ->
+        match Sim.Runtime.write_request_body_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
@@ -1076,7 +1113,7 @@ let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
   | Error error when Error.equal error stream_error -> ()
   | Error error ->
       Alcotest.failf "unexpected upload part error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected stream upload error");
+  | Ok _ -> Alcotest.fail "expected stream request body error");
   let listed =
     Sim.Multipart.list_parts conn ~bucket:"test-bucket" ~key:"large.bin"
       ~upload_id ()
@@ -1084,7 +1121,7 @@ let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
   in
   Alcotest.(check int) "stored parts" 0 (List.length listed.parts)
 
-let test_download_body_drain_errors () =
+let test_response_body_drain_errors () =
   let conn =
     Recording_runtime.connect
       [
@@ -1098,7 +1135,7 @@ let test_download_body_drain_errors () =
   in
   let consume reader =
     let bytes = Bytes.create 3 in
-    match Recording_runtime.read reader bytes ~off:0 ~len:3 with
+    match Recording_runtime.read_response_body reader bytes ~off:0 ~len:3 with
     | Error _ as error -> error
     | Ok read -> Ok (Bytes.sub_string bytes 0 read)
   in
@@ -1193,7 +1230,7 @@ let test_object_paginator_follows_tokens () =
           (list_page ~continuation_token:"token-1" ~truncated:false [ "b.txt" ]);
       ]
   in
-  let options = { Object.List.default_options with max_keys = Some 1 } in
+  let options = { List_objects_v2.default_options with max_keys = Some 1 } in
   let keys =
     Recording_s3.Object.Paginator.keys conn ~bucket:"my-bucket" ~options ()
     |> ok_or_fail "paginator keys"
@@ -1260,9 +1297,7 @@ let test_multipart_paginator_follows_markers () =
   in
   Alcotest.(check (list int))
     "parts" [ 1; 2 ]
-    (List.map
-       (fun (part : Multipart.List_parts.part_info) -> part.part_number)
-       parts);
+    (List.map (fun (part : List_parts.part_info) -> part.part_number) parts);
   let calls = List.rev conn.calls in
   Alcotest.(check int) "calls" 2 (List.length calls);
   match calls with
@@ -1286,11 +1321,11 @@ let test_multipart_upload_part_checksum_headers () =
   let checksum : Object.Checksum.request =
     { Object.Checksum.algorithm = `SHA1; value = Some "provided-sha1" }
   in
-  let options = { Multipart.Upload_part.checksum = Some checksum } in
+  let options = { Upload_part.checksum = Some checksum } in
   let part =
     Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket" ~key:"large.bin"
       ~upload_id ~part_number:1
-      ~body:(Recording_runtime.string_body "hello")
+      ~body:(Recording_runtime.string_request_body "hello")
       ~options ()
     |> ok_or_fail "upload part checksum"
   in
@@ -1428,7 +1463,7 @@ let test_sim_buffer_roundtrip () =
     Sim.Object.Buffer.put_string conn ~bucket:"test-bucket" ~key:"hello.txt"
       ~options:
         {
-          Object.Put.default_options with
+          Put_object.default_options with
           content_type = Some "text/plain";
           checksum = Some checksum;
         }
@@ -1474,7 +1509,7 @@ let test_sim_streaming_get () =
     |> ok_or_fail "put");
   let consume reader =
     let bytes = Bytes.create 3 in
-    match Sim.Runtime.read reader bytes ~off:0 ~len:3 with
+    match Sim.Runtime.read_response_body reader bytes ~off:0 ~len:3 with
     | Error _ as error -> error
     | Ok read -> Ok (Bytes.sub_string bytes 0 read)
   in
@@ -1514,7 +1549,7 @@ let test_sim_paginator_keys () =
     |> ok_or_fail "put other");
   let options =
     {
-      Object.List.default_options with
+      List_objects_v2.default_options with
       prefix = Some "logs/";
       max_keys = Some 1;
     }
@@ -1530,6 +1565,8 @@ let suite =
     ( "core",
       [
         Alcotest.test_case "presigned result" `Quick test_presigned_result;
+        Alcotest.test_case "operation data module names" `Quick
+          test_operation_data_module_names;
         Alcotest.test_case "presigned put checksum headers" `Quick
           test_presigned_put_checksum_headers;
         Alcotest.test_case "presigned multipart upload part" `Quick
@@ -1554,22 +1591,22 @@ let suite =
           test_retry_fatal_error_not_retried;
         Alcotest.test_case "retry disabled policy" `Quick
           test_retry_disabled_policy;
-        Alcotest.test_case "non-replayable upload not retried" `Quick
-          test_non_replayable_upload_not_retried;
-        Alcotest.test_case "runtime stream upload error propagates" `Quick
-          test_runtime_stream_upload_error_propagates;
+        Alcotest.test_case "non-replayable request body not retried" `Quick
+          test_non_replayable_request_body_not_retried;
+        Alcotest.test_case "runtime stream request body error propagates" `Quick
+          test_runtime_stream_request_body_error_propagates;
         Alcotest.test_case "retry jitter bounds" `Quick test_retry_jitter_bounds;
-        Alcotest.test_case "upload descriptor validation" `Quick
-          test_upload_descriptor_validation;
-        Alcotest.test_case "sim stream upload error propagates" `Quick
-          test_sim_stream_upload_error_propagates;
-        Alcotest.test_case "sim stream upload rejects length mismatch" `Quick
-          test_sim_stream_upload_rejects_length_mismatch;
+        Alcotest.test_case "request body descriptor validation" `Quick
+          test_request_body_descriptor_validation;
+        Alcotest.test_case "sim stream request body error propagates" `Quick
+          test_sim_stream_request_body_error_propagates;
+        Alcotest.test_case "sim stream request body rejects length mismatch"
+          `Quick test_sim_stream_request_body_rejects_length_mismatch;
         Alcotest.test_case
           "sim multipart upload part stream error does not store part" `Quick
           test_sim_multipart_upload_part_stream_error_does_not_store_part;
-        Alcotest.test_case "download body drain errors" `Quick
-          test_download_body_drain_errors;
+        Alcotest.test_case "response body drain errors" `Quick
+          test_response_body_drain_errors;
         Alcotest.test_case "malformed xml responses" `Quick
           test_malformed_xml_responses;
         Alcotest.test_case "copy object embedded error" `Quick

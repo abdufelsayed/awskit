@@ -9,9 +9,9 @@
   multipart
   policy
   presigned
+  operation_data
   object_data_intf
   bucket_data_intf
-  multipart_data_intf
   policy_intf
   presigned_data_intf
   data_intf
@@ -63,7 +63,7 @@
   core
   headers
   make
-  multipart_data_intf
+  operation_data
   multipart_ops
   object_data_intf
   object_ops

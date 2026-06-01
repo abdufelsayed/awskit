@@ -43,8 +43,8 @@ Object APIs are split into explicit layers:
     packages}
 }
 
-Primitive operations never expose string bodies as the primary API. Upload
-bodies and download readers come from the selected runtime adapter.
+Primitive operations never expose string bodies as the primary API. Request
+bodies and response body readers come from the selected runtime adapter.
 
 {1 Libraries}
 

@@ -147,7 +147,7 @@ For example, [awskit-s3] exposes [Awskit_s3.Error.is_no_such_key] and
 
 Service packages use {!module:Awskit.Retry} for built-in retries. The default
 policy retries retryable transport failures, throttling responses, and 5xx
-service responses when the upload body is replayable.
+service responses when the request body is replayable.
 
 {[
 let retry_policy =
@@ -167,44 +167,45 @@ behavior itself.
 The runtime abstraction keeps HTTP metadata separate from bodies:
 
 {ul
-  {li upload bodies are passed separately to [Runtime.with_response]}
+  {li request bodies are passed separately to [Runtime.with_response]}
   {li response bodies are valid inside the [with_response] callback}
-  {li download body readers are scoped through [Runtime.with_download_body]}
+  {li response body readers are scoped through [Runtime.with_response_body]}
   {li request and response records are body-free}
 }
 
 This lets service packages stream bodies without forcing all adapters to buffer
 data in memory.
 
-Uploads carry a descriptor:
+Request bodies carry a descriptor:
 
 {[
 {
-  Awskit.Body.Upload.content_length = Some 5L;
+  Awskit.Body.Request.content_length = Some 5L;
   payload_hash = Awskit.Body.Payload_hash.sha256_of_string "hello";
   replayable = true;
 }
 ]}
 
-The descriptor records the declared upload length, the payload hash used for
+The descriptor records the declared request body length, the payload hash used for
 signing, and whether the body can be replayed. Service packages may reject
 unknown lengths. For example, S3 [PutObject] and [UploadPart] currently require
 a known [content_length]; Awskit does not implement SigV4 aws-chunked streaming
-for unknown-length uploads.
+for unknown-length request bodies.
 
-For custom [stream_body] uploads, the producer callback is part of the upload
-operation. Errors returned by that callback are upload failures. When a known
+For custom [stream_request_body] values, the producer callback is part of the
+request operation. Errors returned by that callback are request body failures.
+When a known
 length is declared, the producer must emit exactly that number of bytes; prefer
-[string_body] or [bytes_body] when data is already buffered. Mark a custom
+[string_request_body] or [bytes_request_body] when data is already buffered. Mark a custom
 stream [replayable] only if a retry can recreate the same body.
 
-Downloads must be consumed inside the [with_response] callback, normally
-through [with_download_body]:
+Response bodies must be consumed inside the [with_response] callback, normally
+through [with_response_body]:
 
 {[
 Runtime.with_response conn request body ~f:(fun response body ->
-  Runtime.with_download_body body ~consume:(fun reader ->
-    Runtime.read reader bytes ~off:0 ~len:(Bytes.length bytes)))
+  Runtime.with_response_body body ~consume:(fun reader ->
+    Runtime.read_response_body reader bytes ~off:0 ~len:(Bytes.length bytes)))
 ]}
 
 Service packages expose higher-level helpers when buffering is intentional.
@@ -265,8 +266,8 @@ or HTTP stack. The service package functors need:
 {ul
   {li a monad type and bind/return}
   {li connection region, credentials, clock, and optional endpoint}
-  {li upload-body constructors and upload descriptors}
-  {li download-body scoped consumption}
+  {li request body constructors and request descriptors}
+  {li response body scoped consumption}
   {li HTTP transport through [with_response]}
 }
 

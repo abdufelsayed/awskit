@@ -27,19 +27,19 @@ module Object : sig
     Awskit_s3.OBJECT
       with type connection := t
        and type 'a io := 'a
-       and type upload_body := Runtime.upload_body
-       and type download_reader := Runtime.download_reader
+       and type request_body := Runtime.request_body
+       and type response_body_reader := Runtime.response_body_reader
 
   module Transfer : sig
     val upload_from_path :
       t ->
       bucket:string ->
       key:string ->
-      ?options:Awskit_s3.Object.Put.options ->
+      ?options:Awskit_s3.Put_object.options ->
       ?on_progress:(int64 -> unit) ->
       path:_ Eio.Path.t ->
       unit ->
-      (Awskit_s3.Object.Put.result, Awskit_s3.Error.t) result
+      (Awskit_s3.Put_object.result, Awskit_s3.Error.t) result
     (** Stream a local file to S3. [on_progress], when provided, receives the
         cumulative number of bytes written to the request body. *)
 
@@ -76,11 +76,11 @@ module Object : sig
       t ->
       bucket:string ->
       key:string ->
-      ?options:Awskit_s3.Object.Get.options ->
+      ?options:Awskit_s3.Get_object.options ->
       ?on_progress:(int64 -> unit) ->
       path:_ Eio.Path.t ->
       unit ->
-      (Awskit_s3.Object.Get.info, Awskit_s3.Error.t) result
+      (Awskit_s3.Get_object.result, Awskit_s3.Error.t) result
     (** Stream an S3 object to a local file. [on_progress], when provided,
         receives the cumulative number of bytes written to disk. *)
   end
@@ -92,7 +92,7 @@ module Multipart :
   Awskit_s3.MULTIPART
     with type connection := t
      and type 'a io := 'a
-     and type upload_body := Runtime.upload_body
+     and type request_body := Runtime.request_body
 
 module Presigned :
   Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a

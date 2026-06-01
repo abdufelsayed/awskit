@@ -19,24 +19,24 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     max_response_body_bytes : int;
   }
 
-  type upload_writer = {
+  type request_body_writer = {
     push : string option -> unit;
     remaining : int64 option ref;
     mutable write_error : Awskit.Error.t option;
   }
 
-  type upload_body =
-    | Body of Awskit.Body.Upload.descriptor * Cohttp_lwt.Body.t
+  type request_body =
+    | Body of Awskit.Body.Request.descriptor * Cohttp_lwt.Body.t
     | Stream of
-        Awskit.Body.Upload.descriptor
-        * (upload_writer -> (unit, Awskit.Error.t) Result.t Lwt.t)
+        Awskit.Body.Request.descriptor
+        * (request_body_writer -> (unit, Awskit.Error.t) Result.t Lwt.t)
 
-  type download_body = {
+  type response_body = {
     body : Cohttp_lwt.Body.t;
     max_response_body_bytes : int;
   }
 
-  type download_reader = {
+  type response_body_reader = {
     stream : string Lwt_stream.t;
     mutable chunk : string;
     mutable offset : int;
@@ -106,24 +106,24 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
   let descriptor_for_string body =
     {
-      Awskit.Body.Upload.content_length =
+      Awskit.Body.Request.content_length =
         Some (String.length body |> Int64.of_int);
       payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
       replayable = true;
     }
 
-  let empty_body = Body (descriptor_for_string "", Cohttp_lwt.Body.empty)
+  let empty_request_body = Body (descriptor_for_string "", Cohttp_lwt.Body.empty)
 
-  let string_body body =
+  let string_request_body body =
     Body (descriptor_for_string body, Cohttp_lwt.Body.of_string body)
 
-  let bytes_body body =
+  let bytes_request_body body =
     let body = Bytes.to_string body in
-    string_body body
+    string_request_body body
 
-  let stream_body descriptor ~write = Stream (descriptor, write)
+  let stream_request_body descriptor ~write = Stream (descriptor, write)
 
-  let upload_descriptor = function
+  let request_body_descriptor = function
     | Body (descriptor, _) -> descriptor
     | Stream (descriptor, _) -> descriptor
 
@@ -132,7 +132,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
   let writer_for descriptor push =
     {
       push;
-      remaining = ref descriptor.Awskit.Body.Upload.content_length;
+      remaining = ref descriptor.Awskit.Body.Request.content_length;
       write_error = None;
     }
 
@@ -142,7 +142,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     | Some remaining ->
         let length = Int64.of_int (String.length string) in
         if Stdlib.Int64.compare length remaining > 0 then
-          Error (body_error "upload body exceeded declared content_length")
+          Error (body_error "request body exceeded declared content_length")
         else (
           writer.remaining := Some (Stdlib.Int64.sub remaining length);
           Ok ())
@@ -155,9 +155,9 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         | None | Some 0L -> Ok ()
         | Some _ ->
             Error
-              (body_error "upload body ended before declared content_length"))
+              (body_error "request body ended before declared content_length"))
 
-  let write_string writer string =
+  let write_request_body_string writer string =
     match writer.write_error with
     | Some error -> Lwt.return_error error
     | None -> (
@@ -193,7 +193,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                       Lwt.return_unit
                   | Error error ->
                       Log.warn (fun m ->
-                          m "upload stream failed: %s"
+                          m "request body stream failed: %s"
                             (Awskit.Error.to_string_hum error));
                       push None;
                       wake_finished_once (Error error);
@@ -201,7 +201,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
               (fun exn ->
                 let error = body_error (Exn.to_string exn) in
                 Log.warn (fun m ->
-                    m "upload stream raised: %s"
+                    m "request body stream raised: %s"
                       (Awskit.Error.to_string_hum error));
                 push None;
                 wake_finished_once (Error error);
@@ -210,11 +210,11 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
   (* HTTP call *)
 
-  let do_with_response (conn : conn) (request : Awskit.Request.t) upload_body ~f
-      =
+  let do_with_response (conn : conn) (request : Awskit.Request.t) request_body
+      ~f =
     let uri = make_uri request in
     let headers = Cohttp.Header.of_list request.headers in
-    let body, upload_finished = body_to_cohttp upload_body in
+    let body, request_body_finished = body_to_cohttp request_body in
     let meth = to_cohttp_meth request.method_ in
     let response =
       Lwt.catch
@@ -222,7 +222,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           Lwt.bind
             (Client.call ?ctx:conn.ctx ~headers ~body ~chunked:false meth uri)
             (fun (response, response_body) ->
-              Lwt.bind upload_finished (function
+              Lwt.bind request_body_finished (function
                 | Error error -> Lwt.return_error error
                 | Ok () ->
                     Log.debug (fun m ->
@@ -255,10 +255,10 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let bind = Lwt.bind
 
     type connection = conn
-    type nonrec upload_body = upload_body
-    type nonrec download_body = download_body
-    type nonrec upload_writer = upload_writer
-    type nonrec download_reader = download_reader
+    type nonrec request_body = request_body
+    type nonrec response_body = response_body
+    type nonrec request_body_writer = request_body_writer
+    type nonrec response_body_reader = response_body_reader
 
     let now c = c.clock ()
     let region c = c.region
@@ -266,12 +266,12 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let endpoint c = c.endpoint
     let retry_policy c = c.retry_policy
     let sleep c span = c.sleep span
-    let empty_body = empty_body
-    let string_body = string_body
-    let bytes_body = bytes_body
-    let stream_body = stream_body
-    let upload_descriptor = upload_descriptor
-    let write_string = write_string
+    let empty_request_body = empty_request_body
+    let string_request_body = string_request_body
+    let bytes_request_body = bytes_request_body
+    let stream_request_body = stream_request_body
+    let request_body_descriptor = request_body_descriptor
+    let write_request_body_string = write_request_body_string
 
     let rec read_from_current reader bytes ~off ~len =
       if len = 0 then Lwt.return_ok 0
@@ -293,7 +293,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let invalid_read_bounds bytes ~off ~len =
       off < 0 || len < 0 || len > Bytes.length bytes - off
 
-    let read reader bytes ~off ~len =
+    let read_response_body reader bytes ~off ~len =
       if invalid_read_bounds bytes ~off ~len then
         Lwt.return_error (Awskit.Error.body "invalid read bounds")
       else
@@ -313,7 +313,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       let len =
         if remaining <= 0 then 1 else min (Bytes.length buffer) remaining
       in
-      Lwt.bind (read reader buffer ~off:0 ~len) (function
+      Lwt.bind (read_response_body reader buffer ~off:0 ~len) (function
         | Error _ as error -> Lwt.return error
         | Ok 0 -> Lwt.return_ok ()
         | Ok n ->
@@ -323,24 +323,24 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
               drain_reader reader ~remaining:(remaining - n)
                 ~max_response_body_bytes)
 
-    let drain_download_reader reader body =
+    let drain_response_body_reader reader body =
       drain_reader reader ~remaining:body.max_response_body_bytes
         ~max_response_body_bytes:body.max_response_body_bytes
 
-    let with_download_body body ~consume =
+    let with_response_body body ~consume =
       let reader =
         { stream = Cohttp_lwt.Body.to_stream body.body; chunk = ""; offset = 0 }
       in
       Lwt.bind (consume reader) (fun result ->
-          Lwt.bind (drain_download_reader reader body) (function
+          Lwt.bind (drain_response_body_reader reader body) (function
             | Ok () -> Lwt.return result
             | Error error -> Lwt.return_error error))
 
-    let discard_download_body body =
+    let discard_response_body body =
       let reader =
         { stream = Cohttp_lwt.Body.to_stream body.body; chunk = ""; offset = 0 }
       in
-      drain_download_reader reader body
+      drain_response_body_reader reader body
 
     let with_response = do_with_response
   end

@@ -49,7 +49,7 @@ module Create = struct
     server_side_encryption : Object.Encryption.request option;
   }
 
-  type result = { upload : Upload.t; request : Awskit.Response.t }
+  type result = { upload : Upload.t; response : Awskit.Response.t }
 
   let default_options =
     {
@@ -68,7 +68,7 @@ module Upload_part = struct
   type result = {
     part : Part.t;
     checksum : Object.Checksum.response option;
-    request : Awskit.Response.t;
+    response : Awskit.Response.t;
   }
 
   let default_options = { checksum = None }
@@ -79,8 +79,12 @@ module Complete = struct
     etag : Object.Etag.t option;
     version_id : Object.Version_id.t option;
     checksum : Object.Checksum.response option;
-    request : Awskit.Response.t;
+    response : Awskit.Response.t;
   }
+end
+
+module Abort = struct
+  type result = Awskit.Response.t
 end
 
 module List_parts = struct
@@ -98,7 +102,7 @@ module List_parts = struct
     parts : part_info list;
     is_truncated : bool;
     next_part_number_marker : int option;
-    request : Awskit.Response.t;
+    response : Awskit.Response.t;
   }
 
   let default_options = { max_parts = None; part_number_marker = None }

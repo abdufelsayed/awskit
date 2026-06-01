@@ -6,10 +6,10 @@ type t = {
 module Runtime = struct
   type connection = t
   type 'a t = 'a Lwt.t
-  type upload_body = Awskit_lwt_unix.Runtime.upload_body
-  type download_body = Awskit_lwt_unix.Runtime.download_body
-  type upload_writer = Awskit_lwt_unix.Runtime.upload_writer
-  type download_reader = Awskit_lwt_unix.Runtime.download_reader
+  type request_body = Awskit_lwt_unix.Runtime.request_body
+  type response_body = Awskit_lwt_unix.Runtime.response_body
+  type request_body_writer = Awskit_lwt_unix.Runtime.request_body_writer
+  type response_body_reader = Awskit_lwt_unix.Runtime.response_body_reader
 
   let return = Awskit_lwt_unix.Runtime.return
   let bind = Awskit_lwt_unix.Runtime.bind
@@ -20,15 +20,18 @@ module Runtime = struct
   let sleep t = Awskit_lwt_unix.Runtime.sleep t.aws
   let s3_endpoint_config t = t.endpoint_config
   let endpoint _ = None
-  let empty_body = Awskit_lwt_unix.Runtime.empty_body
-  let string_body = Awskit_lwt_unix.Runtime.string_body
-  let bytes_body = Awskit_lwt_unix.Runtime.bytes_body
-  let stream_body = Awskit_lwt_unix.Runtime.stream_body
-  let upload_descriptor = Awskit_lwt_unix.Runtime.upload_descriptor
-  let write_string = Awskit_lwt_unix.Runtime.write_string
-  let read = Awskit_lwt_unix.Runtime.read
-  let with_download_body = Awskit_lwt_unix.Runtime.with_download_body
-  let discard_download_body = Awskit_lwt_unix.Runtime.discard_download_body
+  let empty_request_body = Awskit_lwt_unix.Runtime.empty_request_body
+  let string_request_body = Awskit_lwt_unix.Runtime.string_request_body
+  let bytes_request_body = Awskit_lwt_unix.Runtime.bytes_request_body
+  let stream_request_body = Awskit_lwt_unix.Runtime.stream_request_body
+  let request_body_descriptor = Awskit_lwt_unix.Runtime.request_body_descriptor
+
+  let write_request_body_string =
+    Awskit_lwt_unix.Runtime.write_request_body_string
+
+  let read_response_body = Awskit_lwt_unix.Runtime.read_response_body
+  let with_response_body = Awskit_lwt_unix.Runtime.with_response_body
+  let discard_response_body = Awskit_lwt_unix.Runtime.discard_response_body
 
   let with_response t request body ~f =
     Awskit_lwt_unix.Runtime.with_response t.aws request body ~f

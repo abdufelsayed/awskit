@@ -1,4 +1,5 @@
 open Common
+open Operation_data
 
 open struct
   module Object = Object
@@ -72,7 +73,7 @@ let object_info response =
   let* version_id = response_version response in
   Ok
     {
-      Object.Get.etag;
+      Get_object.etag;
       content_type = Awskit.Response.header response "content-type";
       content_length = Option.map Int64.of_int content_length;
       last_modified =
@@ -84,7 +85,7 @@ let object_info response =
       version_id;
       checksum = response_checksum response;
       server_side_encryption = response_encryption response;
-      request = response;
+      response;
     }
 
 let put_result response =
@@ -92,22 +93,22 @@ let put_result response =
   let* version_id = response_version response in
   Ok
     {
-      Object.Put.etag;
+      Put_object.etag;
       version_id;
       checksum = response_checksum response;
-      request = response;
+      response;
     }
 
 let delete_result response =
   let* version_id = response_version response in
   Ok
     {
-      Object.Delete.delete_marker =
+      Delete_object.delete_marker =
         Option.bind
           (Awskit.Response.header response "x-amz-delete-marker")
           parse_bool;
       version_id;
-      request = response;
+      response;
     }
 
 let embedded_service_error response body =
@@ -139,11 +140,11 @@ let copy_result response body =
       in
       Ok
         {
-          Object.Copy.etag;
+          Copy_object.etag;
           last_modified;
           version_id;
           copy_source_version_id;
-          request = response;
+          response;
         }
   | Ok (actual, _) ->
       Error

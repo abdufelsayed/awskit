@@ -14,7 +14,7 @@ module Request_payment = struct
         (Xml.child_text "Payer" nodes)
         Bucket.Request_payment.Payer.of_string
     in
-    Ok { Bucket.Request_payment.payer; request = response }
+    Ok { Bucket.Request_payment.payer; response }
 end
 
 module Accelerate = struct
@@ -30,7 +30,7 @@ module Accelerate = struct
         (Xml.child_text "Status" nodes)
         Bucket.Accelerate.Status.of_string
     in
-    Ok { Bucket.Accelerate.status; request = response }
+    Ok { Bucket.Accelerate.status; response }
 end
 
 module Logging = struct
@@ -72,5 +72,5 @@ module Logging = struct
               Some { Bucket.Logging.target_bucket; target_prefix }
           | _ -> None)
     in
-    Ok { Bucket.Logging.config = { logging }; request = response }
+    Ok { Bucket.Logging.config = { logging }; response }
 end

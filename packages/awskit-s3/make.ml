@@ -3,16 +3,16 @@ open Core
 module Make (R : RUNTIME) = struct
   type connection = R.connection
   type 'a io = 'a R.t
-  type upload_body = R.upload_body
-  type download_reader = R.download_reader
+  type request_body = R.request_body
+  type response_body_reader = R.response_body_reader
 
   module Context = struct
     module R = R
 
     type connection = R.connection
     type 'a io = 'a R.t
-    type upload_body = R.upload_body
-    type download_reader = R.download_reader
+    type request_body = R.request_body
+    type response_body_reader = R.response_body_reader
 
     let bind = R.bind
     let ( let* ) = R.bind
@@ -49,7 +49,9 @@ module Make (R : RUNTIME) = struct
       let buffer = Buffer.create 4096 in
       let chunk = Bytes.create 8192 in
       let rec loop total =
-        let* read = R.read reader chunk ~off:0 ~len:(Bytes.length chunk) in
+        let* read =
+          R.read_response_body reader chunk ~off:0 ~len:(Bytes.length chunk)
+        in
         match read with
         | Error error -> return (Error error)
         | Ok 0 -> return_ok (Buffer.contents buffer)
@@ -58,7 +60,7 @@ module Make (R : RUNTIME) = struct
             if Int64.compare total max_size > 0 then
               return_error
                 (Awskit.Error.body ~limit:max_size
-                   "download body exceeded max_size")
+                   "response body exceeded max_size")
             else begin
               Buffer.add_subbytes buffer chunk 0 n;
               loop total
@@ -66,10 +68,10 @@ module Make (R : RUNTIME) = struct
       in
       loop 0L
 
-    let read_download_body body ~max_size =
-      R.with_download_body body ~consume:(read_body ~max_size)
+    let read_response_body body ~max_size =
+      R.with_response_body body ~consume:(read_body ~max_size)
 
-    let discard_download_body = R.discard_download_body
+    let discard_response_body = R.discard_response_body
 
     let service_error response body =
       Awskit.Error.service
@@ -84,7 +86,7 @@ module Make (R : RUNTIME) = struct
         }
 
     let error_response response body =
-      let* body = read_download_body body ~max_size:1_048_576L in
+      let* body = read_response_body body ~max_size:1_048_576L in
       match body with
       | Error error -> return_error error
       | Ok body -> return_error (service_error response (Some body))
@@ -133,7 +135,7 @@ module Make (R : RUNTIME) = struct
 
     let with_response conn ~method_ ~request ~query ~headers ~payload_hash body
         ~f =
-      let replayable = (R.upload_descriptor body).replayable in
+      let replayable = (R.request_body_descriptor body).replayable in
       let rec attempt attempt_number =
         let* request =
           signed_request conn ~method_ ~request ~query ~headers ~payload_hash
@@ -149,7 +151,7 @@ module Make (R : RUNTIME) = struct
                     return_ok (Done result)
                   else
                     let* body =
-                      read_download_body response_body ~max_size:1_048_576L
+                      read_response_body response_body ~max_size:1_048_576L
                     in
                     match body with
                     | Error error -> return_ok (Done (Error error))
@@ -169,7 +171,7 @@ module Make (R : RUNTIME) = struct
 
     let with_empty_response conn ~method_ ~request ~query ~headers ~f =
       with_response conn ~method_ ~request ~query ~headers
-        ~payload_hash:empty_hash R.empty_body ~f
+        ~payload_hash:empty_hash R.empty_request_body ~f
 
     let content_md5 body =
       Digestif.MD5.(digest_string body |> to_raw_string) |> Base64.encode_exn

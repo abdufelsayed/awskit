@@ -6,5 +6,5 @@ let parse body response =
     {
       Bucket.Policy_status.is_public =
         Option.bind (Xml.child_text "IsPublic" nodes) parse_bool;
-      request = response;
+      response;
     }

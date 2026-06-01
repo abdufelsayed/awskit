@@ -30,7 +30,7 @@ module Bucket = struct
               accelerate = None;
               logging = Bucket.Logging.disabled;
             };
-          Ok { Bucket.Create.request = response 200 }
+          Ok { Create_bucket.response = response 200 }
         end
 
   let delete conn ~bucket =
@@ -41,7 +41,7 @@ module Bucket = struct
           Error (service ~status:409 ~code:"BucketNotEmpty" ())
         else begin
           Hashtbl.remove conn.store.buckets bucket;
-          Ok { Bucket.Delete.request = response 204 }
+          Ok { Delete_bucket.response = response 204 }
         end
 
   let head conn ~bucket =
@@ -50,9 +50,9 @@ module Bucket = struct
     | Ok _ ->
         Ok
           {
-            Bucket.Head.name = bucket;
+            Head_bucket.name = bucket;
             region = Some (Runtime.region conn);
-            request = response 200;
+            response = response 200;
           }
 
   let exists conn ~bucket =
@@ -108,7 +108,7 @@ module Bucket = struct
           Ok
             {
               Bucket.Policy_status.is_public = Some false;
-              request = response 200;
+              response = response 200;
             }
   end
 
@@ -120,7 +120,7 @@ module Bucket = struct
           Ok
             {
               Bucket.Versioning.status = state.versioning;
-              request = response 200;
+              response = response 200;
             }
 
     let put conn ~bucket status =
@@ -136,7 +136,8 @@ module Bucket = struct
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
-          Ok { Bucket.Tagging.tags = state.bucket_tags; request = response 200 }
+          Ok
+            { Bucket.Tagging.tags = state.bucket_tags; response = response 200 }
 
     let put conn ~bucket tags =
       match require_bucket conn bucket with
@@ -167,7 +168,7 @@ module Bucket = struct
                 (service ~status:404
                    ~code:"ServerSideEncryptionConfigurationNotFoundError" ())
           | Some config ->
-              Ok { Bucket.Encryption.config; request = response 200 })
+              Ok { Bucket.Encryption.config; response = response 200 })
 
     let put conn ~bucket config =
       match require_bucket conn bucket with
@@ -191,7 +192,7 @@ module Bucket = struct
       | Ok state -> (
           match state.cors with
           | None -> Error (no_such_key ())
-          | Some config -> Ok { Bucket.Cors.config; request = response 200 })
+          | Some config -> Ok { Bucket.Cors.config; response = response 200 })
 
     let put conn ~bucket config =
       match require_bucket conn bucket with
@@ -215,7 +216,8 @@ module Bucket = struct
       | Ok state -> (
           match state.website with
           | None -> Error (no_such_key ())
-          | Some config -> Ok { Bucket.Website.config; request = response 200 })
+          | Some config -> Ok { Bucket.Website.config; response = response 200 }
+          )
 
     let put conn ~bucket config =
       match require_bucket conn bucket with
@@ -240,7 +242,7 @@ module Bucket = struct
           match state.public_access_block with
           | None -> Error (no_such_key ())
           | Some config ->
-              Ok { Bucket.Public_access_block.config; request = response 200 })
+              Ok { Bucket.Public_access_block.config; response = response 200 })
 
     let put conn ~bucket config =
       match require_bucket conn bucket with
@@ -265,7 +267,7 @@ module Bucket = struct
           match state.ownership_controls with
           | None -> Error (no_such_key ())
           | Some config ->
-              Ok { Bucket.Ownership_controls.config; request = response 200 })
+              Ok { Bucket.Ownership_controls.config; response = response 200 })
 
     let put conn ~bucket config =
       match require_bucket conn bucket with
@@ -290,7 +292,7 @@ module Bucket = struct
           Ok
             {
               Bucket.Request_payment.payer = state.request_payment;
-              request = response 200;
+              response = response 200;
             }
 
     let put conn ~bucket payer =
@@ -309,7 +311,7 @@ module Bucket = struct
           Ok
             {
               Bucket.Accelerate.status = state.accelerate;
-              request = response 200;
+              response = response 200;
             }
 
     let put conn ~bucket status =
@@ -325,7 +327,7 @@ module Bucket = struct
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
-          Ok { Bucket.Logging.config = state.logging; request = response 200 }
+          Ok { Bucket.Logging.config = state.logging; response = response 200 }
 
     let put conn ~bucket config =
       match require_bucket conn bucket with

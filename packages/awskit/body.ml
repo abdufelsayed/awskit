@@ -33,7 +33,7 @@ module Payload_hash = struct
     | Unsigned_payload -> "UNSIGNED-PAYLOAD"
 end
 
-module Upload = struct
+module Request = struct
   type descriptor = {
     content_length : int64 option;
     payload_hash : Payload_hash.t;
@@ -45,11 +45,11 @@ module Upload = struct
     | Some length when Int64.(length < zero) ->
         Error
           (Aws_error.validation ~field:"content_length"
-             "upload content length must be non-negative")
+             "request content length must be non-negative")
     | _ -> Ok ()
 end
 
-module Download = struct
+module Response = struct
   type descriptor = {
     content_length : int64 option;
     content_type : string option;

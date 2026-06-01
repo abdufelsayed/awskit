@@ -27,8 +27,8 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     Awskit_s3.OBJECT
       with type connection := t
        and type 'a io := 'a Lwt.t
-       and type upload_body := Runtime.upload_body
-       and type download_reader := Runtime.download_reader
+       and type request_body := Runtime.request_body
+       and type response_body_reader := Runtime.response_body_reader
 
   module Bucket :
     Awskit_s3.BUCKET with type connection := t and type 'a io := 'a Lwt.t
@@ -37,7 +37,7 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     Awskit_s3.MULTIPART
       with type connection := t
        and type 'a io := 'a Lwt.t
-       and type upload_body := Runtime.upload_body
+       and type request_body := Runtime.request_body
 
   module Presigned :
     Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a Lwt.t

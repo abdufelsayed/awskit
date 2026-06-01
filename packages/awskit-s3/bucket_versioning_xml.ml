@@ -15,4 +15,4 @@ let parse body response =
       (Xml.child_text "Status" nodes)
       Bucket.Versioning.Status.of_string
   in
-  Ok { Bucket.Versioning.status; request = response }
+  Ok { Bucket.Versioning.status; response }

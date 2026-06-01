@@ -192,237 +192,218 @@ module type OBJECT_DATA = sig
     end
   end
 
-  module Put : sig
-    type options = {
-      content_type : string option;
-      metadata : Metadata.t;
-      storage_class : Storage_class.t option;
-      tags : Tag.t list;
-      cache_control : string option;
-      content_encoding : string option;
-      content_disposition : string option;
-      preconditions : Preconditions.Write.t;
-      checksum : Checksum.request option;
-      server_side_encryption : Encryption.request option;
-    }
-
-    type result = {
-      etag : Etag.t option;
-      version_id : Version_id.t option;
-      checksum : Checksum.response option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
-  module Get : sig
-    type options = {
-      range : Range.t option;
-      preconditions : Preconditions.Read.t;
-      version_id : Version_id.t option;
-    }
-
-    type info = {
-      etag : Etag.t option;
-      content_type : string option;
-      content_length : int64 option;
-      last_modified : Ptime.t option;
-      metadata : Metadata.t;
-      storage_class : Storage_class.t option;
-      version_id : Version_id.t option;
-      checksum : Checksum.response option;
-      server_side_encryption : Encryption.response option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
-  module Head : sig
-    type options = {
-      preconditions : Preconditions.Read.t;
-      version_id : Version_id.t option;
-    }
-
-    type info = Get.info
-
-    val default_options : options
-  end
-
-  module Delete : sig
-    type options = {
-      preconditions : Preconditions.Delete.t;
-      version_id : Version_id.t option;
-    }
-
-    type result = {
-      delete_marker : bool option;
-      version_id : Version_id.t option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
-  module Delete_many : sig
-    type object_ = {
-      key : string;
-      version_id : Version_id.t option;
-      etag : Etag.t option;
-      last_modified_time : Ptime.t option;
-      size : int64 option;
-    }
-
-    type deleted = {
-      key : string;
-      version_id : Version_id.t option;
-      delete_marker : bool option;
-    }
-
-    type item_error = { key : string; code : string; message : string option }
-
-    type result = {
-      deleted : deleted list;
-      errors : item_error list;
-      request : Awskit.Response.t;
-    }
-  end
-
-  module Copy : sig
-    type metadata_directive = [ `Copy | `Replace of Metadata.t ]
-
-    type options = {
-      source_version_id : Version_id.t option;
-      source_preconditions : Preconditions.Copy_source.t;
-      metadata : metadata_directive option;
-      storage_class : Storage_class.t option;
-      tags : Tag.t list option;
-      checksum : Checksum.request option;
-      server_side_encryption : Encryption.request option;
-    }
-
-    type result = {
-      etag : Etag.t option;
-      last_modified : Ptime.t option;
-      version_id : Version_id.t option;
-      copy_source_version_id : Version_id.t option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
-  module Versions : sig
-    type options = {
-      prefix : string option;
-      delimiter : string option;
-      max_keys : int option;
-      key_marker : string option;
-      version_id_marker : Version_id.t option;
-    }
-
-    type object_version = {
-      key : string;
-      version_id : Version_id.t option;
-      is_latest : bool option;
-      last_modified : Ptime.t option;
-      etag : Etag.t option;
-      size : int64 option;
-      storage_class : Storage_class.t option;
-      owner : string option;
-    }
-
-    type delete_marker = {
-      key : string;
-      version_id : Version_id.t option;
-      is_latest : bool option;
-      last_modified : Ptime.t option;
-      owner : string option;
-    }
-
-    type page = {
-      bucket : string option;
-      prefix : string option;
-      delimiter : string option;
-      versions : object_version list;
-      delete_markers : delete_marker list;
-      common_prefixes : string list;
-      is_truncated : bool;
-      key_marker : string option;
-      version_id_marker : Version_id.t option;
-      next_key_marker : string option;
-      next_version_id_marker : Version_id.t option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
-  module List : sig
-    type options = {
-      prefix : string option;
-      delimiter : string option;
-      max_keys : int option;
-      start_after : string option;
-      continuation_token : string option;
-    }
-
-    type object_summary = {
-      key : string;
-      size : int64 option;
-      etag : Etag.t option;
-      last_modified : Ptime.t option;
-      storage_class : Storage_class.t option;
-      owner : string option;
-      checksums : Checksum.response list;
-    }
-
-    type page = {
-      bucket : string option;
-      prefix : string option;
-      delimiter : string option;
-      objects : object_summary list;
-      common_prefixes : string list;
-      key_count : int option;
-      is_truncated : bool;
-      continuation_token : string option;
-      next_continuation_token : string option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
   module Tagging : sig
-    type result = { tags : Tag.t list; request : Awskit.Response.t }
+    type result = { tags : Tag.t list; response : Awskit.Response.t }
   end
 end
 
 module Object : OBJECT_DATA
 
+module Put_object : sig
+  type options = {
+    content_type : string option;
+    metadata : Metadata.t;
+    storage_class : Storage_class.t option;
+    tags : Tag.t list;
+    cache_control : string option;
+    content_encoding : string option;
+    content_disposition : string option;
+    preconditions : Object.Preconditions.Write.t;
+    checksum : Object.Checksum.request option;
+    server_side_encryption : Object.Encryption.request option;
+  }
+
+  type result = {
+    etag : Object.Etag.t option;
+    version_id : Object.Version_id.t option;
+    checksum : Object.Checksum.response option;
+    response : Awskit.Response.t;
+  }
+
+  val default_options : options
+end
+
+module Get_object : sig
+  type options = {
+    range : Range.t option;
+    preconditions : Object.Preconditions.Read.t;
+    version_id : Object.Version_id.t option;
+  }
+
+  type result = {
+    etag : Object.Etag.t option;
+    content_type : string option;
+    content_length : int64 option;
+    last_modified : Ptime.t option;
+    metadata : Metadata.t;
+    storage_class : Storage_class.t option;
+    version_id : Object.Version_id.t option;
+    checksum : Object.Checksum.response option;
+    server_side_encryption : Object.Encryption.response option;
+    response : Awskit.Response.t;
+  }
+
+  val default_options : options
+end
+
+module Head_object : sig
+  type options = {
+    preconditions : Object.Preconditions.Read.t;
+    version_id : Object.Version_id.t option;
+  }
+
+  type result = Get_object.result
+
+  val default_options : options
+end
+
+module Delete_object : sig
+  type options = {
+    preconditions : Object.Preconditions.Delete.t;
+    version_id : Object.Version_id.t option;
+  }
+
+  type result = {
+    delete_marker : bool option;
+    version_id : Object.Version_id.t option;
+    response : Awskit.Response.t;
+  }
+
+  val default_options : options
+end
+
+module Delete_objects : sig
+  type object_ = {
+    key : string;
+    version_id : Object.Version_id.t option;
+    etag : Object.Etag.t option;
+    last_modified_time : Ptime.t option;
+    size : int64 option;
+  }
+
+  type deleted = {
+    key : string;
+    version_id : Object.Version_id.t option;
+    delete_marker : bool option;
+  }
+
+  type item_error = { key : string; code : string; message : string option }
+
+  type result = {
+    deleted : deleted list;
+    errors : item_error list;
+    response : Awskit.Response.t;
+  }
+end
+
+module Copy_object : sig
+  type metadata_directive = [ `Copy | `Replace of Metadata.t ]
+
+  type options = {
+    source_version_id : Object.Version_id.t option;
+    source_preconditions : Object.Preconditions.Copy_source.t;
+    metadata : metadata_directive option;
+    storage_class : Storage_class.t option;
+    tags : Tag.t list option;
+    checksum : Object.Checksum.request option;
+    server_side_encryption : Object.Encryption.request option;
+  }
+
+  type result = {
+    etag : Object.Etag.t option;
+    last_modified : Ptime.t option;
+    version_id : Object.Version_id.t option;
+    copy_source_version_id : Object.Version_id.t option;
+    response : Awskit.Response.t;
+  }
+
+  val default_options : options
+end
+
+module List_object_versions : sig
+  type options = {
+    prefix : string option;
+    delimiter : string option;
+    max_keys : int option;
+    key_marker : string option;
+    version_id_marker : Object.Version_id.t option;
+  }
+
+  type object_version = {
+    key : string;
+    version_id : Object.Version_id.t option;
+    is_latest : bool option;
+    last_modified : Ptime.t option;
+    etag : Object.Etag.t option;
+    size : int64 option;
+    storage_class : Storage_class.t option;
+    owner : string option;
+  }
+
+  type delete_marker = {
+    key : string;
+    version_id : Object.Version_id.t option;
+    is_latest : bool option;
+    last_modified : Ptime.t option;
+    owner : string option;
+  }
+
+  type page = {
+    bucket : string option;
+    prefix : string option;
+    delimiter : string option;
+    versions : object_version list;
+    delete_markers : delete_marker list;
+    common_prefixes : string list;
+    is_truncated : bool;
+    key_marker : string option;
+    version_id_marker : Object.Version_id.t option;
+    next_key_marker : string option;
+    next_version_id_marker : Object.Version_id.t option;
+    response : Awskit.Response.t;
+  }
+
+  val default_options : options
+end
+
+module List_objects_v2 : sig
+  type options = {
+    prefix : string option;
+    delimiter : string option;
+    max_keys : int option;
+    start_after : string option;
+    continuation_token : string option;
+  }
+
+  type object_summary = {
+    key : string;
+    size : int64 option;
+    etag : Object.Etag.t option;
+    last_modified : Ptime.t option;
+    storage_class : Storage_class.t option;
+    owner : string option;
+    checksums : Object.Checksum.response list;
+  }
+
+  type page = {
+    bucket : string option;
+    prefix : string option;
+    delimiter : string option;
+    objects : object_summary list;
+    common_prefixes : string list;
+    key_count : int option;
+    is_truncated : bool;
+    continuation_token : string option;
+    next_continuation_token : string option;
+    response : Awskit.Response.t;
+  }
+
+  val default_options : options
+end
+
 (** Bucket data types and configuration records. *)
 module type BUCKET_DATA = sig
   type info = { name : string; creation_date : Ptime.t option }
-
-  module Create : sig
-    type options = { region : Awskit.Region.t option }
-    type result = { request : Awskit.Response.t }
-
-    val default_options : options
-  end
-
-  module Delete : sig
-    type result = { request : Awskit.Response.t }
-  end
-
-  module Head : sig
-    type info = {
-      name : string;
-      region : Awskit.Region.t option;
-      request : Awskit.Response.t;
-    }
-  end
 
   module Versioning : sig
     module Status : sig
@@ -432,11 +413,11 @@ module type BUCKET_DATA = sig
       val of_string : string -> t option
     end
 
-    type result = { status : Status.t option; request : Awskit.Response.t }
+    type result = { status : Status.t option; response : Awskit.Response.t }
   end
 
   module Tagging : sig
-    type result = { tags : Tag.t list; request : Awskit.Response.t }
+    type result = { tags : Tag.t list; response : Awskit.Response.t }
   end
 
   module Encryption : sig
@@ -455,7 +436,7 @@ module type BUCKET_DATA = sig
     end
 
     type config = { rules : Rule.t list }
-    type result = { config : config; request : Awskit.Response.t }
+    type result = { config : config; response : Awskit.Response.t }
   end
 
   module Cors : sig
@@ -476,7 +457,7 @@ module type BUCKET_DATA = sig
     }
 
     type config = { rules : rule list }
-    type result = { config : config; request : Awskit.Response.t }
+    type result = { config : config; response : Awskit.Response.t }
   end
 
   module Website : sig
@@ -485,7 +466,7 @@ module type BUCKET_DATA = sig
       error_document_key : string option;
     }
 
-    type result = { config : config; request : Awskit.Response.t }
+    type result = { config : config; response : Awskit.Response.t }
   end
 
   module Public_access_block : sig
@@ -496,7 +477,7 @@ module type BUCKET_DATA = sig
       restrict_public_buckets : bool;
     }
 
-    type result = { config : config; request : Awskit.Response.t }
+    type result = { config : config; response : Awskit.Response.t }
 
     val all_false : config
   end
@@ -510,7 +491,7 @@ module type BUCKET_DATA = sig
     end
 
     type config = { object_ownership : Object_ownership.t }
-    type result = { config : config; request : Awskit.Response.t }
+    type result = { config : config; response : Awskit.Response.t }
   end
 
   module Request_payment : sig
@@ -521,7 +502,7 @@ module type BUCKET_DATA = sig
       val of_string : string -> t option
     end
 
-    type result = { payer : Payer.t option; request : Awskit.Response.t }
+    type result = { payer : Payer.t option; response : Awskit.Response.t }
   end
 
   module Accelerate : sig
@@ -532,17 +513,17 @@ module type BUCKET_DATA = sig
       val of_string : string -> t option
     end
 
-    type result = { status : Status.t option; request : Awskit.Response.t }
+    type result = { status : Status.t option; response : Awskit.Response.t }
   end
 
   module Policy_status : sig
-    type result = { is_public : bool option; request : Awskit.Response.t }
+    type result = { is_public : bool option; response : Awskit.Response.t }
   end
 
   module Logging : sig
     type target = { target_bucket : string; target_prefix : string }
     type config = { logging : target option }
-    type result = { config : config; request : Awskit.Response.t }
+    type result = { config : config; response : Awskit.Response.t }
 
     val disabled : config
     val enabled : target_bucket:string -> target_prefix:string -> config
@@ -551,8 +532,35 @@ end
 
 module Bucket : BUCKET_DATA
 
+module Create_bucket : sig
+  type options = { region : Awskit.Region.t option }
+  type result = { response : Awskit.Response.t }
+
+  val default_options : options
+end
+
+module Delete_bucket : sig
+  type result = { response : Awskit.Response.t }
+end
+
+module Head_bucket : sig
+  type result = {
+    name : string;
+    region : Awskit.Region.t option;
+    response : Awskit.Response.t;
+  }
+end
+
+module List_buckets : sig
+  type result = Bucket.info list
+end
+
+module Get_bucket_location : sig
+  type result = Awskit.Region.t option
+end
+
 (** Multipart upload data types. *)
-module type MULTIPART_DATA = sig
+module rec Multipart : sig
   module Upload_id : sig
     type t
 
@@ -580,63 +588,6 @@ module type MULTIPART_DATA = sig
     val create_exn : part_number:int -> etag:Object.Etag.t -> t
   end
 
-  module Create : sig
-    type options = {
-      content_type : string option;
-      metadata : Metadata.t;
-      storage_class : Storage_class.t option;
-      tags : Tag.t list;
-      checksum : Object.Checksum.request option;
-      server_side_encryption : Object.Encryption.request option;
-    }
-
-    type result = { upload : Upload.t; request : Awskit.Response.t }
-
-    val default_options : options
-  end
-
-  module Upload_part : sig
-    type options = { checksum : Object.Checksum.request option }
-
-    type result = {
-      part : Part.t;
-      checksum : Object.Checksum.response option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
-  module Complete : sig
-    type result = {
-      etag : Object.Etag.t option;
-      version_id : Object.Version_id.t option;
-      checksum : Object.Checksum.response option;
-      request : Awskit.Response.t;
-    }
-  end
-
-  module List_parts : sig
-    type options = { max_parts : int option; part_number_marker : int option }
-
-    type part_info = {
-      part_number : int;
-      etag : Object.Etag.t option;
-      size : int64 option;
-      last_modified : Ptime.t option;
-      checksum : Object.Checksum.response option;
-    }
-
-    type page = {
-      parts : part_info list;
-      is_truncated : bool;
-      next_part_number_marker : int option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
   module Managed : sig
     val min_part_size : int
     val default_part_size : int
@@ -644,14 +595,14 @@ module type MULTIPART_DATA = sig
 
     type options = {
       part_size : int;
-      create_options : Create.options;
+      create_options : Create_multipart_upload.options;
       upload_part_options : Upload_part.options;
     }
 
     type result = {
       upload : Upload.t;
       parts : Part.t list;
-      complete : Complete.result;
+      complete : Complete_multipart_upload.result;
     }
 
     val default_options : options
@@ -659,7 +610,68 @@ module type MULTIPART_DATA = sig
   end
 end
 
-module Multipart : MULTIPART_DATA
+and Create_multipart_upload : sig
+  type options = {
+    content_type : string option;
+    metadata : Metadata.t;
+    storage_class : Storage_class.t option;
+    tags : Tag.t list;
+    checksum : Object.Checksum.request option;
+    server_side_encryption : Object.Encryption.request option;
+  }
+
+  type result = { upload : Multipart.Upload.t; response : Awskit.Response.t }
+
+  val default_options : options
+end
+
+and Upload_part : sig
+  type options = { checksum : Object.Checksum.request option }
+
+  type result = {
+    part : Multipart.Part.t;
+    checksum : Object.Checksum.response option;
+    response : Awskit.Response.t;
+  }
+
+  val default_options : options
+end
+
+and Complete_multipart_upload : sig
+  type result = {
+    etag : Object.Etag.t option;
+    version_id : Object.Version_id.t option;
+    checksum : Object.Checksum.response option;
+    response : Awskit.Response.t;
+  }
+end
+
+and Abort_multipart_upload : sig
+  type result = Awskit.Response.t
+end
+
+and List_parts : sig
+  type options = { max_parts : int option; part_number_marker : int option }
+
+  type part_info = {
+    part_number : int;
+    etag : Object.Etag.t option;
+    size : int64 option;
+    last_modified : Ptime.t option;
+    checksum : Object.Checksum.response option;
+  }
+
+  type page = {
+    parts : part_info list;
+    is_truncated : bool;
+    next_part_number_marker : int option;
+    response : Awskit.Response.t;
+  }
+
+  val default_options : options
+end
+
+module type MULTIPART_DATA = module type of Multipart
 
 (** Opaque validated bucket-policy JSON payloads. *)
 module type POLICY = sig
@@ -810,34 +822,34 @@ end
 module type OBJECT = sig
   type connection
   type +'a io
-  type upload_body
-  type download_reader
+  type request_body
+  type response_body_reader
 
   val put :
     connection ->
     bucket:string ->
     key:string ->
-    ?options:Object.Put.options ->
-    body:upload_body ->
+    ?options:Put_object.options ->
+    body:request_body ->
     unit ->
-    (Object.Put.result, Error.t) result io
+    (Put_object.result, Error.t) result io
 
   val get :
     connection ->
     bucket:string ->
     key:string ->
-    ?options:Object.Get.options ->
-    consume:(download_reader -> ('a, Error.t) result io) ->
+    ?options:Get_object.options ->
+    consume:(response_body_reader -> ('a, Error.t) result io) ->
     unit ->
-    (Object.Get.info * 'a, Error.t) result io
+    (Get_object.result * 'a, Error.t) result io
 
   val head :
     connection ->
     bucket:string ->
     key:string ->
-    ?options:Object.Head.options ->
+    ?options:Head_object.options ->
     unit ->
-    (Object.Head.info, Error.t) result io
+    (Head_object.result, Error.t) result io
 
   val exists :
     connection -> bucket:string -> key:string -> (bool, Error.t) result io
@@ -846,15 +858,15 @@ module type OBJECT = sig
     connection ->
     bucket:string ->
     key:string ->
-    ?options:Object.Delete.options ->
+    ?options:Delete_object.options ->
     unit ->
-    (Object.Delete.result, Error.t) result io
+    (Delete_object.result, Error.t) result io
 
-  val delete_many :
+  val delete_objects :
     connection ->
     bucket:string ->
-    objects:Object.Delete_many.object_ list ->
-    (Object.Delete_many.result, Error.t) result io
+    objects:Delete_objects.object_ list ->
+    (Delete_objects.result, Error.t) result io
 
   val copy :
     connection ->
@@ -862,28 +874,28 @@ module type OBJECT = sig
     src_key:string ->
     dst_bucket:string ->
     dst_key:string ->
-    ?options:Object.Copy.options ->
+    ?options:Copy_object.options ->
     unit ->
-    (Object.Copy.result, Error.t) result io
+    (Copy_object.result, Error.t) result io
 
   val list_versions :
     connection ->
     bucket:string ->
-    ?options:Object.Versions.options ->
+    ?options:List_object_versions.options ->
     unit ->
-    (Object.Versions.page, Error.t) result io
+    (List_object_versions.page, Error.t) result io
 
   val list :
     connection ->
     bucket:string ->
-    ?options:Object.List.options ->
+    ?options:List_objects_v2.options ->
     unit ->
-    (Object.List.page, Error.t) result io
+    (List_objects_v2.page, Error.t) result io
 
   val list_keys :
     connection ->
     bucket:string ->
-    ?options:Object.List.options ->
+    ?options:List_objects_v2.options ->
     unit ->
     (string list, Error.t) result io
 
@@ -891,33 +903,33 @@ module type OBJECT = sig
     val fold_pages :
       connection ->
       bucket:string ->
-      ?options:Object.List.options ->
+      ?options:List_objects_v2.options ->
       ?max_pages:int ->
       init:'acc ->
-      f:('acc -> Object.List.page -> ('acc, Error.t) result io) ->
+      f:('acc -> List_objects_v2.page -> ('acc, Error.t) result io) ->
       unit ->
       ('acc, Error.t) result io
 
     val pages :
       connection ->
       bucket:string ->
-      ?options:Object.List.options ->
+      ?options:List_objects_v2.options ->
       ?max_pages:int ->
       unit ->
-      (Object.List.page list, Error.t) result io
+      (List_objects_v2.page list, Error.t) result io
 
     val objects :
       connection ->
       bucket:string ->
-      ?options:Object.List.options ->
+      ?options:List_objects_v2.options ->
       ?max_pages:int ->
       unit ->
-      (Object.List.object_summary list, Error.t) result io
+      (List_objects_v2.object_summary list, Error.t) result io
 
     val keys :
       connection ->
       bucket:string ->
-      ?options:Object.List.options ->
+      ?options:List_objects_v2.options ->
       ?max_pages:int ->
       unit ->
       (string list, Error.t) result io
@@ -927,36 +939,36 @@ module type OBJECT = sig
     val fold_pages :
       connection ->
       bucket:string ->
-      ?options:Object.Versions.options ->
+      ?options:List_object_versions.options ->
       ?max_pages:int ->
       init:'acc ->
-      f:('acc -> Object.Versions.page -> ('acc, Error.t) result io) ->
+      f:('acc -> List_object_versions.page -> ('acc, Error.t) result io) ->
       unit ->
       ('acc, Error.t) result io
 
     val pages :
       connection ->
       bucket:string ->
-      ?options:Object.Versions.options ->
+      ?options:List_object_versions.options ->
       ?max_pages:int ->
       unit ->
-      (Object.Versions.page list, Error.t) result io
+      (List_object_versions.page list, Error.t) result io
 
     val object_versions :
       connection ->
       bucket:string ->
-      ?options:Object.Versions.options ->
+      ?options:List_object_versions.options ->
       ?max_pages:int ->
       unit ->
-      (Object.Versions.object_version list, Error.t) result io
+      (List_object_versions.object_version list, Error.t) result io
 
     val delete_markers :
       connection ->
       bucket:string ->
-      ?options:Object.Versions.options ->
+      ?options:List_object_versions.options ->
       ?max_pages:int ->
       unit ->
-      (Object.Versions.delete_marker list, Error.t) result io
+      (List_object_versions.delete_marker list, Error.t) result io
   end
 
   module Buffer : sig
@@ -964,35 +976,35 @@ module type OBJECT = sig
       connection ->
       bucket:string ->
       key:string ->
-      ?options:Object.Put.options ->
+      ?options:Put_object.options ->
       string ->
-      (Object.Put.result, Error.t) result io
+      (Put_object.result, Error.t) result io
 
     val put_bytes :
       connection ->
       bucket:string ->
       key:string ->
-      ?options:Object.Put.options ->
+      ?options:Put_object.options ->
       bytes ->
-      (Object.Put.result, Error.t) result io
+      (Put_object.result, Error.t) result io
 
     val get_string :
       connection ->
       bucket:string ->
       key:string ->
       max_size:int64 ->
-      ?options:Object.Get.options ->
+      ?options:Get_object.options ->
       unit ->
-      (Object.Get.info * string, Error.t) result io
+      (Get_object.result * string, Error.t) result io
 
     val get_bytes :
       connection ->
       bucket:string ->
       key:string ->
       max_size:int64 ->
-      ?options:Object.Get.options ->
+      ?options:Get_object.options ->
       unit ->
-      (Object.Get.info * bytes, Error.t) result io
+      (Get_object.result * bytes, Error.t) result io
   end
 
   module Tagging : sig
@@ -1024,21 +1036,23 @@ module type BUCKET = sig
   val create :
     connection ->
     bucket:string ->
-    ?options:Bucket.Create.options ->
+    ?options:Create_bucket.options ->
     unit ->
-    (Bucket.Create.result, Error.t) result io
+    (Create_bucket.result, Error.t) result io
 
   val delete :
-    connection -> bucket:string -> (Bucket.Delete.result, Error.t) result io
+    connection -> bucket:string -> (Delete_bucket.result, Error.t) result io
 
   val head :
-    connection -> bucket:string -> (Bucket.Head.info, Error.t) result io
+    connection -> bucket:string -> (Head_bucket.result, Error.t) result io
 
   val exists : connection -> bucket:string -> (bool, Error.t) result io
-  val list : connection -> (Bucket.info list, Error.t) result io
+  val list : connection -> (List_buckets.result, Error.t) result io
 
   val get_location :
-    connection -> bucket:string -> (Awskit.Region.t option, Error.t) result io
+    connection ->
+    bucket:string ->
+    (Get_bucket_location.result, Error.t) result io
 
   module Policy : sig
     val get : connection -> bucket:string -> (Policy.t, Error.t) result io
@@ -1204,15 +1218,15 @@ end
 module type MULTIPART = sig
   type connection
   type +'a io
-  type upload_body
+  type request_body
 
   val create :
     connection ->
     bucket:string ->
     key:string ->
-    ?options:Multipart.Create.options ->
+    ?options:Create_multipart_upload.options ->
     unit ->
-    (Multipart.Create.result, Error.t) result io
+    (Create_multipart_upload.result, Error.t) result io
 
   val upload_part :
     connection ->
@@ -1220,10 +1234,10 @@ module type MULTIPART = sig
     key:string ->
     upload_id:Multipart.Upload_id.t ->
     part_number:int ->
-    body:upload_body ->
-    ?options:Multipart.Upload_part.options ->
+    body:request_body ->
+    ?options:Upload_part.options ->
     unit ->
-    (Multipart.Upload_part.result, Error.t) result io
+    (Upload_part.result, Error.t) result io
 
   val complete :
     connection ->
@@ -1231,23 +1245,23 @@ module type MULTIPART = sig
     key:string ->
     upload_id:Multipart.Upload_id.t ->
     Multipart.Part.t list ->
-    (Multipart.Complete.result, Error.t) result io
+    (Complete_multipart_upload.result, Error.t) result io
 
   val abort :
     connection ->
     bucket:string ->
     key:string ->
     upload_id:Multipart.Upload_id.t ->
-    (Awskit.Response.t, Error.t) result io
+    (Abort_multipart_upload.result, Error.t) result io
 
   val list_parts :
     connection ->
     bucket:string ->
     key:string ->
     upload_id:Multipart.Upload_id.t ->
-    ?options:Multipart.List_parts.options ->
+    ?options:List_parts.options ->
     unit ->
-    (Multipart.List_parts.page, Error.t) result io
+    (List_parts.page, Error.t) result io
 
   module Paginator : sig
     val fold_pages :
@@ -1255,10 +1269,10 @@ module type MULTIPART = sig
       bucket:string ->
       key:string ->
       upload_id:Multipart.Upload_id.t ->
-      ?options:Multipart.List_parts.options ->
+      ?options:List_parts.options ->
       ?max_pages:int ->
       init:'acc ->
-      f:('acc -> Multipart.List_parts.page -> ('acc, Error.t) result io) ->
+      f:('acc -> List_parts.page -> ('acc, Error.t) result io) ->
       unit ->
       ('acc, Error.t) result io
 
@@ -1267,20 +1281,20 @@ module type MULTIPART = sig
       bucket:string ->
       key:string ->
       upload_id:Multipart.Upload_id.t ->
-      ?options:Multipart.List_parts.options ->
+      ?options:List_parts.options ->
       ?max_pages:int ->
       unit ->
-      (Multipart.List_parts.page list, Error.t) result io
+      (List_parts.page list, Error.t) result io
 
     val parts :
       connection ->
       bucket:string ->
       key:string ->
       upload_id:Multipart.Upload_id.t ->
-      ?options:Multipart.List_parts.options ->
+      ?options:List_parts.options ->
       ?max_pages:int ->
       unit ->
-      (Multipart.List_parts.part_info list, Error.t) result io
+      (List_parts.part_info list, Error.t) result io
   end
 
   module Managed : sig
@@ -1352,15 +1366,15 @@ end
 module type S = sig
   type connection
   type +'a io
-  type upload_body
-  type download_reader
+  type request_body
+  type response_body_reader
 
   module Object :
     OBJECT
       with type connection = connection
        and type 'a io = 'a io
-       and type upload_body = upload_body
-       and type download_reader = download_reader
+       and type request_body = request_body
+       and type response_body_reader = response_body_reader
 
   module Bucket :
     BUCKET with type connection = connection and type 'a io = 'a io
@@ -1369,7 +1383,7 @@ module type S = sig
     MULTIPART
       with type connection = connection
        and type 'a io = 'a io
-       and type upload_body = upload_body
+       and type request_body = request_body
 
   module Presigned :
     PRESIGNED with type connection = connection and type 'a io = 'a io
@@ -1380,8 +1394,8 @@ module Make (R : RUNTIME) :
   S
     with type connection = R.connection
      and type 'a io = 'a R.t
-     and type upload_body = R.upload_body
-     and type download_reader = R.download_reader
+     and type request_body = R.request_body
+     and type response_body_reader = R.response_body_reader
 
 (** In-memory S3 simulator for contract tests. *)
 module Sim : sig
@@ -1426,7 +1440,7 @@ module Sim : sig
       | `List
       | `List_versions
       | `Copy
-      | `Delete_many
+      | `Delete_objects
       | `Multipart_create
       | `Multipart_upload_part
       | `Multipart_complete
@@ -1454,6 +1468,6 @@ module Sim : sig
     S
       with type connection := t
        and type 'a io := 'a
-       and type upload_body := Runtime.upload_body
-       and type download_reader := Runtime.download_reader
+       and type request_body := Runtime.request_body
+       and type response_body_reader := Runtime.response_body_reader
 end

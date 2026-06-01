@@ -1,6 +1,6 @@
 (** Body-free HTTP request metadata.
 
-    Runtime adapters receive upload bodies separately through
+    Runtime adapters receive request bodies separately through
     {!Runtime.S.with_response}. *)
 
 module Method : sig

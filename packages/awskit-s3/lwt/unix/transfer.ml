@@ -5,14 +5,14 @@ module Make
         Awskit_s3.OBJECT
           with type connection := Runtime.connection
            and type 'a io := 'a Lwt.t
-           and type upload_body := Runtime.upload_body
-           and type download_reader := Runtime.download_reader
+           and type request_body := Runtime.request_body
+           and type response_body_reader := Runtime.response_body_reader
 
       module Multipart :
         Awskit_s3.MULTIPART
           with type connection := Runtime.connection
            and type 'a io := 'a Lwt.t
-           and type upload_body := Runtime.upload_body
+           and type request_body := Runtime.request_body
     end) =
 struct
   let buffer_size = 128 * 1024
@@ -45,13 +45,13 @@ struct
                         (file_kind_to_string kind)))))
       (fun exn -> Lwt.return_error (body_error "stat upload" path exn))
 
-  let upload_body_of_path ?on_progress path =
+  let request_body_of_path ?on_progress path =
     Lwt.bind (regular_file_length path) (function
       | Error _ as error -> Lwt.return error
       | Ok content_length ->
           let descriptor =
             {
-              Awskit.Body.Upload.content_length = Some content_length;
+              Awskit.Body.Request.content_length = Some content_length;
               payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
               replayable = true;
             }
@@ -67,7 +67,8 @@ struct
                         | 0 -> Lwt.return_ok ()
                         | n ->
                             let chunk = Bytes.sub_string bytes 0 n in
-                            Lwt.bind (Runtime.write_string writer chunk)
+                            Lwt.bind
+                              (Runtime.write_request_body_string writer chunk)
                               (function
                               | Error _ as error -> Lwt.return error
                               | Ok () ->
@@ -82,10 +83,10 @@ struct
                     loop 0L))
               (fun exn -> Lwt.return_error (body_error "read upload" path exn))
           in
-          Lwt.return_ok (Runtime.stream_body descriptor ~write))
+          Lwt.return_ok (Runtime.stream_request_body descriptor ~write))
 
   let upload_from_path conn ~bucket ~key ?options ?on_progress ~path () =
-    Lwt.bind (upload_body_of_path ?on_progress path) (function
+    Lwt.bind (request_body_of_path ?on_progress path) (function
       | Error _ as error -> Lwt.return error
       | Ok body -> S3.Object.put conn ~bucket ~key ?options ~body ())
 
@@ -131,7 +132,7 @@ struct
   let range_body_of_path path spec =
     let descriptor =
       {
-        Awskit.Body.Upload.content_length = Some (Int64.of_int spec.length);
+        Awskit.Body.Request.content_length = Some (Int64.of_int spec.length);
         payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
         replayable = true;
       }
@@ -160,8 +161,9 @@ struct
                                         spec.part_number path))
                             | n ->
                                 let chunk = Bytes.sub_string bytes 0 n in
-                                Lwt.bind (Runtime.write_string writer chunk)
-                                  (function
+                                Lwt.bind
+                                  (Runtime.write_request_body_string writer
+                                     chunk) (function
                                   | Error _ as error -> Lwt.return error
                                   | Ok () -> loop (remaining - n)))
                       in
@@ -170,7 +172,7 @@ struct
         (fun exn ->
           Lwt.return_error (body_error "read multipart upload" path exn))
     in
-    Runtime.stream_body descriptor ~write
+    Runtime.stream_request_body descriptor ~write
 
   let split_batch ~concurrency specs =
     let rec loop remaining acc = function
@@ -253,7 +255,7 @@ struct
           let part_for_spec spec =
             match
               List.find_opt
-                (fun (part : Awskit_s3.Multipart.List_parts.part_info) ->
+                (fun (part : Awskit_s3.List_parts.part_info) ->
                   part.part_number = spec.part_number)
                 uploaded
             with
@@ -384,8 +386,9 @@ struct
           Lwt_io.with_file ~mode:Lwt_io.Output ~perm:0o600 path (fun channel ->
               let bytes = Bytes.create buffer_size in
               let rec loop transferred =
-                Lwt.bind (Runtime.read reader bytes ~off:0 ~len:buffer_size)
-                  (function
+                Lwt.bind
+                  (Runtime.read_response_body reader bytes ~off:0
+                     ~len:buffer_size) (function
                   | Error _ as error -> Lwt.return error
                   | Ok 0 -> Lwt.return_ok ()
                   | Ok n ->
