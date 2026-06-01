@@ -364,7 +364,7 @@ let test_multipart_edges () =
       let final_body = "second" in
       let upload =
         await "create multipart"
-          (S3.Multipart.create conn ~bucket ~key:"edges.bin" ())
+          (S3.Multipart.create_upload conn ~bucket ~key:"edges.bin" ())
       in
       let upload_id = upload.upload.upload_id in
       let first =
@@ -390,11 +390,13 @@ let test_multipart_edges () =
       in
       expect_status "complete stale etag" 400
         (Lwt_main.run
-           (S3.Multipart.complete conn ~bucket ~key:"edges.bin" ~upload_id
+           (S3.Multipart.complete_upload conn ~bucket ~key:"edges.bin"
+              ~upload_id
               [ first.part; second.part ]));
       ignore
         (await "complete overwritten"
-           (S3.Multipart.complete conn ~bucket ~key:"edges.bin" ~upload_id
+           (S3.Multipart.complete_upload conn ~bucket ~key:"edges.bin"
+              ~upload_id
               [ overwritten.part; second.part ]));
       let _info, body =
         await "get multipart"
@@ -416,7 +418,8 @@ let test_multipart_edges () =
            (String.length final_body));
       expect_status "complete missing upload" 404
         (Lwt_main.run
-           (S3.Multipart.complete conn ~bucket ~key:"edges.bin" ~upload_id
+           (S3.Multipart.complete_upload conn ~bucket ~key:"edges.bin"
+              ~upload_id
               [ overwritten.part; second.part ])))
 
 let test_path_transfer_streams () =
@@ -479,7 +482,7 @@ let test_multipart_path_transfer_resumes () =
         (fun () ->
           let created =
             await "create multipart for resume"
-              (S3.Multipart.create conn ~bucket ~key:"resume.bin" ())
+              (S3.Multipart.create_upload conn ~bucket ~key:"resume.bin" ())
           in
           let upload_id = created.upload.upload_id in
           let first_part = String.sub body 0 part_size in

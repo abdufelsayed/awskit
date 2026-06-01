@@ -33,7 +33,7 @@ module Make (C : Operation_context.S) = struct
              (Fmt.str "expected CompleteMultipartUploadResult XML, got %s"
                 actual))
 
-  let create conn ~bucket ~key ?options () =
+  let create_upload conn ~bucket ~key ?options () =
     let options =
       Option.value ~default:Create_multipart_upload.default_options options
     in
@@ -150,7 +150,7 @@ module Make (C : Operation_context.S) = struct
                                             response;
                                           })))))))
 
-  let complete conn ~bucket ~key ~upload_id parts =
+  let complete_upload conn ~bucket ~key ~upload_id parts =
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
@@ -216,7 +216,7 @@ module Make (C : Operation_context.S) = struct
                             | Error error -> return_error error
                             | Ok result -> return_ok result)))))
 
-  let abort conn ~bucket ~key ~upload_id =
+  let abort_upload conn ~bucket ~key ~upload_id =
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
@@ -416,14 +416,15 @@ module Make (C : Operation_context.S) = struct
           | Error error -> return_error error
           | Ok _ -> (
               let* created =
-                create conn ~bucket ~key ~options:options.create_options ()
+                create_upload conn ~bucket ~key ~options:options.create_options
+                  ()
               in
               match created with
               | Error error -> return_error error
               | Ok created -> (
                   let upload_id = created.upload.upload_id in
                   let abort_and_return error =
-                    let* _ = abort conn ~bucket ~key ~upload_id in
+                    let* _ = abort_upload conn ~bucket ~key ~upload_id in
                     return_error error
                   in
                   let rec upload_parts offset part_number parts =
@@ -450,7 +451,7 @@ module Make (C : Operation_context.S) = struct
                   | Error error -> return_error error
                   | Ok parts -> (
                       let* completed =
-                        complete conn ~bucket ~key ~upload_id parts
+                        complete_upload conn ~bucket ~key ~upload_id parts
                       in
                       match completed with
                       | Error error -> abort_and_return error

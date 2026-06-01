@@ -1112,7 +1112,7 @@ let test_sim_request_body_requires_known_length () =
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected unknown-length object to be absent");
   let created =
-    Sim.Multipart.create conn ~bucket:"test-bucket" ~key:"large.bin" ()
+    Sim.Multipart.create_upload conn ~bucket:"test-bucket" ~key:"large.bin" ()
     |> ok_or_fail "create multipart upload"
   in
   let upload_id = created.upload.upload_id in
@@ -1216,7 +1216,7 @@ let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
   let conn = Sim.connect store ~credentials:creds in
   ignore (Sim.Bucket.create conn ~bucket:"test-bucket" () |> ok_or_fail "bucket");
   let created =
-    Sim.Multipart.create conn ~bucket:"test-bucket" ~key:"large.bin" ()
+    Sim.Multipart.create_upload conn ~bucket:"test-bucket" ~key:"large.bin" ()
     |> ok_or_fail "create multipart upload"
   in
   let upload_id = created.upload.upload_id in
@@ -1559,8 +1559,8 @@ let test_complete_multipart_embedded_error () =
       ~etag:(Object.Etag.of_string_exn "\"part-1\"")
   in
   match
-    Recording_s3.Multipart.complete conn ~bucket:"my-bucket" ~key:"large.bin"
-      ~upload_id [ part ]
+    Recording_s3.Multipart.complete_upload conn ~bucket:"my-bucket"
+      ~key:"large.bin" ~upload_id [ part ]
   with
   | Error error when Error.service_code error = Some "SlowDown" -> ()
   | Error error -> Alcotest.failf "unexpected complete error: %a" Error.pp error

@@ -12,7 +12,7 @@ module Multipart = struct
     let* () = validate_metadata options.metadata in
     validate_tags options.tags
 
-  let create conn ~bucket ~key ?options () =
+  let create_upload conn ~bucket ~key ?options () =
     let options =
       Option.value ~default:Create_multipart_upload.default_options options
     in
@@ -138,7 +138,7 @@ module Multipart = struct
              "complete requires at least one part")
     | parts -> loop None parts
 
-  let complete conn ~bucket ~key ~upload_id parts =
+  let complete_upload conn ~bucket ~key ~upload_id parts =
     match validate_bucket_key bucket key with
     | Error error -> Error error
     | Ok () -> (
@@ -191,7 +191,7 @@ module Multipart = struct
                               @ checksum_response_headers checksum);
                       })))
 
-  let abort conn ~bucket ~key ~upload_id =
+  let abort_upload conn ~bucket ~key ~upload_id =
     match validate_bucket_key bucket key with
     | Error error -> Error error
     | Ok () -> (
@@ -359,13 +359,14 @@ module Multipart = struct
           | Error error -> Error error
           | Ok _ -> (
               match
-                create conn ~bucket ~key ~options:options.create_options ()
+                create_upload conn ~bucket ~key ~options:options.create_options
+                  ()
               with
               | Error error -> Error error
               | Ok created -> (
                   let upload_id = created.upload.upload_id in
                   let abort_and_return error =
-                    ignore (abort conn ~bucket ~key ~upload_id);
+                    ignore (abort_upload conn ~bucket ~key ~upload_id);
                     Error error
                   in
                   let rec upload_parts offset part_number parts =
@@ -388,7 +389,9 @@ module Multipart = struct
                   match upload_parts 0 1 [] with
                   | Error error -> Error error
                   | Ok parts -> (
-                      match complete conn ~bucket ~key ~upload_id parts with
+                      match
+                        complete_upload conn ~bucket ~key ~upload_id parts
+                      with
                       | Error error -> abort_and_return error
                       | Ok complete ->
                           Ok

@@ -282,7 +282,7 @@ struct
 
   let complete_multipart conn ~bucket ~key ~upload_id upload parts =
     let parts = sort_parts parts in
-    Lwt.bind (S3.Multipart.complete conn ~bucket ~key ~upload_id parts)
+    Lwt.bind (S3.Multipart.complete_upload conn ~bucket ~key ~upload_id parts)
       (function
       | Error _ as error -> Lwt.return error
       | Ok complete ->
@@ -355,15 +355,15 @@ struct
                   | Error _ as error -> Lwt.return error
                   | Ok specs ->
                       Lwt.bind
-                        (S3.Multipart.create conn ~bucket ~key
+                        (S3.Multipart.create_upload conn ~bucket ~key
                            ~options:options.create_options ()) (function
                         | Error _ as error -> Lwt.return error
                         | Ok created ->
                             let upload_id = created.upload.upload_id in
                             let abort_and_return error =
                               Lwt.bind
-                                (S3.Multipart.abort conn ~bucket ~key ~upload_id)
-                                (fun _ -> Lwt.return_error error)
+                                (S3.Multipart.abort_upload conn ~bucket ~key
+                                   ~upload_id) (fun _ -> Lwt.return_error error)
                             in
                             Lwt.bind
                               (upload_missing_parts conn ~bucket ~key ~upload_id

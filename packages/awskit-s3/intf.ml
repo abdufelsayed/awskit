@@ -485,7 +485,7 @@ module type MULTIPART = sig
   type +'a io
   type request_body
 
-  val create :
+  val create_upload :
     connection ->
     bucket:string ->
     key:string ->
@@ -504,7 +504,7 @@ module type MULTIPART = sig
     unit ->
     (Upload_part.result, Error.t) result io
 
-  val complete :
+  val complete_upload :
     connection ->
     bucket:string ->
     key:string ->
@@ -512,7 +512,7 @@ module type MULTIPART = sig
     Multipart.Part.t list ->
     (Complete_multipart_upload.result, Error.t) result io
 
-  val abort :
+  val abort_upload :
     connection ->
     bucket:string ->
     key:string ->

@@ -216,14 +216,14 @@ module S3 = struct
     type 'a io = 'a Lwt.t
     type request_body = Runtime.request_body
 
-    let create _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
+    let create_upload _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
 
     let upload_part _ ~bucket:_ ~key:_ ~upload_id:_ ~part_number:_ ~body:_
         ?options:_ () =
       unsupported ()
 
-    let complete _ ~bucket:_ ~key:_ ~upload_id:_ _ = unsupported ()
-    let abort _ ~bucket:_ ~key:_ ~upload_id:_ = unsupported ()
+    let complete_upload _ ~bucket:_ ~key:_ ~upload_id:_ _ = unsupported ()
+    let abort_upload _ ~bucket:_ ~key:_ ~upload_id:_ = unsupported ()
 
     let list_parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
       unsupported ()

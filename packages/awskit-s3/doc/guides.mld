@@ -355,10 +355,10 @@ Awskit_s3_eio.Bucket.Encryption.put s3
 [Multipart] exposes the primitive AWS multipart flow:
 
 {ol
-  {li [Multipart.create] starts an upload and returns an upload ID.}
+  {li [Multipart.create_upload] starts an upload and returns an upload ID.}
   {li [Multipart.upload_part] uploads a known-length part.}
-  {li [Multipart.complete] completes the upload with ordered parts.}
-  {li [Multipart.abort] cancels an upload.}
+  {li [Multipart.complete_upload] completes the upload with ordered parts.}
+  {li [Multipart.abort_upload] cancels an upload.}
   {li [Multipart.list_parts] inspects one page of uploaded parts.}
   {li [Multipart.List_parts.pages] and [parts] follow [ListParts] part-number
     markers.}
@@ -407,7 +407,7 @@ Awskit_s3.Presigned.put_object
 ]}
 
 Multipart direct-upload flows can presign individual [UploadPart] requests
-after [Multipart.create] has produced an upload ID:
+after [Multipart.create_upload] has produced an upload ID:
 
 {[
 Awskit_s3.Presigned.upload_part
@@ -427,7 +427,7 @@ as normal operations.
 A typical direct-upload multipart flow is:
 
 {ol
-  {li Start the upload with [Multipart.create].}
+  {li Start the upload with [Multipart.create_upload].}
   {li Presign one [UploadPart] URL per part number with
     [Presigned.upload_part].}
   {li The uploader sends each part to the corresponding URL.}

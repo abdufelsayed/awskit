@@ -268,7 +268,7 @@ struct
 
   let complete_multipart conn ~bucket ~key ~upload_id upload parts =
     let parts = sort_parts parts in
-    match S3.Multipart.complete conn ~bucket ~key ~upload_id parts with
+    match S3.Multipart.complete_upload conn ~bucket ~key ~upload_id parts with
     | Error _ as error -> error
     | Ok complete -> Ok { Awskit_s3.Multipart.Managed.upload; parts; complete }
 
@@ -304,11 +304,12 @@ struct
     let* content_length = regular_file_length path in
     let* specs = multipart_specs ~content_length ~part_size:options.part_size in
     let* created =
-      S3.Multipart.create conn ~bucket ~key ~options:options.create_options ()
+      S3.Multipart.create_upload conn ~bucket ~key
+        ~options:options.create_options ()
     in
     let upload_id = created.upload.upload_id in
     let abort_and_return error =
-      ignore (S3.Multipart.abort conn ~bucket ~key ~upload_id);
+      ignore (S3.Multipart.abort_upload conn ~bucket ~key ~upload_id);
       Error error
     in
     match

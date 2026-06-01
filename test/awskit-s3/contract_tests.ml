@@ -451,7 +451,7 @@ module Make (Client : SUBJECT) = struct
     in
     Alcotest.(check string) "copied previous body" "one" body;
     let upload =
-      Client.Multipart.create conn ~bucket ~key:"multi-versioned.txt" ()
+      Client.Multipart.create_upload conn ~bucket ~key:"multi-versioned.txt" ()
       |> ok_or_fail "create versioned multipart"
     in
     let part =
@@ -462,7 +462,7 @@ module Make (Client : SUBJECT) = struct
       |> ok_or_fail "upload versioned part"
     in
     let complete =
-      Client.Multipart.complete conn ~bucket ~key:"multi-versioned.txt"
+      Client.Multipart.complete_upload conn ~bucket ~key:"multi-versioned.txt"
         ~upload_id:upload.upload.upload_id [ part.part ]
       |> ok_or_fail "complete versioned multipart"
     in
@@ -1061,7 +1061,7 @@ module Make (Client : SUBJECT) = struct
       }
     in
     let upload =
-      Client.Multipart.create conn ~bucket ~key:"multi.bin"
+      Client.Multipart.create_upload conn ~bucket ~key:"multi.bin"
         ~options:upload_options ()
       |> ok_or_fail "create multipart"
     in
@@ -1110,7 +1110,7 @@ module Make (Client : SUBJECT) = struct
       "part numbers" [ 1; 2 ]
       (List.map (fun (part : List_parts.part_info) -> part.part_number) parts);
     let complete =
-      Client.Multipart.complete conn ~bucket ~key:"multi.bin" ~upload_id
+      Client.Multipart.complete_upload conn ~bucket ~key:"multi.bin" ~upload_id
         [ part1.part; part2.part ]
       |> ok_or_fail "complete multipart"
     in
@@ -1126,7 +1126,7 @@ module Make (Client : SUBJECT) = struct
     check_checksum "completed object checksum" `SHA256
       "r6J7RNQ7Aqn+pB0TztwuQBbPz4fF2/mQ5ZNmmqjOKG0=" info.checksum;
     let aborted =
-      Client.Multipart.create conn ~bucket ~key:"abort.bin" ()
+      Client.Multipart.create_upload conn ~bucket ~key:"abort.bin" ()
       |> ok_or_fail "create abort multipart"
     in
     let aborted_upload_id = aborted.upload.upload_id in
@@ -1137,7 +1137,7 @@ module Make (Client : SUBJECT) = struct
          ()
       |> ok_or_fail "upload aborted part");
     ignore
-      (Client.Multipart.abort conn ~bucket ~key:"abort.bin"
+      (Client.Multipart.abort_upload conn ~bucket ~key:"abort.bin"
          ~upload_id:aborted_upload_id
       |> ok_or_fail "abort multipart");
     match
@@ -1153,7 +1153,7 @@ module Make (Client : SUBJECT) = struct
     let conn = Client.fresh () in
     create_bucket conn;
     let upload =
-      Client.Multipart.create conn ~bucket ~key:"edges.bin" ()
+      Client.Multipart.create_upload conn ~bucket ~key:"edges.bin" ()
       |> ok_or_fail "create edge multipart"
     in
     let upload_id = upload.upload.upload_id in
@@ -1179,13 +1179,13 @@ module Make (Client : SUBJECT) = struct
       |> ok_or_fail "overwrite first part"
     in
     expect_status "complete with stale part etag" 400
-      (Client.Multipart.complete conn ~bucket ~key:"edges.bin" ~upload_id
+      (Client.Multipart.complete_upload conn ~bucket ~key:"edges.bin" ~upload_id
          [ first.part; second.part ]);
     expect_validation "complete with unsorted parts"
-      (Client.Multipart.complete conn ~bucket ~key:"edges.bin" ~upload_id
+      (Client.Multipart.complete_upload conn ~bucket ~key:"edges.bin" ~upload_id
          [ second.part; overwritten.part ]);
     ignore
-      (Client.Multipart.complete conn ~bucket ~key:"edges.bin" ~upload_id
+      (Client.Multipart.complete_upload conn ~bucket ~key:"edges.bin" ~upload_id
          [ overwritten.part; second.part ]
       |> ok_or_fail "complete overwritten parts");
     let _info, body =
@@ -1195,7 +1195,7 @@ module Make (Client : SUBJECT) = struct
     in
     Alcotest.(check string) "completed overwritten body" "FIRSTsecond" body;
     expect_status "complete already completed upload" 404
-      (Client.Multipart.complete conn ~bucket ~key:"edges.bin" ~upload_id
+      (Client.Multipart.complete_upload conn ~bucket ~key:"edges.bin" ~upload_id
          [ overwritten.part; second.part ])
 
   let test_managed_multipart_upload () =
