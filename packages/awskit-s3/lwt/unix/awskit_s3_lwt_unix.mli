@@ -31,7 +31,7 @@ module Object : sig
        and type response_body_reader := Runtime.response_body_reader
 
   module Transfer : sig
-    val upload_from_path :
+    val upload_file :
       t ->
       bucket:string ->
       key:string ->
@@ -43,7 +43,7 @@ module Object : sig
     (** Stream a local file to S3. [on_progress], when provided, receives the
         cumulative number of bytes written to the request body. *)
 
-    val upload_multipart_from_path :
+    val upload_multipart_file :
       t ->
       bucket:string ->
       key:string ->
@@ -57,7 +57,7 @@ module Object : sig
         [4]. The helper aborts the multipart upload when a fresh upload fails.
     *)
 
-    val resume_multipart_upload_from_path :
+    val resume_multipart_upload_file :
       t ->
       bucket:string ->
       key:string ->
@@ -72,7 +72,7 @@ module Object : sig
         matching part numbers and sizes, uploading missing parts, and completing
         the upload. Existing uploads are not aborted on failure. *)
 
-    val download_to_path :
+    val download_file :
       t ->
       bucket:string ->
       key:string ->

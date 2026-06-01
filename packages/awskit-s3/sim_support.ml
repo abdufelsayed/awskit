@@ -631,6 +631,21 @@ module Runtime = struct
   let discard_response_body body =
     with_response_body body ~consume:(fun reader -> discard_reader reader)
 
+  module Request_body = struct
+    let empty = empty_request_body
+    let of_string = string_request_body
+    let of_bytes = bytes_request_body
+    let of_stream = stream_request_body
+    let descriptor = request_body_descriptor
+    let write_string = write_request_body_string
+  end
+
+  module Response_body = struct
+    let read = read_response_body
+    let with_reader = with_response_body
+    let discard = discard_response_body
+  end
+
   let with_response _ _ _ ~f:_ =
     Error
       (Awskit.Error.transport ~retryable:false

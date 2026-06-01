@@ -52,6 +52,18 @@ module Multipart = struct
                         response = response 200;
                       })))
 
+  let request_body_result body =
+    let descriptor = Runtime.Request_body.descriptor body in
+    match descriptor.content_length with
+    | None ->
+        Error
+          (Awskit.Error.validation ~field:"content_length"
+             "S3 multipart uploads require a known content length")
+    | Some _ -> (
+        match Awskit.Body.Request.validate_descriptor descriptor with
+        | Error error -> Error error
+        | Ok () -> Runtime.request_body_result body)
+
   let upload_part conn ~bucket ~key ~upload_id ~part_number ~body ?options () =
     let options = Option.value ~default:Upload_part.default_options options in
     match validate_bucket_key bucket key with
@@ -68,7 +80,7 @@ module Multipart = struct
                 with
                 | Some error -> Error error
                 | None -> (
-                    match Runtime.request_body_result body with
+                    match request_body_result body with
                     | Error error -> Error error
                     | Ok body ->
                         let etag = etag body in
@@ -365,7 +377,7 @@ module Multipart = struct
                       let part_body = String.sub body offset length in
                       match
                         upload_part conn ~bucket ~key ~upload_id ~part_number
-                          ~body:(Runtime.string_request_body part_body)
+                          ~body:(Runtime.Request_body.of_string part_body)
                           ~options:options.upload_part_options ()
                       with
                       | Error error -> abort_and_return error

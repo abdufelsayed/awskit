@@ -11,7 +11,7 @@ bodies and scoped response body readers.
 {2 Upload}
 
 {[
-let body = Awskit_s3_eio.Runtime.string_request_body "hello" in
+let body = Awskit_s3_eio.Runtime.Request_body.of_string "hello" in
 Awskit_s3_eio.Object.put s3
   ~bucket:"my-bucket"
   ~key:"hello.txt"
@@ -23,9 +23,9 @@ Primitive uploads require a known content length. The runtime records length
 and payload hash in its request-body descriptor before signing. Unknown-length
 SigV4 aws-chunked streaming is not implemented today.
 
-For custom [Runtime.stream_request_body] values, declare the exact [content_length]
+For custom [Runtime.Request_body.of_stream] values, declare the exact [content_length]
 and emit exactly that number of bytes. Producer callback errors are returned as
-request body failures. Prefer [Runtime.string_request_body] or [Runtime.bytes_request_body] when the
+request body failures. Prefer [Runtime.Request_body.of_string] or [Runtime.Request_body.of_bytes] when the
 body is already buffered.
 
 Options carry object metadata, content type, storage class, tags,
@@ -44,7 +44,7 @@ Awskit_s3_eio.Object.put s3
   ~bucket:"my-bucket"
   ~key:"hello.txt"
   ~options
-  ~body:(Awskit_s3_eio.Runtime.string_request_body "hello")
+  ~body:(Awskit_s3_eio.Runtime.Request_body.of_string "hello")
   ()
 ]}
 
@@ -84,12 +84,12 @@ service status [412] with code [PreconditionFailed]. Read [If-None-Match] and
 
 [Object.get] scopes the response body to the [consume] callback. Do not store
 the reader outside that callback. Buffering helpers such as
-[Object.Buffer.get_string ~max_size] keep response-size limits explicit.
+[Object.get_as_string ~max_bytes] keep response-size limits explicit.
 
 {[
 let consume reader =
   let bytes = Bytes.create 8192 in
-  match Awskit_s3_eio.Runtime.read_response_body reader bytes ~off:0 ~len:8192 with
+  match Awskit_s3_eio.Runtime.Response_body.read reader bytes ~off:0 ~len:8192 with
   | Error _ as error -> error
   | Ok n -> Ok (Bytes.sub_string bytes 0 n)
 in
@@ -158,28 +158,28 @@ Awskit_s3_eio.Object.Versions.object_versions s3
   ()
 ]}
 
-{1 Object.Buffer}
+{1 In-Memory Object Helpers}
 
-[Object.Buffer] is for explicit in-memory use. Upload helpers accept strings or
-bytes. Download helpers require [max_size] to avoid accidental unbounded
-buffering.
+[Object.put_string], [Object.put_bytes], [Object.get_as_string], and
+[Object.get_as_bytes] are for explicit in-memory use. Download helpers require
+[max_bytes] to avoid accidental unbounded buffering.
 
 {[
-Awskit_s3_eio.Object.Buffer.put_string s3
+Awskit_s3_eio.Object.put_string s3
   ~bucket:"my-bucket"
   ~key:"hello.txt"
   "hello"
 ]}
 
 {[
-Awskit_s3_eio.Object.Buffer.get_string s3
+Awskit_s3_eio.Object.get_as_string s3
   ~bucket:"my-bucket"
   ~key:"hello.txt"
-  ~max_size:1_048_576L
+  ~max_bytes:1_048_576L
   ()
 ]}
 
-If the response body exceeds [max_size], the helper returns
+If the response body exceeds [max_bytes], the helper returns
 [Error (Awskit.Error.Body _)].
 
 {1 Object.Transfer}
@@ -191,7 +191,7 @@ independent of filesystem APIs.
 {2 Eio}
 
 {[
-Awskit_s3_eio.Object.Transfer.upload_from_path s3
+Awskit_s3_eio.Object.Transfer.upload_file s3
   ~bucket:"my-bucket"
   ~key:"archive.tar"
   ~on_progress:(fun bytes -> Fmt.pr "uploaded %Ld bytes@." bytes)
@@ -200,7 +200,7 @@ Awskit_s3_eio.Object.Transfer.upload_from_path s3
 ]}
 
 {[
-Awskit_s3_eio.Object.Transfer.download_to_path s3
+Awskit_s3_eio.Object.Transfer.download_file s3
   ~bucket:"my-bucket"
   ~key:"archive.tar"
   ~on_progress:(fun bytes -> Fmt.pr "downloaded %Ld bytes@." bytes)
@@ -212,7 +212,7 @@ Awskit_s3_eio.Object.Transfer.download_to_path s3
 
 {[
 let* result =
-  Awskit_s3_lwt_unix.Object.Transfer.upload_from_path s3
+  Awskit_s3_lwt_unix.Object.Transfer.upload_file s3
     ~bucket:"my-bucket"
     ~key:"archive.tar"
     ~path:"/tmp/archive.tar"
@@ -224,7 +224,7 @@ bounded concurrency and aborts the multipart upload if a fresh upload fails:
 
 {[
 let* result =
-  Awskit_s3_lwt_unix.Object.Transfer.upload_multipart_from_path s3
+  Awskit_s3_lwt_unix.Object.Transfer.upload_multipart_file s3
     ~bucket:"my-bucket"
     ~key:"large.tar"
     ~path:"/tmp/large.tar"
@@ -240,7 +240,7 @@ failure, so the same upload ID can be retried:
 
 {[
 let* result =
-  Awskit_s3_lwt_unix.Object.Transfer.resume_multipart_upload_from_path s3
+  Awskit_s3_lwt_unix.Object.Transfer.resume_multipart_upload_file s3
     ~bucket:"my-bucket"
     ~key:"large.tar"
     ~upload_id
@@ -504,7 +504,7 @@ signed S3 request, so retryable service responses are classified before being
 returned to callers.
 
 Only replayable request bodies are retried. In-memory bodies created with
-[Runtime.string_request_body] and [Runtime.bytes_request_body] are replayable. Custom stream
+[Runtime.Request_body.of_string] and [Runtime.Request_body.of_bytes] are replayable. Custom stream
 bodies are retried only when their {!type:Awskit.Body.Request.descriptor}
 marks them replayable. Do not mark a stream replayable unless retrying can
 recreate the same bytes from the beginning.
@@ -564,7 +564,7 @@ ignore
    |> Result.get_ok);
 
 ignore
-  (Awskit_s3.Sim.Object.Buffer.put_string conn
+  (Awskit_s3.Sim.Object.put_string conn
      ~bucket:"test-bucket"
      ~key:"hello.txt"
      "hello"

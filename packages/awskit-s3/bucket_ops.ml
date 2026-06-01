@@ -35,7 +35,7 @@ module Make (C : Operation_context.S) = struct
     match validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
-        let upload = R.string_request_body body in
+        let upload = R.Request_body.of_string body in
         let headers =
           [ content_md5_header body; ("content-type", "application/xml") ]
         in
@@ -45,7 +45,7 @@ module Make (C : Operation_context.S) = struct
             with_response conn ~method_:`PUT ~request
               ~query:[ (subresource, []) ]
               ~headers
-              ~payload_hash:(R.request_body_descriptor upload).payload_hash
+              ~payload_hash:(R.Request_body.descriptor upload).payload_hash
               upload
               ~f:(fun response body ->
                 let* discarded = discard_response_body body in
@@ -81,7 +81,7 @@ module Make (C : Operation_context.S) = struct
           then ""
           else Bucket_result_xml.create_config region
         in
-        let upload = R.string_request_body body in
+        let upload = R.Request_body.of_string body in
         let headers =
           if body = "" then [] else [ ("content-type", "application/xml") ]
         in
@@ -89,7 +89,7 @@ module Make (C : Operation_context.S) = struct
         | Error error -> return_error error
         | Ok request ->
             with_response conn ~method_:`PUT ~request ~query:[] ~headers
-              ~payload_hash:(R.request_body_descriptor upload).payload_hash
+              ~payload_hash:(R.Request_body.descriptor upload).payload_hash
               upload ~f:(fun response body ->
                 let* discarded = discard_response_body body in
                 match discarded with
@@ -187,7 +187,7 @@ module Make (C : Operation_context.S) = struct
       | Error error -> return_error error
       | Ok () -> (
           let body = Policy.to_json policy in
-          let upload = R.string_request_body body in
+          let upload = R.Request_body.of_string body in
           let headers =
             [ content_md5_header body; ("content-type", "application/json") ]
           in
@@ -197,7 +197,7 @@ module Make (C : Operation_context.S) = struct
               with_response conn ~method_:`PUT ~request
                 ~query:[ ("policy", []) ]
                 ~headers
-                ~payload_hash:(R.request_body_descriptor upload).payload_hash
+                ~payload_hash:(R.Request_body.descriptor upload).payload_hash
                 upload
                 ~f:(fun response body ->
                   let* discarded = discard_response_body body in

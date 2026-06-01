@@ -50,7 +50,7 @@ module Make (R : RUNTIME) = struct
       let chunk = Bytes.create 8192 in
       let rec loop total =
         let* read =
-          R.read_response_body reader chunk ~off:0 ~len:(Bytes.length chunk)
+          R.Response_body.read reader chunk ~off:0 ~len:(Bytes.length chunk)
         in
         match read with
         | Error error -> return (Error error)
@@ -60,7 +60,7 @@ module Make (R : RUNTIME) = struct
             if Int64.compare total max_size > 0 then
               return_error
                 (Awskit.Error.body ~limit:max_size
-                   "response body exceeded max_size")
+                   "response body exceeded max_bytes")
             else begin
               Buffer.add_subbytes buffer chunk 0 n;
               loop total
@@ -69,9 +69,9 @@ module Make (R : RUNTIME) = struct
       loop 0L
 
     let read_response_body body ~max_size =
-      R.with_response_body body ~consume:(read_body ~max_size)
+      R.Response_body.with_reader body ~consume:(read_body ~max_size)
 
-    let discard_response_body = R.discard_response_body
+    let discard_response_body = R.Response_body.discard
 
     let service_error response body =
       Awskit.Error.service
@@ -135,7 +135,7 @@ module Make (R : RUNTIME) = struct
 
     let with_response conn ~method_ ~request ~query ~headers ~payload_hash body
         ~f =
-      let replayable = (R.request_body_descriptor body).replayable in
+      let replayable = (R.Request_body.descriptor body).replayable in
       let rec attempt attempt_number =
         let* request =
           signed_request conn ~method_ ~request ~query ~headers ~payload_hash
@@ -171,7 +171,7 @@ module Make (R : RUNTIME) = struct
 
     let with_empty_response conn ~method_ ~request ~query ~headers ~f =
       with_response conn ~method_ ~request ~query ~headers
-        ~payload_hash:empty_hash R.empty_request_body ~f
+        ~payload_hash:empty_hash R.Request_body.empty ~f
 
     let content_md5 body =
       Digestif.MD5.(digest_string body |> to_raw_string) |> Base64.encode_exn

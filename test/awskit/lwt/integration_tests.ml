@@ -121,10 +121,10 @@ let test_connection_defaults () =
     (Option.map Aws.Runtime.(endpoint conn) ~f:Awskit.Endpoint.to_url_prefix)
 
 let test_runtime_bodies () =
-  let body = Aws.Runtime.string_request_body "hello" in
+  let body = Aws.Runtime.Request_body.of_string "hello" in
   Alcotest.(check int64)
     "content length" 5L
-    (Option.value (Aws.Runtime.request_body_descriptor body).content_length
+    (Option.value (Aws.Runtime.Request_body.descriptor body).content_length
        ~default:(-1L))
 
 let request_conn () =
@@ -151,17 +151,17 @@ let stream_descriptor length =
 let test_stream_request_body_reaches_client () =
   Request_body_client.request_body := None;
   let body =
-    RequestAws.Runtime.stream_request_body (stream_descriptor 4L)
+    RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
       ~write:(fun writer ->
-        Lwt.bind (RequestAws.Runtime.write_request_body_string writer "ab")
+        Lwt.bind (RequestAws.Runtime.Request_body.write_string writer "ab")
           (function
           | Error _ as error -> Lwt.return error
-          | Ok () -> RequestAws.Runtime.write_request_body_string writer "cd"))
+          | Ok () -> RequestAws.Runtime.Request_body.write_string writer "cd"))
   in
   match
     Lwt_main.run
       (RequestAws.Runtime.with_response (request_conn ()) request_body_request
-         body ~f:(fun _ body -> RequestAws.Runtime.discard_response_body body))
+         body ~f:(fun _ body -> RequestAws.Runtime.Response_body.discard body))
   with
   | Error error ->
       Alcotest.failf "unexpected request body error: %a" Awskit.Error.pp error
@@ -174,9 +174,9 @@ let test_stream_request_body_error_propagates () =
   Request_body_client.request_body := None;
   let stream_error = Awskit.Error.body "stream request body failed" in
   let body =
-    RequestAws.Runtime.stream_request_body (stream_descriptor 4L)
+    RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
       ~write:(fun writer ->
-        Lwt.bind (RequestAws.Runtime.write_request_body_string writer "ab")
+        Lwt.bind (RequestAws.Runtime.Request_body.write_string writer "ab")
           (function
           | Error _ as error -> Lwt.return error
           | Ok () -> Lwt.return_error stream_error))
@@ -184,7 +184,7 @@ let test_stream_request_body_error_propagates () =
   match
     Lwt_main.run
       (RequestAws.Runtime.with_response (request_conn ()) request_body_request
-         body ~f:(fun _ body -> RequestAws.Runtime.discard_response_body body))
+         body ~f:(fun _ body -> RequestAws.Runtime.Response_body.discard body))
   with
   | Error error when Awskit.Error.equal error stream_error -> ()
   | Error error ->
@@ -201,38 +201,38 @@ let expect_request_body_error label result =
 let test_stream_request_body_rejects_short_body () =
   Request_body_client.request_body := None;
   let body =
-    RequestAws.Runtime.stream_request_body (stream_descriptor 4L)
+    RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
       ~write:(fun writer ->
-        RequestAws.Runtime.write_request_body_string writer "ab")
+        RequestAws.Runtime.Request_body.write_string writer "ab")
   in
   Lwt_main.run
     (RequestAws.Runtime.with_response (request_conn ()) request_body_request
-       body ~f:(fun _ body -> RequestAws.Runtime.discard_response_body body))
+       body ~f:(fun _ body -> RequestAws.Runtime.Response_body.discard body))
   |> expect_request_body_error "short request body"
 
 let test_stream_request_body_rejects_long_body () =
   Request_body_client.request_body := None;
   let body =
-    RequestAws.Runtime.stream_request_body (stream_descriptor 4L)
+    RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
       ~write:(fun writer ->
-        Lwt.bind (RequestAws.Runtime.write_request_body_string writer "abcd")
+        Lwt.bind (RequestAws.Runtime.Request_body.write_string writer "abcd")
           (function
           | Error _ as error -> Lwt.return error
-          | Ok () -> RequestAws.Runtime.write_request_body_string writer "e"))
+          | Ok () -> RequestAws.Runtime.Request_body.write_string writer "e"))
   in
   Lwt_main.run
     (RequestAws.Runtime.with_response (request_conn ()) request_body_request
-       body ~f:(fun _ body -> RequestAws.Runtime.discard_response_body body))
+       body ~f:(fun _ body -> RequestAws.Runtime.Response_body.discard body))
   |> expect_request_body_error "long request body"
 
-let limited_conn ~max_response_body_bytes =
+let limited_conn ~max_response_drain_bytes =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let region = Awskit.Region.of_string_exn "us-east-1" in
   LimitedAws.create ~region ~credentials
     ~clock:(fun () -> Ptime.epoch)
-    ~max_response_body_bytes ()
+    ~max_response_drain_bytes ()
 
 let limited_request =
   let target =
@@ -241,12 +241,12 @@ let limited_request =
   in
   Awskit.Request.create_exn ~method_:`GET ~target ()
 
-let with_limited_response ~max_response_body_bytes body ~f =
+let with_limited_response ~max_response_drain_bytes body ~f =
   Limited_body_client.response_body := body;
-  let conn = limited_conn ~max_response_body_bytes in
+  let conn = limited_conn ~max_response_drain_bytes in
   Lwt_main.run
     (LimitedAws.Runtime.with_response conn limited_request
-       LimitedAws.Runtime.empty_request_body ~f:(fun _ body -> f body))
+       LimitedAws.Runtime.Request_body.empty ~f:(fun _ body -> f body))
 
 let expect_body_limit label expected = function
   | Error (Awskit.Error.Body { limit = Some limit; _ }) ->
@@ -256,13 +256,13 @@ let expect_body_limit label expected = function
   | Ok _ -> Alcotest.failf "%s: expected body limit error" label
 
 let test_discard_response_body_enforces_limit () =
-  with_limited_response ~max_response_body_bytes:3 "abcdef"
-    ~f:LimitedAws.Runtime.discard_response_body
+  with_limited_response ~max_response_drain_bytes:3 "abcdef"
+    ~f:LimitedAws.Runtime.Response_body.discard
   |> expect_body_limit "discard limit" 3L
 
 let test_with_response_body_drain_enforces_limit () =
-  with_limited_response ~max_response_body_bytes:3 "abcdef" ~f:(fun body ->
-      LimitedAws.Runtime.with_response_body body ~consume:(fun _ ->
+  with_limited_response ~max_response_drain_bytes:3 "abcdef" ~f:(fun body ->
+      LimitedAws.Runtime.Response_body.with_reader body ~consume:(fun _ ->
           Lwt.return_ok ()))
   |> expect_body_limit "scoped drain limit" 3L
 

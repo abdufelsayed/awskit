@@ -41,7 +41,7 @@ Core modules:
 
 [Awskit_eio] is the direct-style Eio runtime adapter. Its monad type
 is [type 'a t = 'a]. Response bodies are scoped to [with_response] and
-[with_response_body].
+[Runtime.Response_body.with_reader].
 
 {2 awskit-lwt}
 

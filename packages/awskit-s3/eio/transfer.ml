@@ -59,7 +59,7 @@ struct
                   match Eio.Flow.single_read file cstruct with
                   | n -> (
                       let chunk = Bytes.sub_string bytes 0 n in
-                      match Runtime.write_request_body_string writer chunk with
+                      match Runtime.Request_body.write_string writer chunk with
                       | Error _ as error -> error
                       | Ok () ->
                           let transferred =
@@ -72,9 +72,9 @@ struct
                 loop 0L)
           with exn -> Error (body_error "read upload" path exn)
         in
-        Ok (Runtime.stream_request_body descriptor ~write)
+        Ok (Runtime.Request_body.of_stream descriptor ~write)
 
-  let upload_from_path conn ~bucket ~key ?options ?on_progress ~path () =
+  let upload_file conn ~bucket ~key ?options ?on_progress ~path () =
     match request_body_of_path ?on_progress path with
     | Error _ as error -> error
     | Ok body -> S3.Object.put conn ~bucket ~key ?options ~body ()
@@ -139,7 +139,7 @@ struct
                 match Eio.Flow.single_read file cstruct with
                 | n -> (
                     let chunk = Bytes.sub_string bytes 0 n in
-                    match Runtime.write_request_body_string writer chunk with
+                    match Runtime.Request_body.write_string writer chunk with
                     | Error _ as error -> error
                     | Ok () -> loop (remaining - n))
                 | exception End_of_file ->
@@ -153,7 +153,7 @@ struct
             loop spec.length)
       with exn -> Error (body_error "read multipart upload" path exn)
     in
-    Runtime.stream_request_body descriptor ~write
+    Runtime.Request_body.of_stream descriptor ~write
 
   let split_batch ~concurrency specs =
     let rec loop remaining acc = function
@@ -272,7 +272,7 @@ struct
     | Error _ as error -> error
     | Ok complete -> Ok { Awskit_s3.Multipart.Managed.upload; parts; complete }
 
-  let resume_multipart_upload_from_path conn ~bucket ~key ~upload_id ?options
+  let resume_multipart_upload_file conn ~bucket ~key ~upload_id ?options
       ?(concurrency = 4) ?on_progress ~path () =
     let options =
       Option.value ~default:Awskit_s3.Multipart.Managed.default_options options
@@ -294,7 +294,7 @@ struct
     complete_multipart conn ~bucket ~key ~upload_id upload
       (uploaded_parts @ uploaded_now)
 
-  let upload_multipart_from_path conn ~bucket ~key ?options ?(concurrency = 4)
+  let upload_multipart_file conn ~bucket ~key ?options ?(concurrency = 4)
       ?on_progress ~path () =
     let options =
       Option.value ~default:Awskit_s3.Multipart.Managed.default_options options
@@ -323,14 +323,14 @@ struct
         | Ok _ as result -> result
         | Error error -> abort_and_return error)
 
-  let download_to_path conn ~bucket ~key ?options ?on_progress ~path () =
+  let download_file conn ~bucket ~key ?options ?on_progress ~path () =
     let consume reader =
       try
         Eio.Path.with_open_out ~create:(`Or_truncate 0o600) path (fun file ->
             let bytes = Bytes.create buffer_size in
             let rec loop transferred =
               match
-                Runtime.read_response_body reader bytes ~off:0 ~len:buffer_size
+                Runtime.Response_body.read reader bytes ~off:0 ~len:buffer_size
               with
               | Error _ as error -> error
               | Ok 0 -> Ok ()

@@ -971,41 +971,39 @@ module type OBJECT = sig
       (List_object_versions.delete_marker list, Error.t) result io
   end
 
-  module Buffer : sig
-    val put_string :
-      connection ->
-      bucket:string ->
-      key:string ->
-      ?options:Put_object.options ->
-      string ->
-      (Put_object.result, Error.t) result io
+  val put_string :
+    connection ->
+    bucket:string ->
+    key:string ->
+    ?options:Put_object.options ->
+    string ->
+    (Put_object.result, Error.t) result io
 
-    val put_bytes :
-      connection ->
-      bucket:string ->
-      key:string ->
-      ?options:Put_object.options ->
-      bytes ->
-      (Put_object.result, Error.t) result io
+  val put_bytes :
+    connection ->
+    bucket:string ->
+    key:string ->
+    ?options:Put_object.options ->
+    bytes ->
+    (Put_object.result, Error.t) result io
 
-    val get_string :
-      connection ->
-      bucket:string ->
-      key:string ->
-      max_size:int64 ->
-      ?options:Get_object.options ->
-      unit ->
-      (Get_object.result * string, Error.t) result io
+  val get_as_string :
+    connection ->
+    bucket:string ->
+    key:string ->
+    max_bytes:int64 ->
+    ?options:Get_object.options ->
+    unit ->
+    (Get_object.result * string, Error.t) result io
 
-    val get_bytes :
-      connection ->
-      bucket:string ->
-      key:string ->
-      max_size:int64 ->
-      ?options:Get_object.options ->
-      unit ->
-      (Get_object.result * bytes, Error.t) result io
-  end
+  val get_as_bytes :
+    connection ->
+    bucket:string ->
+    key:string ->
+    max_bytes:int64 ->
+    ?options:Get_object.options ->
+    unit ->
+    (Get_object.result * bytes, Error.t) result io
 
   module Tagging : sig
     val get :

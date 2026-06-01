@@ -45,6 +45,19 @@ module Object = struct
             in
             Ok (String.sub body start_int slice_length, 206, headers))
 
+  let request_body_result body =
+    let descriptor = Runtime.Request_body.descriptor body in
+    match descriptor.content_length with
+    | None ->
+        Error
+          (Awskit.Error.validation ~field:"content_length"
+             "S3 uploads require a known content length before SigV4 chunked \
+              streaming")
+    | Some _ -> (
+        match Awskit.Body.Request.validate_descriptor descriptor with
+        | Error error -> Error error
+        | Ok () -> Runtime.request_body_result body)
+
   let put conn ~bucket ~key ?options ~body () =
     let options = Option.value ~default:Put_object.default_options options in
     match validate_bucket_key bucket key with
@@ -69,7 +82,7 @@ module Object = struct
                         with
                         | Error error -> Error error
                         | Ok () -> (
-                            match Runtime.request_body_result body with
+                            match request_body_result body with
                             | Error error -> Error error
                             | Ok body ->
                                 let etag = etag body in
@@ -151,7 +164,7 @@ module Object = struct
                         in
                         Result.map
                           (fun value -> (info, value))
-                          (Runtime.with_response_body
+                          (Runtime.Response_body.with_reader
                              (Runtime.response_body
                                 ~read_fault:(fault_error Response_lost)
                                 body)
@@ -187,7 +200,7 @@ module Object = struct
                         in
                         Result.map
                           (fun value -> (info, value))
-                          (Runtime.with_response_body
+                          (Runtime.Response_body.with_reader
                              (Runtime.response_body body)
                              ~consume)))))
 
@@ -852,44 +865,43 @@ module Object = struct
            ())
   end
 
-  module Buffer = struct
-    let put_string conn ~bucket ~key ?options body =
-      put conn ~bucket ~key ?options ~body:(Runtime.string_request_body body) ()
+  let put_string conn ~bucket ~key ?options body =
+    put conn ~bucket ~key ?options
+      ~body:(Runtime.Request_body.of_string body)
+      ()
 
-    let put_bytes conn ~bucket ~key ?options body =
-      put conn ~bucket ~key ?options ~body:(Runtime.bytes_request_body body) ()
+  let put_bytes conn ~bucket ~key ?options body =
+    put conn ~bucket ~key ?options ~body:(Runtime.Request_body.of_bytes body) ()
 
-    let consume_string ~max_size reader =
-      let chunk = Bytes.create 8192 in
-      let buffer = Buffer.create 128 in
-      let rec loop total =
-        match
-          Runtime.read_response_body reader chunk ~off:0
-            ~len:(Bytes.length chunk)
-        with
-        | Error error -> Error error
-        | Ok 0 -> Ok (Buffer.contents buffer)
-        | Ok n ->
-            let total = Int64.add total (Int64.of_int n) in
-            if Int64.compare total max_size > 0 then
-              Error
-                (Awskit.Error.body ~limit:max_size
-                   "response body exceeded max_size")
-            else begin
-              Buffer.add_subbytes buffer chunk 0 n;
-              loop total
-            end
-      in
-      loop 0L
+  let consume_string ~max_bytes reader =
+    let chunk = Bytes.create 8192 in
+    let buffer = Buffer.create 128 in
+    let rec loop total =
+      match
+        Runtime.Response_body.read reader chunk ~off:0 ~len:(Bytes.length chunk)
+      with
+      | Error error -> Error error
+      | Ok 0 -> Ok (Buffer.contents buffer)
+      | Ok n ->
+          let total = Int64.add total (Int64.of_int n) in
+          if Int64.compare total max_bytes > 0 then
+            Error
+              (Awskit.Error.body ~limit:max_bytes
+                 "response body exceeded max_bytes")
+          else begin
+            Buffer.add_subbytes buffer chunk 0 n;
+            loop total
+          end
+    in
+    loop 0L
 
-    let get_string conn ~bucket ~key ~max_size ?options () =
-      get conn ~bucket ~key ?options ~consume:(consume_string ~max_size) ()
+  let get_as_string conn ~bucket ~key ~max_bytes ?options () =
+    get conn ~bucket ~key ?options ~consume:(consume_string ~max_bytes) ()
 
-    let get_bytes conn ~bucket ~key ~max_size ?options () =
-      Result.map
-        (fun (info, body) -> (info, Bytes.of_string body))
-        (get_string conn ~bucket ~key ~max_size ?options ())
-  end
+  let get_as_bytes conn ~bucket ~key ~max_bytes ?options () =
+    Result.map
+      (fun (info, body) -> (info, Bytes.of_string body))
+      (get_as_string conn ~bucket ~key ~max_bytes ?options ())
 
   module Tagging = struct
     let get conn ~bucket ~key =

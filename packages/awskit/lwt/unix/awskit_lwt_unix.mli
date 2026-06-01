@@ -90,7 +90,7 @@ val create :
   ?credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
   ?retry_policy:Awskit.Retry.t ->
-  ?max_response_body_bytes:int ->
+  ?max_response_drain_bytes:int ->
   ?imdsv1_fallback:Credentials.imdsv1_fallback ->
   unit ->
   (t, Awskit.Error.t) result
@@ -112,8 +112,8 @@ val create :
     @param retry_policy
       Retry behavior for retryable AWS errors and transient transport failures
       (default: {!val:Awskit.Retry.default})
-    @param max_response_body_bytes
-      Maximum response size to buffer in memory (default: 64 MiB)
+    @param max_response_drain_bytes
+      Maximum response body bytes to drain after callbacks (default: 64 MiB)
     @param imdsv1_fallback
       Controls tokenless IMDSv1 fallback when the default credential chain uses
       EC2 instance metadata credentials. *)

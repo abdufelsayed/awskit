@@ -5,7 +5,7 @@ let src = Logs.Src.create "awskit-lwt" ~doc:"AWS Lwt HTTP"
 module Log = (val Logs.src_log src : Logs.LOG)
 
 module Make (Client : Cohttp_lwt.S.Client) = struct
-  let default_max_response_body_bytes = 64 * 1024 * 1024
+  let default_max_response_drain_bytes = 64 * 1024 * 1024
 
   type conn = {
     ctx : Client.ctx option;
@@ -16,7 +16,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     clock : unit -> Ptime.t;
     retry_policy : Awskit.Retry.t;
     sleep : Ptime.Span.t -> unit Lwt.t;
-    max_response_body_bytes : int;
+    max_response_drain_bytes : int;
   }
 
   type request_body_writer = {
@@ -33,7 +33,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
   type response_body = {
     body : Cohttp_lwt.Body.t;
-    max_response_body_bytes : int;
+    max_response_drain_bytes : int;
   }
 
   type response_body_reader = {
@@ -42,18 +42,18 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     mutable offset : int;
   }
 
-  let validate_create_args ?endpoint ~max_response_body_bytes () =
-    if max_response_body_bytes <= 0 then
+  let validate_create_args ?endpoint ~max_response_drain_bytes () =
+    if max_response_drain_bytes <= 0 then
       invalid_arg
-        "Awskit_lwt.Make.create: max_response_body_bytes must be positive";
+        "Awskit_lwt.Make.create: max_response_drain_bytes must be positive";
     Option.iter endpoint ~f:(fun endpoint ->
         ignore (Awskit.Endpoint.to_url_prefix endpoint))
 
   let create_with_credentials_provider ?ctx ?endpoint ~region
       ~credentials_provider ~clock ?(retry_policy = Awskit.Retry.default)
       ?(sleep = fun _ -> Lwt.return_unit)
-      ?(max_response_body_bytes = default_max_response_body_bytes) () =
-    validate_create_args ?endpoint ~max_response_body_bytes ();
+      ?(max_response_drain_bytes = default_max_response_drain_bytes) () =
+    validate_create_args ?endpoint ~max_response_drain_bytes ();
     {
       ctx;
       endpoint;
@@ -62,14 +62,14 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       clock;
       retry_policy;
       sleep;
-      max_response_body_bytes;
+      max_response_drain_bytes;
     }
 
   let create ?ctx ?endpoint ~region ~credentials ~clock ?retry_policy ?sleep
-      ?max_response_body_bytes () =
+      ?max_response_drain_bytes () =
     create_with_credentials_provider ?ctx ?endpoint ~region
       ~credentials_provider:(fun () -> Lwt.return_ok credentials)
-      ~clock ?retry_policy ?sleep ?max_response_body_bytes ()
+      ~clock ?retry_policy ?sleep ?max_response_drain_bytes ()
 
   (* URI construction *)
 
@@ -233,7 +233,8 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                       ( to_aws_response response,
                         {
                           body = response_body;
-                          max_response_body_bytes = conn.max_response_body_bytes;
+                          max_response_drain_bytes =
+                            conn.max_response_drain_bytes;
                         } ))))
         (function
           | Lwt.Canceled -> Lwt.fail Lwt.Canceled
@@ -273,6 +274,15 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let request_body_descriptor = request_body_descriptor
     let write_request_body_string = write_request_body_string
 
+    module Request_body = struct
+      let empty = empty_request_body
+      let of_string = string_request_body
+      let of_bytes = bytes_request_body
+      let of_stream = stream_request_body
+      let descriptor = request_body_descriptor
+      let write_string = write_request_body_string
+    end
+
     let rec read_from_current reader bytes ~off ~len =
       if len = 0 then Lwt.return_ok 0
       else if reader.offset < String.length reader.chunk then begin
@@ -303,12 +313,12 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
             | Lwt.Canceled -> Lwt.fail Lwt.Canceled
             | exn -> Lwt.return_error (Awskit.Error.body (Exn.to_string exn)))
 
-    let drain_limit_error max_response_body_bytes =
+    let drain_limit_error max_response_drain_bytes =
       Awskit.Error.body
-        ~limit:(Int64.of_int max_response_body_bytes)
-        "response body exceeded max_response_body_bytes"
+        ~limit:(Int64.of_int max_response_drain_bytes)
+        "response body exceeded max_response_drain_bytes"
 
-    let rec drain_reader reader ~remaining ~max_response_body_bytes =
+    let rec drain_reader reader ~remaining ~max_response_drain_bytes =
       let buffer = Bytes.create 8192 in
       let len =
         if remaining <= 0 then 1 else min (Bytes.length buffer) remaining
@@ -318,14 +328,14 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         | Ok 0 -> Lwt.return_ok ()
         | Ok n ->
             if n > remaining then
-              Lwt.return_error (drain_limit_error max_response_body_bytes)
+              Lwt.return_error (drain_limit_error max_response_drain_bytes)
             else
               drain_reader reader ~remaining:(remaining - n)
-                ~max_response_body_bytes)
+                ~max_response_drain_bytes)
 
     let drain_response_body_reader reader body =
-      drain_reader reader ~remaining:body.max_response_body_bytes
-        ~max_response_body_bytes:body.max_response_body_bytes
+      drain_reader reader ~remaining:body.max_response_drain_bytes
+        ~max_response_drain_bytes:body.max_response_drain_bytes
 
     let with_response_body body ~consume =
       let reader =
@@ -341,6 +351,12 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         { stream = Cohttp_lwt.Body.to_stream body.body; chunk = ""; offset = 0 }
       in
       drain_response_body_reader reader body
+
+    module Response_body = struct
+      let read = read_response_body
+      let with_reader = with_response_body
+      let discard = discard_response_body
+    end
 
     let with_response = do_with_response
   end

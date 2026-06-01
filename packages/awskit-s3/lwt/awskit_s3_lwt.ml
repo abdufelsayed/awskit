@@ -20,15 +20,9 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let sleep t = Aws.Runtime.sleep t.aws
     let s3_endpoint_config t = t.endpoint_config
     let endpoint _ = None
-    let empty_request_body = Aws.Runtime.empty_request_body
-    let string_request_body = Aws.Runtime.string_request_body
-    let bytes_request_body = Aws.Runtime.bytes_request_body
-    let stream_request_body = Aws.Runtime.stream_request_body
-    let request_body_descriptor = Aws.Runtime.request_body_descriptor
-    let write_request_body_string = Aws.Runtime.write_request_body_string
-    let read_response_body = Aws.Runtime.read_response_body
-    let with_response_body = Aws.Runtime.with_response_body
-    let discard_response_body = Aws.Runtime.discard_response_body
+
+    module Request_body = Aws.Runtime.Request_body
+    module Response_body = Aws.Runtime.Response_body
 
     let with_response t request body ~f =
       Aws.Runtime.with_response t.aws request body ~f

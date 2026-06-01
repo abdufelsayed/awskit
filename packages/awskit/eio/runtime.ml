@@ -16,7 +16,7 @@ type conn = {
   clock : unit -> Ptime.t;
   retry_policy : Awskit.Retry.t;
   endpoint : Awskit.Endpoint.t option;
-  max_response_body_bytes : int;
+  max_response_drain_bytes : int;
 }
 
 type stream_item = Chunk of string | End | Failed of string
@@ -64,7 +64,10 @@ type request_body =
       Awskit.Body.Request.descriptor
       * (request_body_writer -> (unit, Awskit.Error.t) Result.t)
 
-type response_body = { body : Cohttp_eio.Body.t; max_response_body_bytes : int }
+type response_body = {
+  body : Cohttp_eio.Body.t;
+  max_response_drain_bytes : int;
+}
 
 type response_body_reader = {
   body : Cohttp_eio.Body.t;
@@ -77,7 +80,7 @@ type request_body_bridge = {
   finished : (unit, Awskit.Error.t) Result.t Eio.Promise.t;
 }
 
-let default_max_response_body_bytes = 64 * 1024 * 1024
+let default_max_response_drain_bytes = 64 * 1024 * 1024
 let authenticator = lazy (Ca_certs.authenticator ())
 
 let tls_config =
@@ -107,9 +110,9 @@ let https_connector uri raw =
 
 let create ~env ~sw ~region ~credentials ?(clock = Ptime_clock.now)
     ?(retry_policy = Awskit.Retry.default) ?endpoint
-    ?(max_response_body_bytes = default_max_response_body_bytes) () =
-  if max_response_body_bytes <= 0 then
-    invalid_arg "Awskit_eio.create: max_response_body_bytes must be positive";
+    ?(max_response_drain_bytes = default_max_response_drain_bytes) () =
+  if max_response_drain_bytes <= 0 then
+    invalid_arg "Awskit_eio.create: max_response_drain_bytes must be positive";
   let net = Net (env :> < net : _ Eio.Net.t ; .. >)#net in
   let time_clock =
     Time_clock (env :> < clock : _ Eio.Time.clock ; .. >)#clock
@@ -123,7 +126,7 @@ let create ~env ~sw ~region ~credentials ?(clock = Ptime_clock.now)
     clock;
     retry_policy;
     endpoint;
-    max_response_body_bytes;
+    max_response_drain_bytes;
   }
 
 let to_cohttp_meth = function
@@ -178,10 +181,10 @@ let request_body_descriptor = function
 
 let body_error message = Awskit.Error.body message
 
-let drain_limit_error max_response_body_bytes =
+let drain_limit_error max_response_drain_bytes =
   Awskit.Error.body
-    ~limit:(Int64.of_int max_response_body_bytes)
-    "response body exceeded max_response_body_bytes"
+    ~limit:(Int64.of_int max_response_drain_bytes)
+    "response body exceeded max_response_drain_bytes"
 
 let writer_for descriptor stream =
   {
@@ -222,6 +225,15 @@ let write_request_body_string writer string =
       | Ok () ->
           Eio.Stream.add writer.stream (Chunk string);
           Ok ())
+
+module Request_body = struct
+  let empty = empty_request_body
+  let of_string = string_request_body
+  let of_bytes = bytes_request_body
+  let of_stream = stream_request_body
+  let descriptor = request_body_descriptor
+  let write_string = write_request_body_string
+end
 
 let body_to_cohttp ~sw = function
   | Source (_, body) ->
@@ -271,7 +283,7 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
   let uri = make_uri request in
   let meth = to_cohttp_meth request.method_ in
   let make_response_body body =
-    { body; max_response_body_bytes = conn.max_response_body_bytes }
+    { body; max_response_drain_bytes = conn.max_response_drain_bytes }
   in
   let successful_status status = status >= 200 && status < 300 in
   let early_result = ref None in
@@ -374,22 +386,22 @@ let read_response_body reader bytes ~off ~len =
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Awskit.Error.body (Exn.to_string exn))
 
-let rec discard_reader reader ~remaining ~max_response_body_bytes =
+let rec discard_reader reader ~remaining ~max_response_drain_bytes =
   let buffer = Bytes.create 8192 in
   let len = if remaining <= 0 then 1 else min (Bytes.length buffer) remaining in
   match read_response_body reader buffer ~off:0 ~len with
   | Error _ as error -> error
   | Ok 0 -> Ok ()
   | Ok n ->
-      if n > remaining then Error (drain_limit_error max_response_body_bytes)
+      if n > remaining then Error (drain_limit_error max_response_drain_bytes)
       else
         discard_reader reader ~remaining:(remaining - n)
-          ~max_response_body_bytes
+          ~max_response_drain_bytes
 
 let discard_response_body_reader (reader : response_body_reader)
     (body : response_body) =
-  discard_reader reader ~remaining:body.max_response_body_bytes
-    ~max_response_body_bytes:body.max_response_body_bytes
+  discard_reader reader ~remaining:body.max_response_drain_bytes
+    ~max_response_drain_bytes:body.max_response_drain_bytes
 
 let with_response_body (body : response_body) ~consume =
   let reader = { body = body.body; chunk = ""; offset = 0 } in
@@ -405,5 +417,11 @@ let with_response_body (body : response_body) ~consume =
 
 let discard_response_body (body : response_body) =
   discard_response_body_reader { body = body.body; chunk = ""; offset = 0 } body
+
+module Response_body = struct
+  let read = read_response_body
+  let with_reader = with_response_body
+  let discard = discard_response_body
+end
 
 let with_response = do_with_response

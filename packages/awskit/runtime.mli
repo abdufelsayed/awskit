@@ -21,34 +21,37 @@ module type S = sig
   val endpoint : connection -> Endpoint.t option
   val retry_policy : connection -> Retry.t
   val sleep : connection -> Ptime.Span.t -> unit t
-  val empty_request_body : request_body
-  val string_request_body : string -> request_body
-  val bytes_request_body : bytes -> request_body
 
-  val stream_request_body :
-    Body.Request.descriptor ->
-    write:(request_body_writer -> (unit, Error.t) result t) ->
-    request_body
+  module Request_body : sig
+    val empty : request_body
+    val of_string : string -> request_body
+    val of_bytes : bytes -> request_body
 
-  val request_body_descriptor : request_body -> Body.Request.descriptor
+    val of_stream :
+      Body.Request.descriptor ->
+      write:(request_body_writer -> (unit, Error.t) result t) ->
+      request_body
 
-  val write_request_body_string :
-    request_body_writer -> string -> (unit, Error.t) result t
+    val descriptor : request_body -> Body.Request.descriptor
+    val write_string : request_body_writer -> string -> (unit, Error.t) result t
+  end
 
-  val read_response_body :
-    response_body_reader ->
-    bytes ->
-    off:int ->
-    len:int ->
-    (int, Error.t) result t
-  (** Returns [0] at end-of-body. *)
+  module Response_body : sig
+    val read :
+      response_body_reader ->
+      bytes ->
+      off:int ->
+      len:int ->
+      (int, Error.t) result t
+    (** Returns [0] at end-of-body. *)
 
-  val with_response_body :
-    response_body ->
-    consume:(response_body_reader -> ('a, Error.t) result t) ->
-    ('a, Error.t) result t
+    val with_reader :
+      response_body ->
+      consume:(response_body_reader -> ('a, Error.t) result t) ->
+      ('a, Error.t) result t
 
-  val discard_response_body : response_body -> (unit, Error.t) result t
+    val discard : response_body -> (unit, Error.t) result t
+  end
 
   val with_response :
     connection ->

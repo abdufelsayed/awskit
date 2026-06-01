@@ -20,18 +20,9 @@ module Runtime = struct
   let sleep t = Awskit_lwt_unix.Runtime.sleep t.aws
   let s3_endpoint_config t = t.endpoint_config
   let endpoint _ = None
-  let empty_request_body = Awskit_lwt_unix.Runtime.empty_request_body
-  let string_request_body = Awskit_lwt_unix.Runtime.string_request_body
-  let bytes_request_body = Awskit_lwt_unix.Runtime.bytes_request_body
-  let stream_request_body = Awskit_lwt_unix.Runtime.stream_request_body
-  let request_body_descriptor = Awskit_lwt_unix.Runtime.request_body_descriptor
 
-  let write_request_body_string =
-    Awskit_lwt_unix.Runtime.write_request_body_string
-
-  let read_response_body = Awskit_lwt_unix.Runtime.read_response_body
-  let with_response_body = Awskit_lwt_unix.Runtime.with_response_body
-  let discard_response_body = Awskit_lwt_unix.Runtime.discard_response_body
+  module Request_body = Awskit_lwt_unix.Runtime.Request_body
+  module Response_body = Awskit_lwt_unix.Runtime.Response_body
 
   let with_response t request body ~f =
     Awskit_lwt_unix.Runtime.with_response t.aws request body ~f

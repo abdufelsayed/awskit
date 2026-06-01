@@ -150,7 +150,7 @@ let test_object_range_metadata_and_copy () =
       in
       ignore
         (await "put object"
-           (S3.Object.Buffer.put_string conn ~bucket ~key:"range.txt"
+           (S3.Object.put_string conn ~bucket ~key:"range.txt"
               ~options:put_options "abcdefghij"));
       let range_options =
         {
@@ -160,8 +160,8 @@ let test_object_range_metadata_and_copy () =
       in
       let info, body =
         await "get range"
-          (S3.Object.Buffer.get_string conn ~bucket ~key:"range.txt"
-             ~options:range_options ~max_size:16L ())
+          (S3.Object.get_as_string conn ~bucket ~key:"range.txt"
+             ~options:range_options ~max_bytes:16L ())
       in
       Alcotest.(check string) "range body" "cdef" body;
       Alcotest.(check int)
@@ -175,8 +175,8 @@ let test_object_range_metadata_and_copy () =
       in
       let _info, suffix =
         await "get suffix"
-          (S3.Object.Buffer.get_string conn ~bucket ~key:"range.txt"
-             ~options:suffix_options ~max_size:16L ())
+          (S3.Object.get_as_string conn ~bucket ~key:"range.txt"
+             ~options:suffix_options ~max_bytes:16L ())
       in
       Alcotest.(check string) "suffix body" "hij" suffix;
       let invalid_range_options =
@@ -184,8 +184,8 @@ let test_object_range_metadata_and_copy () =
       in
       expect_status "invalid range" 416
         (Lwt_main.run
-           (S3.Object.Buffer.get_string conn ~bucket ~key:"range.txt"
-              ~options:invalid_range_options ~max_size:16L ()));
+           (S3.Object.get_as_string conn ~bucket ~key:"range.txt"
+              ~options:invalid_range_options ~max_bytes:16L ()));
       ignore
         (await "copy object"
            (S3.Object.copy conn ~src_bucket:bucket ~src_key:"range.txt"
@@ -226,12 +226,12 @@ let test_object_versioning () =
               Awskit_s3.Bucket.Versioning.Status.Enabled));
       let put1 =
         await "put version one"
-          (S3.Object.Buffer.put_string conn ~bucket ~key:"versioned.txt" "one")
+          (S3.Object.put_string conn ~bucket ~key:"versioned.txt" "one")
       in
       let v1 = require_version "put version one" put1.version_id in
       let put2 =
         await "put version two"
-          (S3.Object.Buffer.put_string conn ~bucket ~key:"versioned.txt" "two")
+          (S3.Object.put_string conn ~bucket ~key:"versioned.txt" "two")
       in
       let v2 = require_version "put version two" put2.version_id in
       let previous_options =
@@ -239,8 +239,8 @@ let test_object_versioning () =
       in
       let _info, previous =
         await "get previous version"
-          (S3.Object.Buffer.get_string conn ~bucket ~key:"versioned.txt"
-             ~options:previous_options ~max_size:16L ())
+          (S3.Object.get_as_string conn ~bucket ~key:"versioned.txt"
+             ~options:previous_options ~max_bytes:16L ())
       in
       Alcotest.(check string) "previous version body" "one" previous;
       let copy_previous_options =
@@ -258,8 +258,8 @@ let test_object_versioning () =
         (version_string copied.copy_source_version_id);
       let _info, copied_body =
         await "get copied previous"
-          (S3.Object.Buffer.get_string conn ~bucket ~key:"copy-previous.txt"
-             ~max_size:16L ())
+          (S3.Object.get_as_string conn ~bucket ~key:"copy-previous.txt"
+             ~max_bytes:16L ())
       in
       Alcotest.(check string) "copied previous body" "one" copied_body;
       let deleted =
@@ -316,8 +316,8 @@ let test_object_versioning () =
       in
       let _info, hidden =
         await "get hidden current"
-          (S3.Object.Buffer.get_string conn ~bucket ~key:"versioned.txt"
-             ~options:version_two_options ~max_size:16L ())
+          (S3.Object.get_as_string conn ~bucket ~key:"versioned.txt"
+             ~options:version_two_options ~max_bytes:16L ())
       in
       Alcotest.(check string) "hidden version body" "two" hidden;
       ignore
@@ -328,8 +328,8 @@ let test_object_versioning () =
               ()));
       let _info, restored =
         await "get restored current"
-          (S3.Object.Buffer.get_string conn ~bucket ~key:"versioned.txt"
-             ~max_size:16L ())
+          (S3.Object.get_as_string conn ~bucket ~key:"versioned.txt"
+             ~max_bytes:16L ())
       in
       Alcotest.(check string) "restored current body" "two" restored)
 
@@ -378,21 +378,21 @@ let test_multipart_edges () =
         await "upload first"
           (S3.Multipart.upload_part conn ~bucket ~key:"edges.bin" ~upload_id
              ~part_number:1
-             ~body:(S3.Runtime.string_request_body first_body)
+             ~body:(S3.Runtime.Request_body.of_string first_body)
              ())
       in
       let second =
         await "upload second"
           (S3.Multipart.upload_part conn ~bucket ~key:"edges.bin" ~upload_id
              ~part_number:2
-             ~body:(S3.Runtime.string_request_body final_body)
+             ~body:(S3.Runtime.Request_body.of_string final_body)
              ())
       in
       let overwritten =
         await "overwrite first"
           (S3.Multipart.upload_part conn ~bucket ~key:"edges.bin" ~upload_id
              ~part_number:1
-             ~body:(S3.Runtime.string_request_body overwritten_body)
+             ~body:(S3.Runtime.Request_body.of_string overwritten_body)
              ())
       in
       expect_status "complete stale etag" 400
@@ -405,8 +405,8 @@ let test_multipart_edges () =
               [ overwritten.part; second.part ]));
       let _info, body =
         await "get multipart"
-          (S3.Object.Buffer.get_string conn ~bucket ~key:"edges.bin"
-             ~max_size:
+          (S3.Object.get_as_string conn ~bucket ~key:"edges.bin"
+             ~max_bytes:
                (Int64.of_int
                   (String.length overwritten_body + String.length final_body))
              ())
@@ -446,14 +446,14 @@ let test_path_transfer_streams () =
         (fun () ->
           ignore
             (await "upload path"
-               (S3.Object.Transfer.upload_from_path conn ~bucket
-                  ~key:"transfer.bin" ~path:upload_path
+               (S3.Object.Transfer.upload_file conn ~bucket ~key:"transfer.bin"
+                  ~path:upload_path
                   ~on_progress:(fun transferred ->
                     upload_progress := transferred :: !upload_progress)
                   ()));
           ignore
             (await "download path"
-               (S3.Object.Transfer.download_to_path conn ~bucket
+               (S3.Object.Transfer.download_file conn ~bucket
                   ~key:"transfer.bin" ~path:download_path
                   ~on_progress:(fun transferred ->
                     download_progress := transferred :: !download_progress)
@@ -494,11 +494,11 @@ let test_multipart_path_transfer_resumes () =
             (await "upload resume seed"
                (S3.Multipart.upload_part conn ~bucket ~key:"resume.bin"
                   ~upload_id ~part_number:1
-                  ~body:(S3.Runtime.string_request_body first_part)
+                  ~body:(S3.Runtime.Request_body.of_string first_part)
                   ()));
           let result =
             await "resume multipart path"
-              (S3.Object.Transfer.resume_multipart_upload_from_path conn ~bucket
+              (S3.Object.Transfer.resume_multipart_upload_file conn ~bucket
                  ~key:"resume.bin" ~upload_id ~options ~concurrency:2 ~path
                  ~on_progress:(fun transferred ->
                    progress := transferred :: !progress)
@@ -507,8 +507,8 @@ let test_multipart_path_transfer_resumes () =
           Alcotest.(check int) "completed parts" 3 (List.length result.parts);
           let _info, downloaded =
             await "get resumed multipart"
-              (S3.Object.Buffer.get_string conn ~bucket ~key:"resume.bin"
-                 ~max_size:(Int64.of_int (String.length body))
+              (S3.Object.get_as_string conn ~bucket ~key:"resume.bin"
+                 ~max_bytes:(Int64.of_int (String.length body))
                  ())
           in
           Alcotest.(check string) "resumed body" body downloaded;

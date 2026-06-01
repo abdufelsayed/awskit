@@ -93,6 +93,21 @@ module Runtime = struct
   let with_response_body body ~consume = consume { body; offset = 0 }
   let discard_response_body _ = Lwt.return_ok ()
 
+  module Request_body = struct
+    let empty = empty_request_body
+    let of_string = string_request_body
+    let of_bytes = bytes_request_body
+    let of_stream = stream_request_body
+    let descriptor = request_body_descriptor
+    let write_string = write_request_body_string
+  end
+
+  module Response_body = struct
+    let read = read_response_body
+    let with_reader = with_response_body
+    let discard = discard_response_body
+  end
+
   let with_response _ _ _ ~f:_ =
     Lwt.return_error (Awskit.Error.transport ~retryable:false "not implemented")
 end
@@ -179,16 +194,14 @@ module S3 = struct
       let delete_markers _ ~bucket:_ ?options:_ ?max_pages:_ () = unsupported ()
     end
 
-    module Buffer = struct
-      let put_string _ ~bucket:_ ~key:_ ?options:_ _ = unsupported ()
-      let put_bytes _ ~bucket:_ ~key:_ ?options:_ _ = unsupported ()
+    let put_string _ ~bucket:_ ~key:_ ?options:_ _ = unsupported ()
+    let put_bytes _ ~bucket:_ ~key:_ ?options:_ _ = unsupported ()
 
-      let get_string _ ~bucket:_ ~key:_ ~max_size:_ ?options:_ () =
-        unsupported ()
+    let get_as_string _ ~bucket:_ ~key:_ ~max_bytes:_ ?options:_ () =
+      unsupported ()
 
-      let get_bytes _ ~bucket:_ ~key:_ ~max_size:_ ?options:_ () =
-        unsupported ()
-    end
+    let get_as_bytes _ ~bucket:_ ~key:_ ~max_bytes:_ ?options:_ () =
+      unsupported ()
 
     module Tagging = struct
       let get _ ~bucket:_ ~key:_ = unsupported ()
@@ -241,7 +254,7 @@ let with_umask mask f =
   let previous = Unix.umask mask in
   Fun.protect ~finally:(fun () -> ignore (Unix.umask previous)) f
 
-let test_download_to_path_creates_private_file () =
+let test_download_file_creates_private_file () =
   let path = Filename.temp_file "awskit-download-perm" ".bin" in
   let body = "secret downloaded file body" in
   remove_file path;
@@ -251,7 +264,7 @@ let test_download_to_path_creates_private_file () =
       with_umask 0 (fun () ->
           match
             Lwt_main.run
-              (Transfer.download_to_path
+              (Transfer.download_file
                  { Runtime.response_body = body; uploaded_body = None }
                  ~bucket:"bucket" ~key:"key" ~path ())
           with
@@ -267,7 +280,7 @@ let write_file path body =
     ~finally:(fun () -> close_out_noerr channel)
     (fun () -> output_string channel body)
 
-let test_upload_from_path_streams_file_body () =
+let test_upload_file_streams_file_body () =
   Runtime.reset_write_fault ();
   let path = Filename.temp_file "awskit-upload" ".bin" in
   let body = "first line\nsecond line\n" in
@@ -279,7 +292,7 @@ let test_upload_from_path_streams_file_body () =
       let progress = ref [] in
       match
         Lwt_main.run
-          (Transfer.upload_from_path conn ~bucket:"bucket" ~key:"key" ~path
+          (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~path
              ~on_progress:(fun transferred ->
                progress := transferred :: !progress)
              ())
@@ -294,7 +307,7 @@ let test_upload_from_path_streams_file_body () =
             [ Int64.of_int (String.length body) ]
             (List.rev !progress))
 
-let test_upload_from_path_returns_stream_write_error () =
+let test_upload_file_returns_stream_write_error () =
   Runtime.write_error_after_bytes := Some 0;
   let path = Filename.temp_file "awskit-upload-error" ".bin" in
   write_file path "body that cannot be written";
@@ -306,7 +319,7 @@ let test_upload_from_path_returns_stream_write_error () =
       let conn = { Runtime.response_body = ""; uploaded_body = None } in
       match
         Lwt_main.run
-          (Transfer.upload_from_path conn ~bucket:"bucket" ~key:"key" ~path ())
+          (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~path ())
       with
       | Ok _ -> Alcotest.fail "upload succeeded despite write failure"
       | Error error ->
@@ -321,10 +334,10 @@ let suite () =
     ( "transfer",
       [
         Alcotest.test_case "download creates private file" `Quick
-          test_download_to_path_creates_private_file;
+          test_download_file_creates_private_file;
         Alcotest.test_case "upload streams file body" `Quick
-          test_upload_from_path_streams_file_body;
+          test_upload_file_streams_file_body;
         Alcotest.test_case "upload returns stream write error" `Quick
-          test_upload_from_path_returns_stream_write_error;
+          test_upload_file_returns_stream_write_error;
       ] );
   ]

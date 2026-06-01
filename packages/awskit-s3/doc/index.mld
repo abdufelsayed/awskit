@@ -38,7 +38,7 @@ Object APIs are split into explicit layers:
 
 {ul
   {li primitive streaming operations under [Object]}
-  {li bounded in-memory helpers under [Object.Buffer]}
+  {li bounded in-memory helpers under [Object]}
   {li local-path helpers under [Object.Transfer] in Unix-capable adapter
     packages}
 }
@@ -103,7 +103,7 @@ let run env =
   let region = Awskit.Region.of_string_exn "us-east-1" in
   let s3 = Awskit_s3_eio.create ~sw ~env ~region ~credentials () in
   match
-    Awskit_s3_eio.Object.Buffer.put_string s3
+    Awskit_s3_eio.Object.put_string s3
       ~bucket:"my-bucket"
       ~key:"hello.txt"
       "Hello, S3!"
@@ -122,10 +122,10 @@ let run () =
       Lwt_io.eprintf "%s\n" (Awskit_s3.Error.to_string_hum err)
   | Ok s3 ->
       let* result =
-        Awskit_s3_lwt_unix.Object.Buffer.get_string s3
+        Awskit_s3_lwt_unix.Object.get_as_string s3
           ~bucket:"my-bucket"
           ~key:"hello.txt"
-          ~max_size:1_048_576L
+          ~max_bytes:1_048_576L
           ()
       in
       match result with

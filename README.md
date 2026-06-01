@@ -60,8 +60,8 @@ when the stream can actually be replayed for a retry.
 
 Response bodies are streaming and scoped to the runtime response callback.
 Runtime adapters expose `with_response`; inside that callback, consume bodies
-through `with_response_body` or S3 helper APIs such as
-`Object.Buffer.get_string ~max_size`. Buffering and draining helpers apply
+through `Response_body.with_reader` or S3 helper APIs such as
+`Object.get_as_string ~max_bytes`. Buffering and draining helpers apply
 their documented response-size limits.
 
 ## Quick Start
@@ -92,7 +92,7 @@ let () =
   let region = Awskit.Region.of_string_exn "us-east-1" in
   let s3 = Awskit_s3_eio.create ~sw ~env ~region ~credentials () in
   match
-    Awskit_s3_eio.Object.Buffer.put_string s3
+    Awskit_s3_eio.Object.put_string s3
       ~bucket:"my-bucket"
       ~key:"hello.txt"
       "Hello, S3!"
@@ -123,10 +123,10 @@ let run () =
   | Error error -> Lwt_io.eprintf "S3 error: %a\n" Awskit_s3.Error.pp error
   | Ok s3 ->
       let* result =
-        Awskit_s3_lwt_unix.Object.Buffer.get_string s3
+        Awskit_s3_lwt_unix.Object.get_as_string s3
           ~bucket:"my-bucket"
           ~key:"hello.txt"
-          ~max_size:1_048_576L
+          ~max_bytes:1_048_576L
           ()
       in
       match result with
@@ -186,7 +186,7 @@ let () =
   let conn = Awskit_s3.Sim.connect store ~credentials in
 
   Awskit_s3.Sim.Bucket.create conn ~bucket:"test" () |> ignore;
-  Awskit_s3.Sim.Object.Buffer.put_string conn
+  Awskit_s3.Sim.Object.put_string conn
     ~bucket:"test"
     ~key:"hello"
     "world"

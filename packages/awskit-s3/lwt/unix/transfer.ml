@@ -68,7 +68,7 @@ struct
                         | n ->
                             let chunk = Bytes.sub_string bytes 0 n in
                             Lwt.bind
-                              (Runtime.write_request_body_string writer chunk)
+                              (Runtime.Request_body.write_string writer chunk)
                               (function
                               | Error _ as error -> Lwt.return error
                               | Ok () ->
@@ -83,9 +83,9 @@ struct
                     loop 0L))
               (fun exn -> Lwt.return_error (body_error "read upload" path exn))
           in
-          Lwt.return_ok (Runtime.stream_request_body descriptor ~write))
+          Lwt.return_ok (Runtime.Request_body.of_stream descriptor ~write))
 
-  let upload_from_path conn ~bucket ~key ?options ?on_progress ~path () =
+  let upload_file conn ~bucket ~key ?options ?on_progress ~path () =
     Lwt.bind (request_body_of_path ?on_progress path) (function
       | Error _ as error -> Lwt.return error
       | Ok body -> S3.Object.put conn ~bucket ~key ?options ~body ())
@@ -162,7 +162,7 @@ struct
                             | n ->
                                 let chunk = Bytes.sub_string bytes 0 n in
                                 Lwt.bind
-                                  (Runtime.write_request_body_string writer
+                                  (Runtime.Request_body.write_string writer
                                      chunk) (function
                                   | Error _ as error -> Lwt.return error
                                   | Ok () -> loop (remaining - n)))
@@ -172,7 +172,7 @@ struct
         (fun exn ->
           Lwt.return_error (body_error "read multipart upload" path exn))
     in
-    Runtime.stream_request_body descriptor ~write
+    Runtime.Request_body.of_stream descriptor ~write
 
   let split_batch ~concurrency specs =
     let rec loop remaining acc = function
@@ -288,7 +288,7 @@ struct
       | Ok complete ->
           Lwt.return_ok { Awskit_s3.Multipart.Managed.upload; parts; complete })
 
-  let resume_multipart_upload_from_path conn ~bucket ~key ~upload_id ?options
+  let resume_multipart_upload_file conn ~bucket ~key ~upload_id ?options
       ?(concurrency = 4) ?on_progress ~path () =
     let options =
       Option.value ~default:Awskit_s3.Multipart.Managed.default_options options
@@ -335,7 +335,7 @@ struct
                                         ~upload_id upload
                                         (uploaded_parts @ uploaded_now)))))))
 
-  let upload_multipart_from_path conn ~bucket ~key ?options ?(concurrency = 4)
+  let upload_multipart_file conn ~bucket ~key ?options ?(concurrency = 4)
       ?on_progress ~path () =
     let options =
       Option.value ~default:Awskit_s3.Multipart.Managed.default_options options
@@ -379,7 +379,7 @@ struct
                                     | Error error -> abort_and_return error)))))
         )
 
-  let download_to_path conn ~bucket ~key ?options ?on_progress ~path () =
+  let download_file conn ~bucket ~key ?options ?on_progress ~path () =
     let consume reader =
       Lwt.catch
         (fun () ->
@@ -387,7 +387,7 @@ struct
               let bytes = Bytes.create buffer_size in
               let rec loop transferred =
                 Lwt.bind
-                  (Runtime.read_response_body reader bytes ~off:0
+                  (Runtime.Response_body.read reader bytes ~off:0
                      ~len:buffer_size) (function
                   | Error _ as error -> Lwt.return error
                   | Ok 0 -> Lwt.return_ok ()

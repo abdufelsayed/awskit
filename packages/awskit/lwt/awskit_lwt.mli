@@ -35,14 +35,14 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     clock:(unit -> Ptime.t) ->
     ?retry_policy:Awskit.Retry.t ->
     ?sleep:(Ptime.Span.t -> unit Lwt.t) ->
-    ?max_response_body_bytes:int ->
+    ?max_response_drain_bytes:int ->
     unit ->
     t
   (** [endpoint] overrides the default AWS HTTPS endpoint for local test
       services or custom service endpoints. [retry_policy] defaults to
       {!val:Awskit.Retry.default}. [sleep] is used between retries and defaults
-      to no delay for custom Lwt backends. [max_response_body_bytes] defaults to
-      64 MiB. *)
+      to no delay for custom Lwt backends. [max_response_drain_bytes] defaults
+      to 64 MiB. *)
 
   val create_with_credentials_provider :
     ?ctx:Client.ctx ->
@@ -52,7 +52,7 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     clock:(unit -> Ptime.t) ->
     ?retry_policy:Awskit.Retry.t ->
     ?sleep:(Ptime.Span.t -> unit Lwt.t) ->
-    ?max_response_body_bytes:int ->
+    ?max_response_drain_bytes:int ->
     unit ->
     t
   (** Like {!val:create}, but resolves credentials through a provider for each

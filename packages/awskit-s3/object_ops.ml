@@ -30,7 +30,7 @@ module Make (C : Operation_context.S) = struct
         match validate_put_options options with
         | Error error -> return_error error
         | Ok () -> (
-            let descriptor = R.request_body_descriptor body in
+            let descriptor = R.Request_body.descriptor body in
             match descriptor.content_length with
             | None ->
                 return_error
@@ -94,7 +94,7 @@ module Make (C : Operation_context.S) = struct
                 match object_info response with
                 | Error error -> return_error error
                 | Ok info ->
-                    let* consumed = R.with_response_body body ~consume in
+                    let* consumed = R.Response_body.with_reader body ~consume in
                     return (Result.map (fun value -> (info, value)) consumed)))
 
   let head conn ~bucket ~key ?options () =
@@ -162,7 +162,7 @@ module Make (C : Operation_context.S) = struct
                 ("content-type", "application/xml");
               ]
             in
-            let upload = R.string_request_body body in
+            let upload = R.Request_body.of_string body in
             match
               bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/"
             with
@@ -171,7 +171,7 @@ module Make (C : Operation_context.S) = struct
                 with_response conn ~method_:`POST ~request
                   ~query:[ ("delete", []) ]
                   ~headers
-                  ~payload_hash:(R.request_body_descriptor upload).payload_hash
+                  ~payload_hash:(R.Request_body.descriptor upload).payload_hash
                   upload
                   ~f:(fun response response_body ->
                     let* body =
@@ -463,22 +463,20 @@ module Make (C : Operation_context.S) = struct
       return (Result.map List.rev result)
   end
 
-  module Buffer = struct
-    let put_string conn ~bucket ~key ?options body =
-      put conn ~bucket ~key ?options ~body:(R.string_request_body body) ()
+  let put_string conn ~bucket ~key ?options body =
+    put conn ~bucket ~key ?options ~body:(R.Request_body.of_string body) ()
 
-    let put_bytes conn ~bucket ~key ?options body =
-      put conn ~bucket ~key ?options ~body:(R.bytes_request_body body) ()
+  let put_bytes conn ~bucket ~key ?options body =
+    put conn ~bucket ~key ?options ~body:(R.Request_body.of_bytes body) ()
 
-    let get_string conn ~bucket ~key ~max_size ?options () =
-      let consume reader = read_body reader ~max_size in
-      get conn ~bucket ~key ?options ~consume ()
+  let get_as_string conn ~bucket ~key ~max_bytes ?options () =
+    let consume reader = read_body reader ~max_size:max_bytes in
+    get conn ~bucket ~key ?options ~consume ()
 
-    let get_bytes conn ~bucket ~key ~max_size ?options () =
-      let* result = get_string conn ~bucket ~key ~max_size ?options () in
-      return
-        (Result.map (fun (info, body) -> (info, Bytes.of_string body)) result)
-  end
+  let get_as_bytes conn ~bucket ~key ~max_bytes ?options () =
+    let* result = get_as_string conn ~bucket ~key ~max_bytes ?options () in
+    return
+      (Result.map (fun (info, body) -> (info, Bytes.of_string body)) result)
 
   module Tagging = struct
     let get conn ~bucket ~key =
@@ -509,7 +507,7 @@ module Make (C : Operation_context.S) = struct
           | Error error -> return_error error
           | Ok () -> (
               let body = xml_tags tags in
-              let upload = R.string_request_body body in
+              let upload = R.Request_body.of_string body in
               let headers =
                 [
                   ("content-md5", content_md5 body);
@@ -523,7 +521,7 @@ module Make (C : Operation_context.S) = struct
                     ~query:[ ("tagging", []) ]
                     ~headers
                     ~payload_hash:
-                      (R.request_body_descriptor upload).payload_hash upload
+                      (R.Request_body.descriptor upload).payload_hash upload
                     ~f:(fun response body ->
                       let* discarded = discard_response_body body in
                       match discarded with

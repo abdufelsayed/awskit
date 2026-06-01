@@ -99,7 +99,7 @@ module Make (C : Operation_context.S) = struct
         match Public_multipart.Part.create ~part_number ~etag:"unused" with
         | Error error -> return_error error
         | Ok _ -> (
-            let descriptor = R.request_body_descriptor body in
+            let descriptor = R.Request_body.descriptor body in
             match descriptor.content_length with
             | None ->
                 return_error
@@ -191,7 +191,7 @@ module Make (C : Operation_context.S) = struct
                        parts)
                   |> Xml.to_string
                 in
-                let upload = R.string_request_body body in
+                let upload = R.Request_body.of_string body in
                 match object_request conn ~bucket ~key with
                 | Error error -> return_error error
                 | Ok request ->
@@ -204,7 +204,7 @@ module Make (C : Operation_context.S) = struct
                         ]
                       ~headers:[ ("content-type", "application/xml") ]
                       ~payload_hash:
-                        (R.request_body_descriptor upload).payload_hash upload
+                        (R.Request_body.descriptor upload).payload_hash upload
                       ~f:(fun response body ->
                         let* body =
                           read_response_body body ~max_size:1_048_576L
@@ -436,7 +436,7 @@ module Make (C : Operation_context.S) = struct
                       let part_body = String.sub body offset length in
                       let* uploaded =
                         upload_part conn ~bucket ~key ~upload_id ~part_number
-                          ~body:(R.string_request_body part_body)
+                          ~body:(R.Request_body.of_string part_body)
                           ~options:options.upload_part_options ()
                       in
                       match uploaded with

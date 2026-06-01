@@ -46,11 +46,11 @@ let test_runtime_bodies env =
   Eio.Switch.run @@ fun sw ->
   let conn = Awskit_eio.create ~env ~sw ~region ~credentials:c () in
   ignore (Awskit_eio.Runtime.region conn : Awskit.Region.t);
-  let body = Awskit_eio.Runtime.string_request_body "hello" in
+  let body = Awskit_eio.Runtime.Request_body.of_string "hello" in
   Alcotest.(check int64)
     "content length" 5L
     (Option.value
-       (Awskit_eio.Runtime.request_body_descriptor body).content_length
+       (Awskit_eio.Runtime.Request_body.descriptor body).content_length
        ~default:(-1L))
 
 let stream_descriptor length =
@@ -80,7 +80,7 @@ let body_to_cohttp_exn conn body =
 let rec read_all body buffer =
   let chunk = Bytes.create 2 in
   match
-    Awskit_eio__Runtime.read_response_body body chunk ~off:0
+    Awskit_eio__Runtime.Response_body.read body chunk ~off:0
       ~len:(Bytes.length chunk)
   with
   | Error error ->
@@ -169,21 +169,21 @@ let request_body_request_for_endpoint endpoint =
   Awskit.Request.create_exn ~method_:`PUT ~target ()
 
 let read_response_body_to_string body =
-  Awskit_eio__Runtime.with_response_body body ~consume:(fun reader ->
+  Awskit_eio__Runtime.Response_body.with_reader body ~consume:(fun reader ->
       Ok (read_all reader (Buffer.create 128)))
 
 let test_stream_request_body_emits_multiple_chunks env =
   Eio.Switch.run @@ fun sw ->
   let conn = request_conn env sw in
   let body =
-    Awskit_eio__Runtime.stream_request_body (stream_descriptor 6L)
+    Awskit_eio__Runtime.Request_body.of_stream (stream_descriptor 6L)
       ~write:(fun writer ->
-        match Awskit_eio__Runtime.write_request_body_string writer "ab" with
+        match Awskit_eio__Runtime.Request_body.write_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> (
-            match Awskit_eio__Runtime.write_request_body_string writer "cd" with
+            match Awskit_eio__Runtime.Request_body.write_string writer "cd" with
             | Error _ as error -> error
-            | Ok () -> Awskit_eio__Runtime.write_request_body_string writer "ef"
+            | Ok () -> Awskit_eio__Runtime.Request_body.write_string writer "ef"
             ))
   in
   let cohttp_body, request_body_finished = body_to_cohttp_exn conn body in
@@ -200,9 +200,9 @@ let test_stream_request_body_error_propagates env =
   let conn = request_conn env sw in
   let stream_error = Awskit.Error.body "stream request body failed" in
   let body =
-    Awskit_eio__Runtime.stream_request_body (stream_descriptor 4L)
+    Awskit_eio__Runtime.Request_body.of_stream (stream_descriptor 4L)
       ~write:(fun writer ->
-        match Awskit_eio__Runtime.write_request_body_string writer "ab" with
+        match Awskit_eio__Runtime.Request_body.write_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
@@ -223,9 +223,9 @@ let test_stream_request_body_rejects_short_body env =
   Eio.Switch.run @@ fun sw ->
   let conn = request_conn env sw in
   let body =
-    Awskit_eio__Runtime.stream_request_body (stream_descriptor 4L)
+    Awskit_eio__Runtime.Request_body.of_stream (stream_descriptor 4L)
       ~write:(fun writer ->
-        Awskit_eio__Runtime.write_request_body_string writer "ab")
+        Awskit_eio__Runtime.Request_body.write_string writer "ab")
   in
   let _cohttp_body, request_body_finished = body_to_cohttp_exn conn body in
   Eio.Promise.await request_body_finished
@@ -235,11 +235,11 @@ let test_stream_request_body_rejects_long_body env =
   Eio.Switch.run @@ fun sw ->
   let conn = request_conn env sw in
   let body =
-    Awskit_eio__Runtime.stream_request_body (stream_descriptor 4L)
+    Awskit_eio__Runtime.Request_body.of_stream (stream_descriptor 4L)
       ~write:(fun writer ->
-        match Awskit_eio__Runtime.write_request_body_string writer "abcd" with
+        match Awskit_eio__Runtime.Request_body.write_string writer "abcd" with
         | Error _ as error -> error
-        | Ok () -> Awskit_eio__Runtime.write_request_body_string writer "e")
+        | Ok () -> Awskit_eio__Runtime.Request_body.write_string writer "e")
   in
   let _cohttp_body, request_body_finished = body_to_cohttp_exn conn body in
   Eio.Promise.await request_body_finished
@@ -263,10 +263,10 @@ let test_stream_request_body_early_response_cancels_producer_and_preserves_body
         ignore (Eio.Promise.try_resolve wake_producer_finished () : bool)
       in
       let body =
-        Awskit_eio__Runtime.stream_request_body (stream_descriptor 1024L)
+        Awskit_eio__Runtime.Request_body.of_stream (stream_descriptor 1024L)
           ~write:(fun writer ->
             producer_started := true;
-            match Awskit_eio__Runtime.write_request_body_string writer "ab" with
+            match Awskit_eio__Runtime.Request_body.write_string writer "ab" with
             | Error _ as error -> error
             | Ok () ->
                 Exn.protect ~finally:finish_producer ~f:(fun () ->
@@ -306,9 +306,9 @@ let test_stream_request_body_success_response_body_is_scoped env =
       let conn = request_conn env conn_sw in
       let request = request_body_request_for_endpoint endpoint in
       let body =
-        Awskit_eio__Runtime.stream_request_body (stream_descriptor 2L)
+        Awskit_eio__Runtime.Request_body.of_stream (stream_descriptor 2L)
           ~write:(fun writer ->
-            Awskit_eio__Runtime.write_request_body_string writer "ok")
+            Awskit_eio__Runtime.Request_body.write_string writer "ok")
       in
       let result =
         Awskit_eio__Runtime.with_response conn request body
@@ -328,10 +328,10 @@ let test_stream_request_body_success_response_body_is_scoped env =
             (String.length body);
           Alcotest.(check string) "response body" response_body body)
 
-let eio_response_body ~max_response_body_bytes body =
+let eio_response_body ~max_response_drain_bytes body =
   {
     Awskit_eio__Runtime.body = Cohttp_eio.Body.of_string body;
-    max_response_body_bytes;
+    max_response_drain_bytes;
   }
 
 let expect_body_limit label expected = function
@@ -342,13 +342,13 @@ let expect_body_limit label expected = function
   | Ok _ -> Alcotest.failf "%s: expected body limit error" label
 
 let test_discard_response_body_enforces_limit _env =
-  eio_response_body ~max_response_body_bytes:3 "abcdef"
-  |> Awskit_eio__Runtime.discard_response_body
+  eio_response_body ~max_response_drain_bytes:3 "abcdef"
+  |> Awskit_eio__Runtime.Response_body.discard
   |> expect_body_limit "discard limit" 3L
 
 let test_with_response_body_drain_enforces_limit _env =
-  let body = eio_response_body ~max_response_body_bytes:3 "abcdef" in
-  Awskit_eio__Runtime.with_response_body body ~consume:(fun _ -> Ok ())
+  let body = eio_response_body ~max_response_drain_bytes:3 "abcdef" in
+  Awskit_eio__Runtime.Response_body.with_reader body ~consume:(fun _ -> Ok ())
   |> expect_body_limit "scoped drain limit" 3L
 
 let suite env =
