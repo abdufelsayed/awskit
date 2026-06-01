@@ -277,7 +277,7 @@ module Multipart = struct
                         response = response 200;
                       })))
 
-  module Paginator = struct
+  module List_parts = struct
     let validate_max_pages = function
       | None -> Ok ()
       | Some value when value > 0 -> Ok ()

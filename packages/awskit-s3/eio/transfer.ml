@@ -235,7 +235,7 @@ struct
          0L
 
   let matching_uploaded_parts conn ~bucket ~key ~upload_id specs =
-    match S3.Multipart.Paginator.parts conn ~bucket ~key ~upload_id () with
+    match S3.Multipart.List_parts.parts conn ~bucket ~key ~upload_id () with
     | Error _ as error -> error
     | Ok uploaded ->
         let part_for_spec spec =

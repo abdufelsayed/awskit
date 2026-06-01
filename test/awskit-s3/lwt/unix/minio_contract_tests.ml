@@ -61,7 +61,7 @@ let delete_object_version key version_id =
 
 let cleanup_bucket conn ~bucket =
   let open Lwt.Syntax in
-  let* versions_result = S3.Object.Versions.pages conn ~bucket () in
+  let* versions_result = S3.Object.List_object_versions.pages conn ~bucket () in
   (match versions_result with
     | Ok pages ->
         let objects =
@@ -275,8 +275,8 @@ let test_object_versioning () =
       in
       let versions =
         await "list versions"
-          (S3.Object.Versions.object_versions conn ~bucket ~options:list_options
-             ())
+          (S3.Object.List_object_versions.object_versions conn ~bucket
+             ~options:list_options ())
       in
       let listed_versions =
         List.filter_map
@@ -292,8 +292,8 @@ let test_object_versioning () =
         (List.mem (Object.Version_id.to_string v2) listed_versions);
       let markers =
         await "list delete markers"
-          (S3.Object.Versions.delete_markers conn ~bucket ~options:list_options
-             ())
+          (S3.Object.List_object_versions.delete_markers conn ~bucket
+             ~options:list_options ())
       in
       let listed_markers =
         List.filter_map

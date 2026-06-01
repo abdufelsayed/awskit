@@ -114,10 +114,10 @@ The object surface also includes:
   {li [Object.list] for rich pages and [Object.list_keys] for key-only pages}
   {li [Object.list_versions] for [ListObjectVersions] pages, including object
     versions and delete markers}
-  {li [Object.Paginator.pages], [objects], and [keys] for following
+  {li [Object.List_objects_v2.pages], [objects], and [keys] for following
     [ListObjectsV2] continuation tokens}
-  {li [Object.Versions.pages], [object_versions], and [delete_markers] for
-    following version-listing markers}
+  {li [Object.List_object_versions.pages], [object_versions], and
+    [delete_markers] for following version-listing markers}
   {li [Object.Tagging.get], [put], and [delete]}
 }
 
@@ -126,7 +126,7 @@ only the continuation token between requests. Use [max_pages] to cap traversal:
 
 {[
 let keys =
-  Awskit_s3_eio.Object.Paginator.keys s3
+  Awskit_s3_eio.Object.List_objects_v2.keys s3
     ~bucket:"my-bucket"
     ~options:{ Awskit_s3.List_objects_v2.default_options with prefix = Some "logs/" }
     ~max_pages:10
@@ -142,7 +142,8 @@ source version with [Copy_object.source_version_id].
 
 Deleting the current object in a versioned bucket creates a delete marker.
 [Object.list_versions] returns object versions and delete markers, and
-[Object.Versions] provides paginator helpers for traversing the full history.
+[Object.List_object_versions] provides paginator helpers for traversing the full
+history.
 [List_object_versions] is the operation data module for options and page types:
 
 {[
@@ -152,7 +153,7 @@ let options =
     prefix = Some "logs/";
   }
 in
-Awskit_s3_eio.Object.Versions.object_versions s3
+Awskit_s3_eio.Object.List_object_versions.object_versions s3
   ~bucket:"my-bucket"
   ~options
   ()
@@ -359,7 +360,7 @@ Awskit_s3_eio.Bucket.Encryption.put s3
   {li [Multipart.complete] completes the upload with ordered parts.}
   {li [Multipart.abort] cancels an upload.}
   {li [Multipart.list_parts] inspects one page of uploaded parts.}
-  {li [Multipart.Paginator.pages] and [parts] follow [ListParts] part-number
+  {li [Multipart.List_parts.pages] and [parts] follow [ListParts] part-number
     markers.}
 }
 

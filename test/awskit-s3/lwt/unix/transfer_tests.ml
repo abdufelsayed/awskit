@@ -174,7 +174,7 @@ module S3 = struct
     let list _ ~bucket:_ ?options:_ () = unsupported ()
     let list_keys _ ~bucket:_ ?options:_ () = unsupported ()
 
-    module Paginator = struct
+    module List_objects_v2 = struct
       let fold_pages _ ~bucket:_ ?options:_ ?max_pages:_ ~init:_ ~f:_ () =
         unsupported ()
 
@@ -183,7 +183,7 @@ module S3 = struct
       let keys _ ~bucket:_ ?options:_ ?max_pages:_ () = unsupported ()
     end
 
-    module Versions = struct
+    module List_object_versions = struct
       let fold_pages _ ~bucket:_ ?options:_ ?max_pages:_ ~init:_ ~f:_ () =
         unsupported ()
 
@@ -228,7 +228,7 @@ module S3 = struct
     let list_parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
       unsupported ()
 
-    module Paginator = struct
+    module List_parts = struct
       let fold_pages _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ ?max_pages:_
           ~init:_ ~f:_ () =
         unsupported ()

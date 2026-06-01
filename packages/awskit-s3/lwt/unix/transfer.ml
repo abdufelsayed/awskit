@@ -248,7 +248,7 @@ struct
          0L
 
   let matching_uploaded_parts conn ~bucket ~key ~upload_id specs =
-    Lwt.bind (S3.Multipart.Paginator.parts conn ~bucket ~key ~upload_id ())
+    Lwt.bind (S3.Multipart.List_parts.parts conn ~bucket ~key ~upload_id ())
       (function
       | Error _ as error -> Lwt.return error
       | Ok uploaded ->

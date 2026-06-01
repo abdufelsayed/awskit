@@ -891,7 +891,7 @@ module type OBJECT = sig
     unit ->
     (string list, Error.t) result io
 
-  module Paginator : sig
+  module List_objects_v2 : sig
     val fold_pages :
       connection ->
       bucket:string ->
@@ -927,7 +927,7 @@ module type OBJECT = sig
       (string list, Error.t) result io
   end
 
-  module Versions : sig
+  module List_object_versions : sig
     val fold_pages :
       connection ->
       bucket:string ->
@@ -1253,7 +1253,7 @@ module type MULTIPART = sig
     unit ->
     (List_parts.page, Error.t) result io
 
-  module Paginator : sig
+  module List_parts : sig
     val fold_pages :
       connection ->
       bucket:string ->

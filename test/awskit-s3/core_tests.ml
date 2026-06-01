@@ -1379,7 +1379,8 @@ let test_object_paginator_follows_tokens () =
   in
   let options = { List_objects_v2.default_options with max_keys = Some 1 } in
   let keys =
-    Recording_s3.Object.Paginator.keys conn ~bucket:"my-bucket" ~options ()
+    Recording_s3.Object.List_objects_v2.keys conn ~bucket:"my-bucket" ~options
+      ()
     |> ok_or_fail "paginator keys"
   in
   Alcotest.(check (list string)) "keys" [ "a.txt"; "b.txt" ] keys;
@@ -1403,7 +1404,8 @@ let test_object_paginator_max_pages () =
       ]
   in
   let pages =
-    Recording_s3.Object.Paginator.pages conn ~bucket:"my-bucket" ~max_pages:1 ()
+    Recording_s3.Object.List_objects_v2.pages conn ~bucket:"my-bucket"
+      ~max_pages:1 ()
     |> ok_or_fail "paginator pages"
   in
   Alcotest.(check int) "page count" 1 (List.length pages);
@@ -1438,7 +1440,7 @@ let test_multipart_paginator_follows_markers () =
   in
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
   let parts =
-    Recording_s3.Multipart.Paginator.parts conn ~bucket:"my-bucket"
+    Recording_s3.Multipart.List_parts.parts conn ~bucket:"my-bucket"
       ~key:"large.bin" ~upload_id ()
     |> ok_or_fail "multipart paginator parts"
   in
@@ -1697,7 +1699,7 @@ let test_sim_paginator_keys () =
     }
   in
   let keys =
-    Sim.Object.Paginator.keys conn ~bucket:"test-bucket" ~options ()
+    Sim.Object.List_objects_v2.keys conn ~bucket:"test-bucket" ~options ()
     |> ok_or_fail "sim paginator keys"
   in
   Alcotest.(check (list string)) "keys" [ "logs/a.txt"; "logs/b.txt" ] keys

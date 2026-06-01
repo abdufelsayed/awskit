@@ -326,7 +326,7 @@ module Make (C : Operation_context.S) = struct
                                 response;
                               }))))
 
-  module Paginator = struct
+  module List_parts = struct
     let validate_max_pages = function
       | None -> Ok ()
       | Some value when value > 0 -> Ok ()

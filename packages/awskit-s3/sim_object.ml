@@ -724,7 +724,7 @@ module Object = struct
           page.objects)
       (list conn ~bucket ?options ())
 
-  module Paginator = struct
+  module List_objects_v2 = struct
     let validate_max_pages = function
       | None -> Ok ()
       | Some value when value > 0 -> Ok ()
@@ -798,7 +798,7 @@ module Object = struct
            ())
   end
 
-  module Versions = struct
+  module List_object_versions = struct
     let validate_max_pages = function
       | None -> Ok ()
       | Some value when value > 0 -> Ok ()

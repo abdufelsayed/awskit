@@ -308,7 +308,7 @@ module Make (C : Operation_context.S) = struct
              page.objects)
          page)
 
-  module Paginator = struct
+  module List_objects_v2 = struct
     let validate_max_pages = function
       | None -> Ok ()
       | Some value when value > 0 -> Ok ()
@@ -390,7 +390,7 @@ module Make (C : Operation_context.S) = struct
       return (Result.map List.rev result)
   end
 
-  module Versions = struct
+  module List_object_versions = struct
     let validate_max_pages = function
       | None -> Ok ()
       | Some value when value > 0 -> Ok ()

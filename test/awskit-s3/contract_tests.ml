@@ -502,7 +502,7 @@ module Make (Client : SUBJECT) = struct
       (List.length first_versions_page.versions
       + List.length first_versions_page.delete_markers);
     let all_versions =
-      Client.Object.Versions.object_versions conn ~bucket
+      Client.Object.List_object_versions.object_versions conn ~bucket
         ~options:versions_options ()
       |> ok_or_fail "paginate object versions"
     in
@@ -514,7 +514,7 @@ module Make (Client : SUBJECT) = struct
            Option.map Object.Version_id.to_string version.version_id)
          all_versions);
     let all_markers =
-      Client.Object.Versions.delete_markers conn ~bucket
+      Client.Object.List_object_versions.delete_markers conn ~bucket
         ~options:versions_options ()
       |> ok_or_fail "paginate delete markers"
     in
@@ -637,7 +637,7 @@ module Make (Client : SUBJECT) = struct
     in
     Alcotest.(check string) "enabled version body" "enabled" body;
     let suspended_versions =
-      Client.Object.Versions.object_versions conn ~bucket
+      Client.Object.List_object_versions.object_versions conn ~bucket
         ~options:
           {
             List_object_versions.default_options with
@@ -1102,7 +1102,7 @@ module Make (Client : SUBJECT) = struct
           "99fOUhWeYfviXce2x4zfE3HfH+I=" part.checksum
     | _ -> Alcotest.fail "expected first multipart page");
     let parts =
-      Client.Multipart.Paginator.parts conn ~bucket ~key:"multi.bin" ~upload_id
+      Client.Multipart.List_parts.parts conn ~bucket ~key:"multi.bin" ~upload_id
         ~options:list_options ()
       |> ok_or_fail "paginate multipart parts"
     in
