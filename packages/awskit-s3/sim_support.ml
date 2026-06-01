@@ -76,19 +76,19 @@ type bucket_state = {
 
 type operation_record = {
   op :
-    [ `Put
-    | `Get
-    | `Head
-    | `Delete
-    | `List
-    | `List_versions
-    | `Copy
+    [ `Put_object
+    | `Get_object
+    | `Head_object
+    | `Delete_object
+    | `List_objects_v2
+    | `List_object_versions
+    | `Copy_object
     | `Delete_objects
-    | `Multipart_create
-    | `Multipart_upload_part
-    | `Multipart_complete
-    | `Multipart_abort
-    | `Multipart_list_parts ];
+    | `Create_multipart_upload
+    | `Upload_part
+    | `Complete_multipart_upload
+    | `Abort_multipart_upload
+    | `List_parts ];
   bucket : string;
   key : string option;
   timestamp : Ptime.t;

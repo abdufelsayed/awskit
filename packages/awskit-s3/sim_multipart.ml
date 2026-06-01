@@ -26,7 +26,8 @@ module Multipart = struct
             | Error error -> Error error
             | Ok () -> (
                 match
-                  operation_fault conn `Multipart_create bucket (Some key)
+                  operation_fault conn `Create_multipart_upload bucket
+                    (Some key)
                 with
                 | Some error -> Error error
                 | None ->
@@ -75,9 +76,7 @@ module Multipart = struct
             match require_multipart_upload conn ~bucket ~key ~upload_id with
             | Error error -> Error error
             | Ok (_bucket_state, upload) -> (
-                match
-                  operation_fault conn `Multipart_upload_part bucket (Some key)
-                with
+                match operation_fault conn `Upload_part bucket (Some key) with
                 | Some error -> Error error
                 | None -> (
                     match request_body_result body with
@@ -149,7 +148,8 @@ module Multipart = struct
             | Error error -> Error error
             | Ok () -> (
                 match
-                  operation_fault conn `Multipart_complete bucket (Some key)
+                  operation_fault conn `Complete_multipart_upload bucket
+                    (Some key)
                 with
                 | Some error -> Error error
                 | None ->
@@ -198,7 +198,9 @@ module Multipart = struct
         match require_multipart_upload conn ~bucket ~key ~upload_id with
         | Error error -> Error error
         | Ok (bucket_state, _upload) -> (
-            match operation_fault conn `Multipart_abort bucket (Some key) with
+            match
+              operation_fault conn `Abort_multipart_upload bucket (Some key)
+            with
             | Some error -> Error error
             | None ->
                 Hashtbl.remove bucket_state.multipart_uploads
@@ -227,9 +229,7 @@ module Multipart = struct
             match require_multipart_upload conn ~bucket ~key ~upload_id with
             | Error error -> Error error
             | Ok (_bucket_state, upload) -> (
-                match
-                  operation_fault conn `Multipart_list_parts bucket (Some key)
-                with
+                match operation_fault conn `List_parts bucket (Some key) with
                 | Some error -> Error error
                 | None ->
                     let max_parts =

@@ -121,8 +121,9 @@ The object surface also includes:
   {li [Object.Tagging.get], [put], and [delete]}
 }
 
-Paginator helpers preserve the regular [List_objects_v2.options] record and update
-only the continuation token between requests. Use [max_pages] to cap traversal:
+Operation pagination helpers preserve the regular [List_objects_v2.options]
+record and update only the continuation token between requests. Use [max_pages]
+to cap traversal:
 
 {[
 let keys =
@@ -142,8 +143,8 @@ source version with [Copy_object.source_version_id].
 
 Deleting the current object in a versioned bucket creates a delete marker.
 [Object.list_versions] returns object versions and delete markers, and
-[Object.List_object_versions] provides paginator helpers for traversing the full
-history.
+[Object.List_object_versions] provides operation pagination helpers for
+traversing the full history.
 [List_object_versions] is the operation data module for options and page types:
 
 {[

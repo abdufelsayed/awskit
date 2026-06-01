@@ -72,7 +72,9 @@ module Object = struct
                 match validate_tags options.tags with
                 | Error error -> Error error
                 | Ok () -> (
-                    match operation_fault conn `Put bucket (Some key) with
+                    match
+                      operation_fault conn `Put_object bucket (Some key)
+                    with
                     | Some error -> Error error
                     | None -> (
                         match
@@ -137,7 +139,7 @@ module Object = struct
             | Some (Stored_object obj) -> (
                 match take_fault conn with
                 | Some Response_lost -> (
-                    record ~faulted:true conn `Get bucket (Some key);
+                    record ~faulted:true conn `Get_object bucket (Some key);
                     match
                       ensure_read_preconditions obj options.preconditions
                     with
@@ -170,10 +172,10 @@ module Object = struct
                                 body)
                              ~consume))
                 | Some fault ->
-                    record ~faulted:true conn `Get bucket (Some key);
+                    record ~faulted:true conn `Get_object bucket (Some key);
                     Error (fault_error fault)
                 | None -> (
-                    record conn `Get bucket (Some key);
+                    record conn `Get_object bucket (Some key);
                     match
                       ensure_read_preconditions obj options.preconditions
                     with
@@ -220,7 +222,7 @@ module Object = struct
                      ~current:(Option.is_none options.version_id)
                      marker)
             | Some (Stored_object obj) -> (
-                match operation_fault conn `Head bucket (Some key) with
+                match operation_fault conn `Head_object bucket (Some key) with
                 | Some error -> Error error
                 | None -> (
                     match
@@ -278,7 +280,7 @@ module Object = struct
         match require_bucket conn bucket with
         | Error error -> Error error
         | Ok bucket_state -> (
-            match operation_fault conn `Delete bucket (Some key) with
+            match operation_fault conn `Delete_object bucket (Some key) with
             | Some error -> Error error
             | None -> (
                 match options.version_id with
@@ -420,7 +422,7 @@ module Object = struct
                 | Error error -> Error error
                 | Ok destination_bucket_state -> (
                     match
-                      operation_fault conn `Copy destination_bucket
+                      operation_fault conn `Copy_object destination_bucket
                         (Some destination_key)
                     with
                     | Some error -> Error error
@@ -587,7 +589,7 @@ module Object = struct
         match require_bucket conn bucket with
         | Error error -> Error error
         | Ok bucket_state -> (
-            match operation_fault conn `List_versions bucket None with
+            match operation_fault conn `List_object_versions bucket None with
             | Some error -> Error error
             | None ->
                 let all = version_entries bucket_state options in
@@ -643,7 +645,7 @@ module Object = struct
         match require_bucket conn bucket with
         | Error error -> Error error
         | Ok bucket_state -> (
-            match operation_fault conn `List bucket None with
+            match operation_fault conn `List_objects_v2 bucket None with
             | Some error -> Error error
             | None ->
                 let all =

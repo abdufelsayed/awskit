@@ -1698,6 +1698,23 @@ let test_sim_public_helper_surface () =
     [ ("after.txt", "after"); ("ok.txt", "hello") ]
     (Simulator.objects_as_strings store ~bucket:"test-bucket")
 
+let sim_operation_name (_ : Simulator.operation_record) = function
+  | `Put_object | `Get_object | `Head_object | `Delete_object | `List_objects_v2
+  | `List_object_versions | `Copy_object | `Delete_objects
+  | `Create_multipart_upload | `Upload_part | `Complete_multipart_upload
+  | `Abort_multipart_upload | `List_parts ->
+      ()
+
+let test_sim_history_uses_operation_names () =
+  let conn = make_sim () in
+  ignore
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"history.txt"
+       "history"
+    |> ok_or_fail "put history");
+  match Simulator.history (Simulator.store conn) with
+  | record :: _ -> sim_operation_name record record.op
+  | [] -> Alcotest.fail "expected simulator history record"
+
 let test_sim_buffer_roundtrip () =
   let conn = make_sim () in
   let checksum : Object.Checksum.request =
@@ -1877,6 +1894,8 @@ let suite =
           test_object_transfer_aborts_on_complete_failure;
         Alcotest.test_case "sim public helper surface" `Quick
           test_sim_public_helper_surface;
+        Alcotest.test_case "sim history uses operation names" `Quick
+          test_sim_history_uses_operation_names;
         Alcotest.test_case "sim in-memory roundtrip" `Quick
           test_sim_buffer_roundtrip;
         Alcotest.test_case "sim streaming get" `Quick test_sim_streaming_get;
