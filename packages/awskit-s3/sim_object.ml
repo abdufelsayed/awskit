@@ -697,8 +697,6 @@ module Object = struct
                         etag = Some obj.etag;
                         last_modified = Some obj.last_modified;
                         storage_class = obj.storage_class;
-                        owner = None;
-                        checksums = Option.to_list obj.checksum;
                       })
                     selected
                 in

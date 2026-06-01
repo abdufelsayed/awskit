@@ -29,8 +29,6 @@ let parse_page ~response body =
                   Option.bind
                     (Xml.child_text "StorageClass" nodes)
                     Storage_class.of_string;
-                owner = None;
-                checksums = [];
               })
   in
   Ok

@@ -316,8 +316,6 @@ module List = struct
     etag : Etag.t option;
     last_modified : Ptime.t option;
     storage_class : Storage_class.t option;
-    owner : string option;
-    checksums : Checksum.response list;
   }
 
   type page = {

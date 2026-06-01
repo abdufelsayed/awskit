@@ -49,6 +49,16 @@ let test_operation_data_module_names () =
   ignore (None : Get_object.result option);
   ignore (Copy_object.default_options : Copy_object.options);
   ignore (List_objects_v2.default_options : List_objects_v2.options);
+  let listed_object : List_objects_v2.object_summary =
+    {
+      key = "file.txt";
+      size = Some 1L;
+      etag = None;
+      last_modified = None;
+      storage_class = None;
+    }
+  in
+  ignore (listed_object : List_objects_v2.object_summary);
   ignore (List_object_versions.default_options : List_object_versions.options);
   ignore (Create_bucket.default_options : Create_bucket.options);
   ignore (None : Delete_bucket.result option);
@@ -1729,11 +1739,8 @@ let test_sim_buffer_roundtrip () =
   in
   match page.objects with
   | [ object_ ] ->
-      Alcotest.(check (option string))
-        "listed checksum" (Some "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=")
-        (List.find_map
-           (fun (checksum : Object.Checksum.response) -> Some checksum.value)
-           object_.checksums)
+      Alcotest.(check string) "listed key" "hello.txt" object_.key;
+      Alcotest.(check (option int64)) "listed size" (Some 5L) object_.size
   | _ -> Alcotest.fail "expected one listed object"
 
 let test_sim_streaming_get () =
