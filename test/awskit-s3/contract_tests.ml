@@ -1198,40 +1198,40 @@ module Make (Client : SUBJECT) = struct
       (Client.Multipart.complete_upload conn ~bucket ~key:"edges.bin" ~upload_id
          [ overwritten.part; second.part ])
 
-  let test_managed_multipart_upload () =
+  let test_object_transfer_upload () =
     let conn = Client.fresh () in
     create_bucket conn;
-    let part_size = Multipart.Managed.min_part_size in
+    let part_size = Transfer.min_part_size in
     let body = String.make part_size 'a' ^ "end" in
-    let options = { Multipart.Managed.default_options with part_size } in
+    let options = { Transfer.default_options with part_size } in
     let result =
-      Client.Multipart.Managed.upload_string conn ~bucket ~key:"managed.bin"
-        ~options body
-      |> ok_or_fail "managed multipart upload"
+      Client.Object.Transfer.upload_string conn ~bucket
+        ~key:"object-transfer.bin" ~options body
+      |> ok_or_fail "object transfer upload"
     in
     Alcotest.(check (list int))
-      "managed part numbers" [ 1; 2 ]
+      "object transfer part numbers" [ 1; 2 ]
       (List.map
          (fun (part : Multipart.Part.t) -> part.part_number)
          result.parts);
     let _info, stored =
-      Client.Object.get_as_string conn ~bucket ~key:"managed.bin"
+      Client.Object.get_as_string conn ~bucket ~key:"object-transfer.bin"
         ~max_bytes:(Int64.of_int (String.length body + 1))
         ()
-      |> ok_or_fail "get managed multipart"
+      |> ok_or_fail "get object transfer"
     in
     Alcotest.(check int)
-      "managed body size" (String.length body) (String.length stored);
+      "object transfer body size" (String.length body) (String.length stored);
     Alcotest.(check string)
-      "managed body suffix" "end"
+      "object transfer body suffix" "end"
       (String.sub stored (String.length stored - 3) 3);
     match
-      Client.Multipart.Managed.upload_string conn ~bucket ~key:"empty.bin" ""
+      Client.Object.Transfer.upload_string conn ~bucket ~key:"empty.bin" ""
     with
     | Error (Awskit.Error.Validation _) -> ()
     | Error error ->
         Alcotest.failf "unexpected empty body error: %a" Error.pp error
-    | Ok _ -> Alcotest.fail "expected empty managed multipart failure"
+    | Ok _ -> Alcotest.fail "expected empty object transfer failure"
 
   let cases =
     [
@@ -1256,8 +1256,8 @@ module Make (Client : SUBJECT) = struct
       Alcotest.test_case "multipart lifecycle" `Quick test_multipart_lifecycle;
       Alcotest.test_case "multipart completion edges" `Quick
         test_multipart_completion_edges;
-      Alcotest.test_case "managed multipart upload" `Quick
-        test_managed_multipart_upload;
+      Alcotest.test_case "object transfer upload" `Quick
+        test_object_transfer_upload;
     ]
 end
 

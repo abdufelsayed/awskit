@@ -368,14 +368,14 @@ Awskit_s3_eio.Bucket.Encryption.put s3
 parts require a known exact length, and custom stream producer errors are part
 of the upload result.
 
-[Multipart.Managed.upload_string] and [upload_bytes] provide a higher-level
+[Object.Transfer.upload_string] and [Object.Transfer.upload_bytes] provide a higher-level
 sequential multipart upload helper. The helper creates the upload, splits the
 body into AWS-safe parts, uploads each part, completes the upload, and attempts
 to abort if a part upload or completion fails. Defaults use 8 MiB parts, with
 the AWS minimum 5 MiB enforced for configured part sizes.
 
 {[
-Awskit_s3_eio.Multipart.Managed.upload_string s3
+Awskit_s3_eio.Object.Transfer.upload_string s3
   ~bucket:"my-bucket"
   ~key:"large.bin"
   large_body

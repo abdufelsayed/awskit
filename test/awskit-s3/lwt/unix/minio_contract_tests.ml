@@ -9,6 +9,7 @@ module Delete_objects = Awskit_s3.Delete_objects
 module Copy_object = Awskit_s3.Copy_object
 module List_object_versions = Awskit_s3.List_object_versions
 module Range = Awskit_s3.Range
+module Transfer = Awskit_s3.Transfer
 
 let getenv_default name default =
   match Sys.getenv_opt name with
@@ -359,8 +360,8 @@ let test_bucket_config_roundtrip () =
 
 let test_multipart_edges () =
   with_bucket "multipart" (fun conn ~bucket ->
-      let first_body = String.make Multipart.Managed.min_part_size 'a' in
-      let overwritten_body = String.make Multipart.Managed.min_part_size 'b' in
+      let first_body = String.make Transfer.min_part_size 'a' in
+      let overwritten_body = String.make Transfer.min_part_size 'b' in
       let final_body = "second" in
       let upload =
         await "create multipart"
@@ -467,7 +468,7 @@ let test_path_transfer_streams () =
 
 let test_multipart_path_transfer_resumes () =
   with_bucket "transfer-multipart" (fun conn ~bucket ->
-      let part_size = Multipart.Managed.min_part_size in
+      let part_size = Transfer.min_part_size in
       let path = Filename.temp_file "awskit-multipart-upload" ".bin" in
       let body =
         String.init
@@ -475,7 +476,7 @@ let test_multipart_path_transfer_resumes () =
           (fun index -> Char.chr ((index mod 10) + Char.code '0'))
       in
       write_file path body;
-      let options = { Multipart.Managed.default_options with part_size } in
+      let options = { Transfer.default_options with part_size } in
       let progress = ref [] in
       Fun.protect
         ~finally:(fun () -> remove_file path)

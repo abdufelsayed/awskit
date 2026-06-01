@@ -35,7 +35,7 @@ Cohttp runtime packages. Adapter packages carry those dependencies.
 
 - bucket creation, deletion, listing, and configuration;
 - object put, get, head, delete, copy, ranges, metadata, tags, and versions;
-- multipart upload and managed multipart helpers;
+- multipart upload and object transfer helpers;
 - presigned URLs;
 - bucket policies and related XML/JSON wire types;
 - S3 endpoint and addressing configuration;

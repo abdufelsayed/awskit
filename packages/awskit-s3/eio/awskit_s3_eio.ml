@@ -26,6 +26,7 @@ module Runtime = struct
 end
 
 module S3 = Awskit_s3.Make (Runtime)
+module File_transfer = Transfer
 
 let create ~sw ~env ~region ~credentials ?retry_policy ?endpoint
     ?addressing_style ?endpoint_variant ?scheme () =
@@ -38,7 +39,11 @@ let create ~sw ~env ~region ~credentials ?retry_policy ?endpoint
 
 module Object = struct
   include S3.Object
-  module Transfer = Transfer.Make (Runtime) (S3)
+
+  module Transfer = struct
+    include S3.Object.Transfer
+    include File_transfer.Make (Runtime) (S3)
+  end
 end
 
 module Bucket = S3.Bucket

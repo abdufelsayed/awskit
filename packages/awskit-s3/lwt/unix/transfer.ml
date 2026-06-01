@@ -1,12 +1,27 @@
 module Make
     (Runtime : Awskit_s3.RUNTIME with type 'a t = 'a Lwt.t)
     (S3 : sig
-      module Object :
-        Awskit_s3.OBJECT
-          with type connection := Runtime.connection
-           and type 'a io := 'a Lwt.t
-           and type request_body := Runtime.request_body
-           and type response_body_reader := Runtime.response_body_reader
+      module Object : sig
+        val put :
+          Runtime.connection ->
+          bucket:string ->
+          key:string ->
+          ?options:Awskit_s3.Put_object.options ->
+          body:Runtime.request_body ->
+          unit ->
+          (Awskit_s3.Put_object.result, Awskit_s3.Error.t) result Lwt.t
+
+        val get :
+          Runtime.connection ->
+          bucket:string ->
+          key:string ->
+          ?options:Awskit_s3.Get_object.options ->
+          consume:
+            (Runtime.response_body_reader ->
+            ('a, Awskit_s3.Error.t) result Lwt.t) ->
+          unit ->
+          (Awskit_s3.Get_object.result * 'a, Awskit_s3.Error.t) result Lwt.t
+      end
 
       module Multipart :
         Awskit_s3.MULTIPART
@@ -110,9 +125,7 @@ struct
           part_size64
       in
       if
-        Int64.compare part_count
-          (Int64.of_int Awskit_s3.Multipart.Managed.max_parts)
-        > 0
+        Int64.compare part_count (Int64.of_int Awskit_s3.Transfer.max_parts) > 0
       then
         Error
           (Awskit.Error.validation ~field:"part_count"
@@ -195,8 +208,7 @@ struct
     Lwt.bind
       (S3.Multipart.upload_part conn ~bucket ~key ~upload_id
          ~part_number:spec.part_number ~body
-         ~options:options.Awskit_s3.Multipart.Managed.upload_part_options ())
-      (function
+         ~options:options.Awskit_s3.Transfer.upload_part_options ()) (function
       | Error _ as error -> Lwt.return error
       | Ok uploaded -> Lwt.return_ok uploaded.part)
 
@@ -286,17 +298,17 @@ struct
       (function
       | Error _ as error -> Lwt.return error
       | Ok complete ->
-          Lwt.return_ok { Awskit_s3.Multipart.Managed.upload; parts; complete })
+          Lwt.return_ok { Awskit_s3.Transfer.upload; parts; complete })
 
   let resume_multipart_upload_file conn ~bucket ~key ~upload_id ?options
       ?(concurrency = 4) ?on_progress ~path () =
     let options =
-      Option.value ~default:Awskit_s3.Multipart.Managed.default_options options
+      Option.value ~default:Awskit_s3.Transfer.default_options options
     in
     match validate_concurrency concurrency with
     | Error _ as error -> Lwt.return error
     | Ok () -> (
-        match Awskit_s3.Multipart.Managed.validate_options options with
+        match Awskit_s3.Transfer.validate_options options with
         | Error _ as error -> Lwt.return error
         | Ok () ->
             Lwt.bind (regular_file_length path) (function
@@ -338,12 +350,12 @@ struct
   let upload_multipart_file conn ~bucket ~key ?options ?(concurrency = 4)
       ?on_progress ~path () =
     let options =
-      Option.value ~default:Awskit_s3.Multipart.Managed.default_options options
+      Option.value ~default:Awskit_s3.Transfer.default_options options
     in
     match validate_concurrency concurrency with
     | Error _ as error -> Lwt.return error
     | Ok () -> (
-        match Awskit_s3.Multipart.Managed.validate_options options with
+        match Awskit_s3.Transfer.validate_options options with
         | Error _ as error -> Lwt.return error
         | Ok () ->
             Lwt.bind (regular_file_length path) (function

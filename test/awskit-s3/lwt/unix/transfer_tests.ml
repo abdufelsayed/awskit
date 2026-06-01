@@ -240,7 +240,7 @@ module S3 = struct
         unsupported ()
     end
 
-    module Managed = struct
+    module Transfer = struct
       let upload_string _ ~bucket:_ ~key:_ ?options:_ _ = unsupported ()
       let upload_bytes _ ~bucket:_ ~key:_ ?options:_ _ = unsupported ()
     end

@@ -31,6 +31,22 @@ module Object : sig
        and type response_body_reader := Runtime.response_body_reader
 
   module Transfer : sig
+    val upload_string :
+      t ->
+      bucket:string ->
+      key:string ->
+      ?options:Awskit_s3.Transfer.options ->
+      string ->
+      (Awskit_s3.Transfer.result, Awskit_s3.Error.t) result Lwt.t
+
+    val upload_bytes :
+      t ->
+      bucket:string ->
+      key:string ->
+      ?options:Awskit_s3.Transfer.options ->
+      bytes ->
+      (Awskit_s3.Transfer.result, Awskit_s3.Error.t) result Lwt.t
+
     val upload_file :
       t ->
       bucket:string ->
@@ -47,12 +63,12 @@ module Object : sig
       t ->
       bucket:string ->
       key:string ->
-      ?options:Awskit_s3.Multipart.Managed.options ->
+      ?options:Awskit_s3.Transfer.options ->
       ?concurrency:int ->
       ?on_progress:(int64 -> unit) ->
       path:string ->
       unit ->
-      (Awskit_s3.Multipart.Managed.result, Awskit_s3.Error.t) result Lwt.t
+      (Awskit_s3.Transfer.result, Awskit_s3.Error.t) result Lwt.t
     (** Upload a local file with S3 multipart upload. [concurrency] defaults to
         [4]. The helper aborts the multipart upload when a fresh upload fails.
     *)
@@ -62,12 +78,12 @@ module Object : sig
       bucket:string ->
       key:string ->
       upload_id:Awskit_s3.Multipart.Upload_id.t ->
-      ?options:Awskit_s3.Multipart.Managed.options ->
+      ?options:Awskit_s3.Transfer.options ->
       ?concurrency:int ->
       ?on_progress:(int64 -> unit) ->
       path:string ->
       unit ->
-      (Awskit_s3.Multipart.Managed.result, Awskit_s3.Error.t) result Lwt.t
+      (Awskit_s3.Transfer.result, Awskit_s3.Error.t) result Lwt.t
     (** Resume an existing multipart upload by listing uploaded parts, skipping
         matching part numbers and sizes, uploading missing parts, and completing
         the upload. Existing uploads are not aborted on failure. *)

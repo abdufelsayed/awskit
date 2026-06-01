@@ -7,6 +7,7 @@
   object
   bucket
   multipart
+  transfer
   policy
   presigned
   operation_data
@@ -38,6 +39,7 @@
   object_ops
   bucket_ops
   multipart_ops
+  object_transfer_ops
   presigned_ops
   make
   sim_support
@@ -65,6 +67,7 @@
   make
   operation_data
   multipart_ops
+  object_transfer_ops
   object_data_intf
   object_ops
   object_delete_xml

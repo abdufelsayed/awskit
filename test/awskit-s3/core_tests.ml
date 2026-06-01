@@ -59,11 +59,8 @@ let test_operation_data_module_names () =
     (Create_multipart_upload.default_options : Create_multipart_upload.options);
   ignore (Upload_part.default_options : Upload_part.options);
   ignore
-    (Multipart.Managed.default_options.create_options
-      : Create_multipart_upload.options);
-  ignore
-    (Multipart.Managed.default_options.upload_part_options
-      : Upload_part.options);
+    (Transfer.default_options.create_options : Create_multipart_upload.options);
+  ignore (Transfer.default_options.upload_part_options : Upload_part.options);
   ignore (None : Complete_multipart_upload.result option);
   ignore (None : Abort_multipart_upload.result option);
   ignore (List_parts.default_options : List_parts.options)
@@ -1500,8 +1497,8 @@ let multipart_complete_body etag =
     "<CompleteMultipartUploadResult><ETag>%s</ETag></CompleteMultipartUploadResult>"
     etag
 
-let test_managed_multipart_upload_string () =
-  let part_size = Multipart.Managed.min_part_size in
+let test_object_transfer_upload_string () =
+  let part_size = Transfer.min_part_size in
   let body = String.make part_size 'a' ^ "end" in
   let conn =
     Recording_runtime.connect
@@ -1512,11 +1509,11 @@ let test_managed_multipart_upload_string () =
         response 200 (multipart_complete_body "\"complete\"");
       ]
   in
-  let options = { Multipart.Managed.default_options with part_size } in
+  let options = { Transfer.default_options with part_size } in
   let result =
-    Recording_s3.Multipart.Managed.upload_string conn ~bucket:"my-bucket"
+    Recording_s3.Object.Transfer.upload_string conn ~bucket:"my-bucket"
       ~key:"large.bin" ~options body
-    |> ok_or_fail "managed multipart upload"
+    |> ok_or_fail "object transfer upload"
   in
   Alcotest.(check (list int))
     "uploaded parts" [ 1; 2 ]
@@ -1566,8 +1563,8 @@ let test_complete_multipart_embedded_error () =
   | Error error -> Alcotest.failf "unexpected complete error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected embedded complete error"
 
-let test_managed_multipart_aborts_on_part_failure () =
-  let part_size = Multipart.Managed.min_part_size in
+let test_object_transfer_aborts_on_part_failure () =
+  let part_size = Transfer.min_part_size in
   let body = String.make part_size 'x' in
   let conn =
     Recording_runtime.connect
@@ -1578,14 +1575,14 @@ let test_managed_multipart_aborts_on_part_failure () =
         response 204 "";
       ]
   in
-  let options = { Multipart.Managed.default_options with part_size } in
+  let options = { Transfer.default_options with part_size } in
   (match
-     Recording_s3.Multipart.Managed.upload_string conn ~bucket:"my-bucket"
+     Recording_s3.Object.Transfer.upload_string conn ~bucket:"my-bucket"
        ~key:"large.bin" ~options body
    with
   | Error error when Error.service_code error = Some "InvalidRequest" -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected managed upload failure");
+  | Ok _ -> Alcotest.fail "expected object transfer failure");
   match List.rev conn.calls with
   | [ _create; _part1; abort ] ->
       Alcotest.(check string)
@@ -1595,6 +1592,37 @@ let test_managed_multipart_aborts_on_part_failure () =
         "abort upload id" (Some [ "upload-1" ])
         (List.assoc_opt "uploadId" abort.request.target.query)
   | _ -> Alcotest.fail "expected create, failed part, abort"
+
+let test_object_transfer_aborts_on_complete_failure () =
+  let part_size = Transfer.min_part_size in
+  let body = String.make part_size 'x' in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 (multipart_create_body "upload-1");
+        response 200 ~headers:[ ("etag", "\"part-1\"") ] "";
+        response 400
+          {|<Error><Code>InvalidRequest</Code><Message>bad complete</Message></Error>|};
+        response 204 "";
+      ]
+  in
+  let options = { Transfer.default_options with part_size } in
+  (match
+     Recording_s3.Object.Transfer.upload_string conn ~bucket:"my-bucket"
+       ~key:"large.bin" ~options body
+   with
+  | Error error when Error.service_code error = Some "InvalidRequest" -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected object transfer failure");
+  match List.rev conn.calls with
+  | [ _create; _part1; _complete; abort ] ->
+      Alcotest.(check string)
+        "abort method" "DELETE"
+        (Awskit.Request.Method.to_string abort.request.method_);
+      Alcotest.(check (option (list string)))
+        "abort upload id" (Some [ "upload-1" ])
+        (List.assoc_opt "uploadId" abort.request.target.query)
+  | _ -> Alcotest.fail "expected create, part, failed complete, abort"
 
 let make_sim () =
   let clock = Sim.Clock.create ~now:test_time () in
@@ -1769,12 +1797,14 @@ let suite =
           test_multipart_paginator_follows_markers;
         Alcotest.test_case "multipart upload part checksum headers" `Quick
           test_multipart_upload_part_checksum_headers;
-        Alcotest.test_case "managed multipart upload string" `Quick
-          test_managed_multipart_upload_string;
+        Alcotest.test_case "object transfer upload string" `Quick
+          test_object_transfer_upload_string;
         Alcotest.test_case "complete multipart embedded error" `Quick
           test_complete_multipart_embedded_error;
-        Alcotest.test_case "managed multipart aborts on part failure" `Quick
-          test_managed_multipart_aborts_on_part_failure;
+        Alcotest.test_case "object transfer aborts on part failure" `Quick
+          test_object_transfer_aborts_on_part_failure;
+        Alcotest.test_case "object transfer aborts on complete failure" `Quick
+          test_object_transfer_aborts_on_complete_failure;
         Alcotest.test_case "sim in-memory roundtrip" `Quick
           test_sim_buffer_roundtrip;
         Alcotest.test_case "sim streaming get" `Quick test_sim_streaming_get;

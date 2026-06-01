@@ -6,6 +6,7 @@ open struct
   module Object = Object
   module Bucket = Bucket
   module Multipart = Multipart
+  module Transfer = Transfer
   module Policy = Policy
   module Presigned = Presigned
 end
@@ -39,27 +40,27 @@ module type MULTIPART_DATA = sig
     val create : part_number:int -> etag:Object.Etag.t -> (t, Error.t) result
     val create_exn : part_number:int -> etag:Object.Etag.t -> t
   end
+end
 
-  module Managed : sig
-    val min_part_size : int
-    val default_part_size : int
-    val max_parts : int
+module type TRANSFER_DATA = sig
+  val min_part_size : int
+  val default_part_size : int
+  val max_parts : int
 
-    type options = {
-      part_size : int;
-      create_options : Create_multipart_upload.options;
-      upload_part_options : Upload_part.options;
-    }
+  type options = {
+    part_size : int;
+    create_options : Create_multipart_upload.options;
+    upload_part_options : Upload_part.options;
+  }
 
-    type result = {
-      upload : Upload.t;
-      parts : Part.t list;
-      complete : Complete_multipart_upload.result;
-    }
+  type result = {
+    upload : Multipart.Upload.t;
+    parts : Multipart.Part.t list;
+    complete : Complete_multipart_upload.result;
+  }
 
-    val default_options : options
-    val validate_options : options -> (unit, Error.t) Stdlib.result
-  end
+  val default_options : options
+  val validate_options : options -> (unit, Error.t) Stdlib.result
 end
 
 type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
@@ -291,6 +292,24 @@ module type OBJECT = sig
       bucket:string ->
       key:string ->
       (Awskit.Response.t, Error.t) result io
+  end
+
+  module Transfer : sig
+    val upload_string :
+      connection ->
+      bucket:string ->
+      key:string ->
+      ?options:Transfer.options ->
+      string ->
+      (Transfer.result, Error.t) result io
+
+    val upload_bytes :
+      connection ->
+      bucket:string ->
+      key:string ->
+      ?options:Transfer.options ->
+      bytes ->
+      (Transfer.result, Error.t) result io
   end
 end
 
@@ -560,24 +579,6 @@ module type MULTIPART = sig
       ?max_pages:int ->
       unit ->
       (List_parts.part_info list, Error.t) result io
-  end
-
-  module Managed : sig
-    val upload_string :
-      connection ->
-      bucket:string ->
-      key:string ->
-      ?options:Multipart.Managed.options ->
-      string ->
-      (Multipart.Managed.result, Error.t) result io
-
-    val upload_bytes :
-      connection ->
-      bucket:string ->
-      key:string ->
-      ?options:Multipart.Managed.options ->
-      bytes ->
-      (Multipart.Managed.result, Error.t) result io
   end
 end
 

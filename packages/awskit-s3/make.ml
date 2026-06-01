@@ -177,8 +177,14 @@ module Make (R : RUNTIME) = struct
       Digestif.MD5.(digest_string body |> to_raw_string) |> Base64.encode_exn
   end
 
-  module Object = Object_ops.Make (Context)
-  module Bucket = Bucket_ops.Make (Context)
   module Multipart = Multipart_ops.Make (Context)
+  module Object_base = Object_ops.Make (Context)
+
+  module Object = struct
+    include Object_base
+    module Transfer = Object_transfer_ops.Make (Context) (Multipart)
+  end
+
+  module Bucket = Bucket_ops.Make (Context)
   module Presigned = Presigned_ops.Make (Context)
 end
