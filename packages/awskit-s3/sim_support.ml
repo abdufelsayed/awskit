@@ -402,22 +402,13 @@ let ensure_read_preconditions (obj : stored_object)
 let ensure_delete_preconditions (obj : stored_object)
     (p : Object.Preconditions.Delete.t) =
   match p.if_match with
-  | Some condition when not (etag_condition_matches obj condition) ->
-      Error (precondition_failed ())
-  | _ -> (
-      match p.if_match_last_modified_time with
-      | Some time when Ptime.compare obj.last_modified time <> 0 ->
-          Error (precondition_failed ())
-      | _ -> (
-          match p.if_match_size with
-          | Some size when Int64.compare (object_size obj) size <> 0 ->
-              Error (precondition_failed ())
-          | _ -> Ok ()))
+  | None -> Ok ()
+  | Some condition ->
+      if etag_condition_matches obj condition then Ok ()
+      else Error (precondition_failed ())
 
 let delete_preconditions_are_empty (p : Object.Preconditions.Delete.t) =
   Option.is_none p.if_match
-  && Option.is_none p.if_match_last_modified_time
-  && Option.is_none p.if_match_size
 
 let ensure_copy_source_preconditions (obj : stored_object)
     (p : Object.Preconditions.Copy_source.t) =

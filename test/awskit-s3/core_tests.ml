@@ -13,6 +13,15 @@ let ok_or_fail label = function
 
 let header name headers = List.assoc_opt name headers
 
+let string_contains ~substring value =
+  let substring_length = String.length substring in
+  let value_length = String.length value in
+  let rec loop index =
+    index + substring_length <= value_length
+    && (String.sub value index substring_length = substring || loop (index + 1))
+  in
+  substring_length = 0 || loop 0
+
 let checksum_value = function
   | None -> None
   | Some (checksum : Object.Checksum.response) -> Some checksum.value
@@ -34,13 +43,7 @@ let test_operation_data_module_names () =
   ignore (Head_object.default_options : Head_object.options);
   ignore (Delete_object.default_options : Delete_object.options);
   let delete_object : Delete_objects.object_ =
-    {
-      key = "file.txt";
-      version_id = None;
-      etag = None;
-      last_modified_time = None;
-      size = None;
-    }
+    { key = "file.txt"; version_id = None; etag = None }
   in
   ignore (delete_object : Delete_objects.object_);
   ignore (None : Get_object.result option);
@@ -715,8 +718,6 @@ let test_object_precondition_headers () =
     {
       Object.Preconditions.Delete.if_match =
         Some (Object.Etag_condition.etag etag);
-      if_match_last_modified_time = Some test_time;
-      if_match_size = Some 4L;
     }
   in
   let delete_options =
@@ -772,10 +773,10 @@ let test_object_precondition_headers () =
         "delete if-match" (Some "\"etag\"")
         (header "if-match" delete.request.headers);
       Alcotest.(check (option string))
-        "delete last modified" (Some time)
+        "delete last modified removed" None
         (header "x-amz-if-match-last-modified-time" delete.request.headers);
       Alcotest.(check (option string))
-        "delete size" (Some "4")
+        "delete size removed" None
         (header "x-amz-if-match-size" delete.request.headers);
       Alcotest.(check (option string))
         "copy source if-match" (Some "\"etag\"")
@@ -790,6 +791,39 @@ let test_object_precondition_headers () =
         "copy source unmodified since" (Some time)
         (header "x-amz-copy-source-if-unmodified-since" copy.request.headers)
   | _ -> Alcotest.fail "expected five recorded calls"
+
+let test_delete_objects_request_body () =
+  let conn = Recording_runtime.connect [ response 200 "<DeleteResult/>" ] in
+  let version_id = Object.Version_id.of_string_exn "version-1" in
+  let etag = Object.Etag.of_string_exn "\"etag\"" in
+  let objects =
+    [
+      { Delete_objects.key = "key-only.txt"; version_id = None; etag = None };
+      {
+        Delete_objects.key = "versioned.txt";
+        version_id = Some version_id;
+        etag = None;
+      };
+      { Delete_objects.key = "etag.txt"; version_id = None; etag = Some etag };
+    ]
+  in
+  ignore
+    (Recording_s3.Object.delete_objects conn ~bucket:"my-bucket" ~objects
+    |> ok_or_fail "delete objects request body");
+  let body = (Recording_runtime.last_call conn).body in
+  let check_contains label substring =
+    Alcotest.(check bool) label true (string_contains ~substring body)
+  in
+  let check_absent label substring =
+    Alcotest.(check bool) label false (string_contains ~substring body)
+  in
+  check_contains "key-only key" "<Key>key-only.txt</Key>";
+  check_contains "versioned key" "<Key>versioned.txt</Key>";
+  check_contains "version id" "<VersionId>version-1</VersionId>";
+  check_contains "etag key" "<Key>etag.txt</Key>";
+  check_contains "etag" "<ETag>&quot;etag&quot;</ETag>";
+  check_absent "last modified omitted" "LastModifiedTime";
+  check_absent "size omitted" "<Size>"
 
 let test_object_versioning_requests_and_parse () =
   let version_id = Object.Version_id.of_string_exn "version-1" in
@@ -1686,6 +1720,8 @@ let suite =
           test_object_checksum_headers_and_response;
         Alcotest.test_case "object precondition headers" `Quick
           test_object_precondition_headers;
+        Alcotest.test_case "delete objects request body" `Quick
+          test_delete_objects_request_body;
         Alcotest.test_case "object versioning requests and parse" `Quick
           test_object_versioning_requests_and_parse;
         Alcotest.test_case "retry slow down then success" `Quick

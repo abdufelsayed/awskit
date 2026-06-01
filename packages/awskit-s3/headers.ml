@@ -31,12 +31,7 @@ let read_precondition_headers (p : Object.Preconditions.Read.t) =
   |> add_time_header "if-unmodified-since" p.if_unmodified_since
 
 let delete_precondition_headers (p : Object.Preconditions.Delete.t) =
-  []
-  |> add_opt_header "if-match" (Option.map etag_condition_header p.if_match)
-  |> add_time_header "x-amz-if-match-last-modified-time"
-       p.if_match_last_modified_time
-  |> add_opt_header "x-amz-if-match-size"
-       (Option.map Int64.to_string p.if_match_size)
+  [] |> add_opt_header "if-match" (Option.map etag_condition_header p.if_match)
 
 let copy_source_precondition_headers (p : Object.Preconditions.Copy_source.t) =
   []

@@ -267,21 +267,8 @@ module Object = struct
           | None -> true
           | Some etag -> Object.Etag.equal obj.etag etag
         in
-        let modified_matches =
-          match object_.last_modified_time with
-          | None -> true
-          | Some time -> Ptime.compare obj.last_modified time = 0
-        in
-        let size_matches =
-          match object_.size with
-          | None -> true
-          | Some size -> Int64.compare (object_size obj) size = 0
-        in
-        etag_matches && modified_matches && size_matches
-    | None | Some (Stored_delete_marker _) ->
-        Option.is_none object_.etag
-        && Option.is_none object_.last_modified_time
-        && Option.is_none object_.size
+        etag_matches
+    | None | Some (Stored_delete_marker _) -> Option.is_none object_.etag
 
   let delete conn ~bucket ~key ?options () =
     let options = Option.value ~default:Delete_object.default_options options in

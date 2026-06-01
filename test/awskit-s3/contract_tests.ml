@@ -314,13 +314,7 @@ module Make (Client : SUBJECT) = struct
     Alcotest.(check int) "listed count" 1 (List.length page.objects);
     Alcotest.(check bool) "truncated" true page.is_truncated;
     let delete_object key =
-      {
-        Delete_objects.key;
-        version_id = None;
-        etag = None;
-        last_modified_time = None;
-        size = None;
-      }
+      { Delete_objects.key; version_id = None; etag = None }
     in
     ignore
       (Client.Object.delete_objects conn ~bucket
@@ -566,8 +560,6 @@ module Make (Client : SUBJECT) = struct
         Delete_objects.key = "versioned.txt";
         version_id = Some v1;
         etag = Some (Object.Etag.of_string_exn "\"wrong\"");
-        last_modified_time = None;
-        size = None;
       }
     in
     let failed_many =
@@ -1008,8 +1000,6 @@ module Make (Client : SUBJECT) = struct
           {
             Object.Preconditions.Delete.if_match =
               Some (Object.Etag_condition.Etag delete_etag);
-            if_match_last_modified_time = Some test_time;
-            if_match_size = Some 3L;
           };
       }
     in
@@ -1018,22 +1008,25 @@ module Make (Client : SUBJECT) = struct
          ()
       |> ok_or_fail "delete preconditions");
     let delete_fail_key = "delete-conditional-fail.txt" in
-    ignore
-      (Client.Object.put_string conn ~bucket ~key:delete_fail_key "abc"
-      |> ok_or_fail "put delete fail conditional");
+    put_string conn delete_fail_key "abc";
     let delete_fail_options =
       {
         Delete_object.default_options with
         preconditions =
-          { Object.Preconditions.Delete.none with if_match_size = Some 4L };
+          {
+            Object.Preconditions.Delete.if_match =
+              Some
+                (Object.Etag_condition.Etag
+                   (Object.Etag.of_string_exn "\"wrong\""));
+          };
       }
     in
-    expect_precondition_failed "delete if size mismatch"
+    expect_precondition_failed "delete if match mismatch"
       (Client.Object.delete conn ~bucket ~key:delete_fail_key
          ~options:delete_fail_options ());
     expect_precondition_failed "delete missing with precondition"
       (Client.Object.delete conn ~bucket ~key:"missing-delete-conditional.txt"
-         ~options:delete_fail_options ())
+         ~options:delete_options ())
 
   let test_multipart_lifecycle () =
     let conn = Client.fresh () in

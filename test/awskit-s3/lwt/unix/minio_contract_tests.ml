@@ -54,14 +54,7 @@ let expect_status label status result =
 let bucket_name suffix =
   Printf.sprintf "awskit-minio-%d-%s" (Unix.getpid ()) suffix
 
-let delete_object key =
-  {
-    Delete_objects.key;
-    version_id = None;
-    etag = None;
-    last_modified_time = None;
-    size = None;
-  }
+let delete_object key = { Delete_objects.key; version_id = None; etag = None }
 
 let delete_object_version key version_id =
   { (delete_object key) with Delete_objects.version_id }

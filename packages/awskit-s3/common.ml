@@ -165,7 +165,6 @@ module Storage_class = struct
     | Glacier
     | Glacier_ir
     | Deep_archive
-    | Express_onezone
 
   let to_string = function
     | Standard -> "STANDARD"
@@ -175,7 +174,6 @@ module Storage_class = struct
     | Glacier -> "GLACIER"
     | Glacier_ir -> "GLACIER_IR"
     | Deep_archive -> "DEEP_ARCHIVE"
-    | Express_onezone -> "EXPRESS_ONEZONE"
 
   let of_string = function
     | "STANDARD" -> Some Standard
@@ -185,7 +183,6 @@ module Storage_class = struct
     | "GLACIER" -> Some Glacier
     | "GLACIER_IR" -> Some Glacier_ir
     | "DEEP_ARCHIVE" -> Some Deep_archive
-    | "EXPRESS_ONEZONE" -> Some Express_onezone
     | _ -> None
 end
 

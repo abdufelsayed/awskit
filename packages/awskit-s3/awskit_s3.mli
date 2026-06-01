@@ -47,7 +47,6 @@ module Storage_class : sig
     | Glacier
     | Glacier_ir
     | Deep_archive
-    | Express_onezone
 
   val to_string : t -> string
   val of_string : string -> t option
@@ -170,11 +169,7 @@ module type OBJECT_DATA = sig
     end
 
     module Delete : sig
-      type t = {
-        if_match : Etag_condition.t option;
-        if_match_last_modified_time : Ptime.t option;
-        if_match_size : int64 option;
-      }
+      type t = { if_match : Etag_condition.t option }
 
       val none : t
       val if_etag : Etag.t -> t
@@ -277,8 +272,6 @@ module Delete_objects : sig
     key : string;
     version_id : Object.Version_id.t option;
     etag : Object.Etag.t option;
-    last_modified_time : Ptime.t option;
-    size : int64 option;
   }
 
   type deleted = {

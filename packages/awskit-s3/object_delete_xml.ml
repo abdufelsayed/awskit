@@ -23,10 +23,7 @@ let body objects =
       ([ Xml.text "Key" object_.Delete_objects.key ]
       @ optional "VersionId"
           (Option.map Object.Version_id.to_string object_.version_id)
-      @ optional "ETag" (Option.map Object.Etag.to_string object_.etag)
-      @ optional "LastModifiedTime"
-          (Option.map ptime_to_header object_.last_modified_time)
-      @ optional "Size" (Option.map Int64.to_string object_.size))
+      @ optional "ETag" (Option.map Object.Etag.to_string object_.etag))
   in
   Xml.el "Delete" (Xml.text "Quiet" "false" :: List.map object_xml objects)
   |> Xml.to_string

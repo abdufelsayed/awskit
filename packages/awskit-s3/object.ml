@@ -80,20 +80,10 @@ module Preconditions = struct
   end
 
   module Delete = struct
-    type t = {
-      if_match : Etag_condition.t option;
-      if_match_last_modified_time : Ptime.t option;
-      if_match_size : int64 option;
-    }
+    type t = { if_match : Etag_condition.t option }
 
-    let none =
-      {
-        if_match = None;
-        if_match_last_modified_time = None;
-        if_match_size = None;
-      }
-
-    let if_etag etag = { none with if_match = Some (Etag_condition.Etag etag) }
+    let none = { if_match = None }
+    let if_etag etag = { if_match = Some (Etag_condition.Etag etag) }
   end
 
   module Copy_source = struct
@@ -210,8 +200,6 @@ module Delete_many = struct
     key : string;
     version_id : Version_id.t option;
     etag : Etag.t option;
-    last_modified_time : Ptime.t option;
-    size : int64 option;
   }
 
   type deleted = {

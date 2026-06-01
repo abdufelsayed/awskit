@@ -69,11 +69,7 @@ module type OBJECT_DATA = sig
     end
 
     module Delete : sig
-      type t = {
-        if_match : Etag_condition.t option;
-        if_match_last_modified_time : Ptime.t option;
-        if_match_size : int64 option;
-      }
+      type t = { if_match : Etag_condition.t option }
 
       val none : t
       val if_etag : Etag.t -> t
