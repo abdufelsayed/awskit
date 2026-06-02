@@ -22,20 +22,26 @@ let string_contains ~substring value =
   in
   substring_length = 0 || loop 0
 
-let checksum_value = function
-  | None -> None
-  | Some (checksum : Object.Checksum.response) -> Some checksum.value
+let checksum_value (checksum : Object.Checksum.response) =
+  match checksum.values with
+  | [] -> None
+  | (value : Object.Checksum.value) :: _ -> Some value.value
 
 let version_string = Option.map Object.Version_id.to_string
 let query_param name url = Uri.query (Uri.of_string url) |> List.assoc_opt name
 
-let check_checksum label algorithm value = function
+let check_checksum label algorithm value (checksum : Object.Checksum.response) =
+  match
+    List.find_opt
+      (fun (actual : Object.Checksum.value) -> actual.algorithm = algorithm)
+      checksum.values
+  with
   | None -> Alcotest.failf "%s: expected checksum" label
-  | Some (checksum : Object.Checksum.response) ->
+  | Some actual ->
       Alcotest.(check bool)
         (label ^ " algorithm") true
-        (checksum.algorithm = algorithm);
-      Alcotest.(check string) (label ^ " value") value checksum.value
+        (actual.algorithm = algorithm);
+      Alcotest.(check string) (label ^ " value") value actual.value
 
 let test_operation_data_module_names () =
   ignore (Put_object.default_options : Put_object.options);
@@ -56,6 +62,7 @@ let test_operation_data_module_names () =
       etag = None;
       last_modified = None;
       storage_class = None;
+      checksum = { Object.Checksum.algorithms = []; checksum_type = None };
     }
   in
   ignore (listed_object : List_objects_v2.object_summary);
@@ -194,8 +201,11 @@ let test_presigned_result () =
        result.url)
 
 let test_presigned_put_checksum_headers () =
-  let checksum : Object.Checksum.request =
-    { Object.Checksum.algorithm = `SHA1; value = Some "provided-sha1" }
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha1;
+      value = "provided-sha1";
+    }
   in
   let options =
     { Presigned.Put_object.default_options with checksum = Some checksum }
@@ -208,9 +218,6 @@ let test_presigned_put_checksum_headers () =
     |> ok_or_fail "presigned put"
   in
   Alcotest.(check (option string))
-    "checksum algorithm header" (Some "SHA1")
-    (header "x-amz-checksum-algorithm" result.headers);
-  Alcotest.(check (option string))
     "checksum value header" (Some "provided-sha1")
     (header "x-amz-checksum-sha1" result.headers);
   let signed_headers =
@@ -219,16 +226,16 @@ let test_presigned_put_checksum_headers () =
     | _ -> Alcotest.fail "missing signed headers"
   in
   Alcotest.(check bool)
-    "signed checksum algorithm" true
-    (List.mem "x-amz-checksum-algorithm" signed_headers);
-  Alcotest.(check bool)
     "signed checksum value" true
     (List.mem "x-amz-checksum-sha1" signed_headers)
 
 let test_presigned_upload_part () =
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
-  let checksum : Object.Checksum.request =
-    { Object.Checksum.algorithm = `SHA256; value = Some "provided-sha256" }
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
+      value = "provided-sha256";
+    }
   in
   let options =
     { Presigned.Upload_part.default_options with checksum = Some checksum }
@@ -251,9 +258,6 @@ let test_presigned_upload_part () =
     "upload id" (Some [ "upload-1" ])
     (query_param "uploadId" result.url);
   Alcotest.(check (option string))
-    "checksum algorithm header" (Some "SHA256")
-    (header "x-amz-checksum-algorithm" result.headers);
-  Alcotest.(check (option string))
     "checksum value header" (Some "provided-sha256")
     (header "x-amz-checksum-sha256" result.headers);
   let signed_headers =
@@ -261,9 +265,6 @@ let test_presigned_upload_part () =
     | Some [ value ] -> String.split_on_char ';' value
     | _ -> Alcotest.fail "missing signed headers"
   in
-  Alcotest.(check bool)
-    "signed checksum algorithm" true
-    (List.mem "x-amz-checksum-algorithm" signed_headers);
   Alcotest.(check bool)
     "signed checksum value" true
     (List.mem "x-amz-checksum-sha256" signed_headers);
@@ -292,6 +293,42 @@ let test_presigned_rejects_header_newline () =
   | Error (Awskit.Error.Validation _) -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected header validation error"
+
+let test_presigned_rejects_unknown_checksum () =
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Unknown "FUTURE";
+      value = "value";
+    }
+  in
+  let put_options =
+    { Presigned.Put_object.default_options with checksum = Some checksum }
+  in
+  (match
+     Presigned.put_object
+       ~region:(Region.of_string_exn "us-east-1")
+       ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+       ~options:put_options ()
+   with
+  | Error (Awskit.Error.Validation { field = Some "checksum_algorithm"; _ }) ->
+      ()
+  | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected presigned put checksum validation");
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let upload_part_options =
+    { Presigned.Upload_part.default_options with checksum = Some checksum }
+  in
+  match
+    Presigned.upload_part
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"large.bin"
+      ~upload_id ~part_number:1 ~options:upload_part_options ()
+  with
+  | Error (Awskit.Error.Validation { field = Some "checksum_algorithm"; _ }) ->
+      ()
+  | Error error ->
+      Alcotest.failf "unexpected upload part error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected presigned upload-part checksum validation"
 
 module Recording_runtime = struct
   type response = {
@@ -744,29 +781,50 @@ let test_object_checksum_headers_and_response () =
         response 200
           ~headers:
             [
-              ("etag", "\"etag\""); ("x-amz-checksum-sha256", "provided-sha256");
+              ("etag", "\"etag\"");
+              ("x-amz-checksum-sha1", "provided-sha1");
+              ("x-amz-checksum-sha256", "provided-sha256");
+              ("x-amz-checksum-type", "COMPOSITE");
             ]
           "";
       ]
   in
-  let checksum : Object.Checksum.request =
-    { Object.Checksum.algorithm = `SHA256; value = Some "provided-sha256" }
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
+      value = "provided-sha256";
+    }
   in
-  let options = { Put_object.default_options with checksum = Some checksum } in
+  let options =
+    {
+      Put_object.default_options with
+      checksum = Some checksum;
+      expected_bucket_owner = Some "123456789012";
+    }
+  in
   let put =
     Recording_s3.Object.put_string conn ~bucket:"my-bucket" ~key:"file" ~options
       "hello"
     |> ok_or_fail "put checksum"
   in
-  check_checksum "put response checksum" `SHA256 "provided-sha256" put.checksum;
+  check_checksum "put response sha1" Object.Checksum.Algorithm.Sha1
+    "provided-sha1" put.checksum;
+  check_checksum "put response sha256" Object.Checksum.Algorithm.Sha256
+    "provided-sha256" put.checksum;
+  Alcotest.(check bool)
+    "checksum type" true
+    (put.checksum.checksum_type = Some Object.Checksum.Type.Composite);
   let call = Recording_runtime.last_call conn in
   Alcotest.(check string) "body" "hello" call.body;
   Alcotest.(check (option string))
-    "checksum algorithm header" (Some "SHA256")
+    "no checksum algorithm header" None
     (header "x-amz-checksum-algorithm" call.request.headers);
   Alcotest.(check (option string))
     "checksum value header" (Some "provided-sha256")
-    (header "x-amz-checksum-sha256" call.request.headers)
+    (header "x-amz-checksum-sha256" call.request.headers);
+  Alcotest.(check (option string))
+    "expected owner header" (Some "123456789012")
+    (header "x-amz-expected-bucket-owner" call.request.headers)
 
 let test_object_precondition_headers () =
   let time = Ptime.to_rfc3339 test_time in
@@ -918,7 +976,7 @@ let test_delete_objects_request_body () =
     ]
   in
   ignore
-    (Recording_s3.Object.delete_objects conn ~bucket:"my-bucket" ~objects
+    (Recording_s3.Object.delete_objects conn ~bucket:"my-bucket" ~objects ()
     |> ok_or_fail "delete objects request body");
   let body = (Recording_runtime.last_call conn).body in
   let check_contains label substring =
@@ -1584,10 +1642,13 @@ let test_multipart_upload_part_checksum_headers () =
       ]
   in
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
-  let checksum : Object.Checksum.request =
-    { Object.Checksum.algorithm = `SHA1; value = Some "provided-sha1" }
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha1;
+      value = "provided-sha1";
+    }
   in
-  let options = { Upload_part.checksum = Some checksum } in
+  let options = { Upload_part.default_options with checksum = Some checksum } in
   let part =
     Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket" ~key:"large.bin"
       ~upload_id ~part_number:1
@@ -1595,10 +1656,11 @@ let test_multipart_upload_part_checksum_headers () =
       ~options ()
     |> ok_or_fail "upload part checksum"
   in
-  check_checksum "part response checksum" `SHA1 "provided-sha1" part.checksum;
+  check_checksum "part response checksum" Object.Checksum.Algorithm.Sha1
+    "provided-sha1" part.checksum;
   let call = Recording_runtime.last_call conn in
   Alcotest.(check (option string))
-    "checksum algorithm header" (Some "SHA1")
+    "no checksum algorithm header" None
     (header "x-amz-checksum-algorithm" call.request.headers);
   Alcotest.(check (option string))
     "checksum value header" (Some "provided-sha1")
@@ -1606,6 +1668,240 @@ let test_multipart_upload_part_checksum_headers () =
   Alcotest.(check (option (list string)))
     "part number" (Some [ "1" ])
     (List.assoc_opt "partNumber" call.request.target.query)
+
+let test_object_checksum_mode_and_expected_owner_headers () =
+  let expected_owner = "123456789012" in
+  let copy_body =
+    {|<CopyObjectResult><ETag>"copy"</ETag></CopyObjectResult>|}
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 ~headers:[ ("content-length", "5") ] "hello";
+        response 200 ~headers:[ ("content-length", "0") ] "";
+        response 204 "";
+        response 200 "<DeleteResult/>";
+        response 200 copy_body;
+        response 200 (list_page ~truncated:false [ "a.txt" ]);
+        response 200
+          {|<ListVersionsResult><IsTruncated>false</IsTruncated></ListVersionsResult>|};
+      ]
+  in
+  let read_options =
+    {
+      Get_object.default_options with
+      checksum_mode = Some Object.Checksum.Mode.Enabled;
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  ignore
+    (Recording_s3.Object.get_as_string conn ~bucket:"my-bucket" ~key:"file"
+       ~options:read_options ~max_bytes:16L ()
+    |> ok_or_fail "get checksum mode");
+  let head_options =
+    {
+      Head_object.default_options with
+      checksum_mode = Some Object.Checksum.Mode.Enabled;
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  ignore
+    (Recording_s3.Object.head conn ~bucket:"my-bucket" ~key:"file"
+       ~options:head_options ()
+    |> ok_or_fail "head checksum mode");
+  let delete_options =
+    {
+      Delete_object.default_options with
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  ignore
+    (Recording_s3.Object.delete conn ~bucket:"my-bucket" ~key:"file"
+       ~options:delete_options ()
+    |> ok_or_fail "delete expected owner");
+  let delete_many_options =
+    { Delete_objects.expected_bucket_owner = Some expected_owner }
+  in
+  ignore
+    (Recording_s3.Object.delete_objects conn ~bucket:"my-bucket"
+       ~objects:
+         [ { Delete_objects.key = "file"; version_id = None; etag = None } ]
+       ~options:delete_many_options ()
+    |> ok_or_fail "delete many expected owner");
+  let copy_options =
+    {
+      Copy_object.default_options with
+      checksum_algorithm = Some Object.Checksum.Algorithm.Sha256;
+      expected_bucket_owner = Some expected_owner;
+      source_expected_bucket_owner = Some "210987654321";
+    }
+  in
+  ignore
+    (Recording_s3.Object.copy conn ~source_bucket:"source" ~source_key:"file"
+       ~destination_bucket:"my-bucket" ~destination_key:"copy"
+       ~options:copy_options ()
+    |> ok_or_fail "copy expected owner");
+  let list_options =
+    {
+      List_objects_v2.default_options with
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  ignore
+    (Recording_s3.Object.list conn ~bucket:"my-bucket" ~options:list_options ()
+    |> ok_or_fail "list expected owner");
+  let version_options =
+    {
+      List_object_versions.default_options with
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  ignore
+    (Recording_s3.Object.list_versions conn ~bucket:"my-bucket"
+       ~options:version_options ()
+    |> ok_or_fail "list versions expected owner");
+  match List.rev conn.calls with
+  | [ get; head; delete; delete_many; copy; list; versions ] ->
+      List.iter
+        (fun (label, (call : Recording_runtime.call)) ->
+          Alcotest.(check (option string))
+            (label ^ " expected owner")
+            (Some expected_owner)
+            (header "x-amz-expected-bucket-owner" call.request.headers))
+        [
+          ("get", get);
+          ("head", head);
+          ("delete", delete);
+          ("delete many", delete_many);
+          ("copy", copy);
+          ("list", list);
+          ("versions", versions);
+        ];
+      List.iter
+        (fun (label, (call : Recording_runtime.call)) ->
+          Alcotest.(check (option string))
+            (label ^ " checksum mode") (Some "ENABLED")
+            (header "x-amz-checksum-mode" call.request.headers))
+        [ ("get", get); ("head", head) ];
+      Alcotest.(check (option string))
+        "copy checksum algorithm" (Some "SHA256")
+        (header "x-amz-checksum-algorithm" copy.request.headers);
+      Alcotest.(check (option string))
+        "copy source expected owner" (Some "210987654321")
+        (header "x-amz-source-expected-bucket-owner" copy.request.headers)
+  | _ -> Alcotest.fail "expected seven object calls"
+
+let test_multipart_checksum_and_expected_owner_headers () =
+  let expected_owner = "123456789012" in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          "<InitiateMultipartUploadResult><UploadId>upload-1</UploadId></InitiateMultipartUploadResult>";
+        response 200
+          ~headers:
+            [ ("etag", "\"etag-1\""); ("x-amz-checksum-sha1", "provided-sha1") ]
+          "";
+        response 200
+          {|<CompleteMultipartUploadResult><ETag>"final"</ETag><ChecksumSHA256>complete-sha256</ChecksumSHA256><ChecksumType>COMPOSITE</ChecksumType></CompleteMultipartUploadResult>|};
+      ]
+  in
+  let create_options =
+    {
+      Create_multipart_upload.default_options with
+      checksum_algorithm = Some Object.Checksum.Algorithm.Sha256;
+      checksum_type = Some Object.Checksum.Type.Composite;
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  let upload =
+    Recording_s3.Multipart.create_upload conn ~bucket:"my-bucket"
+      ~key:"large.bin" ~options:create_options ()
+    |> ok_or_fail "create multipart checksum"
+  in
+  let upload_id = upload.upload.upload_id in
+  let part_checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha1;
+      value = "provided-sha1";
+    }
+  in
+  let upload_options =
+    {
+      Upload_part.checksum = Some part_checksum;
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  let part =
+    Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket" ~key:"large.bin"
+      ~upload_id ~part_number:1
+      ~body:(Recording_runtime.string_request_body "hello")
+      ~options:upload_options ()
+    |> ok_or_fail "upload part checksum"
+  in
+  let complete_checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
+      value = "top-sha256";
+    }
+  in
+  let complete_options =
+    {
+      Complete_multipart_upload.expected_bucket_owner = Some expected_owner;
+      checksum = Some complete_checksum;
+      checksum_type = Some Object.Checksum.Type.Composite;
+      multipart_object_size = Some 5L;
+    }
+  in
+  let complete =
+    Recording_s3.Multipart.complete_upload conn ~bucket:"my-bucket"
+      ~key:"large.bin" ~upload_id ~options:complete_options [ part.part ]
+    |> ok_or_fail "complete multipart checksum"
+  in
+  check_checksum "complete xml checksum" Object.Checksum.Algorithm.Sha256
+    "complete-sha256" complete.checksum;
+  Alcotest.(check bool)
+    "complete checksum type" true
+    (complete.checksum.checksum_type = Some Object.Checksum.Type.Composite);
+  match List.rev conn.calls with
+  | [ create; upload_part; complete ] ->
+      Alcotest.(check (option string))
+        "create checksum algorithm" (Some "SHA256")
+        (header "x-amz-checksum-algorithm" create.request.headers);
+      Alcotest.(check (option string))
+        "create checksum type" (Some "COMPOSITE")
+        (header "x-amz-checksum-type" create.request.headers);
+      Alcotest.(check (option string))
+        "upload part checksum value" (Some "provided-sha1")
+        (header "x-amz-checksum-sha1" upload_part.request.headers);
+      Alcotest.(check (option string))
+        "upload part no algorithm" None
+        (header "x-amz-checksum-algorithm" upload_part.request.headers);
+      Alcotest.(check (option string))
+        "complete checksum value" (Some "top-sha256")
+        (header "x-amz-checksum-sha256" complete.request.headers);
+      Alcotest.(check (option string))
+        "complete checksum type" (Some "COMPOSITE")
+        (header "x-amz-checksum-type" complete.request.headers);
+      Alcotest.(check (option string))
+        "complete object size" (Some "5")
+        (header "x-amz-mp-object-size" complete.request.headers);
+      List.iter
+        (fun (label, (call : Recording_runtime.call)) ->
+          Alcotest.(check (option string))
+            (label ^ " expected owner")
+            (Some expected_owner)
+            (header "x-amz-expected-bucket-owner" call.request.headers))
+        [
+          ("create", create);
+          ("upload part", upload_part);
+          ("complete", complete);
+        ];
+      Alcotest.(check bool)
+        "completion xml part checksum" true
+        (string_contains ~substring:"<ChecksumSHA1>provided-sha1</ChecksumSHA1>"
+           complete.body)
+  | _ -> Alcotest.fail "expected three multipart calls"
 
 let multipart_create_body upload_id =
   Fmt.str
@@ -1626,6 +1922,7 @@ let test_complete_multipart_embedded_error () =
   let part =
     Multipart.Part.create_exn ~part_number:1
       ~etag:(Object.Etag.of_string_exn "\"part-1\"")
+      ()
   in
   match
     Recording_s3.Multipart.complete_upload conn ~bucket:"my-bucket"
@@ -1710,8 +2007,11 @@ let test_sim_history_uses_operation_names () =
 
 let test_sim_buffer_roundtrip () =
   let conn = make_sim () in
-  let checksum : Object.Checksum.request =
-    { Object.Checksum.algorithm = `SHA256; value = None }
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
+      value = "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=";
+    }
   in
   let put =
     Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"hello.txt"
@@ -1725,7 +2025,7 @@ let test_sim_buffer_roundtrip () =
     |> ok_or_fail "put"
   in
   Alcotest.(check bool) "etag" true (Option.is_some put.etag);
-  check_checksum "put checksum" `SHA256
+  check_checksum "put checksum" Object.Checksum.Algorithm.Sha256
     "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" put.checksum;
   let info, body =
     Simulator.Object.get_as_string conn ~bucket:"test-bucket" ~key:"hello.txt"
@@ -1735,13 +2035,13 @@ let test_sim_buffer_roundtrip () =
   Alcotest.(check string) "body" "hello" body;
   Alcotest.(check (option string))
     "content-type" (Some "text/plain") info.content_type;
-  check_checksum "get checksum" `SHA256
+  check_checksum "get checksum" Object.Checksum.Algorithm.Sha256
     "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" info.checksum;
   let head =
     Simulator.Object.head conn ~bucket:"test-bucket" ~key:"hello.txt" ()
     |> ok_or_fail "head checksum"
   in
-  check_checksum "head checksum" `SHA256
+  check_checksum "head checksum" Object.Checksum.Algorithm.Sha256
     "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" head.checksum;
   let page =
     Simulator.Object.list conn ~bucket:"test-bucket" ()
@@ -1752,6 +2052,86 @@ let test_sim_buffer_roundtrip () =
       Alcotest.(check string) "listed key" "hello.txt" object_.key;
       Alcotest.(check (option int64)) "listed size" (Some 5L) object_.size
   | _ -> Alcotest.fail "expected one listed object"
+
+let test_sim_rejects_unknown_checksum_writes () =
+  let conn = make_sim () in
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Unknown "FUTURE";
+      value = "value";
+    }
+  in
+  let expect_checksum_validation label = function
+    | Error (Awskit.Error.Validation { field = Some "checksum_algorithm"; _ })
+      ->
+        ()
+    | Error error ->
+        Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+    | Ok _ -> Alcotest.failf "%s: expected checksum validation" label
+  in
+  expect_checksum_validation "sim put"
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"bad.txt"
+       ~options:{ Put_object.default_options with checksum = Some checksum }
+       "body");
+  let copy_options =
+    {
+      Copy_object.default_options with
+      checksum_algorithm = Some (Object.Checksum.Algorithm.Unknown "FUTURE");
+    }
+  in
+  ignore
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"source.txt"
+       "body"
+    |> ok_or_fail "source");
+  expect_checksum_validation "sim copy"
+    (Simulator.Object.copy conn ~source_bucket:"test-bucket"
+       ~source_key:"source.txt" ~destination_bucket:"test-bucket"
+       ~destination_key:"copy.txt" ~options:copy_options ());
+  let upload =
+    Simulator.Multipart.create_upload conn ~bucket:"test-bucket" ~key:"bad.bin"
+      ()
+    |> ok_or_fail "create upload"
+  in
+  let upload_id = upload.upload.upload_id in
+  let upload_part_options =
+    { Upload_part.checksum = Some checksum; expected_bucket_owner = None }
+  in
+  expect_checksum_validation "sim upload part"
+    (Simulator.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"bad.bin"
+       ~upload_id ~part_number:1
+       ~body:(Simulator.Runtime.Request_body.of_string "body")
+       ~options:upload_part_options ());
+  let part =
+    Multipart.Part.create_exn ~part_number:1
+      ~etag:(Object.Etag.of_string_exn "\"etag\"")
+      ()
+  in
+  let complete_options =
+    {
+      Complete_multipart_upload.expected_bucket_owner = None;
+      checksum = Some checksum;
+      checksum_type = None;
+      multipart_object_size = None;
+    }
+  in
+  expect_checksum_validation "sim complete checksum"
+    (Simulator.Multipart.complete_upload conn ~bucket:"test-bucket"
+       ~key:"bad.bin" ~upload_id ~options:complete_options [ part ]);
+  let complete_options =
+    {
+      Complete_multipart_upload.default_options with
+      checksum_type = Some (Object.Checksum.Type.Unknown "FUTURE");
+    }
+  in
+  match
+    Simulator.Multipart.complete_upload conn ~bucket:"test-bucket"
+      ~key:"bad.bin" ~upload_id ~options:complete_options [ part ]
+  with
+  | Error (Awskit.Error.Validation { field = Some "checksum_type"; _ }) -> ()
+  | Error error ->
+      Alcotest.failf "sim complete checksum type: unexpected error: %a" Error.pp
+        error
+  | Ok _ -> Alcotest.fail "sim complete checksum type: expected validation"
 
 let test_sim_streaming_get () =
   let conn = make_sim () in
@@ -1841,6 +2221,8 @@ let suite =
           test_bucket_encryption_unknown_write_rejected;
         Alcotest.test_case "object checksum headers and response" `Quick
           test_object_checksum_headers_and_response;
+        Alcotest.test_case "object checksum mode and expected owner headers"
+          `Quick test_object_checksum_mode_and_expected_owner_headers;
         Alcotest.test_case "object precondition headers" `Quick
           test_object_precondition_headers;
         Alcotest.test_case "delete objects request body" `Quick
@@ -1885,6 +2267,8 @@ let suite =
           test_multipart_paginator_follows_markers;
         Alcotest.test_case "multipart upload part checksum headers" `Quick
           test_multipart_upload_part_checksum_headers;
+        Alcotest.test_case "multipart checksum and expected owner headers"
+          `Quick test_multipart_checksum_and_expected_owner_headers;
         Alcotest.test_case "complete multipart embedded error" `Quick
           test_complete_multipart_embedded_error;
         Alcotest.test_case "sim public helper surface" `Quick

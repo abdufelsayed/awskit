@@ -85,7 +85,7 @@ let cleanup_bucket conn ~bucket =
         in
         if objects = [] then Lwt.return_unit
         else
-          let* _ = S3.Object.delete_objects conn ~bucket ~objects in
+          let* _ = S3.Object.delete_objects conn ~bucket ~objects () in
           Lwt.return_unit
     | Error _ -> (
         let* keys_result = S3.Object.list_keys conn ~bucket () in
@@ -93,7 +93,7 @@ let cleanup_bucket conn ~bucket =
         | Ok [] -> Lwt.return_unit
         | Ok keys ->
             let objects = List.map delete_object keys in
-            let* _ = S3.Object.delete_objects conn ~bucket ~objects in
+            let* _ = S3.Object.delete_objects conn ~bucket ~objects () in
             Lwt.return_unit
         | Error _ -> Lwt.return_unit))
   |> fun deleted ->

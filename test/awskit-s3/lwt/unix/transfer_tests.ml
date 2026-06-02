@@ -132,7 +132,11 @@ module S3 = struct
               {
                 Awskit_s3.Put_object.etag = None;
                 version_id = None;
-                checksum = None;
+                checksum =
+                  {
+                    Awskit_s3.Object.Checksum.values = [];
+                    checksum_type = None;
+                  };
                 response;
               })
 
@@ -155,7 +159,11 @@ module S3 = struct
                     metadata = [];
                     storage_class = None;
                     version_id = None;
-                    checksum = None;
+                    checksum =
+                      {
+                        Awskit_s3.Object.Checksum.values = [];
+                        checksum_type = None;
+                      };
                     server_side_encryption = None;
                     response;
                   },
@@ -164,7 +172,7 @@ module S3 = struct
     let head _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
     let exists _ ~bucket:_ ~key:_ = unsupported ()
     let delete _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
-    let delete_objects _ ~bucket:_ ~objects:_ = unsupported ()
+    let delete_objects _ ~bucket:_ ~objects:_ ?options:_ () = unsupported ()
 
     let copy _ ~source_bucket:_ ~source_key:_ ~destination_bucket:_
         ~destination_key:_ ?options:_ () =
@@ -222,8 +230,11 @@ module S3 = struct
         ?options:_ () =
       unsupported ()
 
-    let complete_upload _ ~bucket:_ ~key:_ ~upload_id:_ _ = unsupported ()
-    let abort_upload _ ~bucket:_ ~key:_ ~upload_id:_ = unsupported ()
+    let complete_upload _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ _ =
+      unsupported ()
+
+    let abort_upload _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
+      unsupported ()
 
     let list_parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
       unsupported ()

@@ -13,6 +13,17 @@ let parse_owner nodes =
   | None -> None
   | Some nodes -> Xml.child_text "ID" nodes
 
+let parse_checksum_summary nodes =
+  {
+    Object.Checksum.algorithms =
+      Xml.child_texts "ChecksumAlgorithm" nodes
+      |> List.map String.trim
+      |> List.map Object.Checksum.Algorithm.of_string;
+    checksum_type =
+      Option.map Object.Checksum.Type.of_string
+        (Xml.child_text "ChecksumType" nodes);
+  }
+
 let parse_page ~response body =
   let* nodes = Xml.decode_root body ~name:"ListVersionsResult" in
   let versions =
@@ -46,6 +57,7 @@ let parse_page ~response body =
                     (Xml.child_text "StorageClass" nodes)
                     Storage_class.of_string;
                 owner = parse_owner nodes;
+                checksum = parse_checksum_summary nodes;
               })
   in
   let delete_markers =

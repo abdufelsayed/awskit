@@ -19,23 +19,32 @@ let response_version response =
     (Awskit.Response.header response "x-amz-version-id")
 
 let response_checksum response =
-  let find alg header =
+  let find algorithm header =
     match Awskit.Response.header response header with
     | None -> None
-    | Some value -> Some { Object.Checksum.algorithm = alg; value }
+    | Some value -> Some { Object.Checksum.algorithm; value }
   in
-  match find `CRC32 "x-amz-checksum-crc32" with
-  | Some _ as value -> value
-  | None -> (
-      match find `CRC32C "x-amz-checksum-crc32c" with
-      | Some _ as value -> value
-      | None -> (
-          match find `CRC64NVME "x-amz-checksum-crc64nvme" with
-          | Some _ as value -> value
-          | None -> (
-              match find `SHA1 "x-amz-checksum-sha1" with
-              | Some _ as value -> value
-              | None -> find `SHA256 "x-amz-checksum-sha256")))
+  let values =
+    [
+      find Object.Checksum.Algorithm.Crc32 "x-amz-checksum-crc32";
+      find Crc32c "x-amz-checksum-crc32c";
+      find Crc64nvme "x-amz-checksum-crc64nvme";
+      find Md5 "x-amz-checksum-md5";
+      find Sha1 "x-amz-checksum-sha1";
+      find Sha256 "x-amz-checksum-sha256";
+      find Sha512 "x-amz-checksum-sha512";
+      find Xxhash64 "x-amz-checksum-xxhash64";
+      find Xxhash3 "x-amz-checksum-xxhash3";
+      find Xxhash128 "x-amz-checksum-xxhash128";
+    ]
+    |> List.filter_map Fun.id
+  in
+  {
+    Object.Checksum.values;
+    checksum_type =
+      Option.map Object.Checksum.Type.of_string
+        (Awskit.Response.header response "x-amz-checksum-type");
+  }
 
 let response_encryption response =
   match Awskit.Response.header response "x-amz-server-side-encryption" with

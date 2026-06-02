@@ -277,7 +277,7 @@ struct
                 | Some etag, Some size
                   when Int64.equal size (Int64.of_int spec.length) ->
                     Awskit_s3.Multipart.Part.create
-                      ~part_number:spec.part_number ~etag
+                      ~part_number:spec.part_number ~etag ()
                     |> Result.to_option
                 | _ -> None)
           in
@@ -375,7 +375,8 @@ struct
                             let abort_and_return error =
                               Lwt.bind
                                 (S3.Multipart.abort_upload conn ~bucket ~key
-                                   ~upload_id) (fun _ -> Lwt.return_error error)
+                                   ~upload_id ()) (fun _ ->
+                                  Lwt.return_error error)
                             in
                             Lwt.bind
                               (upload_missing_parts conn ~bucket ~key ~upload_id

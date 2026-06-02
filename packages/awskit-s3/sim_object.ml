@@ -8,6 +8,7 @@ module Object = struct
   type response_body_reader = Runtime.response_body_reader
 
   let invalid_range () = service ~status:416 ~code:"InvalidRange" ()
+  let validate_opt f = function None -> Ok () | Some value -> f value
 
   let ranged_body body = function
     | None -> Ok (body, 200, [])
@@ -73,53 +74,58 @@ module Object = struct
                 | Error error -> Error error
                 | Ok () -> (
                     match
-                      operation_fault conn `Put_object bucket (Some key)
+                      validate_opt validate_checksum_value options.checksum
                     with
-                    | Some error -> Error error
-                    | None -> (
+                    | Error error -> Error error
+                    | Ok () -> (
                         match
-                          ensure_write_preconditions
-                            (current_object bucket_state key)
-                            options.preconditions
+                          operation_fault conn `Put_object bucket (Some key)
                         with
-                        | Error error -> Error error
-                        | Ok () -> (
-                            match request_body_result body with
+                        | Some error -> Error error
+                        | None -> (
+                            match
+                              ensure_write_preconditions
+                                (current_object bucket_state key)
+                                options.preconditions
+                            with
                             | Error error -> Error error
-                            | Ok body ->
-                                let etag = etag body in
-                                let checksum =
-                                  checksum_for_body ~body options.checksum
-                                in
-                                let obj =
-                                  {
-                                    body;
-                                    etag;
-                                    version_id = None;
-                                    content_type = options.content_type;
-                                    metadata = options.metadata;
-                                    storage_class = options.storage_class;
-                                    tags = options.tags;
-                                    checksum;
-                                    last_modified = now conn;
-                                  }
-                                in
-                                let obj =
-                                  store_object conn bucket_state key obj
-                                in
-                                Ok
-                                  {
-                                    Put_object.etag = Some etag;
-                                    version_id = obj.version_id;
-                                    checksum;
-                                    response =
-                                      response 200
-                                        ~headers:
-                                          (("etag", etag)
-                                          :: (version_headers obj.version_id
-                                             @ checksum_response_headers
-                                                 checksum));
-                                  }))))))
+                            | Ok () -> (
+                                match request_body_result body with
+                                | Error error -> Error error
+                                | Ok body ->
+                                    let etag = etag body in
+                                    let checksum =
+                                      checksum_for_value options.checksum
+                                    in
+                                    let obj =
+                                      {
+                                        body;
+                                        etag;
+                                        version_id = None;
+                                        content_type = options.content_type;
+                                        metadata = options.metadata;
+                                        storage_class = options.storage_class;
+                                        tags = options.tags;
+                                        checksum;
+                                        last_modified = now conn;
+                                      }
+                                    in
+                                    let obj =
+                                      store_object conn bucket_state key obj
+                                    in
+                                    Ok
+                                      {
+                                        Put_object.etag = Some etag;
+                                        version_id = obj.version_id;
+                                        checksum;
+                                        response =
+                                          response 200
+                                            ~headers:
+                                              (("etag", etag)
+                                              :: (version_headers obj.version_id
+                                                 @ checksum_response_headers
+                                                     checksum));
+                                      })))))))
 
   let get conn ~bucket ~key ?options ~consume () =
     let options = Option.value ~default:Get_object.default_options options in
@@ -343,7 +349,7 @@ module Object = struct
                             Hashtbl.remove bucket_state.objects key;
                             Ok (delete_result ()))))))
 
-  let delete_objects conn ~bucket ~objects =
+  let delete_objects conn ~bucket ~objects ?options:_ () =
     match validate_bucket bucket with
     | Error error -> Error error
     | Ok () -> (
@@ -418,67 +424,74 @@ module Object = struct
             with
             | Error error -> Error error
             | Ok src -> (
-                match require_bucket conn destination_bucket with
+                match
+                  validate_opt validate_checksum_algorithm
+                    options.checksum_algorithm
+                with
                 | Error error -> Error error
-                | Ok destination_bucket_state -> (
-                    match
-                      operation_fault conn `Copy_object destination_bucket
-                        (Some destination_key)
-                    with
-                    | Some error -> Error error
-                    | None -> (
+                | Ok () -> (
+                    match require_bucket conn destination_bucket with
+                    | Error error -> Error error
+                    | Ok destination_bucket_state -> (
                         match
-                          ensure_copy_source_preconditions src
-                            options.source_preconditions
+                          operation_fault conn `Copy_object destination_bucket
+                            (Some destination_key)
                         with
-                        | Error error -> Error error
-                        | Ok () ->
-                            let metadata =
-                              match options.metadata_directive with
-                              | Some (`Replace metadata) -> metadata
-                              | _ -> src.metadata
-                            in
-                            let checksum =
-                              match
-                                checksum_for_body ~body:src.body
-                                  options.checksum
-                              with
-                              | Some checksum -> Some checksum
-                              | None -> src.checksum
-                            in
-                            let obj =
-                              {
-                                body = src.body;
-                                etag = src.etag;
-                                version_id = None;
-                                content_type = src.content_type;
-                                metadata;
-                                storage_class =
-                                  (match options.storage_class with
-                                  | Some sc -> Some sc
-                                  | None -> src.storage_class);
-                                tags = src.tags;
-                                checksum;
-                                last_modified = now conn;
-                              }
-                            in
-                            let obj =
-                              store_object conn destination_bucket_state
-                                destination_key obj
-                            in
-                            Ok
-                              {
-                                Copy_object.etag = Some obj.etag;
-                                last_modified = Some obj.last_modified;
-                                version_id = obj.version_id;
-                                copy_source_version_id = src.version_id;
-                                response =
-                                  response 200
-                                    ~headers:
-                                      (version_headers obj.version_id
-                                      @ copy_source_version_headers
-                                          src.version_id);
-                              })))))
+                        | Some error -> Error error
+                        | None -> (
+                            match
+                              ensure_copy_source_preconditions src
+                                options.source_preconditions
+                            with
+                            | Error error -> Error error
+                            | Ok () ->
+                                let metadata =
+                                  match options.metadata_directive with
+                                  | Some (`Replace metadata) -> metadata
+                                  | _ -> src.metadata
+                                in
+                                let computed_checksum =
+                                  checksum_for_algorithm ~body:src.body
+                                    options.checksum_algorithm
+                                in
+                                let checksum =
+                                  match computed_checksum.values with
+                                  | [] -> src.checksum
+                                  | _ -> computed_checksum
+                                in
+                                let obj =
+                                  {
+                                    body = src.body;
+                                    etag = src.etag;
+                                    version_id = None;
+                                    content_type = src.content_type;
+                                    metadata;
+                                    storage_class =
+                                      (match options.storage_class with
+                                      | Some sc -> Some sc
+                                      | None -> src.storage_class);
+                                    tags = src.tags;
+                                    checksum;
+                                    last_modified = now conn;
+                                  }
+                                in
+                                let obj =
+                                  store_object conn destination_bucket_state
+                                    destination_key obj
+                                in
+                                Ok
+                                  {
+                                    Copy_object.etag = Some obj.etag;
+                                    last_modified = Some obj.last_modified;
+                                    version_id = obj.version_id;
+                                    copy_source_version_id = src.version_id;
+                                    response =
+                                      response 200
+                                        ~headers:
+                                          (version_headers obj.version_id
+                                          @ copy_source_version_headers
+                                              src.version_id);
+                                  }))))))
 
   type version_entry =
     | Object_version of List_object_versions.object_version
@@ -537,6 +550,7 @@ module Object = struct
               size = Some (Int64.of_int (String.length obj.body));
               storage_class = obj.storage_class;
               owner = None;
+              checksum = checksum_summary obj.checksum;
             }
       | Stored_delete_marker marker ->
           Delete_marker
@@ -699,6 +713,7 @@ module Object = struct
                         etag = Some obj.etag;
                         last_modified = Some obj.last_modified;
                         storage_class = obj.storage_class;
+                        checksum = checksum_summary obj.checksum;
                       })
                     selected
                 in

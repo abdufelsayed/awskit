@@ -4,6 +4,7 @@ module Make (C : Operation_context.S) = struct
   open C
 
   let ( let* ) = bind
+  let validate_opt f = function None -> Ok () | Some value -> f value
 
   type nonrec connection = connection
   type 'a io = 'a R.t
@@ -16,11 +17,14 @@ module Make (C : Operation_context.S) = struct
     | Ok () -> (
         match validate_tags options.tags with
         | Error _ as error -> error
-        | Ok () ->
-            validate_common_headers ?content_type:options.content_type
-              ?cache_control:options.cache_control
-              ?content_encoding:options.content_encoding
-              ?content_disposition:options.content_disposition ())
+        | Ok () -> (
+            match validate_opt validate_checksum_value options.checksum with
+            | Error _ as error -> error
+            | Ok () ->
+                validate_common_headers ?content_type:options.content_type
+                  ?cache_control:options.cache_control
+                  ?content_encoding:options.content_encoding
+                  ?content_disposition:options.content_disposition ()))
 
   let put conn ~bucket ~key ?options ~body () =
     let options = Option.value ~default:Put_object.default_options options in
@@ -45,7 +49,7 @@ module Make (C : Operation_context.S) = struct
                       [ ("content-length", Int64.to_string content_length) ]
                       @ Metadata_headers.to_headers options.metadata
                       @ write_precondition_headers options.preconditions
-                      @ checksum_request_headers options.checksum
+                      @ checksum_value_headers options.checksum
                       @ encryption_request_headers
                           options.server_side_encryption
                       |> add_opt_header "content-type" options.content_type
@@ -59,6 +63,8 @@ module Make (C : Operation_context.S) = struct
                               options.storage_class)
                       |> add_opt_header "x-amz-tagging"
                            (tags_header options.tags)
+                      |> add_opt_header "x-amz-expected-bucket-owner"
+                           options.expected_bucket_owner
                     in
                     match object_request conn ~bucket ~key with
                     | Error error -> return_error error
@@ -78,7 +84,10 @@ module Make (C : Operation_context.S) = struct
     | Ok () -> (
         let headers =
           read_precondition_headers options.preconditions
+          @ checksum_mode_header options.checksum_mode
           |> add_opt_header "range" (Option.map Range.to_header options.range)
+          |> add_opt_header "x-amz-expected-bucket-owner"
+               options.expected_bucket_owner
         in
         let query =
           match options.version_id with
@@ -102,7 +111,12 @@ module Make (C : Operation_context.S) = struct
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        let headers = read_precondition_headers options.preconditions in
+        let headers =
+          read_precondition_headers options.preconditions
+          @ checksum_mode_header options.checksum_mode
+          |> add_opt_header "x-amz-expected-bucket-owner"
+               options.expected_bucket_owner
+        in
         let query =
           match options.version_id with
           | None -> []
@@ -131,7 +145,11 @@ module Make (C : Operation_context.S) = struct
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        let headers = delete_precondition_headers options.preconditions in
+        let headers =
+          delete_precondition_headers options.preconditions
+          |> add_opt_header "x-amz-expected-bucket-owner"
+               options.expected_bucket_owner
+        in
         let query =
           match options.version_id with
           | None -> []
@@ -148,7 +166,10 @@ module Make (C : Operation_context.S) = struct
                 | Error error -> return_error error
                 | Ok () -> return (delete_result response)))
 
-  let delete_objects conn ~bucket ~objects =
+  let delete_objects conn ~bucket ~objects ?options () =
+    let options =
+      Option.value ~default:Delete_objects.default_options options
+    in
     match validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
@@ -161,6 +182,8 @@ module Make (C : Operation_context.S) = struct
                 ("content-md5", content_md5 body);
                 ("content-type", "application/xml");
               ]
+              |> add_opt_header "x-amz-expected-bucket-owner"
+                   options.expected_bucket_owner
             in
             let upload = R.Request_body.of_string body in
             match
@@ -204,38 +227,52 @@ module Make (C : Operation_context.S) = struct
                     (Awskit.Signing.uri_encode ~encode_slash:true
                        (Object.Version_id.to_string version_id))
             in
-            let headers =
-              ("x-amz-copy-source", copy_source)
-              :: copy_source_precondition_headers options.source_preconditions
-              @ checksum_request_headers options.checksum
-              @ encryption_request_headers options.server_side_encryption
-            in
-            let headers =
-              match options.metadata_directive with
-              | None -> headers
-              | Some `Copy -> ("x-amz-metadata-directive", "COPY") :: headers
-              | Some (`Replace metadata) ->
-                  ("x-amz-metadata-directive", "REPLACE")
-                  :: Metadata_headers.to_headers metadata
-                  @ headers
-            in
-            let headers =
-              headers
-              |> add_opt_header "x-amz-storage-class"
-                   (Option.map Storage_class.to_string options.storage_class)
-            in
             match
-              object_request conn ~bucket:destination_bucket
-                ~key:destination_key
+              validate_opt validate_checksum_algorithm
+                options.checksum_algorithm
             with
             | Error error -> return_error error
-            | Ok request ->
-                with_empty_response conn ~method_:`PUT ~request ~query:[]
-                  ~headers ~f:(fun response body ->
-                    let* body = read_response_body body ~max_size:1_048_576L in
-                    match body with
-                    | Error error -> return_error error
-                    | Ok body -> return (copy_result response body))))
+            | Ok () -> (
+                let headers =
+                  ("x-amz-copy-source", copy_source)
+                  :: copy_source_precondition_headers
+                       options.source_preconditions
+                  @ checksum_algorithm_header options.checksum_algorithm
+                  @ encryption_request_headers options.server_side_encryption
+                in
+                let headers =
+                  match options.metadata_directive with
+                  | None -> headers
+                  | Some `Copy ->
+                      ("x-amz-metadata-directive", "COPY") :: headers
+                  | Some (`Replace metadata) ->
+                      ("x-amz-metadata-directive", "REPLACE")
+                      :: Metadata_headers.to_headers metadata
+                      @ headers
+                in
+                let headers =
+                  headers
+                  |> add_opt_header "x-amz-storage-class"
+                       (Option.map Storage_class.to_string options.storage_class)
+                  |> add_opt_header "x-amz-expected-bucket-owner"
+                       options.expected_bucket_owner
+                  |> add_opt_header "x-amz-source-expected-bucket-owner"
+                       options.source_expected_bucket_owner
+                in
+                match
+                  object_request conn ~bucket:destination_bucket
+                    ~key:destination_key
+                with
+                | Error error -> return_error error
+                | Ok request ->
+                    with_empty_response conn ~method_:`PUT ~request ~query:[]
+                      ~headers ~f:(fun response body ->
+                        let* body =
+                          read_response_body body ~max_size:1_048_576L
+                        in
+                        match body with
+                        | Error error -> return_error error
+                        | Ok body -> return (copy_result response body)))))
 
   let list_versions conn ~bucket ?options () =
     let options =
@@ -260,7 +297,12 @@ module Make (C : Operation_context.S) = struct
         match bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/" with
         | Error error -> return_error error
         | Ok request ->
-            with_empty_response conn ~method_:`GET ~request ~query ~headers:[]
+            let headers =
+              []
+              |> add_opt_header "x-amz-expected-bucket-owner"
+                   options.expected_bucket_owner
+            in
+            with_empty_response conn ~method_:`GET ~request ~query ~headers
               ~f:(fun response body ->
                 let* body = read_response_body body ~max_size:4_194_304L in
                 match body with
@@ -290,7 +332,12 @@ module Make (C : Operation_context.S) = struct
         match bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/" with
         | Error error -> return_error error
         | Ok request ->
-            with_empty_response conn ~method_:`GET ~request ~query ~headers:[]
+            let headers =
+              []
+              |> add_opt_header "x-amz-expected-bucket-owner"
+                   options.expected_bucket_owner
+            in
+            with_empty_response conn ~method_:`GET ~request ~query ~headers
               ~f:(fun response body ->
                 let* body = read_response_body body ~max_size:4_194_304L in
                 match body with

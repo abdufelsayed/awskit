@@ -5,6 +5,17 @@ open struct
   module Object = Object
 end
 
+let parse_checksum_summary nodes =
+  {
+    Object.Checksum.algorithms =
+      Xml.child_texts "ChecksumAlgorithm" nodes
+      |> List.map String.trim
+      |> List.map Object.Checksum.Algorithm.of_string;
+    checksum_type =
+      Option.map Object.Checksum.Type.of_string
+        (Xml.child_text "ChecksumType" nodes);
+  }
+
 let parse_page ~response body =
   let* nodes = Xml.decode_root body ~name:"ListBucketResult" in
   let objects =
@@ -29,6 +40,7 @@ let parse_page ~response body =
                   Option.bind
                     (Xml.child_text "StorageClass" nodes)
                     Storage_class.of_string;
+                checksum = parse_checksum_summary nodes;
               })
   in
   Ok

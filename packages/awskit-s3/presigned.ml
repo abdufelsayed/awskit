@@ -26,7 +26,7 @@ module Put_object = struct
   type options = {
     expires_in : Ptime.Span.t option;
     content_type : string option;
-    checksum : Object.Checksum.request option;
+    checksum : Object.Checksum.value option;
     server_side_encryption : Object.Encryption.request option;
     headers : (string * string) list;
   }
@@ -63,7 +63,7 @@ end
 module Upload_part = struct
   type options = {
     expires_in : Ptime.Span.t option;
-    checksum : Object.Checksum.request option;
+    checksum : Object.Checksum.value option;
     headers : (string * string) list;
   }
 
@@ -99,6 +99,7 @@ let canonical_headers_str headers =
   |> String.concat ""
 
 let option_header key = function None -> [] | Some value -> [ (key, value) ]
+let validate_opt f = function None -> Ok () | Some value -> f value
 
 let expires_seconds span =
   match Ptime.Span.to_int_s span with
@@ -228,9 +229,10 @@ let head_object ~region ~credentials ~now ?endpoint ?addressing_style
 let put_object ~region ~credentials ~now ?endpoint ?addressing_style
     ?endpoint_variant ?scheme ~bucket ~key ?options () =
   let options = Option.value ~default:Put_object.default_options options in
+  let* () = validate_opt Headers.validate_checksum_value options.checksum in
   let headers =
     option_header "content-type" options.content_type
-    @ Headers.checksum_request_headers options.checksum
+    @ Headers.checksum_value_headers options.checksum
     @ Headers.encryption_request_headers options.server_side_encryption
     @ options.headers
   in
@@ -251,12 +253,13 @@ let upload_part_query ~upload_id ~part_number =
   ]
 
 let upload_part_headers (options : Upload_part.options) =
-  Headers.checksum_request_headers options.checksum @ options.headers
+  Headers.checksum_value_headers options.checksum @ options.headers
 
 let upload_part ~region ~credentials ~now ?endpoint ?addressing_style
     ?endpoint_variant ?scheme ~bucket ~key ~upload_id ~part_number ?options () =
   let* () = validate_part_number part_number in
   let options = Option.value ~default:Upload_part.default_options options in
+  let* () = validate_opt Headers.validate_checksum_value options.checksum in
   generate ~region ~credentials ~now ?endpoint ?addressing_style
     ?endpoint_variant ?scheme ~bucket ~key ~method_:`PUT
     ~headers:(upload_part_headers options)
@@ -280,9 +283,10 @@ let head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
 let put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
   let options = Option.value ~default:Put_object.default_options options in
+  let* () = validate_opt Headers.validate_checksum_value options.checksum in
   let headers =
     option_header "content-type" options.content_type
-    @ Headers.checksum_request_headers options.checksum
+    @ Headers.checksum_value_headers options.checksum
     @ Headers.encryption_request_headers options.server_side_encryption
     @ options.headers
   in
@@ -299,6 +303,7 @@ let upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ~upload_id ~part_number ?options () =
   let* () = validate_part_number part_number in
   let options = Option.value ~default:Upload_part.default_options options in
+  let* () = validate_opt Headers.validate_checksum_value options.checksum in
   generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ~method_:`PUT
     ~headers:(upload_part_headers options)

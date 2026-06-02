@@ -29,7 +29,7 @@ module type PRESIGNED_DATA = sig
     type options = {
       expires_in : Ptime.Span.t option;
       content_type : string option;
-      checksum : Object.Checksum.request option;
+      checksum : Object.Checksum.value option;
       server_side_encryption : Object.Encryption.request option;
       headers : (string * string) list;
     }
@@ -52,7 +52,7 @@ module type PRESIGNED_DATA = sig
   module Upload_part : sig
     type options = {
       expires_in : Ptime.Span.t option;
-      checksum : Object.Checksum.request option;
+      checksum : Object.Checksum.value option;
       headers : (string * string) list;
     }
 

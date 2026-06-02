@@ -122,14 +122,44 @@ module type OBJECT_DATA = sig
   end
 
   module Checksum : sig
-    type algorithm = [ `CRC32 | `CRC32C | `CRC64NVME | `SHA1 | `SHA256 ]
-    (** S3 object checksum algorithms accepted by object and multipart
-        operations. Requests may carry a precomputed [value], or only an
-        [algorithm] when AWS should calculate the checksum. Responses contain
-        checksum values returned by S3. *)
+    module Algorithm : sig
+      type t =
+        | Crc32
+        | Crc32c
+        | Crc64nvme
+        | Sha1
+        | Sha256
+        | Sha512
+        | Md5
+        | Xxhash64
+        | Xxhash3
+        | Xxhash128
+        | Unknown of string
 
-    type request = { algorithm : algorithm; value : string option }
-    type response = { algorithm : algorithm; value : string }
+      val to_string : t -> string
+      val of_string : string -> t
+    end
+
+    module Type : sig
+      type t = Composite | Full_object | Unknown of string
+
+      val to_string : t -> string
+      val of_string : string -> t
+    end
+
+    module Mode : sig
+      type t = Enabled
+
+      val to_string : t -> string
+    end
+
+    type value = { algorithm : Algorithm.t; value : string }
+    type response = { values : value list; checksum_type : Type.t option }
+
+    type summary = {
+      algorithms : Algorithm.t list;
+      checksum_type : Type.t option;
+    }
   end
 
   module Encryption : sig
@@ -204,14 +234,15 @@ module Put_object : sig
     content_encoding : string option;
     content_disposition : string option;
     preconditions : Object.Preconditions.Write.t;
-    checksum : Object.Checksum.request option;
+    checksum : Object.Checksum.value option;
     server_side_encryption : Object.Encryption.request option;
+    expected_bucket_owner : string option;
   }
 
   type result = {
     etag : Object.Etag.t option;
     version_id : Object.Version_id.t option;
-    checksum : Object.Checksum.response option;
+    checksum : Object.Checksum.response;
     response : Awskit.Response.t;
   }
 
@@ -223,6 +254,8 @@ module Get_object : sig
     range : Range.t option;
     preconditions : Object.Preconditions.Read.t;
     version_id : Object.Version_id.t option;
+    checksum_mode : Object.Checksum.Mode.t option;
+    expected_bucket_owner : string option;
   }
 
   type result = {
@@ -233,7 +266,7 @@ module Get_object : sig
     metadata : Metadata.t;
     storage_class : Storage_class.t option;
     version_id : Object.Version_id.t option;
-    checksum : Object.Checksum.response option;
+    checksum : Object.Checksum.response;
     server_side_encryption : Object.Encryption.response option;
     response : Awskit.Response.t;
   }
@@ -245,6 +278,8 @@ module Head_object : sig
   type options = {
     preconditions : Object.Preconditions.Read.t;
     version_id : Object.Version_id.t option;
+    checksum_mode : Object.Checksum.Mode.t option;
+    expected_bucket_owner : string option;
   }
 
   type result = Get_object.result
@@ -256,6 +291,7 @@ module Delete_object : sig
   type options = {
     preconditions : Object.Preconditions.Delete.t;
     version_id : Object.Version_id.t option;
+    expected_bucket_owner : string option;
   }
 
   type result = {
@@ -287,6 +323,10 @@ module Delete_objects : sig
     errors : item_error list;
     response : Awskit.Response.t;
   }
+
+  type options = { expected_bucket_owner : string option }
+
+  val default_options : options
 end
 
 module Copy_object : sig
@@ -297,8 +337,10 @@ module Copy_object : sig
     source_preconditions : Object.Preconditions.Copy_source.t;
     metadata_directive : metadata_directive option;
     storage_class : Storage_class.t option;
-    checksum : Object.Checksum.request option;
+    checksum_algorithm : Object.Checksum.Algorithm.t option;
     server_side_encryption : Object.Encryption.request option;
+    expected_bucket_owner : string option;
+    source_expected_bucket_owner : string option;
   }
 
   type result = {
@@ -319,6 +361,7 @@ module List_object_versions : sig
     max_keys : int option;
     key_marker : string option;
     version_id_marker : Object.Version_id.t option;
+    expected_bucket_owner : string option;
   }
 
   type object_version = {
@@ -330,6 +373,7 @@ module List_object_versions : sig
     size : int64 option;
     storage_class : Storage_class.t option;
     owner : string option;
+    checksum : Object.Checksum.summary;
   }
 
   type delete_marker = {
@@ -365,6 +409,7 @@ module List_objects_v2 : sig
     max_keys : int option;
     start_after : string option;
     continuation_token : string option;
+    expected_bucket_owner : string option;
   }
 
   type object_summary = {
@@ -373,6 +418,7 @@ module List_objects_v2 : sig
     etag : Object.Etag.t option;
     last_modified : Ptime.t option;
     storage_class : Storage_class.t option;
+    checksum : Object.Checksum.summary;
   }
 
   type page = {
@@ -537,10 +583,25 @@ module rec Multipart : sig
   end
 
   module Part : sig
-    type t = private { part_number : int; etag : Object.Etag.t }
+    type t = private {
+      part_number : int;
+      etag : Object.Etag.t;
+      checksum : Object.Checksum.value option;
+    }
 
-    val create : part_number:int -> etag:Object.Etag.t -> (t, Error.t) result
-    val create_exn : part_number:int -> etag:Object.Etag.t -> t
+    val create :
+      ?checksum:Object.Checksum.value ->
+      part_number:int ->
+      etag:Object.Etag.t ->
+      unit ->
+      (t, Error.t) result
+
+    val create_exn :
+      ?checksum:Object.Checksum.value ->
+      part_number:int ->
+      etag:Object.Etag.t ->
+      unit ->
+      t
   end
 end
 
@@ -550,8 +611,10 @@ and Create_multipart_upload : sig
     metadata : Metadata.t;
     storage_class : Storage_class.t option;
     tags : Tag.t list;
-    checksum : Object.Checksum.request option;
+    checksum_algorithm : Object.Checksum.Algorithm.t option;
+    checksum_type : Object.Checksum.Type.t option;
     server_side_encryption : Object.Encryption.request option;
+    expected_bucket_owner : string option;
   }
 
   type result = { upload : Multipart.Upload.t; response : Awskit.Response.t }
@@ -560,11 +623,14 @@ and Create_multipart_upload : sig
 end
 
 and Upload_part : sig
-  type options = { checksum : Object.Checksum.request option }
+  type options = {
+    checksum : Object.Checksum.value option;
+    expected_bucket_owner : string option;
+  }
 
   type result = {
     part : Multipart.Part.t;
-    checksum : Object.Checksum.response option;
+    checksum : Object.Checksum.response;
     response : Awskit.Response.t;
   }
 
@@ -572,33 +638,50 @@ and Upload_part : sig
 end
 
 and Complete_multipart_upload : sig
+  type options = {
+    expected_bucket_owner : string option;
+    checksum : Object.Checksum.value option;
+    checksum_type : Object.Checksum.Type.t option;
+    multipart_object_size : int64 option;
+  }
+
   type result = {
     etag : Object.Etag.t option;
     version_id : Object.Version_id.t option;
-    checksum : Object.Checksum.response option;
+    checksum : Object.Checksum.response;
     response : Awskit.Response.t;
   }
+
+  val default_options : options
 end
 
 and Abort_multipart_upload : sig
+  type options = { expected_bucket_owner : string option }
   type result = Awskit.Response.t
+
+  val default_options : options
 end
 
 and List_parts : sig
-  type options = { max_parts : int option; part_number_marker : int option }
+  type options = {
+    max_parts : int option;
+    part_number_marker : int option;
+    expected_bucket_owner : string option;
+  }
 
   type part_info = {
     part_number : int;
     etag : Object.Etag.t option;
     size : int64 option;
     last_modified : Ptime.t option;
-    checksum : Object.Checksum.response option;
+    checksum : Object.Checksum.response;
   }
 
   type page = {
     parts : part_info list;
     is_truncated : bool;
     next_part_number_marker : int option;
+    checksum_type : Object.Checksum.Type.t option;
     response : Awskit.Response.t;
   }
 
@@ -664,7 +747,7 @@ module type PRESIGNED_DATA = sig
     type options = {
       expires_in : Ptime.Span.t option;
       content_type : string option;
-      checksum : Object.Checksum.request option;
+      checksum : Object.Checksum.value option;
       server_side_encryption : Object.Encryption.request option;
       headers : (string * string) list;
     }
@@ -687,7 +770,7 @@ module type PRESIGNED_DATA = sig
   module Upload_part : sig
     type options = {
       expires_in : Ptime.Span.t option;
-      checksum : Object.Checksum.request option;
+      checksum : Object.Checksum.value option;
       headers : (string * string) list;
     }
 
@@ -822,6 +905,8 @@ module type OBJECT = sig
     connection ->
     bucket:string ->
     objects:Delete_objects.object_ list ->
+    ?options:Delete_objects.options ->
+    unit ->
     (Delete_objects.result, Error.t) result io
 
   val copy :
@@ -1191,6 +1276,7 @@ module type MULTIPART = sig
     bucket:string ->
     key:string ->
     upload_id:Multipart.Upload_id.t ->
+    ?options:Complete_multipart_upload.options ->
     Multipart.Part.t list ->
     (Complete_multipart_upload.result, Error.t) result io
 
@@ -1199,6 +1285,8 @@ module type MULTIPART = sig
     bucket:string ->
     key:string ->
     upload_id:Multipart.Upload_id.t ->
+    ?options:Abort_multipart_upload.options ->
+    unit ->
     (Abort_multipart_upload.result, Error.t) result io
 
   val list_parts :

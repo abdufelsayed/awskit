@@ -22,14 +22,44 @@ module type OBJECT_DATA = sig
   end
 
   module Checksum : sig
-    type algorithm = [ `CRC32 | `CRC32C | `CRC64NVME | `SHA1 | `SHA256 ]
-    (** S3 object checksum algorithms accepted by object and multipart
-        operations. Requests may carry a precomputed [value], or only an
-        [algorithm] when AWS should calculate the checksum. Responses contain
-        checksum values returned by S3. *)
+    module Algorithm : sig
+      type t =
+        | Crc32
+        | Crc32c
+        | Crc64nvme
+        | Sha1
+        | Sha256
+        | Sha512
+        | Md5
+        | Xxhash64
+        | Xxhash3
+        | Xxhash128
+        | Unknown of string
 
-    type request = { algorithm : algorithm; value : string option }
-    type response = { algorithm : algorithm; value : string }
+      val to_string : t -> string
+      val of_string : string -> t
+    end
+
+    module Type : sig
+      type t = Composite | Full_object | Unknown of string
+
+      val to_string : t -> string
+      val of_string : string -> t
+    end
+
+    module Mode : sig
+      type t = Enabled
+
+      val to_string : t -> string
+    end
+
+    type value = { algorithm : Algorithm.t; value : string }
+    type response = { values : value list; checksum_type : Type.t option }
+
+    type summary = {
+      algorithms : Algorithm.t list;
+      checksum_type : Type.t option;
+    }
   end
 
   module Encryption : sig

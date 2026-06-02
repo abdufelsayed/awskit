@@ -263,7 +263,7 @@ struct
               | Some etag, Some size
                 when Int64.equal size (Int64.of_int spec.length) ->
                   Awskit_s3.Multipart.Part.create ~part_number:spec.part_number
-                    ~etag
+                    ~etag ()
                   |> Result.to_option
               | _ -> None)
         in
@@ -321,7 +321,7 @@ struct
     in
     let upload_id = created.upload.upload_id in
     let abort_and_return error =
-      ignore (S3.Multipart.abort_upload conn ~bucket ~key ~upload_id);
+      ignore (S3.Multipart.abort_upload conn ~bucket ~key ~upload_id ());
       Error error
     in
     match

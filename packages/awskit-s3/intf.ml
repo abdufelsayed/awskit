@@ -35,10 +35,25 @@ module type MULTIPART_DATA = sig
   end
 
   module Part : sig
-    type t = private { part_number : int; etag : Object.Etag.t }
+    type t = private {
+      part_number : int;
+      etag : Object.Etag.t;
+      checksum : Object.Checksum.value option;
+    }
 
-    val create : part_number:int -> etag:Object.Etag.t -> (t, Error.t) result
-    val create_exn : part_number:int -> etag:Object.Etag.t -> t
+    val create :
+      ?checksum:Object.Checksum.value ->
+      part_number:int ->
+      etag:Object.Etag.t ->
+      unit ->
+      (t, Error.t) result
+
+    val create_exn :
+      ?checksum:Object.Checksum.value ->
+      part_number:int ->
+      etag:Object.Etag.t ->
+      unit ->
+      t
   end
 end
 
@@ -134,6 +149,8 @@ module type OBJECT = sig
     connection ->
     bucket:string ->
     objects:Delete_objects.object_ list ->
+    ?options:Delete_objects.options ->
+    unit ->
     (Delete_objects.result, Error.t) result io
 
   val copy :
@@ -503,6 +520,7 @@ module type MULTIPART = sig
     bucket:string ->
     key:string ->
     upload_id:Multipart.Upload_id.t ->
+    ?options:Complete_multipart_upload.options ->
     Multipart.Part.t list ->
     (Complete_multipart_upload.result, Error.t) result io
 
@@ -511,6 +529,8 @@ module type MULTIPART = sig
     bucket:string ->
     key:string ->
     upload_id:Multipart.Upload_id.t ->
+    ?options:Abort_multipart_upload.options ->
+    unit ->
     (Abort_multipart_upload.result, Error.t) result io
 
   val list_parts :

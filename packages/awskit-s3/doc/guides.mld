@@ -50,21 +50,20 @@ Awskit_s3_eio.Object.put s3
 
 {2 Checksums}
 
-[Object.Checksum.request] supports the checksum algorithms exposed by S3 object
-and multipart operations: [CRC32], [CRC32C], [CRC64NVME], [SHA1], and
-[SHA256]. A request can provide both the algorithm and a precomputed checksum
-value, or provide only the algorithm and let AWS compute the stored checksum.
+[Object.Checksum.value] carries an explicit precomputed checksum value. Use it
+for [PutObject], [UploadPart], and [CompleteMultipartUpload] value headers.
+[CopyObject] and [CreateMultipartUpload] use [Object.Checksum.Algorithm.t],
+while [GetObject] and [HeadObject] use [Object.Checksum.Mode.Enabled].
 
-Runtime-backed operations send the checksum algorithm/value headers and parse
-checksum response headers from [PutObject], [GetObject], [HeadObject],
-[UploadPart], and [CompleteMultipartUpload]. Presigned [PUT] URLs include
-checksum headers in the signed header set when configured.
+Runtime-backed operations parse all modeled checksum response headers plus
+optional checksum type metadata from [PutObject], [GetObject], [HeadObject],
+[UploadPart], and [CompleteMultipartUpload]. Presigned [PUT] URLs sign explicit
+checksum value headers when configured.
 
-The simulator stores checksum metadata for objects and multipart parts. It
-computes [SHA1] and [SHA256] values when the request omits an explicit value,
-and preserves explicit values for all supported algorithms. For simulator tests
-that assert exact CRC response values, pass explicit [CRC32], [CRC32C], or
-[CRC64NVME] checksum values in the request.
+The simulator preserves explicit checksum values for objects and multipart
+parts. It computes deterministic [SHA1] and [SHA256] values only where it owns
+the whole body, such as multipart completion after
+[CreateMultipartUpload.checksum_algorithm].
 
 {2 Preconditions}
 

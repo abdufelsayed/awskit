@@ -24,7 +24,7 @@ type stored_object = {
   mutable metadata : Metadata.t;
   mutable storage_class : Storage_class.t option;
   mutable tags : Tag.t list;
-  mutable checksum : Object.Checksum.response option;
+  mutable checksum : Object.Checksum.response;
   mutable last_modified : Ptime.t;
 }
 
@@ -41,7 +41,7 @@ type stored_part = {
   part_number : int;
   body : string;
   etag : Object.Etag.t;
-  checksum : Object.Checksum.response option;
+  checksum : Object.Checksum.response;
   last_modified : Ptime.t;
 }
 
@@ -51,7 +51,8 @@ type multipart_upload = {
   metadata : Metadata.t;
   storage_class : Storage_class.t option;
   tags : Tag.t list;
-  checksum_request : Object.Checksum.request option;
+  checksum_algorithm : Object.Checksum.Algorithm.t option;
+  checksum_type : Object.Checksum.Type.t option;
   parts : (int, stored_part) Hashtbl.t;
   created_at : Ptime.t;
 }
@@ -437,34 +438,60 @@ let require_multipart_upload t ~bucket ~key ~upload_id =
   | _ -> Error (no_such_upload ())
 
 let etag body = "\"" ^ Digestif.MD5.(digest_string body |> to_hex) ^ "\""
+let empty_checksum = Object.Checksum.empty_response
 
-let checksum_of_request ~body (request : Object.Checksum.request) =
-  let value =
-    match request.value with
-    | Some value -> Some value
-    | None -> (
-        match request.algorithm with
-        | `SHA1 ->
-            Some
-              (Digestif.SHA1.(digest_string body |> to_raw_string)
-              |> Base64.encode_exn)
-        | `SHA256 ->
-            Some
-              (Digestif.SHA256.(digest_string body |> to_raw_string)
-              |> Base64.encode_exn)
-        | `CRC32 | `CRC32C | `CRC64NVME -> None)
-  in
-  Option.map
-    (fun value -> { Object.Checksum.algorithm = request.algorithm; value })
-    value
+let checksum_response ?checksum_type values =
+  { Object.Checksum.values; checksum_type }
 
-let checksum_for_body ~body request =
-  Option.bind request (checksum_of_request ~body)
+let checksum_for_value = function
+  | None -> empty_checksum
+  | Some (value : Object.Checksum.value) -> checksum_response [ value ]
+
+let checksum_for_algorithm ~body = function
+  | None -> empty_checksum
+  | Some Object.Checksum.Algorithm.Sha1 ->
+      checksum_response
+        [
+          {
+            Object.Checksum.algorithm = Sha1;
+            value =
+              Digestif.SHA1.(digest_string body |> to_raw_string)
+              |> Base64.encode_exn;
+          };
+        ]
+  | Some Sha256 ->
+      checksum_response
+        [
+          {
+            Object.Checksum.algorithm = Sha256;
+            value =
+              Digestif.SHA256.(digest_string body |> to_raw_string)
+              |> Base64.encode_exn;
+          };
+        ]
+  | Some _ -> empty_checksum
+
+let checksum_summary (checksum : Object.Checksum.response) =
+  {
+    Object.Checksum.algorithms =
+      List.map
+        (fun (value : Object.Checksum.value) -> value.algorithm)
+        checksum.values;
+    checksum_type = checksum.checksum_type;
+  }
 
 let checksum_response_headers = function
-  | None -> []
-  | Some (checksum : Object.Checksum.response) ->
-      [ (checksum_header_name checksum.algorithm, checksum.value) ]
+  | { Object.Checksum.values = []; checksum_type = None } -> []
+  | checksum ->
+      let value_headers =
+        checksum.values
+        |> List.filter_map (fun (value : Object.Checksum.value) ->
+            Option.map
+              (fun name -> (name, value.value))
+              (checksum_header_name value.algorithm))
+      in
+      let type_headers = checksum_type_header checksum.checksum_type in
+      value_headers @ type_headers
 
 let next_upload_id t =
   let id = t.store.next_upload_id in
