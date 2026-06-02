@@ -113,7 +113,10 @@ val create :
       Retry behavior for retryable AWS errors and transient transport failures
       (default: {!val:Awskit.Retry.default})
     @param max_response_drain_bytes
-      Maximum response body bytes to drain after callbacks (default: 64 MiB)
+      Maximum response body bytes to drain after callbacks (default: 64 MiB). If
+      a response consumer succeeds but the remaining body exceeds this drain
+      limit, the operation fails with a body-limit error. If the consumer fails,
+      the consumer error is returned.
     @param imdsv1_fallback
       Controls tokenless IMDSv1 fallback when the default credential chain uses
       EC2 instance metadata credentials. *)

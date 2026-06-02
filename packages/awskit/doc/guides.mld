@@ -213,6 +213,12 @@ For example, [awskit-s3] uses [Object.get_as_string ~max_bytes]. These
 helpers keep response-size limits explicit when buffering or draining a
 streaming response.
 
+Response body readers are scoped. After the consumer returns successfully, the
+runtime drains the remaining response body up to [max_response_drain_bytes] so
+the connection can be reused. If the consumer succeeds but draining exceeds the
+cap, the operation returns the drain error. If the consumer itself fails, the
+consumer error wins.
+
 {1 Choosing An Adapter}
 
 {2 Eio}

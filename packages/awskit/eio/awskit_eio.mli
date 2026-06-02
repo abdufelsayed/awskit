@@ -24,4 +24,6 @@ val create :
 (** Defaults to AWS HTTPS endpoints. Pass an explicit [endpoint] for local test
     services or custom service endpoints. [retry_policy] defaults to
     {!val:Awskit.Retry.default}. [max_response_drain_bytes] defaults to 64 MiB.
-*)
+    If a response consumer succeeds but the remaining body exceeds this drain
+    limit, the operation fails with a body-limit error. If the consumer fails,
+    the consumer error is returned. *)

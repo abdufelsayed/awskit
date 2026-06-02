@@ -62,7 +62,11 @@ Response bodies are streaming and scoped to the runtime response callback.
 Runtime adapters expose `with_response`; inside that callback, consume bodies
 through `Response_body.with_reader` or S3 helper APIs such as
 `Object.get_as_string ~max_bytes`. Buffering and draining helpers apply
-their documented response-size limits.
+their documented response-size limits. After a response consumer succeeds,
+runtime adapters drain the remaining response body up to the configured drain
+limit so the connection can be reused. If that drain exceeds the cap, the
+operation returns the drain error. If the consumer fails, the consumer error
+wins.
 
 ## Quick Start
 

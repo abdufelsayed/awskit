@@ -42,7 +42,9 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
       services or custom service endpoints. [retry_policy] defaults to
       {!val:Awskit.Retry.default}. [sleep] is used between retries and defaults
       to no delay for custom Lwt backends. [max_response_drain_bytes] defaults
-      to 64 MiB. *)
+      to 64 MiB. If a response consumer succeeds but the remaining body exceeds
+      this drain limit, the operation fails with a body-limit error. If the
+      consumer fails, the consumer error is returned. *)
 
   val create_with_credentials_provider :
     ?ctx:Client.ctx ->
