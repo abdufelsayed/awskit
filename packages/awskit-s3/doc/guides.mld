@@ -189,6 +189,14 @@ Unix-capable adapters expose local-path helpers under [Object.Transfer].
 Keeping these helpers at the adapter layer lets the pure [awskit-s3] core stay
 independent of filesystem APIs.
 
+[put_file] and [get_file] are one-request [PutObject] and [GetObject] helpers.
+[upload_file] and [download_file] choose an optimized strategy using
+{!module:Awskit_s3.Transfer} options: small transfers use one request, while
+larger transfers use multipart upload or ranged [GetObject] requests.
+[multipart_upload_file] and [resume_multipart_upload_file] are explicit
+multipart upload helpers. Filesystem transfer helpers live only in the Eio and
+Lwt Unix adapters; they are not simulator operations.
+
 {2 Eio}
 
 {[
@@ -201,10 +209,26 @@ Awskit_s3_eio.Object.Transfer.upload_file s3
 ]}
 
 {[
+Awskit_s3_eio.Object.Transfer.put_file s3
+  ~bucket:"my-bucket"
+  ~key:"single-request-upload.tar"
+  ~path
+  ()
+]}
+
+{[
 Awskit_s3_eio.Object.Transfer.download_file s3
   ~bucket:"my-bucket"
   ~key:"archive.tar"
   ~on_progress:(fun bytes -> Fmt.pr "downloaded %Ld bytes@." bytes)
+  ~path
+  ()
+]}
+
+{[
+Awskit_s3_eio.Object.Transfer.get_file s3
+  ~bucket:"my-bucket"
+  ~key:"single-request-download.tar"
   ~path
   ()
 ]}
@@ -220,16 +244,20 @@ let* result =
     ()
 ]}
 
-For larger files, use the multipart path helper. It uploads file parts with
-bounded concurrency and aborts the multipart upload if a fresh upload fails:
+For explicit multipart upload, use [multipart_upload_file]. It uploads file
+parts with bounded concurrency from [Transfer.upload_options] and aborts the
+multipart upload if a fresh upload fails:
 
 {[
+let options =
+  { Awskit_s3.Transfer.default_upload_options with concurrency = 4 }
+in
 let* result =
-  Awskit_s3_lwt_unix.Object.Transfer.upload_multipart_file s3
+  Awskit_s3_lwt_unix.Object.Transfer.multipart_upload_file s3
     ~bucket:"my-bucket"
     ~key:"large.tar"
+    ~options
     ~path:"/tmp/large.tar"
-    ~concurrency:4
     ~on_progress:(fun bytes -> Fmt.pr "uploaded %Ld bytes@." bytes)
     ()
 ]}

@@ -81,8 +81,30 @@ let test_operation_data_module_names () =
     (Create_multipart_upload.default_options : Create_multipart_upload.options);
   ignore (Upload_part.default_options : Upload_part.options);
   ignore
-    (Transfer.default_options.create_options : Create_multipart_upload.options);
-  ignore (Transfer.default_options.upload_part_options : Upload_part.options);
+    (Transfer.default_upload_options.create_options
+      : Create_multipart_upload.options);
+  ignore
+    (Transfer.default_upload_options.upload_part_options : Upload_part.options);
+  ignore
+    (Transfer.default_upload_options.list_parts_options : List_parts.options);
+  ignore (Transfer.default_download_options.get_options : Get_object.options);
+  ignore (None : Transfer.upload_result option);
+  ignore (None : Transfer.download_result option);
+  Alcotest.(check int64)
+    "default upload threshold"
+    (Int64.of_int Transfer.default_part_size)
+    Transfer.default_multipart_threshold;
+  Alcotest.(check bool)
+    "put strategy" true
+    (Transfer.upload_strategy
+       (Transfer.Put
+          {
+            etag = None;
+            version_id = None;
+            checksum = { Object.Checksum.values = []; checksum_type = None };
+            response = Awskit.Response.create_exn ~status:200 ();
+          })
+    = `Put);
   ignore (None : Complete_multipart_upload.result option);
   ignore (None : Abort_multipart_upload.result option);
   ignore (List_parts.default_options : List_parts.options)

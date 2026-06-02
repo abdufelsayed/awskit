@@ -63,8 +63,8 @@ Main modules:
     configuration records}
   {li {!module:Awskit_s3.Multipart} — multipart upload identifiers, parts,
     options, and result records}
-  {li {!module:Awskit_s3.Transfer} — high-level object transfer options,
-    limits, and multipart transfer result records}
+  {li {!module:Awskit_s3.Transfer} — high-level upload/download options,
+    limits, strategy results, and multipart transfer result records}
   {li {!module:Awskit_s3.Presigned} — pure presigned URL generation}
   {li {!module:Awskit_s3.Policy} — validated opaque bucket policy JSON
     payloads}

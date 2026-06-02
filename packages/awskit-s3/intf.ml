@@ -60,22 +60,60 @@ end
 module type TRANSFER_DATA = sig
   val min_part_size : int
   val default_part_size : int
+  val default_multipart_threshold : int64
+  val default_concurrency : int
   val max_parts : int
 
-  type options = {
+  type upload_options = {
+    multipart_threshold : int64;
     part_size : int;
+    concurrency : int;
+    put_options : Put_object.options;
     create_options : Create_multipart_upload.options;
     upload_part_options : Upload_part.options;
+    complete_options : Complete_multipart_upload.options;
+    abort_options : Abort_multipart_upload.options;
+    list_parts_options : List_parts.options;
   }
 
-  type result = {
+  type download_options = {
+    multipart_threshold : int64;
+    part_size : int;
+    concurrency : int;
+    get_options : Get_object.options;
+  }
+
+  type upload_strategy = [ `Put | `Multipart ]
+  type download_strategy = [ `Get | `Ranged ]
+
+  type multipart_upload_result = {
     upload : Multipart.Upload.t;
     parts : Multipart.Part.t list;
     complete : Complete_multipart_upload.result;
   }
 
-  val default_options : options
-  val validate_options : options -> (unit, Error.t) Stdlib.result
+  type upload_result =
+    | Put of Put_object.result
+    | Multipart of multipart_upload_result
+
+  type download_result =
+    | Get of Get_object.result
+    | Ranged of { info : Head_object.result; parts : int }
+
+  val upload_strategy : upload_result -> upload_strategy
+  val download_strategy : download_result -> download_strategy
+  val default_upload_options : upload_options
+  val default_download_options : download_options
+  val validate_upload_options : upload_options -> (unit, Error.t) Stdlib.result
+
+  val validate_upload_multipart_selection :
+    upload_options -> (unit, Error.t) Stdlib.result
+
+  val validate_download_options :
+    download_options -> (unit, Error.t) Stdlib.result
+
+  val validate_multipart_part_count :
+    content_length:int64 -> part_size:int -> (unit, Error.t) Stdlib.result
 end
 
 type addressing_style = [ `Auto | `Path | `Virtual_hosted ]

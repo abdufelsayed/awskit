@@ -2,6 +2,16 @@ module Runtime = struct
   type connection = {
     response_body : string;
     mutable uploaded_body : string option;
+    mutable put_count : int;
+    mutable get_count : int;
+    mutable head_count : int;
+    mutable multipart_create_count : int;
+    mutable upload_part_count : int;
+    mutable complete_count : int;
+    mutable abort_count : int;
+    mutable get_ranges : string list;
+    mutable fail_ranged_get : bool;
+    mutable list_parts_expected_owner : string option;
   }
 
   type 'a t = 'a Lwt.t
@@ -115,6 +125,60 @@ end
 let unsupported () =
   Lwt.return_error (Awskit.Error.validation ~field:"test" "not implemented")
 
+let connection ?(response_body = "") () =
+  {
+    Runtime.response_body;
+    uploaded_body = None;
+    put_count = 0;
+    get_count = 0;
+    head_count = 0;
+    multipart_create_count = 0;
+    upload_part_count = 0;
+    complete_count = 0;
+    abort_count = 0;
+    get_ranges = [];
+    fail_ranged_get = false;
+    list_parts_expected_owner = None;
+  }
+
+let response status = Awskit.Response.create_exn ~status ()
+
+let empty_checksum : Awskit_s3.Object.Checksum.response =
+  { values = []; checksum_type = None }
+
+let put_result () : Awskit_s3.Put_object.result =
+  {
+    etag = None;
+    version_id = None;
+    checksum = empty_checksum;
+    response = response 200;
+  }
+
+let get_result content_length : Awskit_s3.Get_object.result =
+  {
+    etag = None;
+    content_type = None;
+    content_length;
+    last_modified = None;
+    metadata = [];
+    storage_class = None;
+    version_id = None;
+    checksum = empty_checksum;
+    server_side_encryption = None;
+    response = response 200;
+  }
+
+let parse_range_header header body =
+  match String.split_on_char '-' header with
+  | [ start_part; finish_part ] -> (
+      match String.split_on_char '=' start_part with
+      | [ "bytes"; start ] ->
+          let start = int_of_string start in
+          let finish = int_of_string finish_part in
+          String.sub body start (finish - start + 1)
+      | _ -> body)
+  | _ -> body
+
 module S3 = struct
   module Object = struct
     type connection = Runtime.connection
@@ -123,53 +187,49 @@ module S3 = struct
     type response_body_reader = Runtime.response_body_reader
 
     let put conn ~bucket:_ ~key:_ ?options:_ ~body () =
+      conn.Runtime.put_count <- conn.Runtime.put_count + 1;
       Lwt.bind (Runtime.drain_request_body body) (function
         | Error _ as error -> Lwt.return error
         | Ok body ->
             conn.Runtime.uploaded_body <- Some body;
-            let response = Awskit.Response.create_exn ~status:200 () in
-            Lwt.return_ok
-              {
-                Awskit_s3.Put_object.etag = None;
-                version_id = None;
-                checksum =
-                  {
-                    Awskit_s3.Object.Checksum.values = [];
-                    checksum_type = None;
-                  };
-                response;
-              })
+            Lwt.return_ok (put_result ()))
 
-    let get conn ~bucket:_ ~key:_ ?options:_ ~consume () =
-      Lwt.bind
-        (consume { Runtime.body = conn.Runtime.response_body; offset = 0 })
-        (function
-          | Error _ as error -> Lwt.return error
-          | Ok value ->
-              let response = Awskit.Response.create_exn ~status:200 () in
-              Lwt.return_ok
-                ( {
-                    Awskit_s3.Get_object.etag = None;
-                    content_type = None;
-                    content_length =
-                      Some
-                        (Int64.of_int
-                           (String.length conn.Runtime.response_body));
-                    last_modified = None;
-                    metadata = [];
-                    storage_class = None;
-                    version_id = None;
-                    checksum =
-                      {
-                        Awskit_s3.Object.Checksum.values = [];
-                        checksum_type = None;
-                      };
-                    server_side_encryption = None;
-                    response;
-                  },
-                  value ))
+    let get conn ~bucket:_ ~key:_ ?options ~consume () =
+      conn.Runtime.get_count <- conn.Runtime.get_count + 1;
+      let body =
+        match
+          Option.bind options (fun (options : Awskit_s3.Get_object.options) ->
+              options.range)
+        with
+        | None -> conn.Runtime.response_body
+        | Some range ->
+            let header = Awskit_s3.Range.to_header range in
+            conn.Runtime.get_ranges <- conn.Runtime.get_ranges @ [ header ];
+            parse_range_header header conn.Runtime.response_body
+      in
+      if
+        conn.Runtime.fail_ranged_get
+        && Option.is_some (Option.bind options (fun options -> options.range))
+      then Lwt.return_error (Awskit.Error.body "simulated ranged get failure")
+      else
+        Lwt.bind
+          (consume { Runtime.body; offset = 0 })
+          (function
+            | Error _ as error -> Lwt.return error
+            | Ok value ->
+                Lwt.return_ok
+                  ( get_result
+                      (Some
+                         (Int64.of_int
+                            (String.length conn.Runtime.response_body))),
+                    value ))
 
-    let head _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
+    let head conn ~bucket:_ ~key:_ ?options:_ () =
+      conn.Runtime.head_count <- conn.Runtime.head_count + 1;
+      Lwt.return_ok
+        (get_result
+           (Some (Int64.of_int (String.length conn.Runtime.response_body))))
+
     let exists _ ~bucket:_ ~key:_ = unsupported ()
     let delete _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
     let delete_objects _ ~bucket:_ ~objects:_ ?options:_ () = unsupported ()
@@ -224,17 +284,49 @@ module S3 = struct
     type 'a io = 'a Lwt.t
     type request_body = Runtime.request_body
 
-    let create_upload _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
+    let create_upload conn ~bucket ~key ?options:_ () =
+      conn.Runtime.multipart_create_count <-
+        conn.Runtime.multipart_create_count + 1;
+      let upload_id = Awskit_s3.Multipart.Upload_id.of_string_exn "upload-1" in
+      let upload =
+        Awskit_s3.Multipart.Upload.create_exn ~bucket ~key ~upload_id
+      in
+      Lwt.return_ok
+        { Awskit_s3.Create_multipart_upload.upload; response = response 200 }
 
-    let upload_part _ ~bucket:_ ~key:_ ~upload_id:_ ~part_number:_ ~body:_
+    let upload_part conn ~bucket:_ ~key:_ ~upload_id:_ ~part_number ~body
         ?options:_ () =
-      unsupported ()
+      conn.Runtime.upload_part_count <- conn.Runtime.upload_part_count + 1;
+      Lwt.bind (Runtime.drain_request_body body) (function
+        | Error _ as error -> Lwt.return error
+        | Ok _ ->
+            let etag =
+              Awskit_s3.Object.Etag.of_string_exn
+                (Fmt.str "etag-%d" part_number)
+            in
+            let part =
+              Awskit_s3.Multipart.Part.create_exn ~part_number ~etag ()
+            in
+            Lwt.return_ok
+              {
+                Awskit_s3.Upload_part.part;
+                checksum = empty_checksum;
+                response = response 200;
+              })
 
-    let complete_upload _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ _ =
-      unsupported ()
+    let complete_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ _ =
+      conn.Runtime.complete_count <- conn.Runtime.complete_count + 1;
+      Lwt.return_ok
+        {
+          Awskit_s3.Complete_multipart_upload.etag = None;
+          version_id = None;
+          checksum = empty_checksum;
+          response = response 200;
+        }
 
-    let abort_upload _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
-      unsupported ()
+    let abort_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
+      conn.Runtime.abort_count <- conn.Runtime.abort_count + 1;
+      Lwt.return_ok (response 204)
 
     let list_parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
       unsupported ()
@@ -247,8 +339,11 @@ module S3 = struct
       let pages _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ ?max_pages:_ () =
         unsupported ()
 
-      let parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ ?max_pages:_ () =
-        unsupported ()
+      let parts conn ~bucket:_ ~key:_ ~upload_id:_ ?options ?max_pages:_ () =
+        conn.Runtime.list_parts_expected_owner <-
+          Option.bind options (fun (options : Awskit_s3.List_parts.options) ->
+              options.expected_bucket_owner);
+        Lwt.return_ok []
     end
   end
 end
@@ -261,7 +356,7 @@ let with_umask mask f =
   let previous = Unix.umask mask in
   Fun.protect ~finally:(fun () -> ignore (Unix.umask previous)) f
 
-let test_download_file_creates_private_file () =
+let test_get_file_creates_private_file () =
   let path = Filename.temp_file "awskit-download-perm" ".bin" in
   let body = "secret downloaded file body" in
   remove_file path;
@@ -271,8 +366,8 @@ let test_download_file_creates_private_file () =
       with_umask 0 (fun () ->
           match
             Lwt_main.run
-              (Transfer.download_file
-                 { Runtime.response_body = body; uploaded_body = None }
+              (Transfer.get_file
+                 (connection ~response_body:body ())
                  ~bucket:"bucket" ~key:"key" ~path ())
           with
           | Error error ->
@@ -287,7 +382,16 @@ let write_file path body =
     ~finally:(fun () -> close_out_noerr channel)
     (fun () -> output_string channel body)
 
-let test_upload_file_streams_file_body () =
+let read_file path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+
+let checksum_value : Awskit_s3.Object.Checksum.value =
+  { algorithm = Awskit_s3.Object.Checksum.Algorithm.Sha256; value = "checksum" }
+
+let test_put_file_streams_file_body () =
   Runtime.reset_write_fault ();
   let path = Filename.temp_file "awskit-upload" ".bin" in
   let body = "first line\nsecond line\n" in
@@ -295,11 +399,11 @@ let test_upload_file_streams_file_body () =
   Fun.protect
     ~finally:(fun () -> remove_file path)
     (fun () ->
-      let conn = { Runtime.response_body = ""; uploaded_body = None } in
+      let conn = connection () in
       let progress = ref [] in
       match
         Lwt_main.run
-          (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~path
+          (Transfer.put_file conn ~bucket:"bucket" ~key:"key" ~path
              ~on_progress:(fun transferred ->
                progress := transferred :: !progress)
              ())
@@ -308,13 +412,13 @@ let test_upload_file_streams_file_body () =
           Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
       | Ok _ ->
           Alcotest.(check (option string))
-            "uploaded body" (Some body) conn.uploaded_body;
+            "uploaded body" (Some body) conn.Runtime.uploaded_body;
           Alcotest.(check (list int64))
             "progress"
             [ Int64.of_int (String.length body) ]
             (List.rev !progress))
 
-let test_upload_file_returns_stream_write_error () =
+let test_put_file_returns_stream_write_error () =
   Runtime.write_error_after_bytes := Some 0;
   let path = Filename.temp_file "awskit-upload-error" ".bin" in
   write_file path "body that cannot be written";
@@ -323,28 +427,518 @@ let test_upload_file_returns_stream_write_error () =
       Runtime.reset_write_fault ();
       remove_file path)
     (fun () ->
-      let conn = { Runtime.response_body = ""; uploaded_body = None } in
+      let conn = connection () in
       match
         Lwt_main.run
-          (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~path ())
+          (Transfer.put_file conn ~bucket:"bucket" ~key:"key" ~path ())
       with
       | Ok _ -> Alcotest.fail "upload succeeded despite write failure"
       | Error error ->
           Alcotest.(check (option string))
-            "no stored body" None conn.uploaded_body;
+            "no stored body" None conn.Runtime.uploaded_body;
           Alcotest.(check string)
             "error" "body: simulated upload write failure"
             (Fmt.str "%a" Awskit_s3.Error.pp error))
+
+let test_upload_file_uses_put_below_threshold () =
+  Runtime.reset_write_fault ();
+  let path = Filename.temp_file "awskit-upload-put" ".bin" in
+  write_file path "small";
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          multipart_threshold = 1024L;
+        }
+      in
+      match
+        Lwt_main.run
+          (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~options ~path
+             ())
+      with
+      | Error error ->
+          Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
+      | Ok result ->
+          Alcotest.(check bool)
+            "strategy" true
+            (Awskit_s3.Transfer.upload_strategy result = `Put);
+          Alcotest.(check int) "put count" 1 conn.Runtime.put_count;
+          Alcotest.(check int)
+            "multipart create count" 0 conn.Runtime.multipart_create_count)
+
+let test_upload_file_allows_put_checksum_below_threshold () =
+  Runtime.reset_write_fault ();
+  let path = Filename.temp_file "awskit-upload-put-checksum" ".bin" in
+  write_file path "small";
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection () in
+      let put_options =
+        {
+          Awskit_s3.Put_object.default_options with
+          checksum = Some checksum_value;
+        }
+      in
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          multipart_threshold = 1024L;
+          put_options;
+        }
+      in
+      match
+        Lwt_main.run
+          (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~options ~path
+             ())
+      with
+      | Error error ->
+          Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
+      | Ok result ->
+          Alcotest.(check bool)
+            "strategy" true
+            (Awskit_s3.Transfer.upload_strategy result = `Put);
+          Alcotest.(check int) "put count" 1 conn.Runtime.put_count;
+          Alcotest.(check int)
+            "multipart create count" 0 conn.Runtime.multipart_create_count)
+
+let test_upload_file_uses_multipart_at_threshold () =
+  Runtime.reset_write_fault ();
+  let path = Filename.temp_file "awskit-upload-multipart" ".bin" in
+  let body = String.make Awskit_s3.Transfer.min_part_size 'm' in
+  write_file path body;
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          multipart_threshold = Int64.of_int Awskit_s3.Transfer.min_part_size;
+          part_size = Awskit_s3.Transfer.min_part_size;
+        }
+      in
+      match
+        Lwt_main.run
+          (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~options ~path
+             ())
+      with
+      | Error error ->
+          Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
+      | Ok result ->
+          Alcotest.(check bool)
+            "strategy" true
+            (Awskit_s3.Transfer.upload_strategy result = `Multipart);
+          Alcotest.(check int) "put count" 0 conn.Runtime.put_count;
+          Alcotest.(check int)
+            "multipart create count" 1 conn.Runtime.multipart_create_count;
+          Alcotest.(check int)
+            "upload part count" 1 conn.Runtime.upload_part_count;
+          Alcotest.(check int) "complete count" 1 conn.Runtime.complete_count)
+
+let test_upload_file_rejects_invalid_options () =
+  let path = Filename.temp_file "awskit-upload-invalid" ".bin" in
+  write_file path (String.make Awskit_s3.Transfer.min_part_size 'x');
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection () in
+      let bad_concurrency =
+        { Awskit_s3.Transfer.default_upload_options with concurrency = 0 }
+      in
+      (match
+         Lwt_main.run
+           (Transfer.upload_file conn ~bucket:"bucket" ~key:"key"
+              ~options:bad_concurrency ~path ())
+       with
+      | Error (Awskit.Error.Validation { field = Some "concurrency"; _ }) -> ()
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "expected concurrency validation");
+      let put_options =
+        {
+          Awskit_s3.Put_object.default_options with
+          checksum = Some checksum_value;
+        }
+      in
+      let bad_put_checksum =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          multipart_threshold = 0L;
+          put_options;
+        }
+      in
+      (match
+         Lwt_main.run
+           (Transfer.upload_file conn ~bucket:"bucket" ~key:"key"
+              ~options:bad_put_checksum ~path ())
+       with
+      | Error
+          (Awskit.Error.Validation { field = Some "put_options.checksum"; _ })
+        ->
+          ()
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "expected put checksum validation");
+      (match
+         Lwt_main.run
+           (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+              ~options:bad_put_checksum ~path ())
+       with
+      | Error
+          (Awskit.Error.Validation { field = Some "put_options.checksum"; _ })
+        ->
+          ()
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "expected explicit multipart checksum validation");
+      let upload_part_options =
+        {
+          Awskit_s3.Upload_part.default_options with
+          checksum = Some checksum_value;
+        }
+      in
+      let bad_part_checksum =
+        { Awskit_s3.Transfer.default_upload_options with upload_part_options }
+      in
+      (match
+         Lwt_main.run
+           (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+              ~options:bad_part_checksum ~path ())
+       with
+      | Error
+          (Awskit.Error.Validation
+             { field = Some "upload_part_options.checksum"; _ }) ->
+          ()
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "expected upload-part checksum validation");
+      let create_options =
+        {
+          Awskit_s3.Create_multipart_upload.default_options with
+          checksum_algorithm = Some Awskit_s3.Object.Checksum.Algorithm.Sha256;
+        }
+      in
+      let bad_create_checksum =
+        { Awskit_s3.Transfer.default_upload_options with create_options }
+      in
+      (match
+         Lwt_main.run
+           (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+              ~options:bad_create_checksum ~path ())
+       with
+      | Error
+          (Awskit.Error.Validation
+             { field = Some "create_options.checksum_algorithm"; _ }) ->
+          ()
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "expected create checksum validation");
+      let complete_options =
+        {
+          Awskit_s3.Complete_multipart_upload.default_options with
+          checksum = Some checksum_value;
+        }
+      in
+      let bad_complete_checksum =
+        { Awskit_s3.Transfer.default_upload_options with complete_options }
+      in
+      (match
+         Lwt_main.run
+           (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+              ~options:bad_complete_checksum ~path ())
+       with
+      | Error
+          (Awskit.Error.Validation
+             { field = Some "complete_options.checksum"; _ }) ->
+          ()
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "expected complete checksum validation");
+      let create_options =
+        {
+          Awskit_s3.Create_multipart_upload.default_options with
+          checksum_type = Some Awskit_s3.Object.Checksum.Type.Composite;
+        }
+      in
+      let bad_create_checksum_type =
+        { Awskit_s3.Transfer.default_upload_options with create_options }
+      in
+      (match
+         Lwt_main.run
+           (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+              ~options:bad_create_checksum_type ~path ())
+       with
+      | Error
+          (Awskit.Error.Validation
+             { field = Some "create_options.checksum_type"; _ }) ->
+          ()
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "expected create checksum-type validation");
+      let complete_options =
+        {
+          Awskit_s3.Complete_multipart_upload.default_options with
+          checksum_type = Some Awskit_s3.Object.Checksum.Type.Composite;
+        }
+      in
+      let bad_complete_checksum_type =
+        { Awskit_s3.Transfer.default_upload_options with complete_options }
+      in
+      match
+        Lwt_main.run
+          (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+             ~options:bad_complete_checksum_type ~path ())
+      with
+      | Error
+          (Awskit.Error.Validation
+             { field = Some "complete_options.checksum_type"; _ }) ->
+          ()
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "expected complete checksum-type validation")
+
+let test_resume_multipart_upload_file_uses_list_parts_options () =
+  let path = Filename.temp_file "awskit-resume-list-options" ".bin" in
+  write_file path (String.make Awskit_s3.Transfer.min_part_size 'r');
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection () in
+      let upload_id = Awskit_s3.Multipart.Upload_id.of_string_exn "upload-1" in
+      let list_parts_options =
+        {
+          Awskit_s3.List_parts.default_options with
+          expected_bucket_owner = Some "123456789012";
+        }
+      in
+      let options =
+        { Awskit_s3.Transfer.default_upload_options with list_parts_options }
+      in
+      match
+        Lwt_main.run
+          (Transfer.resume_multipart_upload_file conn ~bucket:"bucket"
+             ~key:"key" ~upload_id ~options ~path ())
+      with
+      | Error error ->
+          Alcotest.failf "resume failed: %a" Awskit_s3.Error.pp error
+      | Ok _ ->
+          Alcotest.(check (option string))
+            "list expected owner" (Some "123456789012")
+            conn.Runtime.list_parts_expected_owner)
+
+let test_download_file_uses_get_below_threshold () =
+  let path = Filename.temp_file "awskit-download-get" ".bin" in
+  remove_file path;
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let body = "small download" in
+      let conn = connection ~response_body:body () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = 1024L;
+        }
+      in
+      match
+        Lwt_main.run
+          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+             ~path ())
+      with
+      | Error error ->
+          Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
+      | Ok result ->
+          Alcotest.(check bool)
+            "strategy" true
+            (Awskit_s3.Transfer.download_strategy result = `Get);
+          Alcotest.(check string) "body" body (read_file path);
+          Alcotest.(check int) "head count" 1 conn.Runtime.head_count;
+          Alcotest.(check int) "get count" 1 conn.Runtime.get_count;
+          Alcotest.(check int)
+            "range count" 0
+            (List.length conn.Runtime.get_ranges))
+
+let test_download_file_uses_ranges_at_threshold () =
+  let path = Filename.temp_file "awskit-download-ranged" ".bin" in
+  remove_file path;
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let part_size = Awskit_s3.Transfer.min_part_size in
+      let body = String.make part_size 'a' ^ "tail" in
+      let conn = connection ~response_body:body () in
+      let progress = ref [] in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = Int64.of_int part_size;
+          part_size;
+          concurrency = 2;
+        }
+      in
+      match
+        Lwt_main.run
+          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+             ~path
+             ~on_progress:(fun transferred ->
+               progress := transferred :: !progress)
+             ())
+      with
+      | Error error ->
+          Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
+      | Ok result ->
+          Alcotest.(check bool)
+            "strategy" true
+            (Awskit_s3.Transfer.download_strategy result = `Ranged);
+          (match result with
+          | Awskit_s3.Transfer.Ranged { parts; _ } ->
+              Alcotest.(check int) "parts" 2 parts
+          | _ -> Alcotest.fail "expected ranged result");
+          Alcotest.(check string) "body" body (read_file path);
+          Alcotest.(check int) "head count" 1 conn.Runtime.head_count;
+          Alcotest.(check int) "get count" 2 conn.Runtime.get_count;
+          Alcotest.(check (list string))
+            "ranges"
+            [
+              Fmt.str "bytes=0-%d" (part_size - 1);
+              Fmt.str "bytes=%d-%d" part_size (String.length body - 1);
+            ]
+            conn.Runtime.get_ranges;
+          Alcotest.(check (option int64))
+            "final progress"
+            (Some (Int64.of_int (String.length body)))
+            (List.find_opt
+               (fun transferred ->
+                 Int64.equal transferred (Int64.of_int (String.length body)))
+               !progress))
+
+let test_download_file_allows_small_range_parts () =
+  let path = Filename.temp_file "awskit-download-small-ranges" ".bin" in
+  remove_file path;
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let body = "abcdefghi" in
+      let conn = connection ~response_body:body () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = 1L;
+          part_size = 4;
+          concurrency = 2;
+        }
+      in
+      match
+        Lwt_main.run
+          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+             ~path ())
+      with
+      | Error error ->
+          Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
+      | Ok result ->
+          (match result with
+          | Awskit_s3.Transfer.Ranged { parts; _ } ->
+              Alcotest.(check int) "parts" 3 parts
+          | _ -> Alcotest.fail "expected ranged result");
+          Alcotest.(check string) "body" body (read_file path);
+          Alcotest.(check int) "get count" 3 conn.Runtime.get_count;
+          Alcotest.(check (list string))
+            "ranges"
+            [ "bytes=0-3"; "bytes=4-7"; "bytes=8-8" ]
+            conn.Runtime.get_ranges)
+
+let test_download_file_rejects_range_option () =
+  let path = Filename.temp_file "awskit-download-range-option" ".bin" in
+  remove_file path;
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection ~response_body:"body" () in
+      let get_options =
+        {
+          Awskit_s3.Get_object.default_options with
+          range = Some (Awskit_s3.Range.bytes_exn ~start:0L ~finish:1L);
+        }
+      in
+      let options =
+        { Awskit_s3.Transfer.default_download_options with get_options }
+      in
+      match
+        Lwt_main.run
+          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+             ~path ())
+      with
+      | Error (Awskit.Error.Validation { field = Some "get_options.range"; _ })
+        ->
+          ()
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "expected range validation")
+
+let test_download_file_ranged_failure_preserves_target () =
+  let path = Filename.temp_file "awskit-download-preserve" ".bin" in
+  let original = "existing target" in
+  write_file path original;
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let part_size = Awskit_s3.Transfer.min_part_size in
+      let conn = connection ~response_body:(String.make part_size 'x') () in
+      conn.Runtime.fail_ranged_get <- true;
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = Int64.of_int part_size;
+          part_size;
+        }
+      in
+      match
+        Lwt_main.run
+          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+             ~path ())
+      with
+      | Ok _ -> Alcotest.fail "download succeeded despite ranged failure"
+      | Error _ ->
+          Alcotest.(check string) "target preserved" original (read_file path);
+          Alcotest.(check bool)
+            "temp removed" false
+            (Sys.file_exists
+               (Filename.concat (Filename.dirname path)
+                  ("." ^ Filename.basename path ^ ".awskit-download.tmp"))))
 
 let suite () =
   [
     ( "transfer",
       [
-        Alcotest.test_case "download creates private file" `Quick
-          test_download_file_creates_private_file;
-        Alcotest.test_case "upload streams file body" `Quick
-          test_upload_file_streams_file_body;
-        Alcotest.test_case "upload returns stream write error" `Quick
-          test_upload_file_returns_stream_write_error;
+        Alcotest.test_case "get creates private file" `Quick
+          test_get_file_creates_private_file;
+        Alcotest.test_case "put streams file body" `Quick
+          test_put_file_streams_file_body;
+        Alcotest.test_case "put returns stream write error" `Quick
+          test_put_file_returns_stream_write_error;
+        Alcotest.test_case "upload uses put below threshold" `Quick
+          test_upload_file_uses_put_below_threshold;
+        Alcotest.test_case "upload allows put checksum below threshold" `Quick
+          test_upload_file_allows_put_checksum_below_threshold;
+        Alcotest.test_case "upload uses multipart at threshold" `Quick
+          test_upload_file_uses_multipart_at_threshold;
+        Alcotest.test_case "upload rejects invalid options" `Quick
+          test_upload_file_rejects_invalid_options;
+        Alcotest.test_case "resume uses list-parts options" `Quick
+          test_resume_multipart_upload_file_uses_list_parts_options;
+        Alcotest.test_case "download uses get below threshold" `Quick
+          test_download_file_uses_get_below_threshold;
+        Alcotest.test_case "download uses ranges at threshold" `Quick
+          test_download_file_uses_ranges_at_threshold;
+        Alcotest.test_case "download allows small range parts" `Quick
+          test_download_file_allows_small_range_parts;
+        Alcotest.test_case "download rejects range option" `Quick
+          test_download_file_rejects_range_option;
+        Alcotest.test_case "download ranged failure preserves target" `Quick
+          test_download_file_ranged_failure_preserves_target;
       ] );
   ]

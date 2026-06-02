@@ -476,7 +476,9 @@ let test_multipart_path_transfer_resumes () =
           (fun index -> Char.chr ((index mod 10) + Char.code '0'))
       in
       write_file path body;
-      let options = { Transfer.default_options with part_size } in
+      let options =
+        { Transfer.default_upload_options with part_size; concurrency = 2 }
+      in
       let progress = ref [] in
       Fun.protect
         ~finally:(fun () -> remove_file path)
@@ -496,7 +498,7 @@ let test_multipart_path_transfer_resumes () =
           let result =
             await "resume multipart path"
               (S3.Object.Transfer.resume_multipart_upload_file conn ~bucket
-                 ~key:"resume.bin" ~upload_id ~options ~concurrency:2 ~path
+                 ~key:"resume.bin" ~upload_id ~options ~path
                  ~on_progress:(fun transferred ->
                    progress := transferred :: !progress)
                  ())
