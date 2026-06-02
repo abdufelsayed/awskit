@@ -245,4 +245,4 @@ test/                  package tests and MinIO contracts
 
 ## License
 
-MIT.
+MIT. See [LICENSE](LICENSE).
