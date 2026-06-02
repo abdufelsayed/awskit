@@ -609,7 +609,7 @@ module type PRESIGNED = sig
     connection ->
     bucket:string ->
     key:string ->
-    ?expires_in:Ptime.Span.t ->
+    ?options:Presigned.Delete_object.options ->
     unit ->
     (Presigned.result, Error.t) result io
 

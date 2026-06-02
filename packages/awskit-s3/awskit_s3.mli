@@ -739,7 +739,7 @@ module type PRESIGNED_DATA = sig
   type result = {
     url : string;
     method_ : method_;
-    headers : (string * string) list;
+    signed_headers : (string * string) list;
     expires_at : Ptime.t option;
   }
 
@@ -749,7 +749,8 @@ module type PRESIGNED_DATA = sig
       content_type : string option;
       checksum : Object.Checksum.value option;
       server_side_encryption : Object.Encryption.request option;
-      headers : (string * string) list;
+      expected_bucket_owner : string option;
+      extra_signed_headers : (string * string) list;
     }
 
     val default_options : options
@@ -761,7 +762,8 @@ module type PRESIGNED_DATA = sig
       response_content_type : string option;
       response_content_disposition : string option;
       version_id : Object.Version_id.t option;
-      headers : (string * string) list;
+      expected_bucket_owner : string option;
+      extra_signed_headers : (string * string) list;
     }
 
     val default_options : options
@@ -771,7 +773,18 @@ module type PRESIGNED_DATA = sig
     type options = {
       expires_in : Ptime.Span.t option;
       checksum : Object.Checksum.value option;
-      headers : (string * string) list;
+      expected_bucket_owner : string option;
+      extra_signed_headers : (string * string) list;
+    }
+
+    val default_options : options
+  end
+
+  module Delete_object : sig
+    type options = {
+      expires_in : Ptime.Span.t option;
+      expected_bucket_owner : string option;
+      extra_signed_headers : (string * string) list;
     }
 
     val default_options : options
@@ -829,7 +842,7 @@ module type PRESIGNED_DATA = sig
     ?scheme:Awskit.Endpoint.Scheme.t ->
     bucket:string ->
     key:string ->
-    ?expires_in:Ptime.Span.t ->
+    ?options:Delete_object.options ->
     unit ->
     (result, Error.t) Stdlib.result
 
@@ -1365,7 +1378,7 @@ module type PRESIGNED = sig
     connection ->
     bucket:string ->
     key:string ->
-    ?expires_in:Ptime.Span.t ->
+    ?options:Presigned.Delete_object.options ->
     unit ->
     (Presigned.result, Error.t) result io
 

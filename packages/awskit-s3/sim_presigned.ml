@@ -23,11 +23,11 @@ module Presigned = struct
       ~endpoint_config:(Runtime.s3_endpoint_config conn)
       ~bucket ~key ?options ()
 
-  let delete_object conn ~bucket ~key ?expires_in () =
+  let delete_object conn ~bucket ~key ?options () =
     Presigned.delete_object_with_endpoint_config ~region:(Runtime.region conn)
       ~credentials:conn.credentials ~now:(now conn)
       ~endpoint_config:(Runtime.s3_endpoint_config conn)
-      ~bucket ~key ?expires_in ()
+      ~bucket ~key ?options ()
 
   let upload_part conn ~bucket ~key ~upload_id ~part_number ?options () =
     Presigned.upload_part_with_endpoint_config ~region:(Runtime.region conn)

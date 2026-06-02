@@ -411,7 +411,11 @@ Awskit_s3.Presigned.upload_part
 ]}
 
 Presigned URLs use [UNSIGNED-PAYLOAD] and the same endpoint/addressing options
-as normal operations.
+as normal operations. Returned [result.signed_headers] are the non-host headers
+that the caller must send with the URL. Use [extra_signed_headers] only for
+additional headers that must be included in the signature. Presigned [PUT] and
+[UploadPart] helpers sign explicit checksum value headers when configured, and
+object presigning options support [expected_bucket_owner] guard rails.
 
 A typical direct-upload multipart flow is:
 

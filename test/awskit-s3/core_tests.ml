@@ -30,6 +30,11 @@ let checksum_value (checksum : Object.Checksum.response) =
 let version_string = Option.map Object.Version_id.to_string
 let query_param name url = Uri.query (Uri.of_string url) |> List.assoc_opt name
 
+let signed_headers_or_fail url =
+  match query_param "X-Amz-SignedHeaders" url with
+  | Some [ value ] -> String.split_on_char ';' value
+  | _ -> Alcotest.fail "missing signed headers"
+
 let check_checksum label algorithm value (checksum : Object.Checksum.response) =
   match
     List.find_opt
@@ -219,15 +224,108 @@ let test_presigned_put_checksum_headers () =
   in
   Alcotest.(check (option string))
     "checksum value header" (Some "provided-sha1")
-    (header "x-amz-checksum-sha1" result.headers);
-  let signed_headers =
-    match query_param "X-Amz-SignedHeaders" result.url with
-    | Some [ value ] -> String.split_on_char ';' value
-    | _ -> Alcotest.fail "missing signed headers"
-  in
+    (header "x-amz-checksum-sha1" result.signed_headers);
+  Alcotest.(check (option string))
+    "no checksum algorithm header" None
+    (header "x-amz-checksum-algorithm" result.signed_headers);
+  let signed_headers = signed_headers_or_fail result.url in
   Alcotest.(check bool)
     "signed checksum value" true
     (List.mem "x-amz-checksum-sha1" signed_headers)
+
+let test_presigned_expected_bucket_owner_headers () =
+  let owner = "123456789012" in
+  let get_options =
+    {
+      Presigned.Get_object.default_options with
+      expected_bucket_owner = Some owner;
+    }
+  in
+  let get =
+    Presigned.get_object
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+      ~options:get_options ()
+    |> ok_or_fail "presigned get expected owner"
+  in
+  Alcotest.(check (option string))
+    "get expected owner header" (Some owner)
+    (header "x-amz-expected-bucket-owner" get.signed_headers);
+  Alcotest.(check bool)
+    "get signed expected owner" true
+    (List.mem "x-amz-expected-bucket-owner" (signed_headers_or_fail get.url));
+  let head =
+    Presigned.head_object
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+      ~options:get_options ()
+    |> ok_or_fail "presigned head expected owner"
+  in
+  Alcotest.(check (option string))
+    "head expected owner header" (Some owner)
+    (header "x-amz-expected-bucket-owner" head.signed_headers);
+  Alcotest.(check bool)
+    "head signed expected owner" true
+    (List.mem "x-amz-expected-bucket-owner" (signed_headers_or_fail head.url));
+  let put_options =
+    {
+      Presigned.Put_object.default_options with
+      expected_bucket_owner = Some owner;
+    }
+  in
+  let put =
+    Presigned.put_object
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+      ~options:put_options ()
+    |> ok_or_fail "presigned put expected owner"
+  in
+  Alcotest.(check (option string))
+    "put expected owner header" (Some owner)
+    (header "x-amz-expected-bucket-owner" put.signed_headers);
+  Alcotest.(check bool)
+    "put signed expected owner" true
+    (List.mem "x-amz-expected-bucket-owner" (signed_headers_or_fail put.url));
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let upload_part_options =
+    {
+      Presigned.Upload_part.default_options with
+      expected_bucket_owner = Some owner;
+    }
+  in
+  let upload_part =
+    Presigned.upload_part
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"large.bin"
+      ~upload_id ~part_number:1 ~options:upload_part_options ()
+    |> ok_or_fail "presigned upload-part expected owner"
+  in
+  Alcotest.(check (option string))
+    "upload-part expected owner header" (Some owner)
+    (header "x-amz-expected-bucket-owner" upload_part.signed_headers);
+  Alcotest.(check bool)
+    "upload-part signed expected owner" true
+    (List.mem "x-amz-expected-bucket-owner"
+       (signed_headers_or_fail upload_part.url));
+  let delete_options =
+    {
+      Presigned.Delete_object.default_options with
+      expected_bucket_owner = Some owner;
+    }
+  in
+  let delete =
+    Presigned.delete_object
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+      ~options:delete_options ()
+    |> ok_or_fail "presigned delete expected owner"
+  in
+  Alcotest.(check (option string))
+    "delete expected owner header" (Some owner)
+    (header "x-amz-expected-bucket-owner" delete.signed_headers);
+  Alcotest.(check bool)
+    "delete signed expected owner" true
+    (List.mem "x-amz-expected-bucket-owner" (signed_headers_or_fail delete.url))
 
 let test_presigned_upload_part () =
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
@@ -259,12 +357,11 @@ let test_presigned_upload_part () =
     (query_param "uploadId" result.url);
   Alcotest.(check (option string))
     "checksum value header" (Some "provided-sha256")
-    (header "x-amz-checksum-sha256" result.headers);
-  let signed_headers =
-    match query_param "X-Amz-SignedHeaders" result.url with
-    | Some [ value ] -> String.split_on_char ';' value
-    | _ -> Alcotest.fail "missing signed headers"
-  in
+    (header "x-amz-checksum-sha256" result.signed_headers);
+  Alcotest.(check (option string))
+    "no checksum algorithm header" None
+    (header "x-amz-checksum-algorithm" result.signed_headers);
+  let signed_headers = signed_headers_or_fail result.url in
   Alcotest.(check bool)
     "signed checksum value" true
     (List.mem "x-amz-checksum-sha256" signed_headers);
@@ -281,7 +378,7 @@ let test_presigned_rejects_header_newline () =
   let options =
     {
       Presigned.Put_object.default_options with
-      headers = [ ("x-test", "ok\r\nInjected: yes") ];
+      extra_signed_headers = [ ("x-test", "ok\r\nInjected: yes") ];
     }
   in
   match
@@ -2201,6 +2298,8 @@ let suite =
           test_operation_data_module_names;
         Alcotest.test_case "presigned put checksum headers" `Quick
           test_presigned_put_checksum_headers;
+        Alcotest.test_case "presigned expected owner headers" `Quick
+          test_presigned_expected_bucket_owner_headers;
         Alcotest.test_case "presigned multipart upload part" `Quick
           test_presigned_upload_part;
         Alcotest.test_case "presigned rejects header newline" `Quick
