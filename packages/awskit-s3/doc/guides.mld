@@ -5,13 +5,13 @@ client surface is streaming-first, endpoint-configurable, and result-returning.
 
 {1 Object Operations}
 
-Primitive object operations live under [Object]. They use runtime-owned upload
-bodies and scoped download readers.
+Primitive object operations live under [Object]. They use runtime-owned request
+bodies and scoped response body readers.
 
 {2 Upload}
 
 {[
-let body = Awskit_s3_eio.Runtime.string_body "hello" in
+let body = Awskit_s3_eio.Runtime.Request_body.of_string "hello" in
 Awskit_s3_eio.Object.put s3
   ~bucket:"my-bucket"
   ~key:"hello.txt"
@@ -20,12 +20,12 @@ Awskit_s3_eio.Object.put s3
 ]}
 
 Primitive uploads require a known content length. The runtime records length
-and payload hash in its upload-body descriptor before signing. Unknown-length
+and payload hash in its request-body descriptor before signing. Unknown-length
 SigV4 aws-chunked streaming is not implemented today.
 
-For custom [Runtime.stream_body] uploads, declare the exact [content_length]
+For custom [Runtime.Request_body.of_stream] values, declare the exact [content_length]
 and emit exactly that number of bytes. Producer callback errors are returned as
-upload failures. Prefer [Runtime.string_body] or [Runtime.bytes_body] when the
+request body failures. Prefer [Runtime.Request_body.of_string] or [Runtime.Request_body.of_bytes] when the
 body is already buffered.
 
 Options carry object metadata, content type, storage class, tags,
@@ -34,7 +34,7 @@ preconditions, checksum headers, and server-side encryption headers:
 {[
 let options =
   {
-    Awskit_s3.Object.Put.default_options with
+    Awskit_s3.Put_object.default_options with
     content_type = Some "text/plain";
     metadata = [ ("origin", "example") ];
     tags = [ { Awskit_s3.Tag.key = "env"; value = "dev" } ];
@@ -44,27 +44,26 @@ Awskit_s3_eio.Object.put s3
   ~bucket:"my-bucket"
   ~key:"hello.txt"
   ~options
-  ~body:(Awskit_s3_eio.Runtime.string_body "hello")
+  ~body:(Awskit_s3_eio.Runtime.Request_body.of_string "hello")
   ()
 ]}
 
 {2 Checksums}
 
-[Object.Checksum.request] supports the checksum algorithms exposed by S3 object
-and multipart operations: [CRC32], [CRC32C], [CRC64NVME], [SHA1], and
-[SHA256]. A request can provide both the algorithm and a precomputed checksum
-value, or provide only the algorithm and let AWS compute the stored checksum.
+[Object.Checksum.value] carries an explicit precomputed checksum value. Use it
+for [PutObject], [UploadPart], and [CompleteMultipartUpload] value headers.
+[CopyObject] and [CreateMultipartUpload] use [Object.Checksum.Algorithm.t],
+while [GetObject] and [HeadObject] use [Object.Checksum.Mode.Enabled].
 
-Runtime-backed operations send the checksum algorithm/value headers and parse
-checksum response headers from [PutObject], [GetObject], [HeadObject],
-[UploadPart], and [CompleteMultipartUpload]. Presigned [PUT] URLs include
-checksum headers in the signed header set when configured.
+Runtime-backed operations parse all modeled checksum response headers plus
+optional checksum type metadata from [PutObject], [GetObject], [HeadObject],
+[UploadPart], and [CompleteMultipartUpload]. Presigned [PUT] URLs sign explicit
+checksum value headers when configured.
 
-The simulator stores checksum metadata for objects and multipart parts. It
-computes [SHA1] and [SHA256] values when the request omits an explicit value,
-and preserves explicit values for all supported algorithms. For simulator tests
-that assert exact CRC response values, pass explicit [CRC32], [CRC32C], or
-[CRC64NVME] checksum values in the request.
+The simulator preserves explicit checksum values for objects and multipart
+parts. It computes deterministic [SHA1] and [SHA256] values only where it owns
+the whole body, such as multipart completion after
+[CreateMultipartUpload.checksum_algorithm].
 
 {2 Preconditions}
 
@@ -84,12 +83,12 @@ service status [412] with code [PreconditionFailed]. Read [If-None-Match] and
 
 [Object.get] scopes the response body to the [consume] callback. Do not store
 the reader outside that callback. Buffering helpers such as
-[Object.Buffer.get_string ~max_size] keep response-size limits explicit.
+[Object.get_as_string ~max_bytes] keep response-size limits explicit.
 
 {[
 let consume reader =
   let bytes = Bytes.create 8192 in
-  match Awskit_s3_eio.Runtime.read reader bytes ~off:0 ~len:8192 with
+  match Awskit_s3_eio.Runtime.Response_body.read reader bytes ~off:0 ~len:8192 with
   | Error _ as error -> error
   | Ok n -> Ok (Bytes.sub_string bytes 0 n)
 in
@@ -109,26 +108,27 @@ structured service errors by primitive operations.
 The object surface also includes:
 
 {ul
-  {li [Object.delete] and [Object.delete_many]}
+  {li [Object.delete] and [Object.delete_objects]}
   {li [Object.copy]}
   {li [Object.list] for rich pages and [Object.list_keys] for key-only pages}
   {li [Object.list_versions] for [ListObjectVersions] pages, including object
     versions and delete markers}
-  {li [Object.Paginator.pages], [objects], and [keys] for following
+  {li [Object.List_objects_v2.pages], [objects], and [keys] for following
     [ListObjectsV2] continuation tokens}
-  {li [Object.Versions.pages], [object_versions], and [delete_markers] for
-    following version-listing markers}
+  {li [Object.List_object_versions.pages], [object_versions], and
+    [delete_markers] for following version-listing markers}
   {li [Object.Tagging.get], [put], and [delete]}
 }
 
-Paginator helpers preserve the regular [Object.List.options] record and update
-only the continuation token between requests. Use [max_pages] to cap traversal:
+Operation pagination helpers preserve the regular [List_objects_v2.options]
+record and update only the continuation token between requests. Use [max_pages]
+to cap traversal:
 
 {[
 let keys =
-  Awskit_s3_eio.Object.Paginator.keys s3
+  Awskit_s3_eio.Object.List_objects_v2.keys s3
     ~bucket:"my-bucket"
-    ~options:{ Awskit_s3.Object.List.default_options with prefix = Some "logs/" }
+    ~options:{ Awskit_s3.List_objects_v2.default_options with prefix = Some "logs/" }
     ~max_pages:10
     ()
 ]}
@@ -138,47 +138,49 @@ let keys =
 [Bucket.Versioning.put] enables bucket versioning. Object writes, copies, and
 multipart completion return version IDs when the bucket is versioned. Reads,
 heads, and deletes accept a [version_id] option. Copy requests can select a
-source version with [Object.Copy.source_version_id].
+source version with [Copy_object.source_version_id].
 
 Deleting the current object in a versioned bucket creates a delete marker.
 [Object.list_versions] returns object versions and delete markers, and
-[Object.Versions] provides paginator helpers for traversing the full history:
+[Object.List_object_versions] provides operation pagination helpers for
+traversing the full history.
+[List_object_versions] is the operation data module for options and page types:
 
 {[
 let options =
   {
-    Awskit_s3.Object.Versions.default_options with
+    Awskit_s3.List_object_versions.default_options with
     prefix = Some "logs/";
   }
 in
-Awskit_s3_eio.Object.Versions.object_versions s3
+Awskit_s3_eio.Object.List_object_versions.object_versions s3
   ~bucket:"my-bucket"
   ~options
   ()
 ]}
 
-{1 Object.Buffer}
+{1 In-Memory Object Helpers}
 
-[Object.Buffer] is for explicit in-memory use. Upload helpers accept strings or
-bytes. Download helpers require [max_size] to avoid accidental unbounded
-buffering.
+[Object.put_string], [Object.put_bytes], [Object.get_as_string], and
+[Object.get_as_bytes] are for explicit in-memory use. Download helpers require
+[max_bytes] to avoid accidental unbounded buffering.
 
 {[
-Awskit_s3_eio.Object.Buffer.put_string s3
+Awskit_s3_eio.Object.put_string s3
   ~bucket:"my-bucket"
   ~key:"hello.txt"
   "hello"
 ]}
 
 {[
-Awskit_s3_eio.Object.Buffer.get_string s3
+Awskit_s3_eio.Object.get_as_string s3
   ~bucket:"my-bucket"
   ~key:"hello.txt"
-  ~max_size:1_048_576L
+  ~max_bytes:1_048_576L
   ()
 ]}
 
-If the response body exceeds [max_size], the helper returns
+If the response body exceeds [max_bytes], the helper returns
 [Error (Awskit.Error.Body _)].
 
 {1 Object.Transfer}
@@ -187,10 +189,18 @@ Unix-capable adapters expose local-path helpers under [Object.Transfer].
 Keeping these helpers at the adapter layer lets the pure [awskit-s3] core stay
 independent of filesystem APIs.
 
+[put_file] and [get_file] are one-request [PutObject] and [GetObject] helpers.
+[upload_file] and [download_file] choose an optimized strategy using
+{!module:Awskit_s3.Transfer} options: small transfers use one request, while
+larger transfers use multipart upload or ranged [GetObject] requests.
+[multipart_upload_file] and [resume_multipart_upload_file] are explicit
+multipart upload helpers. Filesystem transfer helpers live only in the Eio and
+Lwt Unix adapters; they are not simulator operations.
+
 {2 Eio}
 
 {[
-Awskit_s3_eio.Object.Transfer.upload_from_path s3
+Awskit_s3_eio.Object.Transfer.upload_file s3
   ~bucket:"my-bucket"
   ~key:"archive.tar"
   ~on_progress:(fun bytes -> Fmt.pr "uploaded %Ld bytes@." bytes)
@@ -199,10 +209,26 @@ Awskit_s3_eio.Object.Transfer.upload_from_path s3
 ]}
 
 {[
-Awskit_s3_eio.Object.Transfer.download_to_path s3
+Awskit_s3_eio.Object.Transfer.put_file s3
+  ~bucket:"my-bucket"
+  ~key:"single-request-upload.tar"
+  ~path
+  ()
+]}
+
+{[
+Awskit_s3_eio.Object.Transfer.download_file s3
   ~bucket:"my-bucket"
   ~key:"archive.tar"
   ~on_progress:(fun bytes -> Fmt.pr "downloaded %Ld bytes@." bytes)
+  ~path
+  ()
+]}
+
+{[
+Awskit_s3_eio.Object.Transfer.get_file s3
+  ~bucket:"my-bucket"
+  ~key:"single-request-download.tar"
   ~path
   ()
 ]}
@@ -211,23 +237,27 @@ Awskit_s3_eio.Object.Transfer.download_to_path s3
 
 {[
 let* result =
-  Awskit_s3_lwt_unix.Object.Transfer.upload_from_path s3
+  Awskit_s3_lwt_unix.Object.Transfer.upload_file s3
     ~bucket:"my-bucket"
     ~key:"archive.tar"
     ~path:"/tmp/archive.tar"
     ()
 ]}
 
-For larger files, use the multipart path helper. It uploads file parts with
-bounded concurrency and aborts the multipart upload if a fresh upload fails:
+For explicit multipart upload, use [multipart_upload_file]. It uploads file
+parts with bounded concurrency from [Transfer.upload_options] and aborts the
+multipart upload if a fresh upload fails:
 
 {[
+let options =
+  { Awskit_s3.Transfer.default_upload_options with concurrency = 4 }
+in
 let* result =
-  Awskit_s3_lwt_unix.Object.Transfer.upload_multipart_from_path s3
+  Awskit_s3_lwt_unix.Object.Transfer.multipart_upload_file s3
     ~bucket:"my-bucket"
     ~key:"large.tar"
+    ~options
     ~path:"/tmp/large.tar"
-    ~concurrency:4
     ~on_progress:(fun bytes -> Fmt.pr "uploaded %Ld bytes@." bytes)
     ()
 ]}
@@ -239,7 +269,7 @@ failure, so the same upload ID can be retried:
 
 {[
 let* result =
-  Awskit_s3_lwt_unix.Object.Transfer.resume_multipart_upload_from_path s3
+  Awskit_s3_lwt_unix.Object.Transfer.resume_multipart_upload_file s3
     ~bucket:"my-bucket"
     ~key:"large.tar"
     ~upload_id
@@ -313,22 +343,21 @@ subresources:
 {ul
   {li [Bucket.create], [delete], [head], [exists], [list], [get_location]}
   {li [Bucket.Policy.get], [put], [delete]}
-  {li [Bucket.Policy_status.get]}
   {li [Bucket.Versioning.get], [put]}
   {li [Bucket.Tagging.get], [put], [delete]}
   {li [Bucket.Encryption.get], [put], [delete]}
   {li [Bucket.Cors.get], [put], [delete]}
-  {li [Bucket.Website.get], [put], [delete] for index/error documents}
   {li [Bucket.Public_access_block.get], [put], [delete]}
   {li [Bucket.Ownership_controls.get], [put], [delete]}
-  {li [Bucket.Request_payment.get], [put]}
-  {li [Bucket.Accelerate.get], [put]}
-  {li [Bucket.Logging.get], [put] for target bucket/prefix logging}
 }
 
 [Bucket.Policy] sends and receives validated JSON policy payloads for bucket
 access configuration. Applications can construct those documents with their own
 policy model and pass the serialized JSON to the client.
+
+Retained bucket operations that target an existing bucket accept
+[expected_bucket_owner]. Awskit sends it as [x-amz-expected-bucket-owner] so AWS
+can reject calls that resolve to a bucket owned by a different account.
 
 {[
 let encryption =
@@ -337,14 +366,17 @@ let encryption =
       [
         {
           Awskit_s3.Bucket.Encryption.Rule.sse_algorithm =
-            Awskit_s3.Bucket.Encryption.Algorithm.Aes256;
+            Some Awskit_s3.Bucket.Encryption.Algorithm.Aes256;
           kms_master_key_id = None;
+          bucket_key_enabled = None;
+          blocked_encryption_types = [];
         };
       ];
   }
 in
 Awskit_s3_eio.Bucket.Encryption.put s3
   ~bucket:"my-bucket"
+  ~expected_bucket_owner:"123456789012"
   encryption
 ]}
 
@@ -353,31 +385,18 @@ Awskit_s3_eio.Bucket.Encryption.put s3
 [Multipart] exposes the primitive AWS multipart flow:
 
 {ol
-  {li [Multipart.create] starts an upload and returns an upload ID.}
+  {li [Multipart.create_upload] starts an upload and returns an upload ID.}
   {li [Multipart.upload_part] uploads a known-length part.}
-  {li [Multipart.complete] completes the upload with ordered parts.}
-  {li [Multipart.abort] cancels an upload.}
+  {li [Multipart.complete_upload] completes the upload with ordered parts.}
+  {li [Multipart.abort_upload] cancels an upload.}
   {li [Multipart.list_parts] inspects one page of uploaded parts.}
-  {li [Multipart.Paginator.pages] and [parts] follow [ListParts] part-number
+  {li [Multipart.List_parts.pages] and [parts] follow [ListParts] part-number
     markers.}
 }
 
-[Multipart.upload_part] follows the same upload body contract as [Object.put]:
+[Multipart.upload_part] follows the same request body contract as [Object.put]:
 parts require a known exact length, and custom stream producer errors are part
 of the upload result.
-
-[Multipart.Managed.upload_string] and [upload_bytes] provide a higher-level
-sequential multipart upload helper. The helper creates the upload, splits the
-body into AWS-safe parts, uploads each part, completes the upload, and attempts
-to abort if a part upload or completion fails. Defaults use 8 MiB parts, with
-the AWS minimum 5 MiB enforced for configured part sizes.
-
-{[
-Awskit_s3_eio.Multipart.Managed.upload_string s3
-  ~bucket:"my-bucket"
-  ~key:"large.bin"
-  large_body
-]}
 
 {1 Presigned URLs}
 
@@ -405,7 +424,7 @@ Awskit_s3.Presigned.put_object
 ]}
 
 Multipart direct-upload flows can presign individual [UploadPart] requests
-after [Multipart.create] has produced an upload ID:
+after [Multipart.create_upload] has produced an upload ID:
 
 {[
 Awskit_s3.Presigned.upload_part
@@ -420,12 +439,16 @@ Awskit_s3.Presigned.upload_part
 ]}
 
 Presigned URLs use [UNSIGNED-PAYLOAD] and the same endpoint/addressing options
-as normal operations.
+as normal operations. Returned [result.signed_headers] are the non-host headers
+that the caller must send with the URL. Use [extra_signed_headers] only for
+additional headers that must be included in the signature. Presigned [PUT] and
+[UploadPart] helpers sign explicit checksum value headers when configured, and
+object presigning options support [expected_bucket_owner] guard rails.
 
 A typical direct-upload multipart flow is:
 
 {ol
-  {li Start the upload with [Multipart.create].}
+  {li Start the upload with [Multipart.create_upload].}
   {li Presign one [UploadPart] URL per part number with
     [Presigned.upload_part].}
   {li The uploader sends each part to the corresponding URL.}
@@ -502,9 +525,9 @@ adapter receives a custom [retry_policy]. Retries are centralized around the
 signed S3 request, so retryable service responses are classified before being
 returned to callers.
 
-Only replayable upload bodies are retried. In-memory bodies created with
-[Runtime.string_body] and [Runtime.bytes_body] are replayable. Custom stream
-bodies are retried only when their {!type:Awskit.Body.Upload.descriptor}
+Only replayable request bodies are retried. In-memory bodies created with
+[Runtime.Request_body.of_string] and [Runtime.Request_body.of_bytes] are replayable. Custom stream
+bodies are retried only when their {!type:Awskit.Body.Request.descriptor}
 marks them replayable. Do not mark a stream replayable unless retrying can
 recreate the same bytes from the beginning.
 
@@ -543,7 +566,7 @@ The contract runner defaults to [http://127.0.0.1:9000] with the
 
 {1 Simulator Testing}
 
-{!module:Awskit_s3.Sim} exposes the same synchronous S3 operation shape as the
+{!module:Awskit_s3.Simulator} exposes the same synchronous S3 operation shape as the
 runtime-backed client and adds test-only helpers:
 
 {ul
@@ -554,24 +577,24 @@ runtime-backed client and adds test-only helpers:
 }
 
 {[
-let clock = Awskit_s3.Sim.Clock.create () in
-let store = Awskit_s3.Sim.create_store ~clock () in
-let conn = Awskit_s3.Sim.connect store ~credentials in
+let clock = Awskit_s3.Simulator.Clock.create () in
+let store = Awskit_s3.Simulator.create_store ~clock () in
+let conn = Awskit_s3.Simulator.connect store ~credentials in
 
 ignore
-  (Awskit_s3.Sim.Bucket.create conn ~bucket:"test-bucket" ()
+  (Awskit_s3.Simulator.Bucket.create conn ~bucket:"test-bucket" ()
    |> Result.get_ok);
 
 ignore
-  (Awskit_s3.Sim.Object.Buffer.put_string conn
+  (Awskit_s3.Simulator.Object.put_string conn
      ~bucket:"test-bucket"
      ~key:"hello.txt"
      "hello"
    |> Result.get_ok)
 ]}
 
-[Sim.Response_lost] is modeled as a body-read failure. [Sim.Slow_down],
-[Sim.Internal_error], and [Sim.Connection_reset] fail object and multipart
+[Simulator.Response_lost] is modeled as a body-read failure. [Simulator.Slow_down],
+[Simulator.Internal_error], and [Simulator.Connection_reset] fail object and multipart
 operations before mutation. The simulator models enabled bucket versioning for
 object puts, gets, heads, deletes, copies, multipart completion, and delete
 markers. Suspended bucket versioning models the S3 [null] object version and

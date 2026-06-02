@@ -1,6 +1,6 @@
 (** Runtime abstraction for concurrency adapters.
 
-    Runtime adapters own concrete upload and download body values. Service
+    Runtime adapters own concrete request and response body values. Service
     packages use this module type without depending on Eio, Lwt, or Unix. *)
 
 module type S = sig
@@ -10,10 +10,10 @@ module type S = sig
   val bind : 'a t -> ('a -> 'b t) -> 'b t
 
   type connection
-  type upload_body
-  type download_body
-  type upload_writer
-  type download_reader
+  type request_body
+  type response_body
+  type request_body_writer
+  type response_body_reader
 
   val now : connection -> Ptime.t
   val region : connection -> Region.t
@@ -21,33 +21,42 @@ module type S = sig
   val endpoint : connection -> Endpoint.t option
   val retry_policy : connection -> Retry.t
   val sleep : connection -> Ptime.Span.t -> unit t
-  val empty_body : upload_body
-  val string_body : string -> upload_body
-  val bytes_body : bytes -> upload_body
 
-  val stream_body :
-    Body.Upload.descriptor ->
-    write:(upload_writer -> (unit, Error.t) result t) ->
-    upload_body
+  module Request_body : sig
+    val empty : request_body
+    val of_string : string -> request_body
+    val of_bytes : bytes -> request_body
 
-  val upload_descriptor : upload_body -> Body.Upload.descriptor
-  val write_string : upload_writer -> string -> (unit, Error.t) result t
+    val of_stream :
+      Body.Request.descriptor ->
+      write:(request_body_writer -> (unit, Error.t) result t) ->
+      request_body
 
-  val read :
-    download_reader -> bytes -> off:int -> len:int -> (int, Error.t) result t
-  (** Returns [0] at end-of-body. *)
+    val descriptor : request_body -> Body.Request.descriptor
+    val write_string : request_body_writer -> string -> (unit, Error.t) result t
+  end
 
-  val with_download_body :
-    download_body ->
-    consume:(download_reader -> ('a, Error.t) result t) ->
-    ('a, Error.t) result t
+  module Response_body : sig
+    val read :
+      response_body_reader ->
+      bytes ->
+      off:int ->
+      len:int ->
+      (int, Error.t) result t
+    (** Returns [0] at end-of-body. *)
 
-  val discard_download_body : download_body -> (unit, Error.t) result t
+    val with_reader :
+      response_body ->
+      consume:(response_body_reader -> ('a, Error.t) result t) ->
+      ('a, Error.t) result t
+
+    val discard : response_body -> (unit, Error.t) result t
+  end
 
   val with_response :
     connection ->
     Request.t ->
-    upload_body ->
-    f:(Response.t -> download_body -> ('a, Error.t) result t) ->
+    request_body ->
+    f:(Response.t -> response_body -> ('a, Error.t) result t) ->
     ('a, Error.t) result t
 end

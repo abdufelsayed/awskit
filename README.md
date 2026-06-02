@@ -35,7 +35,7 @@ Cohttp runtime packages. Adapter packages carry those dependencies.
 
 - bucket creation, deletion, listing, and configuration;
 - object put, get, head, delete, copy, ranges, metadata, tags, and versions;
-- multipart upload and managed multipart helpers;
+- multipart upload and local-file transfer helpers;
 - presigned URLs;
 - bucket policies and related XML/JSON wire types;
 - S3 endpoint and addressing configuration;
@@ -48,21 +48,25 @@ unless it matches AWS S3.
 
 ## Streaming Contract
 
-Runtime upload bodies carry an upload descriptor with `content_length`,
+Runtime request bodies carry a request descriptor with `content_length`,
 `payload_hash`, and `replayable` metadata. S3 `PutObject` and `UploadPart`
 currently require a known `content_length`; Awskit does not implement
 unknown-length SigV4 aws-chunked streaming.
 
 For already-buffered data, prefer string or bytes body helpers. Custom stream
 bodies must emit exactly the declared number of bytes, and producer callback
-errors are reported as upload failures. Mark custom streams replayable only
+errors are reported as request body failures. Mark custom streams replayable only
 when the stream can actually be replayed for a retry.
 
 Response bodies are streaming and scoped to the runtime response callback.
 Runtime adapters expose `with_response`; inside that callback, consume bodies
-through `with_download_body` or S3 helper APIs such as
-`Object.Buffer.get_string ~max_size`. Buffering and draining helpers apply
-their documented response-size limits.
+through `Response_body.with_reader` or S3 helper APIs such as
+`Object.get_as_string ~max_bytes`. Buffering and draining helpers apply
+their documented response-size limits. After a response consumer succeeds,
+runtime adapters drain the remaining response body up to the configured drain
+limit so the connection can be reused. If that drain exceeds the cap, the
+operation returns the drain error. If the consumer fails, the consumer error
+wins.
 
 ## Quick Start
 
@@ -92,7 +96,7 @@ let () =
   let region = Awskit.Region.of_string_exn "us-east-1" in
   let s3 = Awskit_s3_eio.create ~sw ~env ~region ~credentials () in
   match
-    Awskit_s3_eio.Object.Buffer.put_string s3
+    Awskit_s3_eio.Object.put_string s3
       ~bucket:"my-bucket"
       ~key:"hello.txt"
       "Hello, S3!"
@@ -123,10 +127,10 @@ let run () =
   | Error error -> Lwt_io.eprintf "S3 error: %a\n" Awskit_s3.Error.pp error
   | Ok s3 ->
       let* result =
-        Awskit_s3_lwt_unix.Object.Buffer.get_string s3
+        Awskit_s3_lwt_unix.Object.get_as_string s3
           ~bucket:"my-bucket"
           ~key:"hello.txt"
-          ~max_size:1_048_576L
+          ~max_bytes:1_048_576L
           ()
       in
       match result with
@@ -181,12 +185,12 @@ let () =
       ~secret_access_key:"SK"
       ()
   in
-  let clock = Awskit_s3.Sim.Clock.create () in
-  let store = Awskit_s3.Sim.create_store ~clock () in
-  let conn = Awskit_s3.Sim.connect store ~credentials in
+  let clock = Awskit_s3.Simulator.Clock.create () in
+  let store = Awskit_s3.Simulator.create_store ~clock () in
+  let conn = Awskit_s3.Simulator.connect store ~credentials in
 
-  Awskit_s3.Sim.Bucket.create conn ~bucket:"test" () |> ignore;
-  Awskit_s3.Sim.Object.Buffer.put_string conn
+  Awskit_s3.Simulator.Bucket.create conn ~bucket:"test" () |> ignore;
+  Awskit_s3.Simulator.Object.put_string conn
     ~bucket:"test"
     ~key:"hello"
     "world"
@@ -230,7 +234,8 @@ packages/
     lwt/unix/          ready-to-use Lwt + Unix runtime
     eio/               ready-to-use Eio runtime
   awskit-s3/           pure AWS S3 core
-    sim/               in-memory S3 simulator
+    simulator.ml       in-memory S3 simulator entrypoint
+    sim_*.ml           simulator support modules
     lwt/               S3 over generic Lwt runtime
     lwt/unix/          ready-to-use S3 Lwt + Unix client
     eio/               ready-to-use S3 Eio client
@@ -240,4 +245,4 @@ test/                  package tests and MinIO contracts
 
 ## License
 
-MIT.
+MIT. See [LICENSE](LICENSE).

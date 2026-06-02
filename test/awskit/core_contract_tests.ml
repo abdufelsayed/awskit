@@ -43,6 +43,27 @@ let test_payload_hash_result_and_exn () =
   check_validation_error "bad payload hash"
     (Awskit.Body.Payload_hash.of_sha256_hex "not-hex")
 
+let test_runtime_request_response_body_names () =
+  let request_descriptor =
+    {
+      Awskit.Body.Request.content_length = Some 5L;
+      payload_hash = Awskit.Body.Payload_hash.sha256_of_string "hello";
+      replayable = true;
+    }
+  in
+  Alcotest.(check bool)
+    "request descriptor replayable" true request_descriptor.replayable;
+  let response_descriptor =
+    {
+      Awskit.Body.Response.content_length = Some 5L;
+      content_type = Some "text/plain";
+      headers = [ ("content-type", "text/plain") ];
+    }
+  in
+  Alcotest.(check (option string))
+    "response descriptor content type" (Some "text/plain")
+    response_descriptor.content_type
+
 let test_request_response_contracts () =
   let target =
     Awskit.Request.Target.create_exn ~scheme:`Https ~host:"s3.amazonaws.com"
@@ -90,6 +111,8 @@ let suite =
           test_endpoint_result_and_exn;
         Alcotest.test_case "payload hash result/exn" `Quick
           test_payload_hash_result_and_exn;
+        Alcotest.test_case "runtime request/response body names" `Quick
+          test_runtime_request_response_body_names;
         Alcotest.test_case "request/response metadata" `Quick
           test_request_response_contracts;
       ] );

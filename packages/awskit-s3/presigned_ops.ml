@@ -32,11 +32,11 @@ module Make (C : Operation_context.S) = struct
           ~credentials ~now:(R.now conn) ~endpoint_config:(endpoint_config conn)
           ~bucket ~key ?options ())
 
-  let delete_object conn ~bucket ~key ?expires_in () =
+  let delete_object conn ~bucket ~key ?options () =
     with_credentials conn (fun credentials ->
         Presigned.delete_object_with_endpoint_config ~region:(R.region conn)
           ~credentials ~now:(R.now conn) ~endpoint_config:(endpoint_config conn)
-          ~bucket ~key ?expires_in ())
+          ~bucket ~key ?options ())
 
   let upload_part conn ~bucket ~key ~upload_id ~part_number ?options () =
     with_credentials conn (fun credentials ->

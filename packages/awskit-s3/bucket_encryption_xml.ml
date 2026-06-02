@@ -2,9 +2,49 @@ open Core
 open Bucket_config_xml_support
 
 let validate_rule (rule : Bucket.Encryption.Rule.t) =
-  match rule.kms_master_key_id with
-  | None -> Ok ()
-  | Some value -> validate_header_value ~field:"kms_master_key_id" value
+  let validate_algorithm = function
+    | None
+    | Some Bucket.Encryption.Algorithm.Aes256
+    | Some Aws_kms
+    | Some Aws_kms_dsse ->
+        Ok ()
+    | Some (Unknown _) ->
+        invalid ~field:"sse_algorithm"
+          "unknown encryption algorithms cannot be written"
+  in
+  let validate_blocked_encryption_type = function
+    | Bucket.Encryption.Blocked_encryption_type.Sse_c | No_block -> Ok ()
+    | Unknown _ ->
+        invalid ~field:"blocked_encryption_types"
+          "unknown blocked encryption types cannot be written"
+  in
+  let validate_kms_usage () =
+    match (rule.sse_algorithm, rule.kms_master_key_id) with
+    | (Some Aws_kms | Some Aws_kms_dsse), Some _ -> Ok ()
+    | _, None -> Ok ()
+    | _ ->
+        invalid ~field:"kms_master_key_id"
+          "kms_master_key_id requires aws:kms or aws:kms:dsse"
+  in
+  let validate_bucket_key_usage () =
+    match (rule.sse_algorithm, rule.bucket_key_enabled) with
+    | (Some Aws_kms | Some Aws_kms_dsse), Some _ -> Ok ()
+    | _, None -> Ok ()
+    | _ ->
+        invalid ~field:"bucket_key_enabled"
+          "bucket_key_enabled requires aws:kms or aws:kms:dsse"
+  in
+  let rec validate_blocked = function
+    | [] -> Ok ()
+    | value :: rest ->
+        let* () = validate_blocked_encryption_type value in
+        validate_blocked rest
+  in
+  let* () = validate_algorithm rule.sse_algorithm in
+  let* () = validate_blocked rule.blocked_encryption_types in
+  let* () = validate_kms_usage () in
+  let* () = validate_bucket_key_usage () in
+  validate_opt_header "kms_master_key_id" rule.kms_master_key_id
 
 let validate_config (config : Bucket.Encryption.config) =
   match config.rules with
@@ -18,19 +58,39 @@ let validate_config (config : Bucket.Encryption.config) =
       in
       loop rules
 
+let apply_xml (rule : Bucket.Encryption.Rule.t) =
+  let children =
+    []
+    |> add_opt_header "KMSMasterKeyID" rule.kms_master_key_id
+    |> add_opt_header "SSEAlgorithm"
+         (Option.map Bucket.Encryption.Algorithm.to_string rule.sse_algorithm)
+    |> List.map (fun (name, value) -> Xml.text name value)
+  in
+  match children with
+  | [] -> []
+  | children -> [ Xml.el "ApplyServerSideEncryptionByDefault" children ]
+
+let bucket_key_xml (rule : Bucket.Encryption.Rule.t) =
+  match rule.bucket_key_enabled with
+  | None -> []
+  | Some value -> [ Xml.text "BucketKeyEnabled" (bool_text value) ]
+
+let blocked_encryption_xml (rule : Bucket.Encryption.Rule.t) =
+  match rule.blocked_encryption_types with
+  | [] -> []
+  | values ->
+      [
+        Xml.el "BlockedEncryptionTypes"
+          (List.map
+             (fun value ->
+               Xml.text "EncryptionType"
+                 (Bucket.Encryption.Blocked_encryption_type.to_string value))
+             values);
+      ]
+
 let rule_xml (rule : Bucket.Encryption.Rule.t) =
   Xml.el "Rule"
-    [
-      Xml.el "ApplyServerSideEncryptionByDefault"
-        ([
-           Xml.text "SSEAlgorithm"
-             (Bucket.Encryption.Algorithm.to_string rule.sse_algorithm);
-         ]
-        @
-        match rule.kms_master_key_id with
-        | None -> []
-        | Some value -> [ Xml.text "KMSMasterKeyID" value ]);
-    ]
+    (apply_xml rule @ bucket_key_xml rule @ blocked_encryption_xml rule)
 
 let xml (config : Bucket.Encryption.config) =
   Xml.el "ServerSideEncryptionConfiguration" (List.map rule_xml config.rules)
@@ -38,31 +98,38 @@ let xml (config : Bucket.Encryption.config) =
 
 let parse body response =
   let* nodes = Xml.decode_root body ~name:"ServerSideEncryptionConfiguration" in
+  let parse_apply nodes =
+    match Xml.child "ApplyServerSideEncryptionByDefault" nodes with
+    | None -> (None, None)
+    | Some apply ->
+        let sse_algorithm =
+          Option.map Bucket.Encryption.Algorithm.of_string
+            (Xml.child_text "SSEAlgorithm" apply)
+        in
+        let kms_master_key_id = Xml.child_text "KMSMasterKeyID" apply in
+        (sse_algorithm, kms_master_key_id)
+  in
+  let parse_bucket_key nodes =
+    Option.bind (Xml.child_text "BucketKeyEnabled" nodes) Response.parse_bool
+  in
+  let parse_blocked nodes =
+    Xml.child "BlockedEncryptionTypes" nodes
+    |> Option.value ~default:[]
+    |> Xml.child_texts "EncryptionType"
+    |> List.map Bucket.Encryption.Blocked_encryption_type.of_string
+  in
   let rec loop acc = function
-    | [] ->
-        Ok
+    | [] -> Ok { Bucket.Encryption.config = { rules = List.rev acc }; response }
+    | nodes :: rest ->
+        let sse_algorithm, kms_master_key_id = parse_apply nodes in
+        let rule =
           {
-            Bucket.Encryption.config = { rules = List.rev acc };
-            request = response;
+            Bucket.Encryption.Rule.sse_algorithm;
+            kms_master_key_id;
+            bucket_key_enabled = parse_bucket_key nodes;
+            blocked_encryption_types = parse_blocked nodes;
           }
-    | nodes :: rest -> (
-        match Xml.child "ApplyServerSideEncryptionByDefault" nodes with
-        | None -> Error (decode "missing ApplyServerSideEncryptionByDefault")
-        | Some apply -> (
-            match Xml.child_text "SSEAlgorithm" apply with
-            | None -> Error (decode "missing SSEAlgorithm")
-            | Some algorithm -> (
-                match Bucket.Encryption.Algorithm.of_string algorithm with
-                | None ->
-                    Error (decode "invalid encryption algorithm %S" algorithm)
-                | Some sse_algorithm ->
-                    let rule =
-                      {
-                        Bucket.Encryption.Rule.sse_algorithm;
-                        kms_master_key_id =
-                          Xml.child_text "KMSMasterKeyID" apply;
-                      }
-                    in
-                    loop (rule :: acc) rest)))
+        in
+        loop (rule :: acc) rest
   in
   loop [] (Xml.children "Rule" nodes)

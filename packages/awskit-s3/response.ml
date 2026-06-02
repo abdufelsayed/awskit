@@ -1,4 +1,5 @@
 open Common
+open Operation_data
 
 open struct
   module Object = Object
@@ -18,23 +19,32 @@ let response_version response =
     (Awskit.Response.header response "x-amz-version-id")
 
 let response_checksum response =
-  let find alg header =
+  let find algorithm header =
     match Awskit.Response.header response header with
     | None -> None
-    | Some value -> Some { Object.Checksum.algorithm = alg; value }
+    | Some value -> Some { Object.Checksum.algorithm; value }
   in
-  match find `CRC32 "x-amz-checksum-crc32" with
-  | Some _ as value -> value
-  | None -> (
-      match find `CRC32C "x-amz-checksum-crc32c" with
-      | Some _ as value -> value
-      | None -> (
-          match find `CRC64NVME "x-amz-checksum-crc64nvme" with
-          | Some _ as value -> value
-          | None -> (
-              match find `SHA1 "x-amz-checksum-sha1" with
-              | Some _ as value -> value
-              | None -> find `SHA256 "x-amz-checksum-sha256")))
+  let values =
+    [
+      find Object.Checksum.Algorithm.Crc32 "x-amz-checksum-crc32";
+      find Crc32c "x-amz-checksum-crc32c";
+      find Crc64nvme "x-amz-checksum-crc64nvme";
+      find Md5 "x-amz-checksum-md5";
+      find Sha1 "x-amz-checksum-sha1";
+      find Sha256 "x-amz-checksum-sha256";
+      find Sha512 "x-amz-checksum-sha512";
+      find Xxhash64 "x-amz-checksum-xxhash64";
+      find Xxhash3 "x-amz-checksum-xxhash3";
+      find Xxhash128 "x-amz-checksum-xxhash128";
+    ]
+    |> List.filter_map Fun.id
+  in
+  {
+    Object.Checksum.values;
+    checksum_type =
+      Option.map Object.Checksum.Type.of_string
+        (Awskit.Response.header response "x-amz-checksum-type");
+  }
 
 let response_encryption response =
   match Awskit.Response.header response "x-amz-server-side-encryption" with
@@ -72,7 +82,7 @@ let object_info response =
   let* version_id = response_version response in
   Ok
     {
-      Object.Get.etag;
+      Get_object.etag;
       content_type = Awskit.Response.header response "content-type";
       content_length = Option.map Int64.of_int content_length;
       last_modified =
@@ -84,7 +94,7 @@ let object_info response =
       version_id;
       checksum = response_checksum response;
       server_side_encryption = response_encryption response;
-      request = response;
+      response;
     }
 
 let put_result response =
@@ -92,22 +102,22 @@ let put_result response =
   let* version_id = response_version response in
   Ok
     {
-      Object.Put.etag;
+      Put_object.etag;
       version_id;
       checksum = response_checksum response;
-      request = response;
+      response;
     }
 
 let delete_result response =
   let* version_id = response_version response in
   Ok
     {
-      Object.Delete.delete_marker =
+      Delete_object.delete_marker =
         Option.bind
           (Awskit.Response.header response "x-amz-delete-marker")
           parse_bool;
       version_id;
-      request = response;
+      response;
     }
 
 let embedded_service_error response body =
@@ -139,11 +149,11 @@ let copy_result response body =
       in
       Ok
         {
-          Object.Copy.etag;
+          Copy_object.etag;
           last_modified;
           version_id;
           copy_source_version_id;
-          request = response;
+          response;
         }
   | Ok (actual, _) ->
       Error

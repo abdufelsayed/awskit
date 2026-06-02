@@ -1,7 +1,7 @@
 (test
  (name test_awskit_s3_eio)
  (package awskit-s3-eio)
- (modules test_awskit_s3_eio integration_tests)
+ (modules test_awskit_s3_eio integration_tests transfer_tests)
  (libraries
   awskit
   awskit-eio

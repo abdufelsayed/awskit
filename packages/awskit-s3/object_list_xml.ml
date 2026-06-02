@@ -1,10 +1,22 @@
 open Common
+open Operation_data
 
 open struct
   module Object = Object
 end
 
-let parse_page ~request body =
+let parse_checksum_summary nodes =
+  {
+    Object.Checksum.algorithms =
+      Xml.child_texts "ChecksumAlgorithm" nodes
+      |> List.map String.trim
+      |> List.map Object.Checksum.Algorithm.of_string;
+    checksum_type =
+      Option.map Object.Checksum.Type.of_string
+        (Xml.child_text "ChecksumType" nodes);
+  }
+
+let parse_page ~response body =
   let* nodes = Xml.decode_root body ~name:"ListBucketResult" in
   let objects =
     Xml.children "Contents" nodes
@@ -14,7 +26,7 @@ let parse_page ~request body =
         | Some key ->
             Some
               {
-                Object.List.key;
+                List_objects_v2.key;
                 size =
                   Option.bind (Xml.child_text "Size" nodes) int64_of_string_opt;
                 etag =
@@ -28,13 +40,12 @@ let parse_page ~request body =
                   Option.bind
                     (Xml.child_text "StorageClass" nodes)
                     Storage_class.of_string;
-                owner = None;
-                checksums = [];
+                checksum = parse_checksum_summary nodes;
               })
   in
   Ok
     {
-      Object.List.bucket = Xml.child_text "Name" nodes;
+      List_objects_v2.bucket = Xml.child_text "Name" nodes;
       prefix = Xml.child_text "Prefix" nodes;
       delimiter = Xml.child_text "Delimiter" nodes;
       objects;
@@ -48,5 +59,5 @@ let parse_page ~request body =
           (Option.bind (Xml.child_text "IsTruncated" nodes) Response.parse_bool);
       continuation_token = Xml.child_text "ContinuationToken" nodes;
       next_continuation_token = Xml.child_text "NextContinuationToken" nodes;
-      request;
+      response;
     }

@@ -22,14 +22,44 @@ module type OBJECT_DATA = sig
   end
 
   module Checksum : sig
-    type algorithm = [ `CRC32 | `CRC32C | `CRC64NVME | `SHA1 | `SHA256 ]
-    (** S3 object checksum algorithms accepted by object and multipart
-        operations. Requests may carry a precomputed [value], or only an
-        [algorithm] when AWS should calculate the checksum. Responses contain
-        checksum values returned by S3. *)
+    module Algorithm : sig
+      type t =
+        | Crc32
+        | Crc32c
+        | Crc64nvme
+        | Sha1
+        | Sha256
+        | Sha512
+        | Md5
+        | Xxhash64
+        | Xxhash3
+        | Xxhash128
+        | Unknown of string
 
-    type request = { algorithm : algorithm; value : string option }
-    type response = { algorithm : algorithm; value : string }
+      val to_string : t -> string
+      val of_string : string -> t
+    end
+
+    module Type : sig
+      type t = Composite | Full_object | Unknown of string
+
+      val to_string : t -> string
+      val of_string : string -> t
+    end
+
+    module Mode : sig
+      type t = Enabled
+
+      val to_string : t -> string
+    end
+
+    type value = { algorithm : Algorithm.t; value : string }
+    type response = { values : value list; checksum_type : Type.t option }
+
+    type summary = {
+      algorithms : Algorithm.t list;
+      checksum_type : Type.t option;
+    }
   end
 
   module Encryption : sig
@@ -69,11 +99,7 @@ module type OBJECT_DATA = sig
     end
 
     module Delete : sig
-      type t = {
-        if_match : Etag_condition.t option;
-        if_match_last_modified_time : Ptime.t option;
-        if_match_size : int64 option;
-      }
+      type t = { if_match : Etag_condition.t option }
 
       val none : t
       val if_etag : Etag.t -> t
@@ -91,209 +117,7 @@ module type OBJECT_DATA = sig
     end
   end
 
-  module Put : sig
-    type options = {
-      content_type : string option;
-      metadata : Metadata.t;
-      storage_class : Storage_class.t option;
-      tags : Tag.t list;
-      cache_control : string option;
-      content_encoding : string option;
-      content_disposition : string option;
-      preconditions : Preconditions.Write.t;
-      checksum : Checksum.request option;
-      server_side_encryption : Encryption.request option;
-    }
-
-    type result = {
-      etag : Etag.t option;
-      version_id : Version_id.t option;
-      checksum : Checksum.response option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
-  module Get : sig
-    type options = {
-      range : Range.t option;
-      preconditions : Preconditions.Read.t;
-      version_id : Version_id.t option;
-    }
-
-    type info = {
-      etag : Etag.t option;
-      content_type : string option;
-      content_length : int64 option;
-      last_modified : Ptime.t option;
-      metadata : Metadata.t;
-      storage_class : Storage_class.t option;
-      version_id : Version_id.t option;
-      checksum : Checksum.response option;
-      server_side_encryption : Encryption.response option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
-  module Head : sig
-    type options = {
-      preconditions : Preconditions.Read.t;
-      version_id : Version_id.t option;
-    }
-
-    type info = Get.info
-
-    val default_options : options
-  end
-
-  module Delete : sig
-    type options = {
-      preconditions : Preconditions.Delete.t;
-      version_id : Version_id.t option;
-    }
-
-    type result = {
-      delete_marker : bool option;
-      version_id : Version_id.t option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
-  module Delete_many : sig
-    type object_ = {
-      key : string;
-      version_id : Version_id.t option;
-      etag : Etag.t option;
-      last_modified_time : Ptime.t option;
-      size : int64 option;
-    }
-
-    type deleted = {
-      key : string;
-      version_id : Version_id.t option;
-      delete_marker : bool option;
-    }
-
-    type item_error = { key : string; code : string; message : string option }
-
-    type result = {
-      deleted : deleted list;
-      errors : item_error list;
-      request : Awskit.Response.t;
-    }
-  end
-
-  module Copy : sig
-    type metadata_directive = [ `Copy | `Replace of Metadata.t ]
-
-    type options = {
-      source_version_id : Version_id.t option;
-      source_preconditions : Preconditions.Copy_source.t;
-      metadata : metadata_directive option;
-      storage_class : Storage_class.t option;
-      tags : Tag.t list option;
-      checksum : Checksum.request option;
-      server_side_encryption : Encryption.request option;
-    }
-
-    type result = {
-      etag : Etag.t option;
-      last_modified : Ptime.t option;
-      version_id : Version_id.t option;
-      copy_source_version_id : Version_id.t option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
-  module Versions : sig
-    type options = {
-      prefix : string option;
-      delimiter : string option;
-      max_keys : int option;
-      key_marker : string option;
-      version_id_marker : Version_id.t option;
-    }
-
-    type object_version = {
-      key : string;
-      version_id : Version_id.t option;
-      is_latest : bool option;
-      last_modified : Ptime.t option;
-      etag : Etag.t option;
-      size : int64 option;
-      storage_class : Storage_class.t option;
-      owner : string option;
-    }
-
-    type delete_marker = {
-      key : string;
-      version_id : Version_id.t option;
-      is_latest : bool option;
-      last_modified : Ptime.t option;
-      owner : string option;
-    }
-
-    type page = {
-      bucket : string option;
-      prefix : string option;
-      delimiter : string option;
-      versions : object_version list;
-      delete_markers : delete_marker list;
-      common_prefixes : string list;
-      is_truncated : bool;
-      key_marker : string option;
-      version_id_marker : Version_id.t option;
-      next_key_marker : string option;
-      next_version_id_marker : Version_id.t option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
-  module List : sig
-    type options = {
-      prefix : string option;
-      delimiter : string option;
-      max_keys : int option;
-      start_after : string option;
-      continuation_token : string option;
-    }
-
-    type object_summary = {
-      key : string;
-      size : int64 option;
-      etag : Etag.t option;
-      last_modified : Ptime.t option;
-      storage_class : Storage_class.t option;
-      owner : string option;
-      checksums : Checksum.response list;
-    }
-
-    type page = {
-      bucket : string option;
-      prefix : string option;
-      delimiter : string option;
-      objects : object_summary list;
-      common_prefixes : string list;
-      key_count : int option;
-      is_truncated : bool;
-      continuation_token : string option;
-      next_continuation_token : string option;
-      request : Awskit.Response.t;
-    }
-
-    val default_options : options
-  end
-
   module Tagging : sig
-    type result = { tags : Tag.t list; request : Awskit.Response.t }
+    type result = { tags : Tag.t list; response : Awskit.Response.t }
   end
 end

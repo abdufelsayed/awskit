@@ -18,7 +18,7 @@ applications:
 {ul
   {li object [put], [get], [head], [delete], [copy], [list], metadata, tags,
     ranges, checksums, conditional requests, version IDs, and version listings}
-  {li multipart upload, multipart part listing, managed multipart uploads, and
+  {li multipart upload, multipart part listing, and
     local-file transfer helpers in Unix-capable adapters}
   {li S3 presigned URLs for object and multipart upload-part workflows}
   {li bucket lifecycle needed to create, locate, inspect, and remove buckets}
@@ -38,13 +38,13 @@ Object APIs are split into explicit layers:
 
 {ul
   {li primitive streaming operations under [Object]}
-  {li bounded in-memory helpers under [Object.Buffer]}
+  {li bounded in-memory helpers under [Object]}
   {li local-path helpers under [Object.Transfer] in Unix-capable adapter
     packages}
 }
 
-Primitive operations never expose string bodies as the primary API. Upload
-bodies and download readers come from the selected runtime adapter.
+Primitive operations never expose string bodies as the primary API. Request
+bodies and response body readers come from the selected runtime adapter.
 
 {1 Libraries}
 
@@ -63,10 +63,12 @@ Main modules:
     configuration records}
   {li {!module:Awskit_s3.Multipart} — multipart upload identifiers, parts,
     options, and result records}
+  {li {!module:Awskit_s3.Transfer} — high-level upload/download options,
+    limits, strategy results, and multipart transfer result records}
   {li {!module:Awskit_s3.Presigned} — pure presigned URL generation}
   {li {!module:Awskit_s3.Policy} — validated opaque bucket policy JSON
     payloads}
-  {li {!module:Awskit_s3.Sim} — in-memory S3 test surface}
+  {li {!module:Awskit_s3.Simulator} — in-memory S3 test surface}
   {li {!module:Awskit_s3.Make} — functor for wiring S3 operations to a custom
     {!module-type:Awskit.Runtime.S} implementation}
 }
@@ -103,7 +105,7 @@ let run env =
   let region = Awskit.Region.of_string_exn "us-east-1" in
   let s3 = Awskit_s3_eio.create ~sw ~env ~region ~credentials () in
   match
-    Awskit_s3_eio.Object.Buffer.put_string s3
+    Awskit_s3_eio.Object.put_string s3
       ~bucket:"my-bucket"
       ~key:"hello.txt"
       "Hello, S3!"
@@ -122,10 +124,10 @@ let run () =
       Lwt_io.eprintf "%s\n" (Awskit_s3.Error.to_string_hum err)
   | Ok s3 ->
       let* result =
-        Awskit_s3_lwt_unix.Object.Buffer.get_string s3
+        Awskit_s3_lwt_unix.Object.get_as_string s3
           ~bucket:"my-bucket"
           ~key:"hello.txt"
-          ~max_size:1_048_576L
+          ~max_bytes:1_048_576L
           ()
       in
       match result with

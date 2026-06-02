@@ -18,10 +18,12 @@ val create :
   ?clock:(unit -> Ptime.t) ->
   ?retry_policy:Awskit.Retry.t ->
   ?endpoint:Awskit.Endpoint.t ->
-  ?max_response_body_bytes:int ->
+  ?max_response_drain_bytes:int ->
   unit ->
   t
 (** Defaults to AWS HTTPS endpoints. Pass an explicit [endpoint] for local test
     services or custom service endpoints. [retry_policy] defaults to
-    {!val:Awskit.Retry.default}. [max_response_body_bytes] defaults to 64 MiB.
-*)
+    {!val:Awskit.Retry.default}. [max_response_drain_bytes] defaults to 64 MiB.
+    If a response consumer succeeds but the remaining body exceeds this drain
+    limit, the operation fails with a body-limit error. If the consumer fails,
+    the consumer error is returned. *)

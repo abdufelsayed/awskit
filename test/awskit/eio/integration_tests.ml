@@ -46,20 +46,21 @@ let test_runtime_bodies env =
   Eio.Switch.run @@ fun sw ->
   let conn = Awskit_eio.create ~env ~sw ~region ~credentials:c () in
   ignore (Awskit_eio.Runtime.region conn : Awskit.Region.t);
-  let body = Awskit_eio.Runtime.string_body "hello" in
+  let body = Awskit_eio.Runtime.Request_body.of_string "hello" in
   Alcotest.(check int64)
     "content length" 5L
-    (Option.value (Awskit_eio.Runtime.upload_descriptor body).content_length
+    (Option.value
+       (Awskit_eio.Runtime.Request_body.descriptor body).content_length
        ~default:(-1L))
 
 let stream_descriptor length =
   {
-    Awskit.Body.Upload.content_length = Some length;
+    Awskit.Body.Request.content_length = Some length;
     payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
     replayable = false;
   }
 
-let upload_conn env sw =
+let request_conn env sw =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
@@ -74,12 +75,13 @@ let body_to_cohttp_exn conn body =
   in
   match bridge.body with
   | Some body -> (body, bridge.finished)
-  | None -> Alcotest.fail "expected upload body"
+  | None -> Alcotest.fail "expected request body"
 
 let rec read_all body buffer =
   let chunk = Bytes.create 2 in
   match
-    Awskit_eio__Runtime.read body chunk ~off:0 ~len:(Bytes.length chunk)
+    Awskit_eio__Runtime.Response_body.read body chunk ~off:0
+      ~len:(Bytes.length chunk)
   with
   | Error error ->
       Alcotest.failf "unexpected body read error: %a" Awskit.Error.pp error
@@ -156,7 +158,7 @@ let with_eio_early_response_server env ~status ~response_body ~read_request_body
   let endpoint = Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port () in
   test endpoint
 
-let upload_request_for_endpoint endpoint =
+let request_body_request_for_endpoint endpoint =
   let target =
     Awskit.Request.Target.create_exn
       ~scheme:(Awskit.Endpoint.scheme endpoint)
@@ -166,79 +168,85 @@ let upload_request_for_endpoint endpoint =
   in
   Awskit.Request.create_exn ~method_:`PUT ~target ()
 
-let read_download_body_to_string body =
-  Awskit_eio__Runtime.with_download_body body ~consume:(fun reader ->
+let read_response_body_to_string body =
+  Awskit_eio__Runtime.Response_body.with_reader body ~consume:(fun reader ->
       Ok (read_all reader (Buffer.create 128)))
 
-let test_stream_upload_body_emits_multiple_chunks env =
+let test_stream_request_body_emits_multiple_chunks env =
   Eio.Switch.run @@ fun sw ->
-  let conn = upload_conn env sw in
+  let conn = request_conn env sw in
   let body =
-    Awskit_eio__Runtime.stream_body (stream_descriptor 6L) ~write:(fun writer ->
-        match Awskit_eio__Runtime.write_string writer "ab" with
+    Awskit_eio__Runtime.Request_body.of_stream (stream_descriptor 6L)
+      ~write:(fun writer ->
+        match Awskit_eio__Runtime.Request_body.write_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> (
-            match Awskit_eio__Runtime.write_string writer "cd" with
+            match Awskit_eio__Runtime.Request_body.write_string writer "cd" with
             | Error _ as error -> error
-            | Ok () -> Awskit_eio__Runtime.write_string writer "ef"))
+            | Ok () -> Awskit_eio__Runtime.Request_body.write_string writer "ef"
+            ))
   in
-  let cohttp_body, upload_finished = body_to_cohttp_exn conn body in
+  let cohttp_body, request_body_finished = body_to_cohttp_exn conn body in
   Alcotest.(check string)
     "request body" "abcdef"
     (read_all_cohttp_body cohttp_body (Buffer.create 6));
-  match Eio.Promise.await upload_finished with
+  match Eio.Promise.await request_body_finished with
   | Ok () -> ()
   | Error error ->
-      Alcotest.failf "unexpected upload error: %a" Awskit.Error.pp error
+      Alcotest.failf "unexpected request body error: %a" Awskit.Error.pp error
 
-let test_stream_upload_error_propagates env =
+let test_stream_request_body_error_propagates env =
   Eio.Switch.run @@ fun sw ->
-  let conn = upload_conn env sw in
-  let stream_error = Awskit.Error.body "stream upload failed" in
+  let conn = request_conn env sw in
+  let stream_error = Awskit.Error.body "stream request body failed" in
   let body =
-    Awskit_eio__Runtime.stream_body (stream_descriptor 4L) ~write:(fun writer ->
-        match Awskit_eio__Runtime.write_string writer "ab" with
+    Awskit_eio__Runtime.Request_body.of_stream (stream_descriptor 4L)
+      ~write:(fun writer ->
+        match Awskit_eio__Runtime.Request_body.write_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
-  let _cohttp_body, upload_finished = body_to_cohttp_exn conn body in
-  match Eio.Promise.await upload_finished with
+  let _cohttp_body, request_body_finished = body_to_cohttp_exn conn body in
+  match Eio.Promise.await request_body_finished with
   | Error error when Awskit.Error.equal error stream_error -> ()
   | Error error ->
-      Alcotest.failf "unexpected upload error: %a" Awskit.Error.pp error
-  | Ok () -> Alcotest.fail "expected stream upload error"
+      Alcotest.failf "unexpected request body error: %a" Awskit.Error.pp error
+  | Ok () -> Alcotest.fail "expected stream request body error"
 
-let expect_upload_body_error label = function
+let expect_request_body_error label = function
   | Error (Awskit.Error.Body _) -> ()
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
-  | Ok () -> Alcotest.failf "%s: expected upload body error" label
+  | Ok () -> Alcotest.failf "%s: expected request body error" label
 
-let test_stream_upload_rejects_short_body env =
+let test_stream_request_body_rejects_short_body env =
   Eio.Switch.run @@ fun sw ->
-  let conn = upload_conn env sw in
+  let conn = request_conn env sw in
   let body =
-    Awskit_eio__Runtime.stream_body (stream_descriptor 4L) ~write:(fun writer ->
-        Awskit_eio__Runtime.write_string writer "ab")
+    Awskit_eio__Runtime.Request_body.of_stream (stream_descriptor 4L)
+      ~write:(fun writer ->
+        Awskit_eio__Runtime.Request_body.write_string writer "ab")
   in
-  let _cohttp_body, upload_finished = body_to_cohttp_exn conn body in
-  Eio.Promise.await upload_finished
-  |> expect_upload_body_error "short upload body"
+  let _cohttp_body, request_body_finished = body_to_cohttp_exn conn body in
+  Eio.Promise.await request_body_finished
+  |> expect_request_body_error "short request body"
 
-let test_stream_upload_rejects_long_body env =
+let test_stream_request_body_rejects_long_body env =
   Eio.Switch.run @@ fun sw ->
-  let conn = upload_conn env sw in
+  let conn = request_conn env sw in
   let body =
-    Awskit_eio__Runtime.stream_body (stream_descriptor 4L) ~write:(fun writer ->
-        match Awskit_eio__Runtime.write_string writer "abcd" with
+    Awskit_eio__Runtime.Request_body.of_stream (stream_descriptor 4L)
+      ~write:(fun writer ->
+        match Awskit_eio__Runtime.Request_body.write_string writer "abcd" with
         | Error _ as error -> error
-        | Ok () -> Awskit_eio__Runtime.write_string writer "e")
+        | Ok () -> Awskit_eio__Runtime.Request_body.write_string writer "e")
   in
-  let _cohttp_body, upload_finished = body_to_cohttp_exn conn body in
-  Eio.Promise.await upload_finished
-  |> expect_upload_body_error "long upload body"
+  let _cohttp_body, request_body_finished = body_to_cohttp_exn conn body in
+  Eio.Promise.await request_body_finished
+  |> expect_request_body_error "long request body"
 
-let test_stream_upload_early_response_cancels_producer_and_preserves_body env =
+let test_stream_request_body_early_response_cancels_producer_and_preserves_body
+    env =
   let error_body =
     "<Error><Code>AccessDenied</Code><Message>denied</Message></Error>"
   in
@@ -247,18 +255,18 @@ let test_stream_upload_early_response_cancels_producer_and_preserves_body env =
       Eio.Switch.run @@ fun conn_sw ->
       let clock = Eio.Stdenv.clock env in
       let lifecycle_timeout = 1.0 in
-      let conn = upload_conn env conn_sw in
-      let request = upload_request_for_endpoint endpoint in
+      let conn = request_conn env conn_sw in
+      let request = request_body_request_for_endpoint endpoint in
       let producer_started = ref false in
       let producer_finished, wake_producer_finished = Eio.Promise.create () in
       let finish_producer () =
         ignore (Eio.Promise.try_resolve wake_producer_finished () : bool)
       in
       let body =
-        Awskit_eio__Runtime.stream_body (stream_descriptor 1024L)
+        Awskit_eio__Runtime.Request_body.of_stream (stream_descriptor 1024L)
           ~write:(fun writer ->
             producer_started := true;
-            match Awskit_eio__Runtime.write_string writer "ab" with
+            match Awskit_eio__Runtime.Request_body.write_string writer "ab" with
             | Error _ as error -> error
             | Ok () ->
                 Exn.protect ~finally:finish_producer ~f:(fun () ->
@@ -269,7 +277,7 @@ let test_stream_upload_early_response_cancels_producer_and_preserves_body env =
           Eio.Time.with_timeout_exn clock lifecycle_timeout (fun () ->
               Awskit_eio__Runtime.with_response conn request body
                 ~f:(fun response response_body ->
-                  match read_download_body_to_string response_body with
+                  match read_response_body_to_string response_body with
                   | Ok body -> Ok (response, body)
                   | Error _ as error -> error))
         with Eio.Time.Timeout ->
@@ -290,21 +298,22 @@ let test_stream_upload_early_response_cancels_producer_and_preserves_body env =
           Alcotest.(check int) "status" 403 (Awskit.Response.status response);
           Alcotest.(check string) "error body" error_body body)
 
-let test_stream_upload_success_response_body_is_scoped env =
+let test_stream_request_body_success_response_body_is_scoped env =
   let response_body = String.make (128 * 1024) 'r' in
   with_eio_early_response_server env ~status:200 ~response_body
     ~read_request_body:false (fun endpoint ->
       Eio.Switch.run @@ fun conn_sw ->
-      let conn = upload_conn env conn_sw in
-      let request = upload_request_for_endpoint endpoint in
+      let conn = request_conn env conn_sw in
+      let request = request_body_request_for_endpoint endpoint in
       let body =
-        Awskit_eio__Runtime.stream_body (stream_descriptor 2L)
-          ~write:(fun writer -> Awskit_eio__Runtime.write_string writer "ok")
+        Awskit_eio__Runtime.Request_body.of_stream (stream_descriptor 2L)
+          ~write:(fun writer ->
+            Awskit_eio__Runtime.Request_body.write_string writer "ok")
       in
       let result =
         Awskit_eio__Runtime.with_response conn request body
           ~f:(fun response response_body ->
-            match read_download_body_to_string response_body with
+            match read_response_body_to_string response_body with
             | Ok body -> Ok (response, body)
             | Error _ as error -> error)
       in
@@ -319,10 +328,10 @@ let test_stream_upload_success_response_body_is_scoped env =
             (String.length body);
           Alcotest.(check string) "response body" response_body body)
 
-let eio_download_body ~max_response_body_bytes body =
+let eio_response_body ~max_response_drain_bytes body =
   {
     Awskit_eio__Runtime.body = Cohttp_eio.Body.of_string body;
-    max_response_body_bytes;
+    max_response_drain_bytes;
   }
 
 let expect_body_limit label expected = function
@@ -332,14 +341,14 @@ let expect_body_limit label expected = function
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected body limit error" label
 
-let test_discard_download_body_enforces_limit _env =
-  eio_download_body ~max_response_body_bytes:3 "abcdef"
-  |> Awskit_eio__Runtime.discard_download_body
+let test_discard_response_body_enforces_limit _env =
+  eio_response_body ~max_response_drain_bytes:3 "abcdef"
+  |> Awskit_eio__Runtime.Response_body.discard
   |> expect_body_limit "discard limit" 3L
 
-let test_with_download_body_drain_enforces_limit _env =
-  let body = eio_download_body ~max_response_body_bytes:3 "abcdef" in
-  Awskit_eio__Runtime.with_download_body body ~consume:(fun _ -> Ok ())
+let test_with_response_body_drain_enforces_limit _env =
+  let body = eio_response_body ~max_response_drain_bytes:3 "abcdef" in
+  Awskit_eio__Runtime.Response_body.with_reader body ~consume:(fun _ -> Ok ())
   |> expect_body_limit "scoped drain limit" 3L
 
 let suite env =
@@ -352,25 +361,26 @@ let suite env =
             test_connection_defaults env);
         Alcotest.test_case "runtime bodies" `Quick (fun () ->
             test_runtime_bodies env);
-        Alcotest.test_case "stream upload emits multiple chunks" `Quick
-          (fun () -> test_stream_upload_body_emits_multiple_chunks env);
-        Alcotest.test_case "stream upload error propagates" `Quick (fun () ->
-            test_stream_upload_error_propagates env);
-        Alcotest.test_case "stream upload rejects short body" `Quick (fun () ->
-            test_stream_upload_rejects_short_body env);
-        Alcotest.test_case "stream upload rejects long body" `Quick (fun () ->
-            test_stream_upload_rejects_long_body env);
+        Alcotest.test_case "stream request body emits multiple chunks" `Quick
+          (fun () -> test_stream_request_body_emits_multiple_chunks env);
+        Alcotest.test_case "stream request body error propagates" `Quick
+          (fun () -> test_stream_request_body_error_propagates env);
+        Alcotest.test_case "stream request body rejects short body" `Quick
+          (fun () -> test_stream_request_body_rejects_short_body env);
+        Alcotest.test_case "stream request body rejects long body" `Quick
+          (fun () -> test_stream_request_body_rejects_long_body env);
         Alcotest.test_case
-          "stream upload early response cancels producer and preserves body"
+          "stream request body early response cancels producer and preserves \
+           body"
           `Quick (fun () ->
-            test_stream_upload_early_response_cancels_producer_and_preserves_body
+            test_stream_request_body_early_response_cancels_producer_and_preserves_body
               env);
-        Alcotest.test_case "stream upload success response body is scoped"
+        Alcotest.test_case "stream request body success response body is scoped"
           `Quick (fun () ->
-            test_stream_upload_success_response_body_is_scoped env);
+            test_stream_request_body_success_response_body_is_scoped env);
         Alcotest.test_case "discard body limit" `Quick (fun () ->
-            test_discard_download_body_enforces_limit env);
+            test_discard_response_body_enforces_limit env);
         Alcotest.test_case "scoped drain body limit" `Quick (fun () ->
-            test_with_download_body_drain_enforces_limit env);
+            test_with_response_body_drain_enforces_limit env);
       ] );
   ]

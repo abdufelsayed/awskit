@@ -16,7 +16,7 @@ type conn = {
   clock : unit -> Ptime.t;
   retry_policy : Awskit.Retry.t;
   endpoint : Awskit.Endpoint.t option;
-  max_response_body_bytes : int;
+  max_response_drain_bytes : int;
 }
 
 type stream_item = Chunk of string | End | Failed of string
@@ -52,32 +52,35 @@ let stream_source =
   fun stream ->
     Eio.Resource.T ({ Stream_source.stream; chunk = ""; offset = 0 }, ops)
 
-type upload_writer = {
+type request_body_writer = {
   stream : stream_item Eio.Stream.t;
   remaining : int64 option ref;
   mutable write_error : Awskit.Error.t option;
 }
 
-type upload_body =
-  | Source of Awskit.Body.Upload.descriptor * Cohttp_eio.Body.t
+type request_body =
+  | Source of Awskit.Body.Request.descriptor * Cohttp_eio.Body.t
   | Stream of
-      Awskit.Body.Upload.descriptor
-      * (upload_writer -> (unit, Awskit.Error.t) Result.t)
+      Awskit.Body.Request.descriptor
+      * (request_body_writer -> (unit, Awskit.Error.t) Result.t)
 
-type download_body = { body : Cohttp_eio.Body.t; max_response_body_bytes : int }
+type response_body = {
+  body : Cohttp_eio.Body.t;
+  max_response_drain_bytes : int;
+}
 
-type download_reader = {
+type response_body_reader = {
   body : Cohttp_eio.Body.t;
   mutable chunk : string;
   mutable offset : int;
 }
 
-type upload_bridge = {
+type request_body_bridge = {
   body : Cohttp_eio.Body.t option;
   finished : (unit, Awskit.Error.t) Result.t Eio.Promise.t;
 }
 
-let default_max_response_body_bytes = 64 * 1024 * 1024
+let default_max_response_drain_bytes = 64 * 1024 * 1024
 let authenticator = lazy (Ca_certs.authenticator ())
 
 let tls_config =
@@ -107,9 +110,9 @@ let https_connector uri raw =
 
 let create ~env ~sw ~region ~credentials ?(clock = Ptime_clock.now)
     ?(retry_policy = Awskit.Retry.default) ?endpoint
-    ?(max_response_body_bytes = default_max_response_body_bytes) () =
-  if max_response_body_bytes <= 0 then
-    invalid_arg "Awskit_eio.create: max_response_body_bytes must be positive";
+    ?(max_response_drain_bytes = default_max_response_drain_bytes) () =
+  if max_response_drain_bytes <= 0 then
+    invalid_arg "Awskit_eio.create: max_response_drain_bytes must be positive";
   let net = Net (env :> < net : _ Eio.Net.t ; .. >)#net in
   let time_clock =
     Time_clock (env :> < clock : _ Eio.Time.clock ; .. >)#clock
@@ -123,7 +126,7 @@ let create ~env ~sw ~region ~credentials ?(clock = Ptime_clock.now)
     clock;
     retry_policy;
     endpoint;
-    max_response_body_bytes;
+    max_response_drain_bytes;
   }
 
 let to_cohttp_meth = function
@@ -154,37 +157,39 @@ let make_uri (request : Awskit.Request.t) =
 
 let descriptor_for_string body =
   {
-    Awskit.Body.Upload.content_length = Some (String.length body |> Int64.of_int);
+    Awskit.Body.Request.content_length =
+      Some (String.length body |> Int64.of_int);
     payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
     replayable = true;
   }
 
-let empty_body = Source (descriptor_for_string "", Cohttp_eio.Body.of_string "")
+let empty_request_body =
+  Source (descriptor_for_string "", Cohttp_eio.Body.of_string "")
 
-let string_body body =
+let string_request_body body =
   Source (descriptor_for_string body, Cohttp_eio.Body.of_string body)
 
-let bytes_body body =
+let bytes_request_body body =
   let body = Bytes.to_string body in
-  string_body body
+  string_request_body body
 
-let stream_body descriptor ~write = Stream (descriptor, write)
+let stream_request_body descriptor ~write = Stream (descriptor, write)
 
-let upload_descriptor = function
+let request_body_descriptor = function
   | Source (descriptor, _) -> descriptor
   | Stream (descriptor, _) -> descriptor
 
 let body_error message = Awskit.Error.body message
 
-let drain_limit_error max_response_body_bytes =
+let drain_limit_error max_response_drain_bytes =
   Awskit.Error.body
-    ~limit:(Int64.of_int max_response_body_bytes)
-    "response body exceeded max_response_body_bytes"
+    ~limit:(Int64.of_int max_response_drain_bytes)
+    "response body exceeded max_response_drain_bytes"
 
 let writer_for descriptor stream =
   {
     stream;
-    remaining = ref descriptor.Awskit.Body.Upload.content_length;
+    remaining = ref descriptor.Awskit.Body.Request.content_length;
     write_error = None;
   }
 
@@ -194,7 +199,7 @@ let check_write_length writer string =
   | Some remaining ->
       let length = Int64.of_int (String.length string) in
       if Stdlib.Int64.compare length remaining > 0 then
-        Error (body_error "upload body exceeded declared content_length")
+        Error (body_error "request body exceeded declared content_length")
       else (
         writer.remaining := Some (Stdlib.Int64.sub remaining length);
         Ok ())
@@ -206,9 +211,10 @@ let check_finished_length writer =
       match !(writer.remaining) with
       | None | Some 0L -> Ok ()
       | Some _ ->
-          Error (body_error "upload body ended before declared content_length"))
+          Error (body_error "request body ended before declared content_length")
+      )
 
-let write_string writer string =
+let write_request_body_string writer string =
   match writer.write_error with
   | Some error -> Error error
   | None -> (
@@ -220,15 +226,27 @@ let write_string writer string =
           Eio.Stream.add writer.stream (Chunk string);
           Ok ())
 
+module Request_body = struct
+  let empty = empty_request_body
+  let of_string = string_request_body
+  let of_bytes = bytes_request_body
+  let of_stream = stream_request_body
+  let descriptor = request_body_descriptor
+  let write_string = write_request_body_string
+end
+
 let body_to_cohttp ~sw = function
   | Source (_, body) ->
       { body = Some body; finished = Eio.Promise.create_resolved (Ok ()) }
   | Stream (descriptor, write) ->
       let stream = Eio.Stream.create 16 in
       let writer = writer_for descriptor stream in
-      let upload_finished, wake_upload_finished = Eio.Promise.create () in
+      let request_body_finished, wake_request_body_finished =
+        Eio.Promise.create ()
+      in
       let finish result =
-        ignore (Eio.Promise.try_resolve wake_upload_finished result : bool)
+        ignore
+          (Eio.Promise.try_resolve wake_request_body_finished result : bool)
       in
       Eio.Fiber.fork ~sw (fun () ->
           match write writer with
@@ -238,7 +256,7 @@ let body_to_cohttp ~sw = function
               finish result
           | Error error ->
               Log.warn (fun m ->
-                  m "upload stream failed: %s"
+                  m "request body stream failed: %s"
                     (Awskit.Error.to_string_hum error));
               finish (Error error);
               Eio.Stream.add stream (Failed (Awskit.Error.to_string_hum error))
@@ -246,13 +264,14 @@ let body_to_cohttp ~sw = function
           | exception exn ->
               let error = body_error (Exn.to_string exn) in
               Log.warn (fun m ->
-                  m "upload stream raised: %s"
+                  m "request body stream raised: %s"
                     (Awskit.Error.to_string_hum error));
               finish (Error error);
               Eio.Stream.add stream (Failed (Awskit.Error.to_string_hum error)));
-      { body = Some (stream_source stream); finished = upload_finished }
+      { body = Some (stream_source stream); finished = request_body_finished }
 
-let do_with_response (conn : conn) (request : Awskit.Request.t) upload_body ~f =
+let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
+    =
   let (Net net) = conn.net in
   let https =
     match request.target.scheme with
@@ -263,8 +282,8 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) upload_body ~f =
   let headers = Http.Header.of_list request.headers in
   let uri = make_uri request in
   let meth = to_cohttp_meth request.method_ in
-  let make_download_body body =
-    { body; max_response_body_bytes = conn.max_response_body_bytes }
+  let make_response_body body =
+    { body; max_response_drain_bytes = conn.max_response_drain_bytes }
   in
   let successful_status status = status >= 200 && status < 300 in
   let early_result = ref None in
@@ -276,14 +295,14 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) upload_body ~f =
     | exception exn -> raise (Callback_raised exn)
   in
   let run_call ~call_sw =
-    let bridge = body_to_cohttp ~sw:call_sw upload_body in
+    let bridge = body_to_cohttp ~sw:call_sw request_body in
     try
       let response, body =
         Cohttp_eio.Client.call client ~sw:call_sw ~headers ?body:bridge.body
           meth uri
       in
       let status = Http.Response.status response |> Http.Status.to_int in
-      let upload_result =
+      let request_body_result =
         if successful_status status then Eio.Promise.await bridge.finished
         else
           match Eio.Promise.peek bridge.finished with
@@ -291,14 +310,14 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) upload_body ~f =
           | None ->
               early_result :=
                 Some
-                  (call_f (to_aws_response response) (make_download_body body));
+                  (call_f (to_aws_response response) (make_response_body body));
               raise Early_response
       in
-      match upload_result with
+      match request_body_result with
       | Error _ as error -> error
       | Ok () ->
           Log.debug (fun m -> m "HTTP %d" status);
-          call_f (to_aws_response response) (make_download_body body)
+          call_f (to_aws_response response) (make_response_body body)
     with
     | Early_response as exn -> raise exn
     | Callback_raised exn -> raise exn
@@ -311,12 +330,12 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) upload_body ~f =
             Log.warn (fun m -> m "HTTP call failed: %s" message);
             Error (Awskit.Error.transport ~retryable:true message))
   in
-  match upload_body with
+  match request_body with
   | Source _ -> run_call ~call_sw:conn.sw
   | Stream _ -> (
       try
-        Eio.Switch.run ~name:"awskit stream upload attempt" (fun upload_sw ->
-            run_call ~call_sw:upload_sw)
+        Eio.Switch.run ~name:"awskit stream request body attempt"
+          (fun request_body_sw -> run_call ~call_sw:request_body_sw)
       with Early_response -> (
         match !early_result with
         | Some result -> result
@@ -358,7 +377,7 @@ let rec read_from_current reader bytes ~off ~len =
     reader.offset <- 0;
     read_from_current reader bytes ~off ~len
 
-let read reader bytes ~off ~len =
+let read_response_body reader bytes ~off ~len =
   if invalid_read_bounds bytes ~off ~len then
     Error (Awskit.Error.body "invalid read bounds")
   else
@@ -367,35 +386,42 @@ let read reader bytes ~off ~len =
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Awskit.Error.body (Exn.to_string exn))
 
-let rec discard_reader reader ~remaining ~max_response_body_bytes =
+let rec discard_reader reader ~remaining ~max_response_drain_bytes =
   let buffer = Bytes.create 8192 in
   let len = if remaining <= 0 then 1 else min (Bytes.length buffer) remaining in
-  match read reader buffer ~off:0 ~len with
+  match read_response_body reader buffer ~off:0 ~len with
   | Error _ as error -> error
   | Ok 0 -> Ok ()
   | Ok n ->
-      if n > remaining then Error (drain_limit_error max_response_body_bytes)
+      if n > remaining then Error (drain_limit_error max_response_drain_bytes)
       else
         discard_reader reader ~remaining:(remaining - n)
-          ~max_response_body_bytes
+          ~max_response_drain_bytes
 
-let discard_download_reader (reader : download_reader) (body : download_body) =
-  discard_reader reader ~remaining:body.max_response_body_bytes
-    ~max_response_body_bytes:body.max_response_body_bytes
+let discard_response_body_reader (reader : response_body_reader)
+    (body : response_body) =
+  discard_reader reader ~remaining:body.max_response_drain_bytes
+    ~max_response_drain_bytes:body.max_response_drain_bytes
 
-let with_download_body (body : download_body) ~consume =
+let with_response_body (body : response_body) ~consume =
   let reader = { body = body.body; chunk = ""; offset = 0 } in
   match consume reader with
   | Ok _ as result -> (
-      match discard_download_reader reader body with
+      match discard_response_body_reader reader body with
       | Ok () -> result
       | Error _ as error -> error)
   | Error _ as error -> (
-      match discard_download_reader reader body with
+      match discard_response_body_reader reader body with
       | Ok () -> error
       | Error _ as drain_error -> drain_error)
 
-let discard_download_body (body : download_body) =
-  discard_download_reader { body = body.body; chunk = ""; offset = 0 } body
+let discard_response_body (body : response_body) =
+  discard_response_body_reader { body = body.body; chunk = ""; offset = 0 } body
+
+module Response_body = struct
+  let read = read_response_body
+  let with_reader = with_response_body
+  let discard = discard_response_body
+end
 
 let with_response = do_with_response

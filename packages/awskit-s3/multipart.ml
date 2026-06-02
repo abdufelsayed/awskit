@@ -27,16 +27,21 @@ module Upload = struct
 end
 
 module Part = struct
-  type t = { part_number : int; etag : Object.Etag.t }
+  type t = {
+    part_number : int;
+    etag : Object.Etag.t;
+    checksum : Object.Checksum.value option;
+  }
 
-  let create ~part_number ~etag =
+  let create ?checksum ~part_number ~etag () =
     if part_number <= 0 then
       invalid ~field:"part_number" "part number must be positive"
     else if part_number > 10_000 then
       invalid ~field:"part_number" "part number must be <= 10000"
-    else Ok { part_number; etag }
+    else Ok { part_number; etag; checksum }
 
-  let create_exn ~part_number ~etag = result_exn (create ~part_number ~etag)
+  let create_exn ?checksum ~part_number ~etag () =
+    result_exn (create ?checksum ~part_number ~etag ())
 end
 
 module Create = struct
@@ -45,11 +50,13 @@ module Create = struct
     metadata : Metadata.t;
     storage_class : Storage_class.t option;
     tags : Tag.t list;
-    checksum : Object.Checksum.request option;
+    checksum_algorithm : Object.Checksum.Algorithm.t option;
+    checksum_type : Object.Checksum.Type.t option;
     server_side_encryption : Object.Encryption.request option;
+    expected_bucket_owner : string option;
   }
 
-  type result = { upload : Upload.t; request : Awskit.Response.t }
+  type result = { upload : Upload.t; response : Awskit.Response.t }
 
   let default_options =
     {
@@ -57,79 +64,86 @@ module Create = struct
       metadata = [];
       storage_class = None;
       tags = [];
-      checksum = None;
+      checksum_algorithm = None;
+      checksum_type = None;
       server_side_encryption = None;
+      expected_bucket_owner = None;
     }
 end
 
 module Upload_part = struct
-  type options = { checksum : Object.Checksum.request option }
+  type options = {
+    checksum : Object.Checksum.value option;
+    expected_bucket_owner : string option;
+  }
 
   type result = {
     part : Part.t;
-    checksum : Object.Checksum.response option;
-    request : Awskit.Response.t;
+    checksum : Object.Checksum.response;
+    response : Awskit.Response.t;
   }
 
-  let default_options = { checksum = None }
+  let default_options = { checksum = None; expected_bucket_owner = None }
 end
 
 module Complete = struct
+  type options = {
+    expected_bucket_owner : string option;
+    checksum : Object.Checksum.value option;
+    checksum_type : Object.Checksum.Type.t option;
+    multipart_object_size : int64 option;
+  }
+
   type result = {
     etag : Object.Etag.t option;
     version_id : Object.Version_id.t option;
-    checksum : Object.Checksum.response option;
-    request : Awskit.Response.t;
+    checksum : Object.Checksum.response;
+    response : Awskit.Response.t;
   }
+
+  let default_options =
+    {
+      expected_bucket_owner = None;
+      checksum = None;
+      checksum_type = None;
+      multipart_object_size = None;
+    }
+end
+
+module Abort = struct
+  type options = { expected_bucket_owner : string option }
+  type result = Awskit.Response.t
+
+  let default_options = { expected_bucket_owner = None }
 end
 
 module List_parts = struct
-  type options = { max_parts : int option; part_number_marker : int option }
+  type options = {
+    max_parts : int option;
+    part_number_marker : int option;
+    expected_bucket_owner : string option;
+  }
 
   type part_info = {
     part_number : int;
     etag : Object.Etag.t option;
     size : int64 option;
     last_modified : Ptime.t option;
-    checksum : Object.Checksum.response option;
+    checksum : Object.Checksum.response;
   }
 
   type page = {
     parts : part_info list;
     is_truncated : bool;
     next_part_number_marker : int option;
-    request : Awskit.Response.t;
-  }
-
-  let default_options = { max_parts = None; part_number_marker = None }
-end
-
-module Managed = struct
-  let min_part_size = 5 * 1024 * 1024
-  let default_part_size = 8 * 1024 * 1024
-  let max_parts = 10_000
-
-  type options = {
-    part_size : int;
-    create_options : Create.options;
-    upload_part_options : Upload_part.options;
-  }
-
-  type result = {
-    upload : Upload.t;
-    parts : Part.t list;
-    complete : Complete.result;
+    checksum_type : Object.Checksum.Type.t option;
+    response : Awskit.Response.t;
   }
 
   let default_options =
     {
-      part_size = default_part_size;
-      create_options = Create.default_options;
-      upload_part_options = Upload_part.default_options;
+      max_parts = None;
+      part_number_marker = None;
+      expected_bucket_owner = None;
     }
-
-  let validate_options (options : options) =
-    if options.part_size < min_part_size then
-      invalid ~field:"part_size" "part size must be at least 5 MiB"
-    else Ok ()
 end

@@ -79,8 +79,7 @@ let parse_rule nodes =
 let parse body response =
   let* nodes = Xml.decode_root body ~name:"CORSConfiguration" in
   let rec loop acc = function
-    | [] ->
-        Ok { Bucket.Cors.config = { rules = List.rev acc }; request = response }
+    | [] -> Ok { Bucket.Cors.config = { rules = List.rev acc }; response }
     | nodes :: rest ->
         let* rule = parse_rule nodes in
         loop (rule :: acc) rest

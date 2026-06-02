@@ -3,10 +3,10 @@ type t = { aws : Awskit_eio.t; endpoint_config : Awskit_s3.endpoint_config }
 module Runtime = struct
   type connection = t
   type 'a t = 'a
-  type upload_body = Awskit_eio.Runtime.upload_body
-  type download_body = Awskit_eio.Runtime.download_body
-  type upload_writer = Awskit_eio.Runtime.upload_writer
-  type download_reader = Awskit_eio.Runtime.download_reader
+  type request_body = Awskit_eio.Runtime.request_body
+  type response_body = Awskit_eio.Runtime.response_body
+  type request_body_writer = Awskit_eio.Runtime.request_body_writer
+  type response_body_reader = Awskit_eio.Runtime.response_body_reader
 
   let return = Awskit_eio.Runtime.return
   let bind = Awskit_eio.Runtime.bind
@@ -17,21 +17,16 @@ module Runtime = struct
   let sleep t = Awskit_eio.Runtime.sleep t.aws
   let s3_endpoint_config t = t.endpoint_config
   let endpoint _ = None
-  let empty_body = Awskit_eio.Runtime.empty_body
-  let string_body = Awskit_eio.Runtime.string_body
-  let bytes_body = Awskit_eio.Runtime.bytes_body
-  let stream_body = Awskit_eio.Runtime.stream_body
-  let upload_descriptor = Awskit_eio.Runtime.upload_descriptor
-  let write_string = Awskit_eio.Runtime.write_string
-  let read = Awskit_eio.Runtime.read
-  let with_download_body = Awskit_eio.Runtime.with_download_body
-  let discard_download_body = Awskit_eio.Runtime.discard_download_body
+
+  module Request_body = Awskit_eio.Runtime.Request_body
+  module Response_body = Awskit_eio.Runtime.Response_body
 
   let with_response t request body ~f =
     Awskit_eio.Runtime.with_response t.aws request body ~f
 end
 
 module S3 = Awskit_s3.Make (Runtime)
+module File_transfer = Transfer
 
 let create ~sw ~env ~region ~credentials ?retry_policy ?endpoint
     ?addressing_style ?endpoint_variant ?scheme () =
@@ -44,7 +39,10 @@ let create ~sw ~env ~region ~credentials ?retry_policy ?endpoint
 
 module Object = struct
   include S3.Object
-  module Transfer = Transfer.Make (Runtime) (S3)
+
+  module Transfer = struct
+    include File_transfer.Make (Runtime) (S3)
+  end
 end
 
 module Bucket = S3.Bucket

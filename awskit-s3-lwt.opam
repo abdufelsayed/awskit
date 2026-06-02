@@ -5,8 +5,8 @@ description: "S3 client adapter over the generic Awskit Lwt runtime."
 maintainer: ["Abdullah Elsayed <hey@abdufelsayed.dev>"]
 authors: ["Abdullah Elsayed <hey@abdufelsayed.dev>"]
 license: "MIT"
-homepage: "https://github.com/weldr-ai/awskit"
-bug-reports: "https://github.com/weldr-ai/awskit/issues"
+homepage: "https://github.com/abdufelsayed/awskit"
+bug-reports: "https://github.com/abdufelsayed/awskit/issues"
 depends: [
   "dune" {>= "3.22"}
   "ocaml"
@@ -34,5 +34,5 @@ build: [
     "@doc" {with-doc}
   ]
 ]
-dev-repo: "git+https://github.com/weldr-ai/awskit.git"
+dev-repo: "git+https://github.com/abdufelsayed/awskit.git"
 x-maintenance-intent: ["(latest)"]

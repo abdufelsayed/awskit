@@ -29,7 +29,7 @@ module Public_access_block = struct
             block_public_policy = bool_child "BlockPublicPolicy" nodes;
             restrict_public_buckets = bool_child "RestrictPublicBuckets" nodes;
           };
-        request = response;
+        response;
       }
 end
 
@@ -62,6 +62,6 @@ module Ownership_controls = struct
                 Ok
                   {
                     Bucket.Ownership_controls.config = { object_ownership };
-                    request = response;
+                    response;
                   }))
 end

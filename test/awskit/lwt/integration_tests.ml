@@ -45,7 +45,7 @@ end
 
 module LimitedAws = Awskit_lwt.Make (Limited_body_client)
 
-module Upload_body_client = struct
+module Request_body_client = struct
   type ctx = unit
 
   module IO = Cohttp_lwt_unix.Client.IO
@@ -92,7 +92,98 @@ module Upload_body_client = struct
   let callv ?ctx:_ _uri _requests = Lwt.return (Lwt_stream.of_list [])
 end
 
-module UploadAws = Awskit_lwt.Make (Upload_body_client)
+module RequestAws = Awskit_lwt.Make (Request_body_client)
+
+module Early_response_client = struct
+  type ctx = unit
+
+  module IO = Cohttp_lwt_unix.Client.IO
+
+  type 'a io = 'a Lwt.t
+  type 'a with_context = ?ctx:ctx -> 'a
+  type body = Cohttp_lwt.Body.t
+
+  let response_body = ref ""
+  let response () = Cohttp.Response.make ~status:`Forbidden ()
+  let map_context f g ?ctx = g (f ?ctx)
+
+  let call ?ctx:_ ?headers:_ ?body:_ ?chunked:_ _meth _uri =
+    Lwt.return (response (), Cohttp_lwt.Body.of_string !response_body)
+
+  let head ?ctx:_ ?headers:_ _uri = Lwt.return (response ())
+  let get ?ctx ?headers uri = call ?ctx ?headers `GET uri
+
+  let delete ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `DELETE uri
+
+  let post ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `POST uri
+
+  let put ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `PUT uri
+
+  let patch ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `PATCH uri
+
+  let set_cache _ = ()
+
+  let post_form ?ctx:_ ?headers:_ ~params:_ _uri =
+    Lwt.return (response (), Cohttp_lwt.Body.of_string !response_body)
+
+  let callv ?ctx:_ _uri _requests = Lwt.return (Lwt_stream.of_list [])
+end
+
+module EarlyResponseAws = Awskit_lwt.Make (Early_response_client)
+
+module Backpressure_client = struct
+  type ctx = unit
+
+  module IO = Cohttp_lwt_unix.Client.IO
+
+  type 'a io = 'a Lwt.t
+  type 'a with_context = ?ctx:ctx -> 'a
+  type body = Cohttp_lwt.Body.t
+
+  let produced_chunks = ref 0
+  let observed_before_consumption = ref None
+  let response () = Cohttp.Response.make ~status:`OK ()
+  let map_context f g ?ctx = g (f ?ctx)
+
+  let call ?ctx:_ ?headers:_ ?body ?chunked:_ _meth _uri =
+    Lwt.bind (Lwt.pause ()) (fun () ->
+        observed_before_consumption := Some !produced_chunks;
+        let request_body =
+          match body with
+          | None -> Lwt.return ""
+          | Some body -> Cohttp_lwt.Body.to_string body
+        in
+        Lwt.bind request_body (fun _ ->
+            Lwt.return (response (), Cohttp_lwt.Body.empty)))
+
+  let head ?ctx:_ ?headers:_ _uri = Lwt.return (response ())
+  let get ?ctx ?headers uri = call ?ctx ?headers `GET uri
+
+  let delete ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `DELETE uri
+
+  let post ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `POST uri
+
+  let put ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `PUT uri
+
+  let patch ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `PATCH uri
+
+  let set_cache _ = ()
+
+  let post_form ?ctx:_ ?headers:_ ~params:_ _uri =
+    Lwt.return (response (), Cohttp_lwt.Body.empty)
+
+  let callv ?ctx:_ _uri _requests = Lwt.return (Lwt_stream.of_list [])
+end
+
+module BackpressureAws = Awskit_lwt.Make (Backpressure_client)
 
 let test_connection_roundtrip () =
   let c =
@@ -121,20 +212,34 @@ let test_connection_defaults () =
     (Option.map Aws.Runtime.(endpoint conn) ~f:Awskit.Endpoint.to_url_prefix)
 
 let test_runtime_bodies () =
-  let body = Aws.Runtime.string_body "hello" in
+  let body = Aws.Runtime.Request_body.of_string "hello" in
   Alcotest.(check int64)
     "content length" 5L
-    (Option.value (Aws.Runtime.upload_descriptor body).content_length
+    (Option.value (Aws.Runtime.Request_body.descriptor body).content_length
        ~default:(-1L))
 
-let upload_conn () =
+let request_conn () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let region = Awskit.Region.of_string_exn "us-east-1" in
-  UploadAws.create ~region ~credentials ~clock:(fun () -> Ptime.epoch) ()
+  RequestAws.create ~region ~credentials ~clock:(fun () -> Ptime.epoch) ()
 
-let upload_request =
+let early_response_conn () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let region = Awskit.Region.of_string_exn "us-east-1" in
+  EarlyResponseAws.create ~region ~credentials ~clock:(fun () -> Ptime.epoch) ()
+
+let backpressure_conn () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let region = Awskit.Region.of_string_exn "us-east-1" in
+  BackpressureAws.create ~region ~credentials ~clock:(fun () -> Ptime.epoch) ()
+
+let request_body_request =
   let target =
     Awskit.Request.Target.create_exn ~scheme:`Http ~host:"localhost" ~path:"/"
       ()
@@ -143,89 +248,217 @@ let upload_request =
 
 let stream_descriptor length =
   {
-    Awskit.Body.Upload.content_length = Some length;
+    Awskit.Body.Request.content_length = Some length;
     payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
     replayable = false;
   }
 
-let test_stream_upload_body_reaches_client () =
-  Upload_body_client.request_body := None;
+let test_stream_request_body_reaches_client () =
+  Request_body_client.request_body := None;
   let body =
-    UploadAws.Runtime.stream_body (stream_descriptor 4L) ~write:(fun writer ->
-        Lwt.bind (UploadAws.Runtime.write_string writer "ab") (function
+    RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
+      ~write:(fun writer ->
+        Lwt.bind (RequestAws.Runtime.Request_body.write_string writer "ab")
+          (function
           | Error _ as error -> Lwt.return error
-          | Ok () -> UploadAws.Runtime.write_string writer "cd"))
+          | Ok () -> RequestAws.Runtime.Request_body.write_string writer "cd"))
   in
   match
     Lwt_main.run
-      (UploadAws.Runtime.with_response (upload_conn ()) upload_request body
-         ~f:(fun _ body -> UploadAws.Runtime.discard_download_body body))
+      (RequestAws.Runtime.with_response (request_conn ()) request_body_request
+         body ~f:(fun _ body -> RequestAws.Runtime.Response_body.discard body))
   with
   | Error error ->
-      Alcotest.failf "unexpected upload error: %a" Awskit.Error.pp error
+      Alcotest.failf "unexpected request body error: %a" Awskit.Error.pp error
   | Ok () ->
       Alcotest.(check (option string))
         "request body" (Some "abcd")
-        !Upload_body_client.request_body
+        !Request_body_client.request_body
 
-let test_stream_upload_error_propagates () =
-  Upload_body_client.request_body := None;
-  let stream_error = Awskit.Error.body "stream upload failed" in
+let test_stream_request_body_error_propagates () =
+  Request_body_client.request_body := None;
+  let stream_error = Awskit.Error.body "stream request body failed" in
   let body =
-    UploadAws.Runtime.stream_body (stream_descriptor 4L) ~write:(fun writer ->
-        Lwt.bind (UploadAws.Runtime.write_string writer "ab") (function
+    RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
+      ~write:(fun writer ->
+        Lwt.bind (RequestAws.Runtime.Request_body.write_string writer "ab")
+          (function
           | Error _ as error -> Lwt.return error
           | Ok () -> Lwt.return_error stream_error))
   in
   match
     Lwt_main.run
-      (UploadAws.Runtime.with_response (upload_conn ()) upload_request body
-         ~f:(fun _ body -> UploadAws.Runtime.discard_download_body body))
+      (RequestAws.Runtime.with_response (request_conn ()) request_body_request
+         body ~f:(fun _ body -> RequestAws.Runtime.Response_body.discard body))
   with
   | Error error when Awskit.Error.equal error stream_error -> ()
   | Error error ->
-      Alcotest.failf "unexpected upload error: %a" Awskit.Error.pp error
-  | Ok () -> Alcotest.fail "expected stream upload error"
+      Alcotest.failf "unexpected request body error: %a" Awskit.Error.pp error
+  | Ok () -> Alcotest.fail "expected stream request body error"
 
-let expect_upload_body_error label result =
+let expect_request_body_error label result =
   match result with
   | Error (Awskit.Error.Body _) -> ()
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
-  | Ok _ -> Alcotest.failf "%s: expected upload body error" label
+  | Ok _ -> Alcotest.failf "%s: expected request body error" label
 
-let test_stream_upload_rejects_short_body () =
-  Upload_body_client.request_body := None;
-  let body =
-    UploadAws.Runtime.stream_body (stream_descriptor 4L) ~write:(fun writer ->
-        UploadAws.Runtime.write_string writer "ab")
+let read_early_response_body body =
+  let bytes = Bytes.create 16 in
+  EarlyResponseAws.Runtime.Response_body.with_reader body
+    ~consume:(fun reader ->
+      let buffer = Buffer.create 128 in
+      let rec loop () =
+        Lwt.bind
+          (EarlyResponseAws.Runtime.Response_body.read reader bytes ~off:0
+             ~len:(Bytes.length bytes))
+          (function
+            | Error _ as error -> Lwt.return error
+            | Ok 0 -> Lwt.return_ok (Buffer.contents buffer)
+            | Ok n ->
+                Buffer.add_subbytes buffer bytes ~pos:0 ~len:n;
+                loop ())
+      in
+      loop ())
+
+let rec wait_until ?(attempts = 20) condition =
+  if condition () then Lwt.return true
+  else if attempts <= 0 then Lwt.return false
+  else
+    Lwt.bind (Lwt.pause ()) (fun () ->
+        wait_until ~attempts:(attempts - 1) condition)
+
+let test_stream_request_body_early_response_preserves_body () =
+  let error_body =
+    "<Error><Code>AccessDenied</Code><Message>denied</Message></Error>"
   in
-  Lwt_main.run
-    (UploadAws.Runtime.with_response (upload_conn ()) upload_request body
-       ~f:(fun _ body -> UploadAws.Runtime.discard_download_body body))
-  |> expect_upload_body_error "short upload body"
-
-let test_stream_upload_rejects_long_body () =
-  Upload_body_client.request_body := None;
+  Early_response_client.response_body := error_body;
+  let producer_started = ref false in
+  let producer_finalized = ref false in
   let body =
-    UploadAws.Runtime.stream_body (stream_descriptor 4L) ~write:(fun writer ->
-        Lwt.bind (UploadAws.Runtime.write_string writer "abcd") (function
+    EarlyResponseAws.Runtime.Request_body.of_stream (stream_descriptor 1024L)
+      ~write:(fun writer ->
+        producer_started := true;
+        Lwt.bind
+          (EarlyResponseAws.Runtime.Request_body.write_string writer "ab")
+          (function
           | Error _ as error -> Lwt.return error
-          | Ok () -> UploadAws.Runtime.write_string writer "e"))
+          | Ok () ->
+              Lwt.finalize
+                (fun () -> Lwt_unix.sleep 60.0)
+                (fun () ->
+                  producer_finalized := true;
+                  Lwt.return_unit)
+              |> Lwt.map (fun () -> Ok ())))
+  in
+  let outcome =
+    Lwt_main.run
+      (Lwt.catch
+         (fun () ->
+           Lwt_unix.with_timeout 0.5 (fun () ->
+               Lwt.bind
+                 (EarlyResponseAws.Runtime.with_response
+                    (early_response_conn ()) request_body_request body
+                    ~f:(fun response response_body ->
+                      Lwt.bind (read_early_response_body response_body)
+                        (function
+                        | Error _ as error -> Lwt.return error
+                        | Ok body -> Lwt.return_ok (response, body))))
+                 (fun result ->
+                   Lwt.bind
+                     (wait_until (fun () -> !producer_finalized))
+                     (fun producer_finalized ->
+                       Lwt.return (`Result (result, producer_finalized))))))
+         (function
+           | Lwt_unix.Timeout -> Lwt.return `Timeout | exn -> Lwt.fail exn))
+  in
+  Alcotest.(check bool) "producer started" true !producer_started;
+  match outcome with
+  | `Timeout ->
+      Alcotest.fail
+        "Runtime.with_response did not return after early service response"
+  | `Result (Error error, _) ->
+      Alcotest.failf "unexpected runtime error: %a" Awskit.Error.pp error
+  | `Result (Ok (response, body), producer_finalized) ->
+      Alcotest.(check int) "status" 403 (Awskit.Response.status response);
+      Alcotest.(check string) "error body" error_body body;
+      Alcotest.(check bool) "producer finalized" true producer_finalized
+
+let test_stream_request_body_backpressure_limits_read_ahead () =
+  Backpressure_client.produced_chunks := 0;
+  Backpressure_client.observed_before_consumption := None;
+  let chunk = "aa" in
+  let chunk_count = 32 in
+  let body =
+    BackpressureAws.Runtime.Request_body.of_stream
+      (stream_descriptor (Int64.of_int (chunk_count * String.length chunk)))
+      ~write:(fun writer ->
+        let rec loop remaining =
+          if remaining = 0 then Lwt.return_ok ()
+          else
+            Lwt.bind
+              (BackpressureAws.Runtime.Request_body.write_string writer chunk)
+              (function
+              | Error _ as error -> Lwt.return error
+              | Ok () ->
+                  Int.incr Backpressure_client.produced_chunks;
+                  loop (remaining - 1))
+        in
+        loop chunk_count)
+  in
+  (match
+     Lwt_main.run
+       (BackpressureAws.Runtime.with_response (backpressure_conn ())
+          request_body_request body ~f:(fun _ body ->
+            BackpressureAws.Runtime.Response_body.discard body))
+   with
+  | Error error ->
+      Alcotest.failf "unexpected request body error: %a" Awskit.Error.pp error
+  | Ok () -> ());
+  Alcotest.(check int)
+    "all chunks produced" chunk_count
+    !Backpressure_client.produced_chunks;
+  match !Backpressure_client.observed_before_consumption with
+  | None -> Alcotest.fail "client did not observe producer progress"
+  | Some produced ->
+      Alcotest.(check bool)
+        "bounded request body read ahead" true (produced <= 16)
+
+let test_stream_request_body_rejects_short_body () =
+  Request_body_client.request_body := None;
+  let body =
+    RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
+      ~write:(fun writer ->
+        RequestAws.Runtime.Request_body.write_string writer "ab")
   in
   Lwt_main.run
-    (UploadAws.Runtime.with_response (upload_conn ()) upload_request body
-       ~f:(fun _ body -> UploadAws.Runtime.discard_download_body body))
-  |> expect_upload_body_error "long upload body"
+    (RequestAws.Runtime.with_response (request_conn ()) request_body_request
+       body ~f:(fun _ body -> RequestAws.Runtime.Response_body.discard body))
+  |> expect_request_body_error "short request body"
 
-let limited_conn ~max_response_body_bytes =
+let test_stream_request_body_rejects_long_body () =
+  Request_body_client.request_body := None;
+  let body =
+    RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
+      ~write:(fun writer ->
+        Lwt.bind (RequestAws.Runtime.Request_body.write_string writer "abcd")
+          (function
+          | Error _ as error -> Lwt.return error
+          | Ok () -> RequestAws.Runtime.Request_body.write_string writer "e"))
+  in
+  Lwt_main.run
+    (RequestAws.Runtime.with_response (request_conn ()) request_body_request
+       body ~f:(fun _ body -> RequestAws.Runtime.Response_body.discard body))
+  |> expect_request_body_error "long request body"
+
+let limited_conn ~max_response_drain_bytes =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let region = Awskit.Region.of_string_exn "us-east-1" in
   LimitedAws.create ~region ~credentials
     ~clock:(fun () -> Ptime.epoch)
-    ~max_response_body_bytes ()
+    ~max_response_drain_bytes ()
 
 let limited_request =
   let target =
@@ -234,12 +467,12 @@ let limited_request =
   in
   Awskit.Request.create_exn ~method_:`GET ~target ()
 
-let with_limited_response ~max_response_body_bytes body ~f =
+let with_limited_response ~max_response_drain_bytes body ~f =
   Limited_body_client.response_body := body;
-  let conn = limited_conn ~max_response_body_bytes in
+  let conn = limited_conn ~max_response_drain_bytes in
   Lwt_main.run
     (LimitedAws.Runtime.with_response conn limited_request
-       LimitedAws.Runtime.empty_body ~f:(fun _ body -> f body))
+       LimitedAws.Runtime.Request_body.empty ~f:(fun _ body -> f body))
 
 let expect_body_limit label expected = function
   | Error (Awskit.Error.Body { limit = Some limit; _ }) ->
@@ -248,14 +481,14 @@ let expect_body_limit label expected = function
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected body limit error" label
 
-let test_discard_download_body_enforces_limit () =
-  with_limited_response ~max_response_body_bytes:3 "abcdef"
-    ~f:LimitedAws.Runtime.discard_download_body
+let test_discard_response_body_enforces_limit () =
+  with_limited_response ~max_response_drain_bytes:3 "abcdef"
+    ~f:LimitedAws.Runtime.Response_body.discard
   |> expect_body_limit "discard limit" 3L
 
-let test_with_download_body_drain_enforces_limit () =
-  with_limited_response ~max_response_body_bytes:3 "abcdef" ~f:(fun body ->
-      LimitedAws.Runtime.with_download_body body ~consume:(fun _ ->
+let test_with_response_body_drain_enforces_limit () =
+  with_limited_response ~max_response_drain_bytes:3 "abcdef" ~f:(fun body ->
+      LimitedAws.Runtime.Response_body.with_reader body ~consume:(fun _ ->
           Lwt.return_ok ()))
   |> expect_body_limit "scoped drain limit" 3L
 
@@ -266,17 +499,21 @@ let suite =
         Alcotest.test_case "roundtrip" `Quick test_connection_roundtrip;
         Alcotest.test_case "defaults" `Quick test_connection_defaults;
         Alcotest.test_case "runtime bodies" `Quick test_runtime_bodies;
-        Alcotest.test_case "stream upload reaches client" `Quick
-          test_stream_upload_body_reaches_client;
-        Alcotest.test_case "stream upload error propagates" `Quick
-          test_stream_upload_error_propagates;
-        Alcotest.test_case "stream upload rejects short body" `Quick
-          test_stream_upload_rejects_short_body;
-        Alcotest.test_case "stream upload rejects long body" `Quick
-          test_stream_upload_rejects_long_body;
+        Alcotest.test_case "stream request body reaches client" `Quick
+          test_stream_request_body_reaches_client;
+        Alcotest.test_case "stream request body error propagates" `Quick
+          test_stream_request_body_error_propagates;
+        Alcotest.test_case "stream request body early response preserves body"
+          `Quick test_stream_request_body_early_response_preserves_body;
+        Alcotest.test_case "stream request body backpressure limits read ahead"
+          `Quick test_stream_request_body_backpressure_limits_read_ahead;
+        Alcotest.test_case "stream request body rejects short body" `Quick
+          test_stream_request_body_rejects_short_body;
+        Alcotest.test_case "stream request body rejects long body" `Quick
+          test_stream_request_body_rejects_long_body;
         Alcotest.test_case "discard body limit" `Quick
-          test_discard_download_body_enforces_limit;
+          test_discard_response_body_enforces_limit;
         Alcotest.test_case "scoped drain body limit" `Quick
-          test_with_download_body_drain_enforces_limit;
+          test_with_response_body_drain_enforces_limit;
       ] );
   ]

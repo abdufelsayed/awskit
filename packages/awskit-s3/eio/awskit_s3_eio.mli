@@ -27,62 +27,83 @@ module Object : sig
     Awskit_s3.OBJECT
       with type connection := t
        and type 'a io := 'a
-       and type upload_body := Runtime.upload_body
-       and type download_reader := Runtime.download_reader
+       and type request_body := Runtime.request_body
+       and type response_body_reader := Runtime.response_body_reader
 
   module Transfer : sig
-    val upload_from_path :
+    val put_file :
       t ->
       bucket:string ->
       key:string ->
-      ?options:Awskit_s3.Object.Put.options ->
+      ?options:Awskit_s3.Put_object.options ->
       ?on_progress:(int64 -> unit) ->
       path:_ Eio.Path.t ->
       unit ->
-      (Awskit_s3.Object.Put.result, Awskit_s3.Error.t) result
+      (Awskit_s3.Put_object.result, Awskit_s3.Error.t) result
     (** Stream a local file to S3. [on_progress], when provided, receives the
         cumulative number of bytes written to the request body. *)
 
-    val upload_multipart_from_path :
+    val get_file :
       t ->
       bucket:string ->
       key:string ->
-      ?options:Awskit_s3.Multipart.Managed.options ->
-      ?concurrency:int ->
+      ?options:Awskit_s3.Get_object.options ->
       ?on_progress:(int64 -> unit) ->
       path:_ Eio.Path.t ->
       unit ->
-      (Awskit_s3.Multipart.Managed.result, Awskit_s3.Error.t) result
-    (** Upload a local file with S3 multipart upload. [concurrency] defaults to
-        [4]. The helper aborts the multipart upload when a fresh upload fails.
-    *)
+      (Awskit_s3.Get_object.result, Awskit_s3.Error.t) result
+    (** Stream an S3 object to a local file. [on_progress], when provided,
+        receives the cumulative number of bytes written to disk. *)
 
-    val resume_multipart_upload_from_path :
+    val upload_file :
+      t ->
+      bucket:string ->
+      key:string ->
+      ?options:Awskit_s3.Transfer.upload_options ->
+      ?on_progress:(int64 -> unit) ->
+      path:_ Eio.Path.t ->
+      unit ->
+      (Awskit_s3.Transfer.upload_result, Awskit_s3.Error.t) result
+    (** Upload a local file, using [PutObject] below the multipart threshold and
+        multipart upload at or above it. *)
+
+    val download_file :
+      t ->
+      bucket:string ->
+      key:string ->
+      ?options:Awskit_s3.Transfer.download_options ->
+      ?on_progress:(int64 -> unit) ->
+      path:_ Eio.Path.t ->
+      unit ->
+      (Awskit_s3.Transfer.download_result, Awskit_s3.Error.t) result
+    (** Download an object to a local file, using ranged [GetObject] requests at
+        or above the multipart threshold. *)
+
+    val multipart_upload_file :
+      t ->
+      bucket:string ->
+      key:string ->
+      ?options:Awskit_s3.Transfer.upload_options ->
+      ?on_progress:(int64 -> unit) ->
+      path:_ Eio.Path.t ->
+      unit ->
+      (Awskit_s3.Transfer.multipart_upload_result, Awskit_s3.Error.t) result
+    (** Upload a local file with S3 multipart upload. The helper aborts the
+        multipart upload when a fresh upload fails. *)
+
+    val resume_multipart_upload_file :
       t ->
       bucket:string ->
       key:string ->
       upload_id:Awskit_s3.Multipart.Upload_id.t ->
-      ?options:Awskit_s3.Multipart.Managed.options ->
-      ?concurrency:int ->
+      ?options:Awskit_s3.Transfer.upload_options ->
       ?on_progress:(int64 -> unit) ->
       path:_ Eio.Path.t ->
       unit ->
-      (Awskit_s3.Multipart.Managed.result, Awskit_s3.Error.t) result
+      (Awskit_s3.Transfer.multipart_upload_result, Awskit_s3.Error.t) result
     (** Resume an existing multipart upload by listing uploaded parts, skipping
         matching part numbers and sizes, uploading missing parts, and completing
         the upload. Existing uploads are not aborted on failure. *)
-
-    val download_to_path :
-      t ->
-      bucket:string ->
-      key:string ->
-      ?options:Awskit_s3.Object.Get.options ->
-      ?on_progress:(int64 -> unit) ->
-      path:_ Eio.Path.t ->
-      unit ->
-      (Awskit_s3.Object.Get.info, Awskit_s3.Error.t) result
-    (** Stream an S3 object to a local file. [on_progress], when provided,
-        receives the cumulative number of bytes written to disk. *)
   end
 end
 
@@ -92,7 +113,7 @@ module Multipart :
   Awskit_s3.MULTIPART
     with type connection := t
      and type 'a io := 'a
-     and type upload_body := Runtime.upload_body
+     and type request_body := Runtime.request_body
 
 module Presigned :
   Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a

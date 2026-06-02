@@ -347,7 +347,7 @@ module Credentials = struct
 end
 
 let create ?ctx ?endpoint ?region ?credentials ?(clock = Ptime_clock.now)
-    ?retry_policy ?max_response_body_bytes ?imdsv1_fallback () =
+    ?retry_policy ?max_response_drain_bytes ?imdsv1_fallback () =
   match
     ( (match region with
       | Some region -> Awskit.Region.of_string region
@@ -362,5 +362,5 @@ let create ?ctx ?endpoint ?region ?credentials ?(clock = Ptime_clock.now)
       Ok
         (Strict.create_with_credentials_provider ?ctx ?endpoint ~region
            ~credentials_provider ~clock ?retry_policy ~sleep
-           ?max_response_body_bytes ())
+           ?max_response_drain_bytes ())
   | Error error, _ | _, Error error -> Error error

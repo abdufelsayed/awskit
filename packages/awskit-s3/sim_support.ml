@@ -24,7 +24,7 @@ type stored_object = {
   mutable metadata : Metadata.t;
   mutable storage_class : Storage_class.t option;
   mutable tags : Tag.t list;
-  mutable checksum : Object.Checksum.response option;
+  mutable checksum : Object.Checksum.response;
   mutable last_modified : Ptime.t;
 }
 
@@ -41,7 +41,7 @@ type stored_part = {
   part_number : int;
   body : string;
   etag : Object.Etag.t;
-  checksum : Object.Checksum.response option;
+  checksum : Object.Checksum.response;
   last_modified : Ptime.t;
 }
 
@@ -51,7 +51,8 @@ type multipart_upload = {
   metadata : Metadata.t;
   storage_class : Storage_class.t option;
   tags : Tag.t list;
-  checksum_request : Object.Checksum.request option;
+  checksum_algorithm : Object.Checksum.Algorithm.t option;
+  checksum_type : Object.Checksum.Type.t option;
   parts : (int, stored_part) Hashtbl.t;
   created_at : Ptime.t;
 }
@@ -66,29 +67,25 @@ type bucket_state = {
   mutable versioning : Bucket.Versioning.Status.t option;
   mutable encryption : Bucket.Encryption.config option;
   mutable cors : Bucket.Cors.config option;
-  mutable website : Bucket.Website.config option;
   mutable public_access_block : Bucket.Public_access_block.config option;
   mutable ownership_controls : Bucket.Ownership_controls.config option;
-  mutable request_payment : Bucket.Request_payment.Payer.t option;
-  mutable accelerate : Bucket.Accelerate.Status.t option;
-  mutable logging : Bucket.Logging.config;
 }
 
-type op_record = {
+type operation_record = {
   op :
-    [ `Put
-    | `Get
-    | `Head
-    | `Delete
-    | `List
-    | `List_versions
-    | `Copy
-    | `Delete_many
-    | `Multipart_create
-    | `Multipart_upload_part
-    | `Multipart_complete
-    | `Multipart_abort
-    | `Multipart_list_parts ];
+    [ `Put_object
+    | `Get_object
+    | `Head_object
+    | `Delete_object
+    | `List_objects_v2
+    | `List_object_versions
+    | `Copy_object
+    | `Delete_objects
+    | `Create_multipart_upload
+    | `Upload_part
+    | `Complete_multipart_upload
+    | `Abort_multipart_upload
+    | `List_parts ];
   bucket : string;
   key : string option;
   timestamp : Ptime.t;
@@ -99,7 +96,7 @@ type store = {
   config : config;
   clock : Clock.t;
   buckets : (string, bucket_state) Hashtbl.t;
-  mutable history : op_record list;
+  mutable history : operation_record list;
   mutable next_upload_id : int;
   mutable next_version_id : int;
 }
@@ -115,17 +112,17 @@ let create_store ?(config = default_config) ~clock () =
   }
 
 type fault = Slow_down | Internal_error | Connection_reset | Response_lost
-type buggify = { random : Random.State.t; prob : float }
+type random_faults = { random : Random.State.t; prob : float }
 
 type t = {
   store : store;
   credentials : Awskit.Credentials.t;
   mutable faults : fault list;
-  mutable buggify : buggify option;
+  mutable random_faults : random_faults option;
 }
 
 let connect store ~credentials =
-  { store; credentials; faults = []; buggify = None }
+  { store; credentials; faults = []; random_faults = None }
 
 let store t = t.store
 let now t = Clock.now t.store.clock
@@ -170,11 +167,11 @@ let take_fault t =
       t.faults <- rest;
       Some fault
   | [] -> (
-      match t.buggify with
+      match t.random_faults with
       | None -> None
-      | Some buggify ->
-          if Random.State.float buggify.random 1.0 < buggify.prob then
-            Some Internal_error
+      | Some random_faults ->
+          if Random.State.float random_faults.random 1.0 < random_faults.prob
+          then Some Internal_error
           else None)
 
 let operation_fault t op bucket key =
@@ -402,22 +399,13 @@ let ensure_read_preconditions (obj : stored_object)
 let ensure_delete_preconditions (obj : stored_object)
     (p : Object.Preconditions.Delete.t) =
   match p.if_match with
-  | Some condition when not (etag_condition_matches obj condition) ->
-      Error (precondition_failed ())
-  | _ -> (
-      match p.if_match_last_modified_time with
-      | Some time when Ptime.compare obj.last_modified time <> 0 ->
-          Error (precondition_failed ())
-      | _ -> (
-          match p.if_match_size with
-          | Some size when Int64.compare (object_size obj) size <> 0 ->
-              Error (precondition_failed ())
-          | _ -> Ok ()))
+  | None -> Ok ()
+  | Some condition ->
+      if etag_condition_matches obj condition then Ok ()
+      else Error (precondition_failed ())
 
 let delete_preconditions_are_empty (p : Object.Preconditions.Delete.t) =
   Option.is_none p.if_match
-  && Option.is_none p.if_match_last_modified_time
-  && Option.is_none p.if_match_size
 
 let ensure_copy_source_preconditions (obj : stored_object)
     (p : Object.Preconditions.Copy_source.t) =
@@ -450,34 +438,60 @@ let require_multipart_upload t ~bucket ~key ~upload_id =
   | _ -> Error (no_such_upload ())
 
 let etag body = "\"" ^ Digestif.MD5.(digest_string body |> to_hex) ^ "\""
+let empty_checksum = Object.Checksum.empty_response
 
-let checksum_of_request ~body (request : Object.Checksum.request) =
-  let value =
-    match request.value with
-    | Some value -> Some value
-    | None -> (
-        match request.algorithm with
-        | `SHA1 ->
-            Some
-              (Digestif.SHA1.(digest_string body |> to_raw_string)
-              |> Base64.encode_exn)
-        | `SHA256 ->
-            Some
-              (Digestif.SHA256.(digest_string body |> to_raw_string)
-              |> Base64.encode_exn)
-        | `CRC32 | `CRC32C | `CRC64NVME -> None)
-  in
-  Option.map
-    (fun value -> { Object.Checksum.algorithm = request.algorithm; value })
-    value
+let checksum_response ?checksum_type values =
+  { Object.Checksum.values; checksum_type }
 
-let checksum_for_body ~body request =
-  Option.bind request (checksum_of_request ~body)
+let checksum_for_value = function
+  | None -> empty_checksum
+  | Some (value : Object.Checksum.value) -> checksum_response [ value ]
+
+let checksum_for_algorithm ~body = function
+  | None -> empty_checksum
+  | Some Object.Checksum.Algorithm.Sha1 ->
+      checksum_response
+        [
+          {
+            Object.Checksum.algorithm = Sha1;
+            value =
+              Digestif.SHA1.(digest_string body |> to_raw_string)
+              |> Base64.encode_exn;
+          };
+        ]
+  | Some Sha256 ->
+      checksum_response
+        [
+          {
+            Object.Checksum.algorithm = Sha256;
+            value =
+              Digestif.SHA256.(digest_string body |> to_raw_string)
+              |> Base64.encode_exn;
+          };
+        ]
+  | Some _ -> empty_checksum
+
+let checksum_summary (checksum : Object.Checksum.response) =
+  {
+    Object.Checksum.algorithms =
+      List.map
+        (fun (value : Object.Checksum.value) -> value.algorithm)
+        checksum.values;
+    checksum_type = checksum.checksum_type;
+  }
 
 let checksum_response_headers = function
-  | None -> []
-  | Some (checksum : Object.Checksum.response) ->
-      [ (checksum_header_name checksum.algorithm, checksum.value) ]
+  | { Object.Checksum.values = []; checksum_type = None } -> []
+  | checksum ->
+      let value_headers =
+        checksum.values
+        |> List.filter_map (fun (value : Object.Checksum.value) ->
+            Option.map
+              (fun name -> (name, value.value))
+              (checksum_header_name value.algorithm))
+      in
+      let type_headers = checksum_type_header checksum.checksum_type in
+      value_headers @ type_headers
 
 let next_upload_id t =
   let id = t.store.next_upload_id in
@@ -491,20 +505,20 @@ module Runtime = struct
   let return x = x
   let bind x f = f x
 
-  type upload_body = {
-    descriptor : Awskit.Body.Upload.descriptor;
+  type request_body = {
+    descriptor : Awskit.Body.Request.descriptor;
     body : (string, Awskit.Error.t) result;
   }
 
-  type download_body = { body : string; read_fault : Awskit.Error.t option }
+  type response_body = { body : string; read_fault : Awskit.Error.t option }
 
-  type upload_writer = {
+  type request_body_writer = {
     buffer : Buffer.t;
     remaining : int64 option ref;
     mutable write_error : Awskit.Error.t option;
   }
 
-  type download_reader = {
+  type response_body_reader = {
     body : string;
     mutable offset : int;
     mutable read_fault : Awskit.Error.t option;
@@ -520,24 +534,25 @@ module Runtime = struct
 
   let descriptor_for_string body =
     {
-      Awskit.Body.Upload.content_length =
+      Awskit.Body.Request.content_length =
         Some (Int64.of_int (String.length body));
       payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
       replayable = true;
     }
 
-  let empty_body = { descriptor = descriptor_for_string ""; body = Ok "" }
+  let empty_request_body =
+    { descriptor = descriptor_for_string ""; body = Ok "" }
 
-  let string_body value =
+  let string_request_body value =
     { descriptor = descriptor_for_string value; body = Ok value }
 
-  let bytes_body value = string_body (Bytes.to_string value)
+  let bytes_request_body value = string_request_body (Bytes.to_string value)
   let body_error message = Awskit.Error.body message
 
   let writer_for descriptor =
     {
       buffer = Buffer.create 1024;
-      remaining = ref descriptor.Awskit.Body.Upload.content_length;
+      remaining = ref descriptor.Awskit.Body.Request.content_length;
       write_error = None;
     }
 
@@ -547,7 +562,7 @@ module Runtime = struct
     | Some remaining ->
         let length = Int64.of_int (String.length value) in
         if Stdlib.Int64.compare length remaining > 0 then
-          Error (body_error "upload body exceeded declared content_length")
+          Error (body_error "request body exceeded declared content_length")
         else (
           writer.remaining := Some (Stdlib.Int64.sub remaining length);
           Ok ())
@@ -560,9 +575,9 @@ module Runtime = struct
         | None | Some 0L -> Ok (Buffer.contents writer.buffer)
         | Some _ ->
             Error
-              (body_error "upload body ended before declared content_length"))
+              (body_error "request body ended before declared content_length"))
 
-  let stream_body descriptor ~write =
+  let stream_request_body descriptor ~write =
     let writer = writer_for descriptor in
     let body =
       match write writer with
@@ -571,10 +586,10 @@ module Runtime = struct
     in
     { descriptor; body }
 
-  let upload_descriptor (body : upload_body) = body.descriptor
-  let upload_body_result (body : upload_body) = body.body
+  let request_body_descriptor (body : request_body) = body.descriptor
+  let request_body_result (body : request_body) = body.body
 
-  let write_string writer value =
+  let write_request_body_string writer value =
     match writer.write_error with
     | Some error -> Error error
     | None -> (
@@ -586,7 +601,7 @@ module Runtime = struct
             Buffer.add_string writer.buffer value;
             Ok ())
 
-  let read (reader : download_reader) bytes ~off ~len =
+  let read_response_body (reader : response_body_reader) bytes ~off ~len =
     match reader.read_fault with
     | Some error ->
         reader.read_fault <- None;
@@ -602,16 +617,18 @@ module Runtime = struct
             reader.offset <- reader.offset + copied;
             Ok copied
 
-  let download_body ?read_fault body : download_body = { body; read_fault }
+  let response_body ?read_fault body : response_body = { body; read_fault }
 
   let rec discard_reader reader =
     let buffer = Bytes.create 8192 in
-    match read reader buffer ~off:0 ~len:(Bytes.length buffer) with
+    match
+      read_response_body reader buffer ~off:0 ~len:(Bytes.length buffer)
+    with
     | Error _ as error -> error
     | Ok 0 -> Ok ()
     | Ok _ -> discard_reader reader
 
-  let with_download_body (body : download_body) ~consume =
+  let with_response_body (body : response_body) ~consume =
     let reader =
       { body = body.body; offset = 0; read_fault = body.read_fault }
     in
@@ -625,22 +642,37 @@ module Runtime = struct
         | Ok () -> error
         | Error _ as drain_error -> drain_error)
 
-  let discard_download_body body =
-    with_download_body body ~consume:(fun reader -> discard_reader reader)
+  let discard_response_body body =
+    with_response_body body ~consume:(fun reader -> discard_reader reader)
+
+  module Request_body = struct
+    let empty = empty_request_body
+    let of_string = string_request_body
+    let of_bytes = bytes_request_body
+    let of_stream = stream_request_body
+    let descriptor = request_body_descriptor
+    let write_string = write_request_body_string
+  end
+
+  module Response_body = struct
+    let read = read_response_body
+    let with_reader = with_response_body
+    let discard = discard_response_body
+  end
 
   let with_response _ _ _ ~f:_ =
     Error
       (Awskit.Error.transport ~retryable:false
-         "Sim.Runtime.with_response is not an HTTP transport")
+         "Simulator.Runtime.with_response is not an HTTP transport")
 end
 
-type object_meta = {
+type object_metadata = {
   etag : Object.Etag.t option;
   size : int64 option;
   last_modified : Ptime.t option;
 }
 
-let object_meta store ~bucket ~key =
+let object_metadata store ~bucket ~key =
   match bucket_state store bucket with
   | None -> None
   | Some bucket -> (
@@ -669,7 +701,7 @@ let keys store ~bucket =
 let history store = List.rev store.history
 let clear_history store = store.history <- []
 
-let dump_strings store ~bucket =
+let objects_as_strings store ~bucket =
   match bucket_state store bucket with
   | None -> []
   | Some (bucket : bucket_state) ->
@@ -684,14 +716,14 @@ let inject_fault t fault = t.faults <- t.faults @ [ fault ]
 let inject_faults t faults = t.faults <- t.faults @ faults
 let clear_faults t = t.faults <- []
 
-let enable_buggify t ~seed ~prob =
-  t.buggify <- Some { random = Random.State.make [| seed |]; prob }
+let enable_random_faults t ~seed ~prob =
+  t.random_faults <- Some { random = Random.State.make [| seed |]; prob }
 
-let disable_buggify t = t.buggify <- None
+let disable_random_faults t = t.random_faults <- None
 
 let info_of_object ?content_length response (obj : stored_object) =
   {
-    Object.Get.etag = Some obj.etag;
+    Get_object.etag = Some obj.etag;
     content_type = obj.content_type;
     content_length =
       Some
@@ -703,5 +735,5 @@ let info_of_object ?content_length response (obj : stored_object) =
     version_id = obj.version_id;
     checksum = obj.checksum;
     server_side_encryption = None;
-    request = response;
+    response;
   }

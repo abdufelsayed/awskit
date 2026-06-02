@@ -13,20 +13,101 @@ let ok_or_fail label = function
 
 let header name headers = List.assoc_opt name headers
 
-let checksum_value = function
-  | None -> None
-  | Some (checksum : Object.Checksum.response) -> Some checksum.value
+let string_contains ~substring value =
+  let substring_length = String.length substring in
+  let value_length = String.length value in
+  let rec loop index =
+    index + substring_length <= value_length
+    && (String.sub value index substring_length = substring || loop (index + 1))
+  in
+  substring_length = 0 || loop 0
+
+let checksum_value (checksum : Object.Checksum.response) =
+  match checksum.values with
+  | [] -> None
+  | (value : Object.Checksum.value) :: _ -> Some value.value
 
 let version_string = Option.map Object.Version_id.to_string
 let query_param name url = Uri.query (Uri.of_string url) |> List.assoc_opt name
 
-let check_checksum label algorithm value = function
+let signed_headers_or_fail url =
+  match query_param "X-Amz-SignedHeaders" url with
+  | Some [ value ] -> String.split_on_char ';' value
+  | _ -> Alcotest.fail "missing signed headers"
+
+let check_checksum label algorithm value (checksum : Object.Checksum.response) =
+  match
+    List.find_opt
+      (fun (actual : Object.Checksum.value) -> actual.algorithm = algorithm)
+      checksum.values
+  with
   | None -> Alcotest.failf "%s: expected checksum" label
-  | Some (checksum : Object.Checksum.response) ->
+  | Some actual ->
       Alcotest.(check bool)
         (label ^ " algorithm") true
-        (checksum.algorithm = algorithm);
-      Alcotest.(check string) (label ^ " value") value checksum.value
+        (actual.algorithm = algorithm);
+      Alcotest.(check string) (label ^ " value") value actual.value
+
+let test_operation_data_module_names () =
+  ignore (Put_object.default_options : Put_object.options);
+  ignore (Get_object.default_options : Get_object.options);
+  ignore (Head_object.default_options : Head_object.options);
+  ignore (Delete_object.default_options : Delete_object.options);
+  let delete_object : Delete_objects.object_ =
+    { key = "file.txt"; version_id = None; etag = None }
+  in
+  ignore (delete_object : Delete_objects.object_);
+  ignore (None : Get_object.result option);
+  ignore (Copy_object.default_options : Copy_object.options);
+  ignore (List_objects_v2.default_options : List_objects_v2.options);
+  let listed_object : List_objects_v2.object_summary =
+    {
+      key = "file.txt";
+      size = Some 1L;
+      etag = None;
+      last_modified = None;
+      storage_class = None;
+      checksum = { Object.Checksum.algorithms = []; checksum_type = None };
+    }
+  in
+  ignore (listed_object : List_objects_v2.object_summary);
+  ignore (List_object_versions.default_options : List_object_versions.options);
+  ignore (Create_bucket.default_options : Create_bucket.options);
+  ignore (None : Delete_bucket.result option);
+  ignore (None : Head_bucket.result option);
+  ignore (None : List_buckets.result option);
+  ignore (None : Get_bucket_location.result option);
+  ignore
+    (Create_multipart_upload.default_options : Create_multipart_upload.options);
+  ignore (Upload_part.default_options : Upload_part.options);
+  ignore
+    (Transfer.default_upload_options.create_options
+      : Create_multipart_upload.options);
+  ignore
+    (Transfer.default_upload_options.upload_part_options : Upload_part.options);
+  ignore
+    (Transfer.default_upload_options.list_parts_options : List_parts.options);
+  ignore (Transfer.default_download_options.get_options : Get_object.options);
+  ignore (None : Transfer.upload_result option);
+  ignore (None : Transfer.download_result option);
+  Alcotest.(check int64)
+    "default upload threshold"
+    (Int64.of_int Transfer.default_part_size)
+    Transfer.default_multipart_threshold;
+  Alcotest.(check bool)
+    "put strategy" true
+    (Transfer.upload_strategy
+       (Transfer.Put
+          {
+            etag = None;
+            version_id = None;
+            checksum = { Object.Checksum.values = []; checksum_type = None };
+            response = Awskit.Response.create_exn ~status:200 ();
+          })
+    = `Put);
+  ignore (None : Complete_multipart_upload.result option);
+  ignore (None : Abort_multipart_upload.result option);
+  ignore (List_parts.default_options : List_parts.options)
 
 let test_endpoint_resolution () =
   let result =
@@ -147,8 +228,11 @@ let test_presigned_result () =
        result.url)
 
 let test_presigned_put_checksum_headers () =
-  let checksum : Object.Checksum.request =
-    { Object.Checksum.algorithm = `SHA1; value = Some "provided-sha1" }
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha1;
+      value = "provided-sha1";
+    }
   in
   let options =
     { Presigned.Put_object.default_options with checksum = Some checksum }
@@ -161,27 +245,117 @@ let test_presigned_put_checksum_headers () =
     |> ok_or_fail "presigned put"
   in
   Alcotest.(check (option string))
-    "checksum algorithm header" (Some "SHA1")
-    (header "x-amz-checksum-algorithm" result.headers);
-  Alcotest.(check (option string))
     "checksum value header" (Some "provided-sha1")
-    (header "x-amz-checksum-sha1" result.headers);
-  let signed_headers =
-    match query_param "X-Amz-SignedHeaders" result.url with
-    | Some [ value ] -> String.split_on_char ';' value
-    | _ -> Alcotest.fail "missing signed headers"
-  in
-  Alcotest.(check bool)
-    "signed checksum algorithm" true
-    (List.mem "x-amz-checksum-algorithm" signed_headers);
+    (header "x-amz-checksum-sha1" result.signed_headers);
+  Alcotest.(check (option string))
+    "no checksum algorithm header" None
+    (header "x-amz-checksum-algorithm" result.signed_headers);
+  let signed_headers = signed_headers_or_fail result.url in
   Alcotest.(check bool)
     "signed checksum value" true
     (List.mem "x-amz-checksum-sha1" signed_headers)
 
+let test_presigned_expected_bucket_owner_headers () =
+  let owner = "123456789012" in
+  let get_options =
+    {
+      Presigned.Get_object.default_options with
+      expected_bucket_owner = Some owner;
+    }
+  in
+  let get =
+    Presigned.get_object
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+      ~options:get_options ()
+    |> ok_or_fail "presigned get expected owner"
+  in
+  Alcotest.(check (option string))
+    "get expected owner header" (Some owner)
+    (header "x-amz-expected-bucket-owner" get.signed_headers);
+  Alcotest.(check bool)
+    "get signed expected owner" true
+    (List.mem "x-amz-expected-bucket-owner" (signed_headers_or_fail get.url));
+  let head =
+    Presigned.head_object
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+      ~options:get_options ()
+    |> ok_or_fail "presigned head expected owner"
+  in
+  Alcotest.(check (option string))
+    "head expected owner header" (Some owner)
+    (header "x-amz-expected-bucket-owner" head.signed_headers);
+  Alcotest.(check bool)
+    "head signed expected owner" true
+    (List.mem "x-amz-expected-bucket-owner" (signed_headers_or_fail head.url));
+  let put_options =
+    {
+      Presigned.Put_object.default_options with
+      expected_bucket_owner = Some owner;
+    }
+  in
+  let put =
+    Presigned.put_object
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+      ~options:put_options ()
+    |> ok_or_fail "presigned put expected owner"
+  in
+  Alcotest.(check (option string))
+    "put expected owner header" (Some owner)
+    (header "x-amz-expected-bucket-owner" put.signed_headers);
+  Alcotest.(check bool)
+    "put signed expected owner" true
+    (List.mem "x-amz-expected-bucket-owner" (signed_headers_or_fail put.url));
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let upload_part_options =
+    {
+      Presigned.Upload_part.default_options with
+      expected_bucket_owner = Some owner;
+    }
+  in
+  let upload_part =
+    Presigned.upload_part
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"large.bin"
+      ~upload_id ~part_number:1 ~options:upload_part_options ()
+    |> ok_or_fail "presigned upload-part expected owner"
+  in
+  Alcotest.(check (option string))
+    "upload-part expected owner header" (Some owner)
+    (header "x-amz-expected-bucket-owner" upload_part.signed_headers);
+  Alcotest.(check bool)
+    "upload-part signed expected owner" true
+    (List.mem "x-amz-expected-bucket-owner"
+       (signed_headers_or_fail upload_part.url));
+  let delete_options =
+    {
+      Presigned.Delete_object.default_options with
+      expected_bucket_owner = Some owner;
+    }
+  in
+  let delete =
+    Presigned.delete_object
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+      ~options:delete_options ()
+    |> ok_or_fail "presigned delete expected owner"
+  in
+  Alcotest.(check (option string))
+    "delete expected owner header" (Some owner)
+    (header "x-amz-expected-bucket-owner" delete.signed_headers);
+  Alcotest.(check bool)
+    "delete signed expected owner" true
+    (List.mem "x-amz-expected-bucket-owner" (signed_headers_or_fail delete.url))
+
 let test_presigned_upload_part () =
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
-  let checksum : Object.Checksum.request =
-    { Object.Checksum.algorithm = `SHA256; value = Some "provided-sha256" }
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
+      value = "provided-sha256";
+    }
   in
   let options =
     { Presigned.Upload_part.default_options with checksum = Some checksum }
@@ -204,19 +378,12 @@ let test_presigned_upload_part () =
     "upload id" (Some [ "upload-1" ])
     (query_param "uploadId" result.url);
   Alcotest.(check (option string))
-    "checksum algorithm header" (Some "SHA256")
-    (header "x-amz-checksum-algorithm" result.headers);
-  Alcotest.(check (option string))
     "checksum value header" (Some "provided-sha256")
-    (header "x-amz-checksum-sha256" result.headers);
-  let signed_headers =
-    match query_param "X-Amz-SignedHeaders" result.url with
-    | Some [ value ] -> String.split_on_char ';' value
-    | _ -> Alcotest.fail "missing signed headers"
-  in
-  Alcotest.(check bool)
-    "signed checksum algorithm" true
-    (List.mem "x-amz-checksum-algorithm" signed_headers);
+    (header "x-amz-checksum-sha256" result.signed_headers);
+  Alcotest.(check (option string))
+    "no checksum algorithm header" None
+    (header "x-amz-checksum-algorithm" result.signed_headers);
+  let signed_headers = signed_headers_or_fail result.url in
   Alcotest.(check bool)
     "signed checksum value" true
     (List.mem "x-amz-checksum-sha256" signed_headers);
@@ -233,7 +400,7 @@ let test_presigned_rejects_header_newline () =
   let options =
     {
       Presigned.Put_object.default_options with
-      headers = [ ("x-test", "ok\r\nInjected: yes") ];
+      extra_signed_headers = [ ("x-test", "ok\r\nInjected: yes") ];
     }
   in
   match
@@ -246,6 +413,42 @@ let test_presigned_rejects_header_newline () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected header validation error"
 
+let test_presigned_rejects_unknown_checksum () =
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Unknown "FUTURE";
+      value = "value";
+    }
+  in
+  let put_options =
+    { Presigned.Put_object.default_options with checksum = Some checksum }
+  in
+  (match
+     Presigned.put_object
+       ~region:(Region.of_string_exn "us-east-1")
+       ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
+       ~options:put_options ()
+   with
+  | Error (Awskit.Error.Validation { field = Some "checksum_algorithm"; _ }) ->
+      ()
+  | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected presigned put checksum validation");
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let upload_part_options =
+    { Presigned.Upload_part.default_options with checksum = Some checksum }
+  in
+  match
+    Presigned.upload_part
+      ~region:(Region.of_string_exn "us-east-1")
+      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"large.bin"
+      ~upload_id ~part_number:1 ~options:upload_part_options ()
+  with
+  | Error (Awskit.Error.Validation { field = Some "checksum_algorithm"; _ }) ->
+      ()
+  | Error error ->
+      Alcotest.failf "unexpected upload part error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected presigned upload-part checksum validation"
+
 module Recording_runtime = struct
   type response = {
     status : int;
@@ -256,9 +459,9 @@ module Recording_runtime = struct
 
   type call = { request : Awskit.Request.t; body : string }
 
-  type upload_body = {
+  type request_body = {
     body : (string, Awskit.Error.t) result;
-    descriptor : Awskit.Body.Upload.descriptor;
+    descriptor : Awskit.Body.Request.descriptor;
   }
 
   type connection = {
@@ -277,10 +480,10 @@ module Recording_runtime = struct
   let return value = value
   let bind value f = f value
 
-  type download_body = { body : string; read_error_after : int option }
-  type upload_writer = Buffer.t
+  type response_body = { body : string; read_error_after : int option }
+  type request_body_writer = Buffer.t
 
-  type download_reader = {
+  type response_body_reader = {
     body : string;
     read_error_after : int option;
     mutable offset : int;
@@ -315,41 +518,41 @@ module Recording_runtime = struct
 
   let descriptor ?(replayable = true) body =
     {
-      Awskit.Body.Upload.content_length =
+      Awskit.Body.Request.content_length =
         Some (Int64.of_int (String.length body));
       payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
       replayable;
     }
 
-  let upload_body ?replayable body =
+  let request_body ?replayable body =
     { body = Ok body; descriptor = descriptor ?replayable body }
 
-  let empty_body = upload_body ""
-  let string_body body = upload_body body
-  let bytes_body body = upload_body (Bytes.to_string body)
+  let empty_request_body = request_body ""
+  let string_request_body body = request_body body
+  let bytes_request_body body = request_body (Bytes.to_string body)
 
-  let stream_body descriptor ~write =
+  let stream_request_body descriptor ~write =
     let buffer = Buffer.create 128 in
     let body =
       match write buffer with
       | Ok () -> (
           let body = Buffer.contents buffer in
           let length = Int64.of_int (String.length body) in
-          match descriptor.Awskit.Body.Upload.content_length with
+          match descriptor.Awskit.Body.Request.content_length with
           | Some declared when not (Stdlib.Int64.equal declared length) ->
-              Error (Awskit.Error.body "upload body length mismatch")
+              Error (Awskit.Error.body "request body length mismatch")
           | _ -> Ok body)
       | Error _ as error -> error
     in
     { body; descriptor }
 
-  let upload_descriptor body = body.descriptor
+  let request_body_descriptor body = body.descriptor
 
-  let write_string writer body =
+  let write_request_body_string writer body =
     Buffer.add_string writer body;
     Ok ()
 
-  let read reader bytes ~off ~len =
+  let read_response_body reader bytes ~off ~len =
     if len = 0 then Ok 0
     else if
       match reader.read_error_after with
@@ -367,12 +570,12 @@ module Recording_runtime = struct
 
   let rec drain reader =
     let bytes = Bytes.create 8 in
-    match read reader bytes ~off:0 ~len:(Bytes.length bytes) with
+    match read_response_body reader bytes ~off:0 ~len:(Bytes.length bytes) with
     | Error _ as error -> error
     | Ok 0 -> Ok ()
     | Ok _ -> drain reader
 
-  let with_download_body (body : download_body) ~consume =
+  let with_response_body (body : response_body) ~consume =
     let reader =
       { body = body.body; read_error_after = body.read_error_after; offset = 0 }
     in
@@ -384,14 +587,29 @@ module Recording_runtime = struct
         | Ok () -> error
         | Error _ as drain_error -> drain_error)
 
-  let discard_download_body (body : download_body) =
+  let discard_response_body (body : response_body) =
     let reader =
       { body = body.body; read_error_after = body.read_error_after; offset = 0 }
     in
     let result = drain reader in
     result
 
-  let with_response conn request (body : upload_body) ~f =
+  module Request_body = struct
+    let empty = empty_request_body
+    let of_string = string_request_body
+    let of_bytes = bytes_request_body
+    let of_stream = stream_request_body
+    let descriptor = request_body_descriptor
+    let write_string = write_request_body_string
+  end
+
+  module Response_body = struct
+    let read = read_response_body
+    let with_reader = with_response_body
+    let discard = discard_response_body
+  end
+
+  let with_response conn request (body : request_body) ~f =
     match body.body with
     | Error _ as error -> error
     | Ok body -> (
@@ -458,26 +676,11 @@ let test_bucket_config_parse () =
   let cors =
     {|<CORSConfiguration><CORSRule><ID>web</ID><AllowedOrigin>https://example.com</AllowedOrigin><AllowedMethod>GET</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>etag</ExposeHeader><MaxAgeSeconds>300</MaxAgeSeconds></CORSRule></CORSConfiguration>|}
   in
-  let website =
-    {|<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument></WebsiteConfiguration>|}
-  in
   let public_access_block =
     {|<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>false</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>false</RestrictPublicBuckets></PublicAccessBlockConfiguration>|}
   in
   let ownership =
     {|<OwnershipControls><Rule><ObjectOwnership>BucketOwnerEnforced</ObjectOwnership></Rule></OwnershipControls>|}
-  in
-  let request_payment =
-    {|<RequestPaymentConfiguration><Payer>Requester</Payer></RequestPaymentConfiguration>|}
-  in
-  let accelerate =
-    {|<AccelerateConfiguration><Status>Enabled</Status></AccelerateConfiguration>|}
-  in
-  let policy_status =
-    {|<PolicyStatus><IsPublic>false</IsPublic></PolicyStatus>|}
-  in
-  let logging =
-    {|<BucketLoggingStatus><LoggingEnabled><TargetBucket>log-bucket</TargetBucket><TargetPrefix>logs/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>|}
   in
   let conn =
     Recording_runtime.connect
@@ -486,13 +689,8 @@ let test_bucket_config_parse () =
         response 200 tagging;
         response 200 encryption;
         response 200 cors;
-        response 200 website;
         response 200 public_access_block;
         response 200 ownership;
-        response 200 request_payment;
-        response 200 accelerate;
-        response 200 policy_status;
-        response 200 logging;
       ]
   in
   let versioning =
@@ -513,22 +711,20 @@ let test_bucket_config_parse () =
   in
   (match encryption.config.rules with
   | [ rule ] ->
-      Alcotest.(check string)
-        "algorithm" "aws:kms"
-        (Bucket.Encryption.Algorithm.to_string rule.sse_algorithm);
       Alcotest.(check (option string))
-        "kms key" (Some "key-1") rule.kms_master_key_id
+        "algorithm" (Some "aws:kms")
+        (Option.map Bucket.Encryption.Algorithm.to_string rule.sse_algorithm);
+      Alcotest.(check (option string))
+        "kms key" (Some "key-1") rule.kms_master_key_id;
+      Alcotest.(check (option bool)) "bucket key" None rule.bucket_key_enabled;
+      Alcotest.(check int)
+        "blocked types" 0
+        (List.length rule.blocked_encryption_types)
   | _ -> Alcotest.fail "expected one encryption rule");
   let cors =
     Recording_s3.Bucket.Cors.get conn ~bucket:"my-bucket" |> ok_or_fail "cors"
   in
   Alcotest.(check int) "cors rule count" 1 (List.length cors.config.rules);
-  let website =
-    Recording_s3.Bucket.Website.get conn ~bucket:"my-bucket"
-    |> ok_or_fail "website"
-  in
-  Alcotest.(check (option string))
-    "index" (Some "index.html") website.config.index_document_suffix;
   let public_access_block =
     Recording_s3.Bucket.Public_access_block.get conn ~bucket:"my-bucket"
     |> ok_or_fail "public access block"
@@ -542,36 +738,160 @@ let test_bucket_config_parse () =
   Alcotest.(check string)
     "ownership" "BucketOwnerEnforced"
     (Bucket.Ownership_controls.Object_ownership.to_string
-       ownership.config.object_ownership);
-  let request_payment =
-    Recording_s3.Bucket.Request_payment.get conn ~bucket:"my-bucket"
-    |> ok_or_fail "request payment"
+       ownership.config.object_ownership)
+
+let expected_owner = "123456789012"
+
+let check_expected_owner_header label (call : Recording_runtime.call) =
+  Alcotest.(check (option string))
+    label (Some expected_owner)
+    (header "x-amz-expected-bucket-owner" call.request.headers)
+
+let check_no_expected_owner_header label (call : Recording_runtime.call) =
+  Alcotest.(check (option string))
+    label None
+    (header "x-amz-expected-bucket-owner" call.request.headers)
+
+let test_bucket_expected_owner_headers () =
+  let conn =
+    Recording_runtime.connect
+      [ response 200 ~headers:[ ("x-amz-bucket-region", "us-west-2") ] "" ]
   in
+  ignore
+    (Recording_s3.Bucket.head conn ~bucket:"my-bucket"
+       ~expected_bucket_owner:expected_owner
+    |> ok_or_fail "head expected owner");
+  check_expected_owner_header "head expected owner"
+    (Recording_runtime.last_call conn);
+  let conn =
+    Recording_runtime.connect
+      [ response 200 "<LocationConstraint>us-west-2</LocationConstraint>" ]
+  in
+  ignore
+    (Recording_s3.Bucket.get_location conn ~bucket:"my-bucket"
+       ~expected_bucket_owner:expected_owner
+    |> ok_or_fail "location expected owner");
+  check_expected_owner_header "location expected owner"
+    (Recording_runtime.last_call conn);
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          {|<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>|};
+      ]
+  in
+  ignore
+    (Recording_s3.Bucket.Versioning.get conn ~bucket:"my-bucket"
+       ~expected_bucket_owner:expected_owner
+    |> ok_or_fail "xml get expected owner");
+  check_expected_owner_header "xml get expected owner"
+    (Recording_runtime.last_call conn);
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  ignore
+    (Recording_s3.Bucket.Versioning.put conn ~bucket:"my-bucket"
+       ~expected_bucket_owner:expected_owner Bucket.Versioning.Status.Enabled
+    |> ok_or_fail "xml put expected owner");
+  check_expected_owner_header "xml put expected owner"
+    (Recording_runtime.last_call conn);
+  let conn = Recording_runtime.connect [ response 204 "" ] in
+  ignore
+    (Recording_s3.Bucket.Tagging.delete conn ~bucket:"my-bucket"
+       ~expected_bucket_owner:expected_owner
+    |> ok_or_fail "xml delete expected owner");
+  check_expected_owner_header "xml delete expected owner"
+    (Recording_runtime.last_call conn);
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  ignore
+    (Recording_s3.Bucket.create conn ~bucket:"new-bucket" ()
+    |> ok_or_fail "create no expected owner");
+  check_no_expected_owner_header "create no expected owner"
+    (Recording_runtime.last_call conn);
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          "<ListAllMyBucketsResult><Buckets/></ListAllMyBucketsResult>";
+      ]
+  in
+  ignore (Recording_s3.Bucket.list conn |> ok_or_fail "list no expected owner");
+  check_no_expected_owner_header "list no expected owner"
+    (Recording_runtime.last_call conn)
+
+let test_bucket_encryption_extended_xml () =
+  let body =
+    {|<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms:dsse</SSEAlgorithm><KMSMasterKeyID>key-1</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled><BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>|}
+  in
+  let conn = Recording_runtime.connect [ response 200 body; response 200 "" ] in
+  let parsed =
+    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket"
+    |> ok_or_fail "extended encryption parse"
+  in
+  let config = parsed.config in
+  (match config.rules with
+  | [ rule ] ->
+      Alcotest.(check bool)
+        "dsse algorithm" true
+        (rule.sse_algorithm = Some Bucket.Encryption.Algorithm.Aws_kms_dsse);
+      Alcotest.(check (option string))
+        "kms key" (Some "key-1") rule.kms_master_key_id;
+      Alcotest.(check (option bool))
+        "bucket key" (Some true) rule.bucket_key_enabled;
+      Alcotest.(check bool)
+        "blocked type" true
+        (rule.blocked_encryption_types
+        = [ Bucket.Encryption.Blocked_encryption_type.Sse_c ])
+  | _ -> Alcotest.fail "expected one encryption rule");
+  ignore
+    (Recording_s3.Bucket.Encryption.put conn ~bucket:"my-bucket" config
+    |> ok_or_fail "extended encryption serialize");
+  let body = (Recording_runtime.last_call conn).body in
   Alcotest.(check bool)
-    "requester payer" true
-    (request_payment.payer = Some Bucket.Request_payment.Payer.Requester);
-  let accelerate =
-    Recording_s3.Bucket.Accelerate.get conn ~bucket:"my-bucket"
-    |> ok_or_fail "accelerate"
-  in
+    "serializes dsse" true
+    (string_contains ~substring:"aws:kms:dsse" body);
   Alcotest.(check bool)
-    "accelerate enabled" true
-    (accelerate.status = Some Bucket.Accelerate.Status.Enabled);
-  let policy_status =
-    Recording_s3.Bucket.Policy_status.get conn ~bucket:"my-bucket"
-    |> ok_or_fail "policy status"
+    "serializes bucket key" true
+    (string_contains ~substring:"<BucketKeyEnabled>true</BucketKeyEnabled>" body);
+  Alcotest.(check bool)
+    "serializes blocked type" true
+    (string_contains ~substring:"<EncryptionType>SSE-C</EncryptionType>" body)
+
+let test_bucket_encryption_unknown_read_values () =
+  let body =
+    {|<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>future-value</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>|}
   in
-  Alcotest.(check (option bool))
-    "policy status" (Some false) policy_status.is_public;
-  let logging =
-    Recording_s3.Bucket.Logging.get conn ~bucket:"my-bucket"
-    |> ok_or_fail "logging"
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  let result =
+    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket"
+    |> ok_or_fail "unknown encryption parse"
   in
-  match logging.config.logging with
-  | Some target ->
-      Alcotest.(check string) "logging target" "log-bucket" target.target_bucket;
-      Alcotest.(check string) "logging prefix" "logs/" target.target_prefix
-  | None -> Alcotest.fail "expected logging target"
+  match result.config.rules with
+  | [
+   { Bucket.Encryption.Rule.sse_algorithm = Some (Unknown "future-value"); _ };
+  ] ->
+      ()
+  | _ -> Alcotest.fail "expected unknown encryption algorithm"
+
+let test_bucket_encryption_unknown_write_rejected () =
+  let config =
+    {
+      Bucket.Encryption.rules =
+        [
+          {
+            Bucket.Encryption.Rule.sse_algorithm =
+              Some (Bucket.Encryption.Algorithm.Unknown "future-value");
+            kms_master_key_id = None;
+            bucket_key_enabled = None;
+            blocked_encryption_types = [];
+          };
+        ];
+    }
+  in
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  match Recording_s3.Bucket.Encryption.put conn ~bucket:"my-bucket" config with
+  | Error (Awskit.Error.Validation { field = Some "sse_algorithm"; _ }) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected validation error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected unknown encryption write rejection"
 
 let test_object_checksum_headers_and_response () =
   let conn =
@@ -580,29 +900,50 @@ let test_object_checksum_headers_and_response () =
         response 200
           ~headers:
             [
-              ("etag", "\"etag\""); ("x-amz-checksum-sha256", "provided-sha256");
+              ("etag", "\"etag\"");
+              ("x-amz-checksum-sha1", "provided-sha1");
+              ("x-amz-checksum-sha256", "provided-sha256");
+              ("x-amz-checksum-type", "COMPOSITE");
             ]
           "";
       ]
   in
-  let checksum : Object.Checksum.request =
-    { Object.Checksum.algorithm = `SHA256; value = Some "provided-sha256" }
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
+      value = "provided-sha256";
+    }
   in
-  let options = { Object.Put.default_options with checksum = Some checksum } in
+  let options =
+    {
+      Put_object.default_options with
+      checksum = Some checksum;
+      expected_bucket_owner = Some "123456789012";
+    }
+  in
   let put =
-    Recording_s3.Object.Buffer.put_string conn ~bucket:"my-bucket" ~key:"file"
-      ~options "hello"
+    Recording_s3.Object.put_string conn ~bucket:"my-bucket" ~key:"file" ~options
+      "hello"
     |> ok_or_fail "put checksum"
   in
-  check_checksum "put response checksum" `SHA256 "provided-sha256" put.checksum;
+  check_checksum "put response sha1" Object.Checksum.Algorithm.Sha1
+    "provided-sha1" put.checksum;
+  check_checksum "put response sha256" Object.Checksum.Algorithm.Sha256
+    "provided-sha256" put.checksum;
+  Alcotest.(check bool)
+    "checksum type" true
+    (put.checksum.checksum_type = Some Object.Checksum.Type.Composite);
   let call = Recording_runtime.last_call conn in
   Alcotest.(check string) "body" "hello" call.body;
   Alcotest.(check (option string))
-    "checksum algorithm header" (Some "SHA256")
+    "no checksum algorithm header" None
     (header "x-amz-checksum-algorithm" call.request.headers);
   Alcotest.(check (option string))
     "checksum value header" (Some "provided-sha256")
-    (header "x-amz-checksum-sha256" call.request.headers)
+    (header "x-amz-checksum-sha256" call.request.headers);
+  Alcotest.(check (option string))
+    "expected owner header" (Some "123456789012")
+    (header "x-amz-expected-bucket-owner" call.request.headers)
 
 let test_object_precondition_headers () =
   let time = Ptime.to_rfc3339 test_time in
@@ -630,10 +971,10 @@ let test_object_precondition_headers () =
     }
   in
   let put_options =
-    { Object.Put.default_options with preconditions = write_preconditions }
+    { Put_object.default_options with preconditions = write_preconditions }
   in
   ignore
-    (Recording_s3.Object.Buffer.put_string conn ~bucket:"my-bucket" ~key:"file"
+    (Recording_s3.Object.put_string conn ~bucket:"my-bucket" ~key:"file"
        ~options:put_options "body"
     |> ok_or_fail "put preconditions");
   let read_preconditions =
@@ -646,14 +987,14 @@ let test_object_precondition_headers () =
     }
   in
   let get_options =
-    { Object.Get.default_options with preconditions = read_preconditions }
+    { Get_object.default_options with preconditions = read_preconditions }
   in
   ignore
-    (Recording_s3.Object.Buffer.get_string conn ~bucket:"my-bucket" ~key:"file"
-       ~options:get_options ~max_size:16L ()
+    (Recording_s3.Object.get_as_string conn ~bucket:"my-bucket" ~key:"file"
+       ~options:get_options ~max_bytes:16L ()
     |> ok_or_fail "get preconditions");
   let head_options =
-    { Object.Head.default_options with preconditions = read_preconditions }
+    { Head_object.default_options with preconditions = read_preconditions }
   in
   ignore
     (Recording_s3.Object.head conn ~bucket:"my-bucket" ~key:"file"
@@ -663,12 +1004,10 @@ let test_object_precondition_headers () =
     {
       Object.Preconditions.Delete.if_match =
         Some (Object.Etag_condition.etag etag);
-      if_match_last_modified_time = Some test_time;
-      if_match_size = Some 4L;
     }
   in
   let delete_options =
-    { Object.Delete.default_options with preconditions = delete_preconditions }
+    { Delete_object.default_options with preconditions = delete_preconditions }
   in
   ignore
     (Recording_s3.Object.delete conn ~bucket:"my-bucket" ~key:"file"
@@ -685,13 +1024,14 @@ let test_object_precondition_headers () =
   in
   let copy_options =
     {
-      Object.Copy.default_options with
+      Copy_object.default_options with
       source_preconditions = copy_preconditions;
     }
   in
   ignore
-    (Recording_s3.Object.copy conn ~src_bucket:"my-bucket" ~src_key:"file"
-       ~dst_bucket:"my-bucket" ~dst_key:"copy" ~options:copy_options ()
+    (Recording_s3.Object.copy conn ~source_bucket:"my-bucket" ~source_key:"file"
+       ~destination_bucket:"my-bucket" ~destination_key:"copy"
+       ~options:copy_options ()
     |> ok_or_fail "copy preconditions");
   match List.rev conn.calls with
   | [ put; get; head; delete; copy ] ->
@@ -720,10 +1060,10 @@ let test_object_precondition_headers () =
         "delete if-match" (Some "\"etag\"")
         (header "if-match" delete.request.headers);
       Alcotest.(check (option string))
-        "delete last modified" (Some time)
+        "delete last modified removed" None
         (header "x-amz-if-match-last-modified-time" delete.request.headers);
       Alcotest.(check (option string))
-        "delete size" (Some "4")
+        "delete size removed" None
         (header "x-amz-if-match-size" delete.request.headers);
       Alcotest.(check (option string))
         "copy source if-match" (Some "\"etag\"")
@@ -738,6 +1078,39 @@ let test_object_precondition_headers () =
         "copy source unmodified since" (Some time)
         (header "x-amz-copy-source-if-unmodified-since" copy.request.headers)
   | _ -> Alcotest.fail "expected five recorded calls"
+
+let test_delete_objects_request_body () =
+  let conn = Recording_runtime.connect [ response 200 "<DeleteResult/>" ] in
+  let version_id = Object.Version_id.of_string_exn "version-1" in
+  let etag = Object.Etag.of_string_exn "\"etag\"" in
+  let objects =
+    [
+      { Delete_objects.key = "key-only.txt"; version_id = None; etag = None };
+      {
+        Delete_objects.key = "versioned.txt";
+        version_id = Some version_id;
+        etag = None;
+      };
+      { Delete_objects.key = "etag.txt"; version_id = None; etag = Some etag };
+    ]
+  in
+  ignore
+    (Recording_s3.Object.delete_objects conn ~bucket:"my-bucket" ~objects ()
+    |> ok_or_fail "delete objects request body");
+  let body = (Recording_runtime.last_call conn).body in
+  let check_contains label substring =
+    Alcotest.(check bool) label true (string_contains ~substring body)
+  in
+  let check_absent label substring =
+    Alcotest.(check bool) label false (string_contains ~substring body)
+  in
+  check_contains "key-only key" "<Key>key-only.txt</Key>";
+  check_contains "versioned key" "<Key>versioned.txt</Key>";
+  check_contains "version id" "<VersionId>version-1</VersionId>";
+  check_contains "etag key" "<Key>etag.txt</Key>";
+  check_contains "etag" "<ETag>&quot;etag&quot;</ETag>";
+  check_absent "last modified omitted" "LastModifiedTime";
+  check_absent "size omitted" "<Size>"
 
 let test_object_versioning_requests_and_parse () =
   let version_id = Object.Version_id.of_string_exn "version-1" in
@@ -759,11 +1132,12 @@ let test_object_versioning_requests_and_parse () =
       ]
   in
   let copy_options =
-    { Object.Copy.default_options with source_version_id = Some version_id }
+    { Copy_object.default_options with source_version_id = Some version_id }
   in
   let copy =
-    Recording_s3.Object.copy conn ~src_bucket:"my-bucket" ~src_key:"file"
-      ~dst_bucket:"my-bucket" ~dst_key:"copy" ~options:copy_options ()
+    Recording_s3.Object.copy conn ~source_bucket:"my-bucket" ~source_key:"file"
+      ~destination_bucket:"my-bucket" ~destination_key:"copy"
+      ~options:copy_options ()
     |> ok_or_fail "copy source version"
   in
   Alcotest.(check (option string))
@@ -771,7 +1145,7 @@ let test_object_versioning_requests_and_parse () =
     (version_string copy.copy_source_version_id);
   let list_options =
     {
-      Object.Versions.default_options with
+      List_object_versions.default_options with
       prefix = Some "logs/";
       max_keys = Some 10;
       key_marker = Some "logs/a.txt";
@@ -797,6 +1171,9 @@ let test_object_versioning_requests_and_parse () =
       Alcotest.(check (option string))
         "copy source header" (Some "/my-bucket/file?versionId=version-1")
         (header "x-amz-copy-source" copy_call.request.headers);
+      Alcotest.(check (option string))
+        "copy tagging header omitted" None
+        (header "x-amz-tagging" copy_call.request.headers);
       Alcotest.(check (option (list string)))
         "versions query" (Some [])
         (List.assoc_opt "versions" versions_call.request.target.query);
@@ -819,8 +1196,7 @@ let test_retry_slow_down_then_success () =
     Recording_runtime.connect [ response 503 slow_down; response 200 "" ]
   in
   let result =
-    Recording_s3.Object.Buffer.put_string conn ~bucket:"my-bucket" ~key:"file"
-      "body"
+    Recording_s3.Object.put_string conn ~bucket:"my-bucket" ~key:"file" "body"
   in
   ignore (ok_or_fail "retry put" result);
   Alcotest.(check int) "attempts" 2 (List.length conn.calls);
@@ -834,8 +1210,7 @@ let test_retry_fatal_error_not_retried () =
     Recording_runtime.connect [ response 403 denied; response 200 "" ]
   in
   (match
-     Recording_s3.Object.Buffer.put_string conn ~bucket:"my-bucket" ~key:"file"
-       "body"
+     Recording_s3.Object.put_string conn ~bucket:"my-bucket" ~key:"file" "body"
    with
   | Error error when Error.service_code error = Some "AccessDenied" -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
@@ -852,8 +1227,7 @@ let test_retry_disabled_policy () =
       [ response 503 slow_down; response 200 "" ]
   in
   (match
-     Recording_s3.Object.Buffer.put_string conn ~bucket:"my-bucket" ~key:"file"
-       "body"
+     Recording_s3.Object.put_string conn ~bucket:"my-bucket" ~key:"file" "body"
    with
   | Error error when Error.service_code error = Some "SlowDown" -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
@@ -861,11 +1235,11 @@ let test_retry_disabled_policy () =
   Alcotest.(check int) "attempts" 1 (List.length conn.calls);
   Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
 
-let test_non_replayable_upload_not_retried () =
+let test_non_replayable_request_body_not_retried () =
   let slow_down =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
   in
-  let descriptor : Awskit.Body.Upload.descriptor =
+  let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
       payload_hash = Awskit.Body.Payload_hash.sha256_of_string "body";
@@ -876,8 +1250,8 @@ let test_non_replayable_upload_not_retried () =
     Recording_runtime.connect [ response 503 slow_down; response 200 "" ]
   in
   let body =
-    Recording_runtime.stream_body descriptor ~write:(fun writer ->
-        Recording_runtime.write_string writer "body")
+    Recording_runtime.stream_request_body descriptor ~write:(fun writer ->
+        Recording_runtime.write_request_body_string writer "body")
   in
   (match
      Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~body ()
@@ -888,19 +1262,19 @@ let test_non_replayable_upload_not_retried () =
   Alcotest.(check int) "attempts" 1 (List.length conn.calls);
   Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
 
-let test_runtime_stream_upload_error_propagates () =
-  let descriptor : Awskit.Body.Upload.descriptor =
+let test_runtime_stream_request_body_error_propagates () =
+  let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
       payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
       replayable = false;
     }
   in
-  let stream_error = Awskit.Error.body "runtime stream upload failed" in
+  let stream_error = Awskit.Error.body "runtime stream request body failed" in
   let conn = Recording_runtime.connect [ response 200 "" ] in
   let body =
-    Recording_runtime.stream_body descriptor ~write:(fun writer ->
-        match Recording_runtime.write_string writer "ab" with
+    Recording_runtime.stream_request_body descriptor ~write:(fun writer ->
+        match Recording_runtime.write_request_body_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
@@ -909,7 +1283,7 @@ let test_runtime_stream_upload_error_propagates () =
   with
   | Error error when Error.equal error stream_error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected stream upload error"
+  | Ok _ -> Alcotest.fail "expected stream request body error"
 
 let test_retry_jitter_bounds () =
   let policy =
@@ -936,8 +1310,8 @@ let test_retry_jitter_bounds () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected invalid jitter"
 
-let test_upload_descriptor_validation () =
-  let invalid_descriptor : Awskit.Body.Upload.descriptor =
+let test_request_body_descriptor_validation () =
+  let invalid_descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some (-1L);
       payload_hash = Awskit.Body.Payload_hash.sha256_of_string "";
@@ -946,8 +1320,8 @@ let test_upload_descriptor_validation () =
   in
   let conn = Recording_runtime.connect [ response 200 "" ] in
   let body =
-    Recording_runtime.stream_body invalid_descriptor ~write:(fun _writer ->
-        Ok ())
+    Recording_runtime.stream_request_body invalid_descriptor
+      ~write:(fun _writer -> Ok ())
   in
   (match
      Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~body ()
@@ -965,19 +1339,101 @@ let test_upload_descriptor_validation () =
   | Error error ->
       Alcotest.failf "unexpected multipart error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected multipart descriptor validation failure");
-  Alcotest.(check int) "multipart put not called" 0 (List.length conn.calls)
+  Alcotest.(check int) "multipart put not called" 0 (List.length conn.calls);
+  let unknown_length_descriptor : Awskit.Body.Request.descriptor =
+    {
+      content_length = None;
+      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
+      replayable = false;
+    }
+  in
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  let body =
+    Recording_runtime.stream_request_body unknown_length_descriptor
+      ~write:(fun writer ->
+        Recording_runtime.write_request_body_string writer "body")
+  in
+  (match
+     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"unknown" ~body ()
+   with
+  | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected unknown-length put error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected unknown-length object validation failure");
+  (match
+     Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket"
+       ~key:"large.bin" ~upload_id ~part_number:1 ~body ()
+   with
+  | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected unknown-length part error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected unknown-length multipart validation failure");
+  Alcotest.(check int)
+    "unknown-length upload not called" 0 (List.length conn.calls)
 
-let test_sim_stream_upload_error_propagates () =
+let test_sim_request_body_requires_known_length () =
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials:creds in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "bucket");
+  let descriptor : Awskit.Body.Request.descriptor =
+    {
+      content_length = None;
+      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
+      replayable = false;
+    }
+  in
+  let body =
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        Simulator.Runtime.Request_body.write_string writer "body")
+  in
+  (match
+     Simulator.Object.put conn ~bucket:"test-bucket" ~key:"unknown" ~body ()
+   with
+  | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected sim unknown-length put error: %a" Error.pp
+        error
+  | Ok _ -> Alcotest.fail "expected sim unknown-length object failure");
+  (match Simulator.Object.head conn ~bucket:"test-bucket" ~key:"unknown" () with
+  | Error error when Error.is_not_found error -> ()
+  | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected unknown-length object to be absent");
+  let created =
+    Simulator.Multipart.create_upload conn ~bucket:"test-bucket"
+      ~key:"large.bin" ()
+    |> ok_or_fail "create multipart upload"
+  in
+  let upload_id = created.upload.upload_id in
+  (match
+     Simulator.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"large.bin"
+       ~upload_id ~part_number:1 ~body ()
+   with
+  | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected sim unknown-length part error: %a" Error.pp
+        error
+  | Ok _ -> Alcotest.fail "expected sim unknown-length multipart failure");
+  let listed =
+    Simulator.Multipart.list_parts conn ~bucket:"test-bucket" ~key:"large.bin"
+      ~upload_id ()
+    |> ok_or_fail "list multipart parts"
+  in
+  Alcotest.(check int) "stored parts" 0 (List.length listed.parts)
+
+let test_sim_stream_request_body_error_propagates () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
-  let clock = Sim.Clock.create ~now:test_time () in
-  let store = Sim.create_store ~clock () in
-  let conn = Sim.connect store ~credentials in
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials in
   let bucket = "stream-error-bucket" in
-  ignore (Sim.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
-  let stream_error = Awskit.Error.body "sim stream upload failed" in
-  let descriptor : Awskit.Body.Upload.descriptor =
+  ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
+  let stream_error = Awskit.Error.body "sim stream request body failed" in
+  let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
       payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
@@ -985,30 +1441,30 @@ let test_sim_stream_upload_error_propagates () =
     }
   in
   let body =
-    Sim.Runtime.stream_body descriptor ~write:(fun writer ->
-        match Sim.Runtime.write_string writer "ab" with
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        match Simulator.Runtime.Request_body.write_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
-  (match Sim.Object.put conn ~bucket ~key:"bad" ~body () with
+  (match Simulator.Object.put conn ~bucket ~key:"bad" ~body () with
   | Error error when Awskit.Error.equal error stream_error -> ()
   | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected stream upload error");
-  match Sim.Object.head conn ~bucket ~key:"bad" () with
+  | Ok _ -> Alcotest.fail "expected stream request body error");
+  match Simulator.Object.head conn ~bucket ~key:"bad" () with
   | Error error when Error.is_not_found error -> ()
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream error object to be absent"
 
-let test_sim_stream_upload_rejects_length_mismatch () =
+let test_sim_stream_request_body_rejects_length_mismatch () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
-  let clock = Sim.Clock.create ~now:test_time () in
-  let store = Sim.create_store ~clock () in
-  let conn = Sim.connect store ~credentials in
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials in
   let bucket = "stream-length-bucket" in
-  ignore (Sim.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
-  let descriptor : Awskit.Body.Upload.descriptor =
+  ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
+  let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
       payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
@@ -1016,47 +1472,50 @@ let test_sim_stream_upload_rejects_length_mismatch () =
     }
   in
   let short_body =
-    Sim.Runtime.stream_body descriptor ~write:(fun writer ->
-        Sim.Runtime.write_string writer "ab")
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        Simulator.Runtime.Request_body.write_string writer "ab")
   in
-  (match Sim.Object.put conn ~bucket ~key:"short" ~body:short_body () with
+  (match Simulator.Object.put conn ~bucket ~key:"short" ~body:short_body () with
   | Error (Awskit.Error.Body _) -> ()
   | Error error ->
       Alcotest.failf "unexpected short put error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected short upload body error");
+  | Ok _ -> Alcotest.fail "expected short request body error");
   let long_body =
-    Sim.Runtime.stream_body descriptor ~write:(fun writer ->
-        match Sim.Runtime.write_string writer "abcd" with
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        match Simulator.Runtime.Request_body.write_string writer "abcd" with
         | Error _ as error -> error
-        | Ok () -> Sim.Runtime.write_string writer "e")
+        | Ok () -> Simulator.Runtime.Request_body.write_string writer "e")
   in
-  (match Sim.Object.put conn ~bucket ~key:"long" ~body:long_body () with
+  (match Simulator.Object.put conn ~bucket ~key:"long" ~body:long_body () with
   | Error (Awskit.Error.Body _) -> ()
   | Error error -> Alcotest.failf "unexpected long put error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected long upload body error");
-  (match Sim.Object.head conn ~bucket ~key:"short" () with
+  | Ok _ -> Alcotest.fail "expected long request body error");
+  (match Simulator.Object.head conn ~bucket ~key:"short" () with
   | Error error when Error.is_not_found error -> ()
   | Error error ->
       Alcotest.failf "unexpected short head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected short body object to be absent");
-  match Sim.Object.head conn ~bucket ~key:"long" () with
+  match Simulator.Object.head conn ~bucket ~key:"long" () with
   | Error error when Error.is_not_found error -> ()
   | Error error ->
       Alcotest.failf "unexpected long head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected long body object to be absent"
 
 let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
-  let clock = Sim.Clock.create ~now:test_time () in
-  let store = Sim.create_store ~clock () in
-  let conn = Sim.connect store ~credentials:creds in
-  ignore (Sim.Bucket.create conn ~bucket:"test-bucket" () |> ok_or_fail "bucket");
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials:creds in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "bucket");
   let created =
-    Sim.Multipart.create conn ~bucket:"test-bucket" ~key:"large.bin" ()
+    Simulator.Multipart.create_upload conn ~bucket:"test-bucket"
+      ~key:"large.bin" ()
     |> ok_or_fail "create multipart upload"
   in
   let upload_id = created.upload.upload_id in
-  let stream_error = Awskit.Error.body "sim multipart stream upload failed" in
-  let descriptor : Awskit.Body.Upload.descriptor =
+  let stream_error = Awskit.Error.body "sim multipart request body failed" in
+  let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
       payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
@@ -1064,27 +1523,27 @@ let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
     }
   in
   let body =
-    Sim.Runtime.stream_body descriptor ~write:(fun writer ->
-        match Sim.Runtime.write_string writer "ab" with
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        match Simulator.Runtime.Request_body.write_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
   (match
-     Sim.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"large.bin"
+     Simulator.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"large.bin"
        ~upload_id ~part_number:1 ~body ()
    with
   | Error error when Error.equal error stream_error -> ()
   | Error error ->
       Alcotest.failf "unexpected upload part error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected stream upload error");
+  | Ok _ -> Alcotest.fail "expected stream request body error");
   let listed =
-    Sim.Multipart.list_parts conn ~bucket:"test-bucket" ~key:"large.bin"
+    Simulator.Multipart.list_parts conn ~bucket:"test-bucket" ~key:"large.bin"
       ~upload_id ()
     |> ok_or_fail "list multipart parts"
   in
   Alcotest.(check int) "stored parts" 0 (List.length listed.parts)
 
-let test_download_body_drain_errors () =
+let test_response_body_drain_errors () =
   let conn =
     Recording_runtime.connect
       [
@@ -1098,7 +1557,7 @@ let test_download_body_drain_errors () =
   in
   let consume reader =
     let bytes = Bytes.create 3 in
-    match Recording_runtime.read reader bytes ~off:0 ~len:3 with
+    match Recording_runtime.read_response_body reader bytes ~off:0 ~len:3 with
     | Error _ as error -> error
     | Ok read -> Ok (Bytes.sub_string bytes 0 read)
   in
@@ -1113,6 +1572,25 @@ let test_download_body_drain_errors () =
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected discard failure after successful head");
   Alcotest.(check int) "calls" 2 (List.length conn.calls)
+
+let test_in_memory_helper_limit_error_uses_max_bytes () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:[ ("etag", "\"etag\""); ("content-length", "6") ]
+          "abcdef";
+      ]
+  in
+  match
+    Recording_s3.Object.get_as_string conn ~bucket:"my-bucket" ~key:"file"
+      ~max_bytes:3L ()
+  with
+  | Error (Awskit.Error.Body { message; limit = Some 3L }) ->
+      Alcotest.(check string)
+        "message" "response body exceeded max_bytes" message
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected max_bytes body limit failure"
 
 let test_malformed_xml_responses () =
   let conn =
@@ -1155,8 +1633,8 @@ let test_copy_object_embedded_error () =
   in
   let conn = Recording_runtime.connect [ response 200 body ] in
   match
-    Recording_s3.Object.copy conn ~src_bucket:"my-bucket" ~src_key:"file"
-      ~dst_bucket:"my-bucket" ~dst_key:"copy" ()
+    Recording_s3.Object.copy conn ~source_bucket:"my-bucket" ~source_key:"file"
+      ~destination_bucket:"my-bucket" ~destination_key:"copy" ()
   with
   | Error error when Error.service_code error = Some "SlowDown" -> ()
   | Error error -> Alcotest.failf "unexpected copy error: %a" Error.pp error
@@ -1193,9 +1671,10 @@ let test_object_paginator_follows_tokens () =
           (list_page ~continuation_token:"token-1" ~truncated:false [ "b.txt" ]);
       ]
   in
-  let options = { Object.List.default_options with max_keys = Some 1 } in
+  let options = { List_objects_v2.default_options with max_keys = Some 1 } in
   let keys =
-    Recording_s3.Object.Paginator.keys conn ~bucket:"my-bucket" ~options ()
+    Recording_s3.Object.List_objects_v2.keys conn ~bucket:"my-bucket" ~options
+      ()
     |> ok_or_fail "paginator keys"
   in
   Alcotest.(check (list string)) "keys" [ "a.txt"; "b.txt" ] keys;
@@ -1219,7 +1698,8 @@ let test_object_paginator_max_pages () =
       ]
   in
   let pages =
-    Recording_s3.Object.Paginator.pages conn ~bucket:"my-bucket" ~max_pages:1 ()
+    Recording_s3.Object.List_objects_v2.pages conn ~bucket:"my-bucket"
+      ~max_pages:1 ()
     |> ok_or_fail "paginator pages"
   in
   Alcotest.(check int) "page count" 1 (List.length pages);
@@ -1254,15 +1734,13 @@ let test_multipart_paginator_follows_markers () =
   in
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
   let parts =
-    Recording_s3.Multipart.Paginator.parts conn ~bucket:"my-bucket"
+    Recording_s3.Multipart.List_parts.parts conn ~bucket:"my-bucket"
       ~key:"large.bin" ~upload_id ()
     |> ok_or_fail "multipart paginator parts"
   in
   Alcotest.(check (list int))
     "parts" [ 1; 2 ]
-    (List.map
-       (fun (part : Multipart.List_parts.part_info) -> part.part_number)
-       parts);
+    (List.map (fun (part : List_parts.part_info) -> part.part_number) parts);
   let calls = List.rev conn.calls in
   Alcotest.(check int) "calls" 2 (List.length calls);
   match calls with
@@ -1283,21 +1761,25 @@ let test_multipart_upload_part_checksum_headers () =
       ]
   in
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
-  let checksum : Object.Checksum.request =
-    { Object.Checksum.algorithm = `SHA1; value = Some "provided-sha1" }
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha1;
+      value = "provided-sha1";
+    }
   in
-  let options = { Multipart.Upload_part.checksum = Some checksum } in
+  let options = { Upload_part.default_options with checksum = Some checksum } in
   let part =
     Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket" ~key:"large.bin"
       ~upload_id ~part_number:1
-      ~body:(Recording_runtime.string_body "hello")
+      ~body:(Recording_runtime.string_request_body "hello")
       ~options ()
     |> ok_or_fail "upload part checksum"
   in
-  check_checksum "part response checksum" `SHA1 "provided-sha1" part.checksum;
+  check_checksum "part response checksum" Object.Checksum.Algorithm.Sha1
+    "provided-sha1" part.checksum;
   let call = Recording_runtime.last_call conn in
   Alcotest.(check (option string))
-    "checksum algorithm header" (Some "SHA1")
+    "no checksum algorithm header" None
     (header "x-amz-checksum-algorithm" call.request.headers);
   Alcotest.(check (option string))
     "checksum value header" (Some "provided-sha1")
@@ -1305,6 +1787,240 @@ let test_multipart_upload_part_checksum_headers () =
   Alcotest.(check (option (list string)))
     "part number" (Some [ "1" ])
     (List.assoc_opt "partNumber" call.request.target.query)
+
+let test_object_checksum_mode_and_expected_owner_headers () =
+  let expected_owner = "123456789012" in
+  let copy_body =
+    {|<CopyObjectResult><ETag>"copy"</ETag></CopyObjectResult>|}
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 ~headers:[ ("content-length", "5") ] "hello";
+        response 200 ~headers:[ ("content-length", "0") ] "";
+        response 204 "";
+        response 200 "<DeleteResult/>";
+        response 200 copy_body;
+        response 200 (list_page ~truncated:false [ "a.txt" ]);
+        response 200
+          {|<ListVersionsResult><IsTruncated>false</IsTruncated></ListVersionsResult>|};
+      ]
+  in
+  let read_options =
+    {
+      Get_object.default_options with
+      checksum_mode = Some Object.Checksum.Mode.Enabled;
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  ignore
+    (Recording_s3.Object.get_as_string conn ~bucket:"my-bucket" ~key:"file"
+       ~options:read_options ~max_bytes:16L ()
+    |> ok_or_fail "get checksum mode");
+  let head_options =
+    {
+      Head_object.default_options with
+      checksum_mode = Some Object.Checksum.Mode.Enabled;
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  ignore
+    (Recording_s3.Object.head conn ~bucket:"my-bucket" ~key:"file"
+       ~options:head_options ()
+    |> ok_or_fail "head checksum mode");
+  let delete_options =
+    {
+      Delete_object.default_options with
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  ignore
+    (Recording_s3.Object.delete conn ~bucket:"my-bucket" ~key:"file"
+       ~options:delete_options ()
+    |> ok_or_fail "delete expected owner");
+  let delete_many_options =
+    { Delete_objects.expected_bucket_owner = Some expected_owner }
+  in
+  ignore
+    (Recording_s3.Object.delete_objects conn ~bucket:"my-bucket"
+       ~objects:
+         [ { Delete_objects.key = "file"; version_id = None; etag = None } ]
+       ~options:delete_many_options ()
+    |> ok_or_fail "delete many expected owner");
+  let copy_options =
+    {
+      Copy_object.default_options with
+      checksum_algorithm = Some Object.Checksum.Algorithm.Sha256;
+      expected_bucket_owner = Some expected_owner;
+      source_expected_bucket_owner = Some "210987654321";
+    }
+  in
+  ignore
+    (Recording_s3.Object.copy conn ~source_bucket:"source" ~source_key:"file"
+       ~destination_bucket:"my-bucket" ~destination_key:"copy"
+       ~options:copy_options ()
+    |> ok_or_fail "copy expected owner");
+  let list_options =
+    {
+      List_objects_v2.default_options with
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  ignore
+    (Recording_s3.Object.list conn ~bucket:"my-bucket" ~options:list_options ()
+    |> ok_or_fail "list expected owner");
+  let version_options =
+    {
+      List_object_versions.default_options with
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  ignore
+    (Recording_s3.Object.list_versions conn ~bucket:"my-bucket"
+       ~options:version_options ()
+    |> ok_or_fail "list versions expected owner");
+  match List.rev conn.calls with
+  | [ get; head; delete; delete_many; copy; list; versions ] ->
+      List.iter
+        (fun (label, (call : Recording_runtime.call)) ->
+          Alcotest.(check (option string))
+            (label ^ " expected owner")
+            (Some expected_owner)
+            (header "x-amz-expected-bucket-owner" call.request.headers))
+        [
+          ("get", get);
+          ("head", head);
+          ("delete", delete);
+          ("delete many", delete_many);
+          ("copy", copy);
+          ("list", list);
+          ("versions", versions);
+        ];
+      List.iter
+        (fun (label, (call : Recording_runtime.call)) ->
+          Alcotest.(check (option string))
+            (label ^ " checksum mode") (Some "ENABLED")
+            (header "x-amz-checksum-mode" call.request.headers))
+        [ ("get", get); ("head", head) ];
+      Alcotest.(check (option string))
+        "copy checksum algorithm" (Some "SHA256")
+        (header "x-amz-checksum-algorithm" copy.request.headers);
+      Alcotest.(check (option string))
+        "copy source expected owner" (Some "210987654321")
+        (header "x-amz-source-expected-bucket-owner" copy.request.headers)
+  | _ -> Alcotest.fail "expected seven object calls"
+
+let test_multipart_checksum_and_expected_owner_headers () =
+  let expected_owner = "123456789012" in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          "<InitiateMultipartUploadResult><UploadId>upload-1</UploadId></InitiateMultipartUploadResult>";
+        response 200
+          ~headers:
+            [ ("etag", "\"etag-1\""); ("x-amz-checksum-sha1", "provided-sha1") ]
+          "";
+        response 200
+          {|<CompleteMultipartUploadResult><ETag>"final"</ETag><ChecksumSHA256>complete-sha256</ChecksumSHA256><ChecksumType>COMPOSITE</ChecksumType></CompleteMultipartUploadResult>|};
+      ]
+  in
+  let create_options =
+    {
+      Create_multipart_upload.default_options with
+      checksum_algorithm = Some Object.Checksum.Algorithm.Sha256;
+      checksum_type = Some Object.Checksum.Type.Composite;
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  let upload =
+    Recording_s3.Multipart.create_upload conn ~bucket:"my-bucket"
+      ~key:"large.bin" ~options:create_options ()
+    |> ok_or_fail "create multipart checksum"
+  in
+  let upload_id = upload.upload.upload_id in
+  let part_checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha1;
+      value = "provided-sha1";
+    }
+  in
+  let upload_options =
+    {
+      Upload_part.checksum = Some part_checksum;
+      expected_bucket_owner = Some expected_owner;
+    }
+  in
+  let part =
+    Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket" ~key:"large.bin"
+      ~upload_id ~part_number:1
+      ~body:(Recording_runtime.string_request_body "hello")
+      ~options:upload_options ()
+    |> ok_or_fail "upload part checksum"
+  in
+  let complete_checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
+      value = "top-sha256";
+    }
+  in
+  let complete_options =
+    {
+      Complete_multipart_upload.expected_bucket_owner = Some expected_owner;
+      checksum = Some complete_checksum;
+      checksum_type = Some Object.Checksum.Type.Composite;
+      multipart_object_size = Some 5L;
+    }
+  in
+  let complete =
+    Recording_s3.Multipart.complete_upload conn ~bucket:"my-bucket"
+      ~key:"large.bin" ~upload_id ~options:complete_options [ part.part ]
+    |> ok_or_fail "complete multipart checksum"
+  in
+  check_checksum "complete xml checksum" Object.Checksum.Algorithm.Sha256
+    "complete-sha256" complete.checksum;
+  Alcotest.(check bool)
+    "complete checksum type" true
+    (complete.checksum.checksum_type = Some Object.Checksum.Type.Composite);
+  match List.rev conn.calls with
+  | [ create; upload_part; complete ] ->
+      Alcotest.(check (option string))
+        "create checksum algorithm" (Some "SHA256")
+        (header "x-amz-checksum-algorithm" create.request.headers);
+      Alcotest.(check (option string))
+        "create checksum type" (Some "COMPOSITE")
+        (header "x-amz-checksum-type" create.request.headers);
+      Alcotest.(check (option string))
+        "upload part checksum value" (Some "provided-sha1")
+        (header "x-amz-checksum-sha1" upload_part.request.headers);
+      Alcotest.(check (option string))
+        "upload part no algorithm" None
+        (header "x-amz-checksum-algorithm" upload_part.request.headers);
+      Alcotest.(check (option string))
+        "complete checksum value" (Some "top-sha256")
+        (header "x-amz-checksum-sha256" complete.request.headers);
+      Alcotest.(check (option string))
+        "complete checksum type" (Some "COMPOSITE")
+        (header "x-amz-checksum-type" complete.request.headers);
+      Alcotest.(check (option string))
+        "complete object size" (Some "5")
+        (header "x-amz-mp-object-size" complete.request.headers);
+      List.iter
+        (fun (label, (call : Recording_runtime.call)) ->
+          Alcotest.(check (option string))
+            (label ^ " expected owner")
+            (Some expected_owner)
+            (header "x-amz-expected-bucket-owner" call.request.headers))
+        [
+          ("create", create);
+          ("upload part", upload_part);
+          ("complete", complete);
+        ];
+      Alcotest.(check bool)
+        "completion xml part checksum" true
+        (string_contains ~substring:"<ChecksumSHA1>provided-sha1</ChecksumSHA1>"
+           complete.body)
+  | _ -> Alcotest.fail "expected three multipart calls"
 
 let multipart_create_body upload_id =
   Fmt.str
@@ -1316,54 +2032,6 @@ let multipart_complete_body etag =
     "<CompleteMultipartUploadResult><ETag>%s</ETag></CompleteMultipartUploadResult>"
     etag
 
-let test_managed_multipart_upload_string () =
-  let part_size = Multipart.Managed.min_part_size in
-  let body = String.make part_size 'a' ^ "end" in
-  let conn =
-    Recording_runtime.connect
-      [
-        response 200 (multipart_create_body "upload-1");
-        response 200 ~headers:[ ("etag", "\"part-1\"") ] "";
-        response 200 ~headers:[ ("etag", "\"part-2\"") ] "";
-        response 200 (multipart_complete_body "\"complete\"");
-      ]
-  in
-  let options = { Multipart.Managed.default_options with part_size } in
-  let result =
-    Recording_s3.Multipart.Managed.upload_string conn ~bucket:"my-bucket"
-      ~key:"large.bin" ~options body
-    |> ok_or_fail "managed multipart upload"
-  in
-  Alcotest.(check (list int))
-    "uploaded parts" [ 1; 2 ]
-    (List.map (fun (part : Multipart.Part.t) -> part.part_number) result.parts);
-  Alcotest.(check bool)
-    "complete etag" true
-    (Option.is_some result.complete.etag);
-  match List.rev conn.calls with
-  | [ create; part1; part2; complete ] ->
-      Alcotest.(check string)
-        "create method" "POST"
-        (Awskit.Request.Method.to_string create.request.method_);
-      Alcotest.(check (option (list string)))
-        "create uploads query" (Some [])
-        (List.assoc_opt "uploads" create.request.target.query);
-      Alcotest.(check int) "part 1 body" part_size (String.length part1.body);
-      Alcotest.(check string) "part 2 body" "end" part2.body;
-      Alcotest.(check (option (list string)))
-        "part 1 number" (Some [ "1" ])
-        (List.assoc_opt "partNumber" part1.request.target.query);
-      Alcotest.(check (option (list string)))
-        "part 2 number" (Some [ "2" ])
-        (List.assoc_opt "partNumber" part2.request.target.query);
-      Alcotest.(check bool)
-        "complete includes first part" true
-        (String.contains complete.body '1');
-      Alcotest.(check bool)
-        "complete includes second etag" true
-        (String.contains complete.body '2')
-  | _ -> Alcotest.fail "expected create, two parts, complete"
-
 let test_complete_multipart_embedded_error () =
   let body =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
@@ -1373,62 +2041,102 @@ let test_complete_multipart_embedded_error () =
   let part =
     Multipart.Part.create_exn ~part_number:1
       ~etag:(Object.Etag.of_string_exn "\"part-1\"")
+      ()
   in
   match
-    Recording_s3.Multipart.complete conn ~bucket:"my-bucket" ~key:"large.bin"
-      ~upload_id [ part ]
+    Recording_s3.Multipart.complete_upload conn ~bucket:"my-bucket"
+      ~key:"large.bin" ~upload_id [ part ]
   with
   | Error error when Error.service_code error = Some "SlowDown" -> ()
   | Error error -> Alcotest.failf "unexpected complete error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected embedded complete error"
 
-let test_managed_multipart_aborts_on_part_failure () =
-  let part_size = Multipart.Managed.min_part_size in
-  let body = String.make part_size 'x' in
-  let conn =
-    Recording_runtime.connect
-      [
-        response 200 (multipart_create_body "upload-1");
-        response 400
-          {|<Error><Code>InvalidRequest</Code><Message>bad part</Message></Error>|};
-        response 204 "";
-      ]
-  in
-  let options = { Multipart.Managed.default_options with part_size } in
-  (match
-     Recording_s3.Multipart.Managed.upload_string conn ~bucket:"my-bucket"
-       ~key:"large.bin" ~options body
-   with
-  | Error error when Error.service_code error = Some "InvalidRequest" -> ()
-  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected managed upload failure");
-  match List.rev conn.calls with
-  | [ _create; _part1; abort ] ->
-      Alcotest.(check string)
-        "abort method" "DELETE"
-        (Awskit.Request.Method.to_string abort.request.method_);
-      Alcotest.(check (option (list string)))
-        "abort upload id" (Some [ "upload-1" ])
-        (List.assoc_opt "uploadId" abort.request.target.query)
-  | _ -> Alcotest.fail "expected create, failed part, abort"
-
 let make_sim () =
-  let clock = Sim.Clock.create ~now:test_time () in
-  let store = Sim.create_store ~clock () in
-  let conn = Sim.connect store ~credentials:creds in
-  ignore (Sim.Bucket.create conn ~bucket:"test-bucket" () |> ok_or_fail "bucket");
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials:creds in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "bucket");
   conn
+
+let test_sim_public_helper_surface () =
+  let conn = make_sim () in
+  let store = Simulator.store conn in
+  let put =
+    Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"ok.txt" "hello"
+    |> ok_or_fail "put ok"
+  in
+  (match
+     (Simulator.object_metadata store ~bucket:"test-bucket" ~key:"ok.txt"
+       : Simulator.object_metadata option)
+   with
+  | None -> Alcotest.fail "expected object metadata"
+  | Some metadata -> (
+      Alcotest.(check (option int64)) "metadata size" (Some 5L) metadata.size;
+      Alcotest.(check (option string))
+        "metadata etag"
+        (Option.map Object.Etag.to_string put.etag)
+        (Option.map Object.Etag.to_string metadata.etag);
+      match metadata.last_modified with
+      | Some last_modified when Ptime.equal last_modified test_time -> ()
+      | _ -> Alcotest.fail "expected metadata last modified"));
+  Alcotest.(check (list (pair string string)))
+    "objects as strings"
+    [ ("ok.txt", "hello") ]
+    (Simulator.objects_as_strings store ~bucket:"test-bucket");
+  Alcotest.(check bool)
+    "missing object metadata" true
+    (Option.is_none
+       (Simulator.object_metadata store ~bucket:"test-bucket" ~key:"missing"));
+  Simulator.enable_random_faults conn ~seed:7 ~prob:1.0;
+  (match
+     Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"faulted.txt"
+       "faulted"
+   with
+  | Error error when Error.service_code error = Some "InternalError" -> ()
+  | Error error -> Alcotest.failf "unexpected random fault: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected random fault");
+  Simulator.disable_random_faults conn;
+  ignore
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"after.txt"
+       "after"
+    |> ok_or_fail "put after disabling random faults");
+  Alcotest.(check (list (pair string string)))
+    "objects after random fault"
+    [ ("after.txt", "after"); ("ok.txt", "hello") ]
+    (Simulator.objects_as_strings store ~bucket:"test-bucket")
+
+let sim_operation_name (_ : Simulator.operation_record) = function
+  | `Put_object | `Get_object | `Head_object | `Delete_object | `List_objects_v2
+  | `List_object_versions | `Copy_object | `Delete_objects
+  | `Create_multipart_upload | `Upload_part | `Complete_multipart_upload
+  | `Abort_multipart_upload | `List_parts ->
+      ()
+
+let test_sim_history_uses_operation_names () =
+  let conn = make_sim () in
+  ignore
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"history.txt"
+       "history"
+    |> ok_or_fail "put history");
+  match Simulator.history (Simulator.store conn) with
+  | record :: _ -> sim_operation_name record record.op
+  | [] -> Alcotest.fail "expected simulator history record"
 
 let test_sim_buffer_roundtrip () =
   let conn = make_sim () in
-  let checksum : Object.Checksum.request =
-    { Object.Checksum.algorithm = `SHA256; value = None }
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
+      value = "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=";
+    }
   in
   let put =
-    Sim.Object.Buffer.put_string conn ~bucket:"test-bucket" ~key:"hello.txt"
+    Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"hello.txt"
       ~options:
         {
-          Object.Put.default_options with
+          Put_object.default_options with
           content_type = Some "text/plain";
           checksum = Some checksum;
         }
@@ -1436,50 +2144,128 @@ let test_sim_buffer_roundtrip () =
     |> ok_or_fail "put"
   in
   Alcotest.(check bool) "etag" true (Option.is_some put.etag);
-  check_checksum "put checksum" `SHA256
+  check_checksum "put checksum" Object.Checksum.Algorithm.Sha256
     "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" put.checksum;
   let info, body =
-    Sim.Object.Buffer.get_string conn ~bucket:"test-bucket" ~key:"hello.txt"
-      ~max_size:16L ()
+    Simulator.Object.get_as_string conn ~bucket:"test-bucket" ~key:"hello.txt"
+      ~max_bytes:16L ()
     |> ok_or_fail "get"
   in
   Alcotest.(check string) "body" "hello" body;
   Alcotest.(check (option string))
     "content-type" (Some "text/plain") info.content_type;
-  check_checksum "get checksum" `SHA256
+  check_checksum "get checksum" Object.Checksum.Algorithm.Sha256
     "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" info.checksum;
   let head =
-    Sim.Object.head conn ~bucket:"test-bucket" ~key:"hello.txt" ()
+    Simulator.Object.head conn ~bucket:"test-bucket" ~key:"hello.txt" ()
     |> ok_or_fail "head checksum"
   in
-  check_checksum "head checksum" `SHA256
+  check_checksum "head checksum" Object.Checksum.Algorithm.Sha256
     "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" head.checksum;
   let page =
-    Sim.Object.list conn ~bucket:"test-bucket" () |> ok_or_fail "list checksum"
+    Simulator.Object.list conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "list checksum"
   in
   match page.objects with
   | [ object_ ] ->
-      Alcotest.(check (option string))
-        "listed checksum" (Some "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=")
-        (List.find_map
-           (fun (checksum : Object.Checksum.response) -> Some checksum.value)
-           object_.checksums)
+      Alcotest.(check string) "listed key" "hello.txt" object_.key;
+      Alcotest.(check (option int64)) "listed size" (Some 5L) object_.size
   | _ -> Alcotest.fail "expected one listed object"
+
+let test_sim_rejects_unknown_checksum_writes () =
+  let conn = make_sim () in
+  let checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm = Object.Checksum.Algorithm.Unknown "FUTURE";
+      value = "value";
+    }
+  in
+  let expect_checksum_validation label = function
+    | Error (Awskit.Error.Validation { field = Some "checksum_algorithm"; _ })
+      ->
+        ()
+    | Error error ->
+        Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+    | Ok _ -> Alcotest.failf "%s: expected checksum validation" label
+  in
+  expect_checksum_validation "sim put"
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"bad.txt"
+       ~options:{ Put_object.default_options with checksum = Some checksum }
+       "body");
+  let copy_options =
+    {
+      Copy_object.default_options with
+      checksum_algorithm = Some (Object.Checksum.Algorithm.Unknown "FUTURE");
+    }
+  in
+  ignore
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"source.txt"
+       "body"
+    |> ok_or_fail "source");
+  expect_checksum_validation "sim copy"
+    (Simulator.Object.copy conn ~source_bucket:"test-bucket"
+       ~source_key:"source.txt" ~destination_bucket:"test-bucket"
+       ~destination_key:"copy.txt" ~options:copy_options ());
+  let upload =
+    Simulator.Multipart.create_upload conn ~bucket:"test-bucket" ~key:"bad.bin"
+      ()
+    |> ok_or_fail "create upload"
+  in
+  let upload_id = upload.upload.upload_id in
+  let upload_part_options =
+    { Upload_part.checksum = Some checksum; expected_bucket_owner = None }
+  in
+  expect_checksum_validation "sim upload part"
+    (Simulator.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"bad.bin"
+       ~upload_id ~part_number:1
+       ~body:(Simulator.Runtime.Request_body.of_string "body")
+       ~options:upload_part_options ());
+  let part =
+    Multipart.Part.create_exn ~part_number:1
+      ~etag:(Object.Etag.of_string_exn "\"etag\"")
+      ()
+  in
+  let complete_options =
+    {
+      Complete_multipart_upload.expected_bucket_owner = None;
+      checksum = Some checksum;
+      checksum_type = None;
+      multipart_object_size = None;
+    }
+  in
+  expect_checksum_validation "sim complete checksum"
+    (Simulator.Multipart.complete_upload conn ~bucket:"test-bucket"
+       ~key:"bad.bin" ~upload_id ~options:complete_options [ part ]);
+  let complete_options =
+    {
+      Complete_multipart_upload.default_options with
+      checksum_type = Some (Object.Checksum.Type.Unknown "FUTURE");
+    }
+  in
+  match
+    Simulator.Multipart.complete_upload conn ~bucket:"test-bucket"
+      ~key:"bad.bin" ~upload_id ~options:complete_options [ part ]
+  with
+  | Error (Awskit.Error.Validation { field = Some "checksum_type"; _ }) -> ()
+  | Error error ->
+      Alcotest.failf "sim complete checksum type: unexpected error: %a" Error.pp
+        error
+  | Ok _ -> Alcotest.fail "sim complete checksum type: expected validation"
 
 let test_sim_streaming_get () =
   let conn = make_sim () in
   ignore
-    (Sim.Object.Buffer.put_string conn ~bucket:"test-bucket" ~key:"stream"
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"stream"
        "abcdef"
     |> ok_or_fail "put");
   let consume reader =
     let bytes = Bytes.create 3 in
-    match Sim.Runtime.read reader bytes ~off:0 ~len:3 with
+    match Simulator.Runtime.Response_body.read reader bytes ~off:0 ~len:3 with
     | Error _ as error -> error
     | Ok read -> Ok (Bytes.sub_string bytes 0 read)
   in
   let _info, body =
-    Sim.Object.get conn ~bucket:"test-bucket" ~key:"stream" ~consume ()
+    Simulator.Object.get conn ~bucket:"test-bucket" ~key:"stream" ~consume ()
     |> ok_or_fail "stream get"
   in
   Alcotest.(check string) "partial body" "abc" body
@@ -1487,40 +2273,40 @@ let test_sim_streaming_get () =
 let test_buffer_limit () =
   let conn = make_sim () in
   ignore
-    (Sim.Object.Buffer.put_string conn ~bucket:"test-bucket" ~key:"large"
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"large"
        "abcdef"
     |> ok_or_fail "put");
   match
-    Sim.Object.Buffer.get_string conn ~bucket:"test-bucket" ~key:"large"
-      ~max_size:3L ()
+    Simulator.Object.get_as_string conn ~bucket:"test-bucket" ~key:"large"
+      ~max_bytes:3L ()
   with
   | Error (Awskit.Error.Body _) -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected max_size failure"
+  | Ok _ -> Alcotest.fail "expected max_bytes failure"
 
 let test_sim_paginator_keys () =
   let conn = make_sim () in
   ignore
-    (Sim.Object.Buffer.put_string conn ~bucket:"test-bucket" ~key:"logs/a.txt"
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"logs/a.txt"
        "a"
     |> ok_or_fail "put a");
   ignore
-    (Sim.Object.Buffer.put_string conn ~bucket:"test-bucket" ~key:"logs/b.txt"
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"logs/b.txt"
        "b"
     |> ok_or_fail "put b");
   ignore
-    (Sim.Object.Buffer.put_string conn ~bucket:"test-bucket" ~key:"other.txt"
+    (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"other.txt"
        "other"
     |> ok_or_fail "put other");
   let options =
     {
-      Object.List.default_options with
+      List_objects_v2.default_options with
       prefix = Some "logs/";
       max_keys = Some 1;
     }
   in
   let keys =
-    Sim.Object.Paginator.keys conn ~bucket:"test-bucket" ~options ()
+    Simulator.Object.List_objects_v2.keys conn ~bucket:"test-bucket" ~options ()
     |> ok_or_fail "sim paginator keys"
   in
   Alcotest.(check (list string)) "keys" [ "logs/a.txt"; "logs/b.txt" ] keys
@@ -1530,8 +2316,12 @@ let suite =
     ( "core",
       [
         Alcotest.test_case "presigned result" `Quick test_presigned_result;
+        Alcotest.test_case "operation data module names" `Quick
+          test_operation_data_module_names;
         Alcotest.test_case "presigned put checksum headers" `Quick
           test_presigned_put_checksum_headers;
+        Alcotest.test_case "presigned expected owner headers" `Quick
+          test_presigned_expected_bucket_owner_headers;
         Alcotest.test_case "presigned multipart upload part" `Quick
           test_presigned_upload_part;
         Alcotest.test_case "presigned rejects header newline" `Quick
@@ -1542,10 +2332,22 @@ let suite =
         Alcotest.test_case "bucket head request" `Quick test_bucket_head_request;
         Alcotest.test_case "bucket list parse" `Quick test_bucket_list_parse;
         Alcotest.test_case "bucket config parse" `Quick test_bucket_config_parse;
+        Alcotest.test_case "bucket expected owner headers" `Quick
+          test_bucket_expected_owner_headers;
+        Alcotest.test_case "bucket encryption extended xml" `Quick
+          test_bucket_encryption_extended_xml;
+        Alcotest.test_case "bucket encryption unknown read values" `Quick
+          test_bucket_encryption_unknown_read_values;
+        Alcotest.test_case "bucket encryption unknown write rejected" `Quick
+          test_bucket_encryption_unknown_write_rejected;
         Alcotest.test_case "object checksum headers and response" `Quick
           test_object_checksum_headers_and_response;
+        Alcotest.test_case "object checksum mode and expected owner headers"
+          `Quick test_object_checksum_mode_and_expected_owner_headers;
         Alcotest.test_case "object precondition headers" `Quick
           test_object_precondition_headers;
+        Alcotest.test_case "delete objects request body" `Quick
+          test_delete_objects_request_body;
         Alcotest.test_case "object versioning requests and parse" `Quick
           test_object_versioning_requests_and_parse;
         Alcotest.test_case "retry slow down then success" `Quick
@@ -1554,22 +2356,26 @@ let suite =
           test_retry_fatal_error_not_retried;
         Alcotest.test_case "retry disabled policy" `Quick
           test_retry_disabled_policy;
-        Alcotest.test_case "non-replayable upload not retried" `Quick
-          test_non_replayable_upload_not_retried;
-        Alcotest.test_case "runtime stream upload error propagates" `Quick
-          test_runtime_stream_upload_error_propagates;
+        Alcotest.test_case "non-replayable request body not retried" `Quick
+          test_non_replayable_request_body_not_retried;
+        Alcotest.test_case "runtime stream request body error propagates" `Quick
+          test_runtime_stream_request_body_error_propagates;
         Alcotest.test_case "retry jitter bounds" `Quick test_retry_jitter_bounds;
-        Alcotest.test_case "upload descriptor validation" `Quick
-          test_upload_descriptor_validation;
-        Alcotest.test_case "sim stream upload error propagates" `Quick
-          test_sim_stream_upload_error_propagates;
-        Alcotest.test_case "sim stream upload rejects length mismatch" `Quick
-          test_sim_stream_upload_rejects_length_mismatch;
+        Alcotest.test_case "request body descriptor validation" `Quick
+          test_request_body_descriptor_validation;
+        Alcotest.test_case "sim request body requires known length" `Quick
+          test_sim_request_body_requires_known_length;
+        Alcotest.test_case "sim stream request body error propagates" `Quick
+          test_sim_stream_request_body_error_propagates;
+        Alcotest.test_case "sim stream request body rejects length mismatch"
+          `Quick test_sim_stream_request_body_rejects_length_mismatch;
         Alcotest.test_case
           "sim multipart upload part stream error does not store part" `Quick
           test_sim_multipart_upload_part_stream_error_does_not_store_part;
-        Alcotest.test_case "download body drain errors" `Quick
-          test_download_body_drain_errors;
+        Alcotest.test_case "response body drain errors" `Quick
+          test_response_body_drain_errors;
+        Alcotest.test_case "in-memory helper limit error uses max_bytes" `Quick
+          test_in_memory_helper_limit_error_uses_max_bytes;
         Alcotest.test_case "malformed xml responses" `Quick
           test_malformed_xml_responses;
         Alcotest.test_case "copy object embedded error" `Quick
@@ -1582,16 +2388,18 @@ let suite =
           test_multipart_paginator_follows_markers;
         Alcotest.test_case "multipart upload part checksum headers" `Quick
           test_multipart_upload_part_checksum_headers;
-        Alcotest.test_case "managed multipart upload string" `Quick
-          test_managed_multipart_upload_string;
+        Alcotest.test_case "multipart checksum and expected owner headers"
+          `Quick test_multipart_checksum_and_expected_owner_headers;
         Alcotest.test_case "complete multipart embedded error" `Quick
           test_complete_multipart_embedded_error;
-        Alcotest.test_case "managed multipart aborts on part failure" `Quick
-          test_managed_multipart_aborts_on_part_failure;
-        Alcotest.test_case "sim buffer roundtrip" `Quick
+        Alcotest.test_case "sim public helper surface" `Quick
+          test_sim_public_helper_surface;
+        Alcotest.test_case "sim history uses operation names" `Quick
+          test_sim_history_uses_operation_names;
+        Alcotest.test_case "sim in-memory roundtrip" `Quick
           test_sim_buffer_roundtrip;
         Alcotest.test_case "sim streaming get" `Quick test_sim_streaming_get;
-        Alcotest.test_case "buffer limit" `Quick test_buffer_limit;
+        Alcotest.test_case "in-memory helper limit" `Quick test_buffer_limit;
         Alcotest.test_case "sim paginator keys" `Quick test_sim_paginator_keys;
       ] );
   ]

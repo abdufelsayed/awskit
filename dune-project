@@ -5,7 +5,7 @@
 (generate_opam_files true)
 
 (source
- (github weldr-ai/awskit))
+ (github abdufelsayed/awskit))
 
 (authors "Abdullah Elsayed <hey@abdufelsayed.dev>")
 

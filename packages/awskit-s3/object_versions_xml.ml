@@ -1,4 +1,5 @@
 open Common
+open Operation_data
 
 open struct
   module Object = Object
@@ -12,7 +13,18 @@ let parse_owner nodes =
   | None -> None
   | Some nodes -> Xml.child_text "ID" nodes
 
-let parse_page ~request body =
+let parse_checksum_summary nodes =
+  {
+    Object.Checksum.algorithms =
+      Xml.child_texts "ChecksumAlgorithm" nodes
+      |> List.map String.trim
+      |> List.map Object.Checksum.Algorithm.of_string;
+    checksum_type =
+      Option.map Object.Checksum.Type.of_string
+        (Xml.child_text "ChecksumType" nodes);
+  }
+
+let parse_page ~response body =
   let* nodes = Xml.decode_root body ~name:"ListVersionsResult" in
   let versions =
     Xml.children "Version" nodes
@@ -22,7 +34,7 @@ let parse_page ~request body =
         | Some key ->
             Some
               {
-                Object.Versions.key;
+                List_object_versions.key;
                 version_id =
                   Option.bind
                     (Xml.child_text "VersionId" nodes)
@@ -45,6 +57,7 @@ let parse_page ~request body =
                     (Xml.child_text "StorageClass" nodes)
                     Storage_class.of_string;
                 owner = parse_owner nodes;
+                checksum = parse_checksum_summary nodes;
               })
   in
   let delete_markers =
@@ -55,7 +68,7 @@ let parse_page ~request body =
         | Some key ->
             Some
               {
-                Object.Versions.key;
+                List_object_versions.key;
                 version_id =
                   Option.bind
                     (Xml.child_text "VersionId" nodes)
@@ -73,7 +86,7 @@ let parse_page ~request body =
   in
   Ok
     {
-      Object.Versions.bucket = Xml.child_text "Name" nodes;
+      List_object_versions.bucket = Xml.child_text "Name" nodes;
       prefix = Xml.child_text "Prefix" nodes;
       delimiter = Xml.child_text "Delimiter" nodes;
       versions;
@@ -92,5 +105,5 @@ let parse_page ~request body =
         Option.bind
           (Xml.child_text "NextVersionIdMarker" nodes)
           parse_version_id;
-      request;
+      response;
     }

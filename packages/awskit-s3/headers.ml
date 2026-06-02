@@ -31,12 +31,7 @@ let read_precondition_headers (p : Object.Preconditions.Read.t) =
   |> add_time_header "if-unmodified-since" p.if_unmodified_since
 
 let delete_precondition_headers (p : Object.Preconditions.Delete.t) =
-  []
-  |> add_opt_header "if-match" (Option.map etag_condition_header p.if_match)
-  |> add_time_header "x-amz-if-match-last-modified-time"
-       p.if_match_last_modified_time
-  |> add_opt_header "x-amz-if-match-size"
-       (Option.map Int64.to_string p.if_match_size)
+  [] |> add_opt_header "if-match" (Option.map etag_condition_header p.if_match)
 
 let copy_source_precondition_headers (p : Object.Preconditions.Copy_source.t) =
   []
@@ -69,28 +64,62 @@ let tags_header tags =
             Uri.pct_encode tag.key ^ "=" ^ Uri.pct_encode tag.value)
         |> String.concat "&")
 
-let checksum_algorithm = function
-  | `CRC32 -> "CRC32"
-  | `CRC32C -> "CRC32C"
-  | `CRC64NVME -> "CRC64NVME"
-  | `SHA1 -> "SHA1"
-  | `SHA256 -> "SHA256"
-
 let checksum_header_name = function
-  | `CRC32 -> "x-amz-checksum-crc32"
-  | `CRC32C -> "x-amz-checksum-crc32c"
-  | `CRC64NVME -> "x-amz-checksum-crc64nvme"
-  | `SHA1 -> "x-amz-checksum-sha1"
-  | `SHA256 -> "x-amz-checksum-sha256"
+  | Object.Checksum.Algorithm.Crc32 -> Some "x-amz-checksum-crc32"
+  | Crc32c -> Some "x-amz-checksum-crc32c"
+  | Crc64nvme -> Some "x-amz-checksum-crc64nvme"
+  | Sha1 -> Some "x-amz-checksum-sha1"
+  | Sha256 -> Some "x-amz-checksum-sha256"
+  | Sha512 -> Some "x-amz-checksum-sha512"
+  | Md5 -> Some "x-amz-checksum-md5"
+  | Xxhash64 -> Some "x-amz-checksum-xxhash64"
+  | Xxhash3 -> Some "x-amz-checksum-xxhash3"
+  | Xxhash128 -> Some "x-amz-checksum-xxhash128"
+  | Unknown _ -> None
 
-let checksum_request_headers = function
+let validate_checksum_algorithm = function
+  | Object.Checksum.Algorithm.Unknown value ->
+      invalid ~field:"checksum_algorithm"
+        "unknown checksum algorithm %S cannot be sent" value
+  | _ -> Ok ()
+
+let validate_checksum_type = function
+  | Object.Checksum.Type.Unknown value ->
+      invalid ~field:"checksum_type" "unknown checksum type %S cannot be sent"
+        value
+  | _ -> Ok ()
+
+let validate_checksum_value (checksum : Object.Checksum.value) =
+  validate_checksum_algorithm checksum.algorithm
+
+let checksum_value_headers = function
   | None -> []
-  | Some (request : Object.Checksum.request) ->
-      ("x-amz-checksum-algorithm", checksum_algorithm request.algorithm)
-      ::
-      (match request.value with
+  | Some (checksum : Object.Checksum.value) -> (
+      match checksum_header_name checksum.algorithm with
       | None -> []
-      | Some value -> [ (checksum_header_name request.algorithm, value) ])
+      | Some name -> [ (name, checksum.value) ])
+
+let checksum_algorithm_header = function
+  | None -> []
+  | Some algorithm ->
+      [
+        ( "x-amz-checksum-algorithm",
+          Object.Checksum.Algorithm.to_string algorithm );
+      ]
+
+let checksum_type_header = function
+  | None -> []
+  | Some checksum_type ->
+      [ ("x-amz-checksum-type", Object.Checksum.Type.to_string checksum_type) ]
+
+let checksum_mode_header = function
+  | None -> []
+  | Some mode ->
+      [ ("x-amz-checksum-mode", Object.Checksum.Mode.to_string mode) ]
+
+let multipart_object_size_header = function
+  | None -> []
+  | Some size -> [ ("x-amz-mp-object-size", Int64.to_string size) ]
 
 let encryption_request_headers = function
   | None -> []
