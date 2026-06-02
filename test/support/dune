@@ -1,0 +1,4 @@
+(library
+ (name awskit_test)
+ (wrapped false)
+ (libraries awskit alcotest ptime))

@@ -1,7 +1,7 @@
 (test
  (name test_awskit_s3_lwt_unix)
  (package awskit-s3-lwt-unix)
- (modules test_awskit_s3_lwt_unix integration_tests transfer_tests)
+ (modules test_awskit_s3_lwt_unix test_integration test_transfer)
  (libraries
   awskit
   awskit-lwt-unix
@@ -14,8 +14,8 @@
   alcotest))
 
 (executable
- (name minio_contract_tests)
- (modules minio_contract_tests)
+ (name test_minio_contract)
+ (modules test_minio_contract)
  (libraries
   awskit
   awskit-lwt-unix
@@ -30,4 +30,4 @@
  (alias minio-contract)
  (package awskit-s3-lwt-unix)
  (action
-  (run ./minio_contract_tests.exe)))
+  (run ./test_minio_contract.exe)))

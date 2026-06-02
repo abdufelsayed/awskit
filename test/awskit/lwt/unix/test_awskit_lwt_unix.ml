@@ -1,1 +1,1 @@
-let () = Alcotest.run "awskit-lwt-unix" (Integration_tests.suite ())
+let () = Alcotest.run "awskit-lwt-unix" (Test_integration.suite ())

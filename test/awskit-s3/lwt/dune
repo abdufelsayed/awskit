@@ -1,7 +1,6 @@
 (test
  (name test_awskit_s3_lwt)
  (package awskit-s3-lwt)
- (modules test_awskit_s3_lwt integration_tests)
  (libraries
   awskit
   awskit-lwt
