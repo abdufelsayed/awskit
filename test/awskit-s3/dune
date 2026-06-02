@@ -3,7 +3,7 @@
  (package awskit-s3)
  (modules test_awskit_s3 core_tests contract_tests)
  (libraries
-  awskit_s3
+  awskit-s3
   fmt
   alcotest
   ptime

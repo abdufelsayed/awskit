@@ -655,10 +655,10 @@ let test_bucket_list_parse () =
     {|<ListAllMyBucketsResult><Buckets><Bucket><Name>alpha</Name><CreationDate>2026-04-08T12:00:00Z</CreationDate></Bucket><Bucket><Name>zeta</Name></Bucket></Buckets></ListAllMyBucketsResult>|}
   in
   let conn = Recording_runtime.connect [ response 200 body ] in
-  let buckets = Recording_s3.Bucket.list conn |> ok_or_fail "bucket list" in
+  let list_result = Recording_s3.Bucket.list conn |> ok_or_fail "bucket list" in
   Alcotest.(check (list string))
     "bucket names" [ "alpha"; "zeta" ]
-    (List.map (fun (bucket : Bucket.info) -> bucket.name) buckets);
+    (List.map (fun (bucket : Bucket.info) -> bucket.name) list_result.buckets);
   let call = Recording_runtime.last_call conn in
   Alcotest.(check string)
     "root host" "s3.us-east-1.amazonaws.com" call.request.target.host

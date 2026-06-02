@@ -83,16 +83,16 @@ module Make (Client : SUBJECT) = struct
     Alcotest.(check bool)
       "created bucket" true
       (Client.Bucket.exists conn ~bucket |> ok_or_fail "exists present");
-    let buckets = Client.Bucket.list conn |> ok_or_fail "list buckets" in
+    let list_result = Client.Bucket.list conn |> ok_or_fail "list buckets" in
     Alcotest.(check (list string))
       "bucket list" [ bucket ]
-      (List.map (fun (info : Bucket.info) -> info.name) buckets);
+      (List.map (fun (info : Bucket.info) -> info.name) list_result.buckets);
     let location =
       Client.Bucket.get_location conn ~bucket |> ok_or_fail "location"
     in
     Alcotest.(check (option string))
       "location" (Some "us-east-1")
-      (Option.map Region.to_string location);
+      (Option.map Region.to_string location.region);
     ignore (Client.Bucket.delete conn ~bucket |> ok_or_fail "delete bucket");
     Alcotest.(check bool)
       "deleted bucket" false
@@ -362,15 +362,15 @@ module Make (Client : SUBJECT) = struct
       (Client.Object.Tagging.put conn ~bucket ~key:"tagged.txt" tags
       |> ok_or_fail "put object tags");
     let result =
-      Client.Object.Tagging.get conn ~bucket ~key:"tagged.txt"
+      Client.Object.Tagging.get conn ~bucket ~key:"tagged.txt" ()
       |> ok_or_fail "get object tags"
     in
     Alcotest.(check int) "tag count" 2 (List.length result.tags);
     ignore
-      (Client.Object.Tagging.delete conn ~bucket ~key:"tagged.txt"
+      (Client.Object.Tagging.delete conn ~bucket ~key:"tagged.txt" ()
       |> ok_or_fail "delete object tags");
     let result =
-      Client.Object.Tagging.get conn ~bucket ~key:"tagged.txt"
+      Client.Object.Tagging.get conn ~bucket ~key:"tagged.txt" ()
       |> ok_or_fail "get deleted tags"
     in
     Alcotest.(check int) "deleted tag count" 0 (List.length result.tags)

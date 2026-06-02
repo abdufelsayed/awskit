@@ -13,11 +13,9 @@ depends: [
   "dune" {>= "3.22"}
   "ocaml"
   "awskit" {= version}
-  "base"
   "digestif"
   "ptime"
   "fmt"
-  "logs"
   "yojson"
   "base64"
   "uri"

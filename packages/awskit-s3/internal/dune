@@ -1,0 +1,16 @@
+(library
+ (name awskit_s3_internal)
+ (package awskit-s3)
+ (libraries
+  awskit
+  digestif
+  ptime
+  fmt
+  yojson
+  base64
+  uri
+  ezxmlm
+  ppx_protocol_conv_xmlm
+  ppx_yojson_conv_lib)
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq ppx_protocol_conv ppx_yojson_conv)))

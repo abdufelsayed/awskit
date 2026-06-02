@@ -135,16 +135,14 @@
   "S3 operations, bucket configuration, multipart uploads, presigned URLs, policies, simulation, and XML wire types. Runtime adapters are available as separate packages.")
  (depends
   ocaml
-  (awskit
-   (= :version))
-  base
-  digestif
-  ptime
-  fmt
-  logs
-  yojson
-  base64
-  uri
+	  (awskit
+	   (= :version))
+	  digestif
+	  ptime
+	  fmt
+	  yojson
+	  base64
+	  uri
   ezxmlm
   ppx_protocol_conv_xmlm
   ppx_deriving

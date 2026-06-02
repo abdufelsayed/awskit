@@ -78,7 +78,7 @@ opam install awskit-s3-eio eio_main
 
 ```lisp
 ; dune
-(libraries awskit awskit-s3 awskit-s3-eio eio_main)
+(libraries awskit awskit-s3 awskit-s3-eio eio_main fmt)
 ```
 
 ```ocaml
