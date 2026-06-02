@@ -35,7 +35,7 @@ Cohttp runtime packages. Adapter packages carry those dependencies.
 
 - bucket creation, deletion, listing, and configuration;
 - object put, get, head, delete, copy, ranges, metadata, tags, and versions;
-- multipart upload and object transfer helpers;
+- multipart upload and local-file transfer helpers;
 - presigned URLs;
 - bucket policies and related XML/JSON wire types;
 - S3 endpoint and addressing configuration;
@@ -230,7 +230,8 @@ packages/
     lwt/unix/          ready-to-use Lwt + Unix runtime
     eio/               ready-to-use Eio runtime
   awskit-s3/           pure AWS S3 core
-    sim/               in-memory S3 simulator
+    simulator.ml       in-memory S3 simulator entrypoint
+    sim_*.ml           simulator support modules
     lwt/               S3 over generic Lwt runtime
     lwt/unix/          ready-to-use S3 Lwt + Unix client
     eio/               ready-to-use S3 Eio client

@@ -520,26 +520,11 @@ let test_bucket_config_parse () =
   let cors =
     {|<CORSConfiguration><CORSRule><ID>web</ID><AllowedOrigin>https://example.com</AllowedOrigin><AllowedMethod>GET</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>etag</ExposeHeader><MaxAgeSeconds>300</MaxAgeSeconds></CORSRule></CORSConfiguration>|}
   in
-  let website =
-    {|<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument></WebsiteConfiguration>|}
-  in
   let public_access_block =
     {|<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>false</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>false</RestrictPublicBuckets></PublicAccessBlockConfiguration>|}
   in
   let ownership =
     {|<OwnershipControls><Rule><ObjectOwnership>BucketOwnerEnforced</ObjectOwnership></Rule></OwnershipControls>|}
-  in
-  let request_payment =
-    {|<RequestPaymentConfiguration><Payer>Requester</Payer></RequestPaymentConfiguration>|}
-  in
-  let accelerate =
-    {|<AccelerateConfiguration><Status>Enabled</Status></AccelerateConfiguration>|}
-  in
-  let policy_status =
-    {|<PolicyStatus><IsPublic>false</IsPublic></PolicyStatus>|}
-  in
-  let logging =
-    {|<BucketLoggingStatus><LoggingEnabled><TargetBucket>log-bucket</TargetBucket><TargetPrefix>logs/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>|}
   in
   let conn =
     Recording_runtime.connect
@@ -548,13 +533,8 @@ let test_bucket_config_parse () =
         response 200 tagging;
         response 200 encryption;
         response 200 cors;
-        response 200 website;
         response 200 public_access_block;
         response 200 ownership;
-        response 200 request_payment;
-        response 200 accelerate;
-        response 200 policy_status;
-        response 200 logging;
       ]
   in
   let versioning =
@@ -575,22 +555,20 @@ let test_bucket_config_parse () =
   in
   (match encryption.config.rules with
   | [ rule ] ->
-      Alcotest.(check string)
-        "algorithm" "aws:kms"
-        (Bucket.Encryption.Algorithm.to_string rule.sse_algorithm);
       Alcotest.(check (option string))
-        "kms key" (Some "key-1") rule.kms_master_key_id
+        "algorithm" (Some "aws:kms")
+        (Option.map Bucket.Encryption.Algorithm.to_string rule.sse_algorithm);
+      Alcotest.(check (option string))
+        "kms key" (Some "key-1") rule.kms_master_key_id;
+      Alcotest.(check (option bool)) "bucket key" None rule.bucket_key_enabled;
+      Alcotest.(check int)
+        "blocked types" 0
+        (List.length rule.blocked_encryption_types)
   | _ -> Alcotest.fail "expected one encryption rule");
   let cors =
     Recording_s3.Bucket.Cors.get conn ~bucket:"my-bucket" |> ok_or_fail "cors"
   in
   Alcotest.(check int) "cors rule count" 1 (List.length cors.config.rules);
-  let website =
-    Recording_s3.Bucket.Website.get conn ~bucket:"my-bucket"
-    |> ok_or_fail "website"
-  in
-  Alcotest.(check (option string))
-    "index" (Some "index.html") website.config.index_document_suffix;
   let public_access_block =
     Recording_s3.Bucket.Public_access_block.get conn ~bucket:"my-bucket"
     |> ok_or_fail "public access block"
@@ -604,36 +582,160 @@ let test_bucket_config_parse () =
   Alcotest.(check string)
     "ownership" "BucketOwnerEnforced"
     (Bucket.Ownership_controls.Object_ownership.to_string
-       ownership.config.object_ownership);
-  let request_payment =
-    Recording_s3.Bucket.Request_payment.get conn ~bucket:"my-bucket"
-    |> ok_or_fail "request payment"
+       ownership.config.object_ownership)
+
+let expected_owner = "123456789012"
+
+let check_expected_owner_header label (call : Recording_runtime.call) =
+  Alcotest.(check (option string))
+    label (Some expected_owner)
+    (header "x-amz-expected-bucket-owner" call.request.headers)
+
+let check_no_expected_owner_header label (call : Recording_runtime.call) =
+  Alcotest.(check (option string))
+    label None
+    (header "x-amz-expected-bucket-owner" call.request.headers)
+
+let test_bucket_expected_owner_headers () =
+  let conn =
+    Recording_runtime.connect
+      [ response 200 ~headers:[ ("x-amz-bucket-region", "us-west-2") ] "" ]
   in
+  ignore
+    (Recording_s3.Bucket.head conn ~bucket:"my-bucket"
+       ~expected_bucket_owner:expected_owner
+    |> ok_or_fail "head expected owner");
+  check_expected_owner_header "head expected owner"
+    (Recording_runtime.last_call conn);
+  let conn =
+    Recording_runtime.connect
+      [ response 200 "<LocationConstraint>us-west-2</LocationConstraint>" ]
+  in
+  ignore
+    (Recording_s3.Bucket.get_location conn ~bucket:"my-bucket"
+       ~expected_bucket_owner:expected_owner
+    |> ok_or_fail "location expected owner");
+  check_expected_owner_header "location expected owner"
+    (Recording_runtime.last_call conn);
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          {|<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>|};
+      ]
+  in
+  ignore
+    (Recording_s3.Bucket.Versioning.get conn ~bucket:"my-bucket"
+       ~expected_bucket_owner:expected_owner
+    |> ok_or_fail "xml get expected owner");
+  check_expected_owner_header "xml get expected owner"
+    (Recording_runtime.last_call conn);
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  ignore
+    (Recording_s3.Bucket.Versioning.put conn ~bucket:"my-bucket"
+       ~expected_bucket_owner:expected_owner Bucket.Versioning.Status.Enabled
+    |> ok_or_fail "xml put expected owner");
+  check_expected_owner_header "xml put expected owner"
+    (Recording_runtime.last_call conn);
+  let conn = Recording_runtime.connect [ response 204 "" ] in
+  ignore
+    (Recording_s3.Bucket.Tagging.delete conn ~bucket:"my-bucket"
+       ~expected_bucket_owner:expected_owner
+    |> ok_or_fail "xml delete expected owner");
+  check_expected_owner_header "xml delete expected owner"
+    (Recording_runtime.last_call conn);
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  ignore
+    (Recording_s3.Bucket.create conn ~bucket:"new-bucket" ()
+    |> ok_or_fail "create no expected owner");
+  check_no_expected_owner_header "create no expected owner"
+    (Recording_runtime.last_call conn);
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          "<ListAllMyBucketsResult><Buckets/></ListAllMyBucketsResult>";
+      ]
+  in
+  ignore (Recording_s3.Bucket.list conn |> ok_or_fail "list no expected owner");
+  check_no_expected_owner_header "list no expected owner"
+    (Recording_runtime.last_call conn)
+
+let test_bucket_encryption_extended_xml () =
+  let body =
+    {|<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms:dsse</SSEAlgorithm><KMSMasterKeyID>key-1</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled><BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>|}
+  in
+  let conn = Recording_runtime.connect [ response 200 body; response 200 "" ] in
+  let parsed =
+    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket"
+    |> ok_or_fail "extended encryption parse"
+  in
+  let config = parsed.config in
+  (match config.rules with
+  | [ rule ] ->
+      Alcotest.(check bool)
+        "dsse algorithm" true
+        (rule.sse_algorithm = Some Bucket.Encryption.Algorithm.Aws_kms_dsse);
+      Alcotest.(check (option string))
+        "kms key" (Some "key-1") rule.kms_master_key_id;
+      Alcotest.(check (option bool))
+        "bucket key" (Some true) rule.bucket_key_enabled;
+      Alcotest.(check bool)
+        "blocked type" true
+        (rule.blocked_encryption_types
+        = [ Bucket.Encryption.Blocked_encryption_type.Sse_c ])
+  | _ -> Alcotest.fail "expected one encryption rule");
+  ignore
+    (Recording_s3.Bucket.Encryption.put conn ~bucket:"my-bucket" config
+    |> ok_or_fail "extended encryption serialize");
+  let body = (Recording_runtime.last_call conn).body in
   Alcotest.(check bool)
-    "requester payer" true
-    (request_payment.payer = Some Bucket.Request_payment.Payer.Requester);
-  let accelerate =
-    Recording_s3.Bucket.Accelerate.get conn ~bucket:"my-bucket"
-    |> ok_or_fail "accelerate"
-  in
+    "serializes dsse" true
+    (string_contains ~substring:"aws:kms:dsse" body);
   Alcotest.(check bool)
-    "accelerate enabled" true
-    (accelerate.status = Some Bucket.Accelerate.Status.Enabled);
-  let policy_status =
-    Recording_s3.Bucket.Policy_status.get conn ~bucket:"my-bucket"
-    |> ok_or_fail "policy status"
+    "serializes bucket key" true
+    (string_contains ~substring:"<BucketKeyEnabled>true</BucketKeyEnabled>" body);
+  Alcotest.(check bool)
+    "serializes blocked type" true
+    (string_contains ~substring:"<EncryptionType>SSE-C</EncryptionType>" body)
+
+let test_bucket_encryption_unknown_read_values () =
+  let body =
+    {|<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>future-value</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>|}
   in
-  Alcotest.(check (option bool))
-    "policy status" (Some false) policy_status.is_public;
-  let logging =
-    Recording_s3.Bucket.Logging.get conn ~bucket:"my-bucket"
-    |> ok_or_fail "logging"
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  let result =
+    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket"
+    |> ok_or_fail "unknown encryption parse"
   in
-  match logging.config.logging with
-  | Some target ->
-      Alcotest.(check string) "logging target" "log-bucket" target.target_bucket;
-      Alcotest.(check string) "logging prefix" "logs/" target.target_prefix
-  | None -> Alcotest.fail "expected logging target"
+  match result.config.rules with
+  | [
+   { Bucket.Encryption.Rule.sse_algorithm = Some (Unknown "future-value"); _ };
+  ] ->
+      ()
+  | _ -> Alcotest.fail "expected unknown encryption algorithm"
+
+let test_bucket_encryption_unknown_write_rejected () =
+  let config =
+    {
+      Bucket.Encryption.rules =
+        [
+          {
+            Bucket.Encryption.Rule.sse_algorithm =
+              Some (Bucket.Encryption.Algorithm.Unknown "future-value");
+            kms_master_key_id = None;
+            bucket_key_enabled = None;
+            blocked_encryption_types = [];
+          };
+        ];
+    }
+  in
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  match Recording_s3.Bucket.Encryption.put conn ~bucket:"my-bucket" config with
+  | Error (Awskit.Error.Validation { field = Some "sse_algorithm"; _ }) -> ()
+  | Error error ->
+      Alcotest.failf "unexpected validation error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected unknown encryption write rejection"
 
 let test_object_checksum_headers_and_response () =
   let conn =
@@ -1515,54 +1617,6 @@ let multipart_complete_body etag =
     "<CompleteMultipartUploadResult><ETag>%s</ETag></CompleteMultipartUploadResult>"
     etag
 
-let test_object_transfer_upload_string () =
-  let part_size = Transfer.min_part_size in
-  let body = String.make part_size 'a' ^ "end" in
-  let conn =
-    Recording_runtime.connect
-      [
-        response 200 (multipart_create_body "upload-1");
-        response 200 ~headers:[ ("etag", "\"part-1\"") ] "";
-        response 200 ~headers:[ ("etag", "\"part-2\"") ] "";
-        response 200 (multipart_complete_body "\"complete\"");
-      ]
-  in
-  let options = { Transfer.default_options with part_size } in
-  let result =
-    Recording_s3.Object.Transfer.upload_string conn ~bucket:"my-bucket"
-      ~key:"large.bin" ~options body
-    |> ok_or_fail "object transfer upload"
-  in
-  Alcotest.(check (list int))
-    "uploaded parts" [ 1; 2 ]
-    (List.map (fun (part : Multipart.Part.t) -> part.part_number) result.parts);
-  Alcotest.(check bool)
-    "complete etag" true
-    (Option.is_some result.complete.etag);
-  match List.rev conn.calls with
-  | [ create; part1; part2; complete ] ->
-      Alcotest.(check string)
-        "create method" "POST"
-        (Awskit.Request.Method.to_string create.request.method_);
-      Alcotest.(check (option (list string)))
-        "create uploads query" (Some [])
-        (List.assoc_opt "uploads" create.request.target.query);
-      Alcotest.(check int) "part 1 body" part_size (String.length part1.body);
-      Alcotest.(check string) "part 2 body" "end" part2.body;
-      Alcotest.(check (option (list string)))
-        "part 1 number" (Some [ "1" ])
-        (List.assoc_opt "partNumber" part1.request.target.query);
-      Alcotest.(check (option (list string)))
-        "part 2 number" (Some [ "2" ])
-        (List.assoc_opt "partNumber" part2.request.target.query);
-      Alcotest.(check bool)
-        "complete includes first part" true
-        (String.contains complete.body '1');
-      Alcotest.(check bool)
-        "complete includes second etag" true
-        (String.contains complete.body '2')
-  | _ -> Alcotest.fail "expected create, two parts, complete"
-
 let test_complete_multipart_embedded_error () =
   let body =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
@@ -1580,67 +1634,6 @@ let test_complete_multipart_embedded_error () =
   | Error error when Error.service_code error = Some "SlowDown" -> ()
   | Error error -> Alcotest.failf "unexpected complete error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected embedded complete error"
-
-let test_object_transfer_aborts_on_part_failure () =
-  let part_size = Transfer.min_part_size in
-  let body = String.make part_size 'x' in
-  let conn =
-    Recording_runtime.connect
-      [
-        response 200 (multipart_create_body "upload-1");
-        response 400
-          {|<Error><Code>InvalidRequest</Code><Message>bad part</Message></Error>|};
-        response 204 "";
-      ]
-  in
-  let options = { Transfer.default_options with part_size } in
-  (match
-     Recording_s3.Object.Transfer.upload_string conn ~bucket:"my-bucket"
-       ~key:"large.bin" ~options body
-   with
-  | Error error when Error.service_code error = Some "InvalidRequest" -> ()
-  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected object transfer failure");
-  match List.rev conn.calls with
-  | [ _create; _part1; abort ] ->
-      Alcotest.(check string)
-        "abort method" "DELETE"
-        (Awskit.Request.Method.to_string abort.request.method_);
-      Alcotest.(check (option (list string)))
-        "abort upload id" (Some [ "upload-1" ])
-        (List.assoc_opt "uploadId" abort.request.target.query)
-  | _ -> Alcotest.fail "expected create, failed part, abort"
-
-let test_object_transfer_aborts_on_complete_failure () =
-  let part_size = Transfer.min_part_size in
-  let body = String.make part_size 'x' in
-  let conn =
-    Recording_runtime.connect
-      [
-        response 200 (multipart_create_body "upload-1");
-        response 200 ~headers:[ ("etag", "\"part-1\"") ] "";
-        response 400
-          {|<Error><Code>InvalidRequest</Code><Message>bad complete</Message></Error>|};
-        response 204 "";
-      ]
-  in
-  let options = { Transfer.default_options with part_size } in
-  (match
-     Recording_s3.Object.Transfer.upload_string conn ~bucket:"my-bucket"
-       ~key:"large.bin" ~options body
-   with
-  | Error error when Error.service_code error = Some "InvalidRequest" -> ()
-  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected object transfer failure");
-  match List.rev conn.calls with
-  | [ _create; _part1; _complete; abort ] ->
-      Alcotest.(check string)
-        "abort method" "DELETE"
-        (Awskit.Request.Method.to_string abort.request.method_);
-      Alcotest.(check (option (list string)))
-        "abort upload id" (Some [ "upload-1" ])
-        (List.assoc_opt "uploadId" abort.request.target.query)
-  | _ -> Alcotest.fail "expected create, part, failed complete, abort"
 
 let make_sim () =
   let clock = Simulator.Clock.create ~now:test_time () in
@@ -1838,6 +1831,14 @@ let suite =
         Alcotest.test_case "bucket head request" `Quick test_bucket_head_request;
         Alcotest.test_case "bucket list parse" `Quick test_bucket_list_parse;
         Alcotest.test_case "bucket config parse" `Quick test_bucket_config_parse;
+        Alcotest.test_case "bucket expected owner headers" `Quick
+          test_bucket_expected_owner_headers;
+        Alcotest.test_case "bucket encryption extended xml" `Quick
+          test_bucket_encryption_extended_xml;
+        Alcotest.test_case "bucket encryption unknown read values" `Quick
+          test_bucket_encryption_unknown_read_values;
+        Alcotest.test_case "bucket encryption unknown write rejected" `Quick
+          test_bucket_encryption_unknown_write_rejected;
         Alcotest.test_case "object checksum headers and response" `Quick
           test_object_checksum_headers_and_response;
         Alcotest.test_case "object precondition headers" `Quick
@@ -1884,14 +1885,8 @@ let suite =
           test_multipart_paginator_follows_markers;
         Alcotest.test_case "multipart upload part checksum headers" `Quick
           test_multipart_upload_part_checksum_headers;
-        Alcotest.test_case "object transfer upload string" `Quick
-          test_object_transfer_upload_string;
         Alcotest.test_case "complete multipart embedded error" `Quick
           test_complete_multipart_embedded_error;
-        Alcotest.test_case "object transfer aborts on part failure" `Quick
-          test_object_transfer_aborts_on_part_failure;
-        Alcotest.test_case "object transfer aborts on complete failure" `Quick
-          test_object_transfer_aborts_on_complete_failure;
         Alcotest.test_case "sim public helper surface" `Quick
           test_sim_public_helper_surface;
         Alcotest.test_case "sim history uses operation names" `Quick

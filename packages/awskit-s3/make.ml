@@ -182,7 +182,6 @@ module Make (R : RUNTIME) = struct
 
   module Object = struct
     include Object_base
-    module Transfer = Object_transfer_ops.Make (Context) (Multipart)
   end
 
   module Bucket = Bucket_ops.Make (Context)

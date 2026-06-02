@@ -31,22 +31,6 @@ module Object : sig
        and type response_body_reader := Runtime.response_body_reader
 
   module Transfer : sig
-    val upload_string :
-      t ->
-      bucket:string ->
-      key:string ->
-      ?options:Awskit_s3.Transfer.options ->
-      string ->
-      (Awskit_s3.Transfer.result, Awskit_s3.Error.t) result
-
-    val upload_bytes :
-      t ->
-      bucket:string ->
-      key:string ->
-      ?options:Awskit_s3.Transfer.options ->
-      bytes ->
-      (Awskit_s3.Transfer.result, Awskit_s3.Error.t) result
-
     val upload_file :
       t ->
       bucket:string ->

@@ -239,11 +239,6 @@ module S3 = struct
       let parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ ?max_pages:_ () =
         unsupported ()
     end
-
-    module Transfer = struct
-      let upload_string _ ~bucket:_ ~key:_ ?options:_ _ = unsupported ()
-      let upload_bytes _ ~bucket:_ ~key:_ ?options:_ _ = unsupported ()
-    end
   end
 end
 

@@ -736,8 +736,10 @@ module Make (Client : SUBJECT) = struct
           [
             {
               Bucket.Encryption.Rule.sse_algorithm =
-                Bucket.Encryption.Algorithm.Aes256;
+                Some Bucket.Encryption.Algorithm.Aes256;
               kms_master_key_id = None;
+              bucket_key_enabled = None;
+              blocked_encryption_types = [];
             };
           ];
       }
@@ -776,23 +778,6 @@ module Make (Client : SUBJECT) = struct
     Alcotest.(check int) "cors rule count" 1 (List.length result.config.rules);
     ignore (Client.Bucket.Cors.delete conn ~bucket |> ok_or_fail "delete cors");
     expect_not_found "deleted cors" (Client.Bucket.Cors.get conn ~bucket);
-    let website =
-      {
-        Bucket.Website.index_document_suffix = Some "index.html";
-        error_document_key = Some "error.html";
-      }
-    in
-    ignore
-      (Client.Bucket.Website.put conn ~bucket website
-      |> ok_or_fail "put website");
-    let result =
-      Client.Bucket.Website.get conn ~bucket |> ok_or_fail "get website"
-    in
-    Alcotest.(check (option string))
-      "website index" (Some "index.html") result.config.index_document_suffix;
-    ignore
-      (Client.Bucket.Website.delete conn ~bucket |> ok_or_fail "delete website");
-    expect_not_found "deleted website" (Client.Bucket.Website.get conn ~bucket);
     let public_access_block =
       {
         Bucket.Public_access_block.block_public_acls = true;
@@ -836,48 +821,7 @@ module Make (Client : SUBJECT) = struct
       (Client.Bucket.Ownership_controls.delete conn ~bucket
       |> ok_or_fail "delete ownership");
     expect_not_found "deleted ownership"
-      (Client.Bucket.Ownership_controls.get conn ~bucket);
-    ignore
-      (Client.Bucket.Request_payment.put conn ~bucket
-         Bucket.Request_payment.Payer.Requester
-      |> ok_or_fail "put request payment");
-    let result =
-      Client.Bucket.Request_payment.get conn ~bucket
-      |> ok_or_fail "get request payment"
-    in
-    Alcotest.(check bool)
-      "request payment" true
-      (result.payer = Some Bucket.Request_payment.Payer.Requester);
-    ignore
-      (Client.Bucket.Accelerate.put conn ~bucket
-         Bucket.Accelerate.Status.Enabled
-      |> ok_or_fail "put accelerate");
-    let result =
-      Client.Bucket.Accelerate.get conn ~bucket |> ok_or_fail "get accelerate"
-    in
-    Alcotest.(check bool)
-      "accelerate" true
-      (result.status = Some Bucket.Accelerate.Status.Enabled);
-    let policy_status =
-      Client.Bucket.Policy_status.get conn ~bucket |> ok_or_fail "policy status"
-    in
-    Alcotest.(check (option bool))
-      "policy status" (Some false) policy_status.is_public;
-    let logging =
-      Bucket.Logging.enabled ~target_bucket:"log-bucket" ~target_prefix:"logs/"
-    in
-    ignore
-      (Client.Bucket.Logging.put conn ~bucket logging
-      |> ok_or_fail "put logging");
-    let result =
-      Client.Bucket.Logging.get conn ~bucket |> ok_or_fail "get logging"
-    in
-    match result.config.logging with
-    | Some target ->
-        Alcotest.(check string)
-          "logging bucket" "log-bucket" target.target_bucket;
-        Alcotest.(check string) "logging prefix" "logs/" target.target_prefix
-    | None -> Alcotest.fail "expected logging target"
+      (Client.Bucket.Ownership_controls.get conn ~bucket)
 
   let test_buffer_limit () =
     let conn = Client.fresh () in
@@ -1198,41 +1142,6 @@ module Make (Client : SUBJECT) = struct
       (Client.Multipart.complete_upload conn ~bucket ~key:"edges.bin" ~upload_id
          [ overwritten.part; second.part ])
 
-  let test_object_transfer_upload () =
-    let conn = Client.fresh () in
-    create_bucket conn;
-    let part_size = Transfer.min_part_size in
-    let body = String.make part_size 'a' ^ "end" in
-    let options = { Transfer.default_options with part_size } in
-    let result =
-      Client.Object.Transfer.upload_string conn ~bucket
-        ~key:"object-transfer.bin" ~options body
-      |> ok_or_fail "object transfer upload"
-    in
-    Alcotest.(check (list int))
-      "object transfer part numbers" [ 1; 2 ]
-      (List.map
-         (fun (part : Multipart.Part.t) -> part.part_number)
-         result.parts);
-    let _info, stored =
-      Client.Object.get_as_string conn ~bucket ~key:"object-transfer.bin"
-        ~max_bytes:(Int64.of_int (String.length body + 1))
-        ()
-      |> ok_or_fail "get object transfer"
-    in
-    Alcotest.(check int)
-      "object transfer body size" (String.length body) (String.length stored);
-    Alcotest.(check string)
-      "object transfer body suffix" "end"
-      (String.sub stored (String.length stored - 3) 3);
-    match
-      Client.Object.Transfer.upload_string conn ~bucket ~key:"empty.bin" ""
-    with
-    | Error (Awskit.Error.Validation _) -> ()
-    | Error error ->
-        Alcotest.failf "unexpected empty body error: %a" Error.pp error
-    | Ok _ -> Alcotest.fail "expected empty object transfer failure"
-
   let cases =
     [
       Alcotest.test_case "bucket lifecycle" `Quick test_bucket_lifecycle;
@@ -1256,8 +1165,6 @@ module Make (Client : SUBJECT) = struct
       Alcotest.test_case "multipart lifecycle" `Quick test_multipart_lifecycle;
       Alcotest.test_case "multipart completion edges" `Quick
         test_multipart_completion_edges;
-      Alcotest.test_case "object transfer upload" `Quick
-        test_object_transfer_upload;
     ]
 end
 

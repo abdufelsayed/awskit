@@ -316,22 +316,21 @@ subresources:
 {ul
   {li [Bucket.create], [delete], [head], [exists], [list], [get_location]}
   {li [Bucket.Policy.get], [put], [delete]}
-  {li [Bucket.Policy_status.get]}
   {li [Bucket.Versioning.get], [put]}
   {li [Bucket.Tagging.get], [put], [delete]}
   {li [Bucket.Encryption.get], [put], [delete]}
   {li [Bucket.Cors.get], [put], [delete]}
-  {li [Bucket.Website.get], [put], [delete] for index/error documents}
   {li [Bucket.Public_access_block.get], [put], [delete]}
   {li [Bucket.Ownership_controls.get], [put], [delete]}
-  {li [Bucket.Request_payment.get], [put]}
-  {li [Bucket.Accelerate.get], [put]}
-  {li [Bucket.Logging.get], [put] for target bucket/prefix logging}
 }
 
 [Bucket.Policy] sends and receives validated JSON policy payloads for bucket
 access configuration. Applications can construct those documents with their own
 policy model and pass the serialized JSON to the client.
+
+Retained bucket operations that target an existing bucket accept
+[expected_bucket_owner]. Awskit sends it as [x-amz-expected-bucket-owner] so AWS
+can reject calls that resolve to a bucket owned by a different account.
 
 {[
 let encryption =
@@ -340,14 +339,17 @@ let encryption =
       [
         {
           Awskit_s3.Bucket.Encryption.Rule.sse_algorithm =
-            Awskit_s3.Bucket.Encryption.Algorithm.Aes256;
+            Some Awskit_s3.Bucket.Encryption.Algorithm.Aes256;
           kms_master_key_id = None;
+          bucket_key_enabled = None;
+          blocked_encryption_types = [];
         };
       ];
   }
 in
 Awskit_s3_eio.Bucket.Encryption.put s3
   ~bucket:"my-bucket"
+  ~expected_bucket_owner:"123456789012"
   encryption
 ]}
 
@@ -368,19 +370,6 @@ Awskit_s3_eio.Bucket.Encryption.put s3
 [Multipart.upload_part] follows the same request body contract as [Object.put]:
 parts require a known exact length, and custom stream producer errors are part
 of the upload result.
-
-[Object.Transfer.upload_string] and [Object.Transfer.upload_bytes] provide a higher-level
-sequential multipart upload helper. The helper creates the upload, splits the
-body into AWS-safe parts, uploads each part, completes the upload, and attempts
-to abort if a part upload or completion fails. Defaults use 8 MiB parts, with
-the AWS minimum 5 MiB enforced for configured part sizes.
-
-{[
-Awskit_s3_eio.Object.Transfer.upload_string s3
-  ~bucket:"my-bucket"
-  ~key:"large.bin"
-  large_body
-]}
 
 {1 Presigned URLs}
 

@@ -18,7 +18,7 @@ applications:
 {ul
   {li object [put], [get], [head], [delete], [copy], [list], metadata, tags,
     ranges, checksums, conditional requests, version IDs, and version listings}
-  {li multipart upload, multipart part listing, object transfer uploads, and
+  {li multipart upload, multipart part listing, and
     local-file transfer helpers in Unix-capable adapters}
   {li S3 presigned URLs for object and multipart upload-part workflows}
   {li bucket lifecycle needed to create, locate, inspect, and remove buckets}

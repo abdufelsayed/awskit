@@ -52,18 +52,42 @@ end
 
 module Encryption = struct
   module Algorithm = struct
-    type t = Aes256 | Aws_kms
+    type t = Aes256 | Aws_kms | Aws_kms_dsse | Unknown of string
 
-    let to_string = function Aes256 -> "AES256" | Aws_kms -> "aws:kms"
+    let to_string = function
+      | Aes256 -> "AES256"
+      | Aws_kms -> "aws:kms"
+      | Aws_kms_dsse -> "aws:kms:dsse"
+      | Unknown value -> value
 
     let of_string = function
-      | "AES256" -> Some Aes256
-      | "aws:kms" -> Some Aws_kms
-      | _ -> None
+      | "AES256" -> Aes256
+      | "aws:kms" -> Aws_kms
+      | "aws:kms:dsse" -> Aws_kms_dsse
+      | value -> Unknown value
+  end
+
+  module Blocked_encryption_type = struct
+    type t = Sse_c | No_block | Unknown of string
+
+    let to_string = function
+      | Sse_c -> "SSE-C"
+      | No_block -> "NONE"
+      | Unknown value -> value
+
+    let of_string = function
+      | "SSE-C" -> Sse_c
+      | "NONE" -> No_block
+      | value -> Unknown value
   end
 
   module Rule = struct
-    type t = { sse_algorithm : Algorithm.t; kms_master_key_id : string option }
+    type t = {
+      sse_algorithm : Algorithm.t option;
+      kms_master_key_id : string option;
+      bucket_key_enabled : bool option;
+      blocked_encryption_types : Blocked_encryption_type.t list;
+    }
   end
 
   type config = { rules : Rule.t list }
@@ -100,15 +124,6 @@ module Cors = struct
   }
 
   type config = { rules : rule list }
-  type result = { config : config; response : Awskit.Response.t }
-end
-
-module Website = struct
-  type config = {
-    index_document_suffix : string option;
-    error_document_key : string option;
-  }
-
   type result = { config : config; response : Awskit.Response.t }
 end
 
@@ -149,51 +164,4 @@ module Ownership_controls = struct
 
   type config = { object_ownership : Object_ownership.t }
   type result = { config : config; response : Awskit.Response.t }
-end
-
-module Request_payment = struct
-  module Payer = struct
-    type t = Bucket_owner | Requester
-
-    let to_string = function
-      | Bucket_owner -> "BucketOwner"
-      | Requester -> "Requester"
-
-    let of_string = function
-      | "BucketOwner" -> Some Bucket_owner
-      | "Requester" -> Some Requester
-      | _ -> None
-  end
-
-  type result = { payer : Payer.t option; response : Awskit.Response.t }
-end
-
-module Accelerate = struct
-  module Status = struct
-    type t = Enabled | Suspended
-
-    let to_string = function Enabled -> "Enabled" | Suspended -> "Suspended"
-
-    let of_string = function
-      | "Enabled" -> Some Enabled
-      | "Suspended" -> Some Suspended
-      | _ -> None
-  end
-
-  type result = { status : Status.t option; response : Awskit.Response.t }
-end
-
-module Policy_status = struct
-  type result = { is_public : bool option; response : Awskit.Response.t }
-end
-
-module Logging = struct
-  type target = { target_bucket : string; target_prefix : string }
-  type config = { logging : target option }
-  type result = { config : config; response : Awskit.Response.t }
-
-  let disabled = { logging = None }
-
-  let enabled ~target_bucket ~target_prefix =
-    { logging = Some { target_bucket; target_prefix } }
 end

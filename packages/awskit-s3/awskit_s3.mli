@@ -412,16 +412,25 @@ module type BUCKET_DATA = sig
 
   module Encryption : sig
     module Algorithm : sig
-      type t = Aes256 | Aws_kms
+      type t = Aes256 | Aws_kms | Aws_kms_dsse | Unknown of string
 
       val to_string : t -> string
-      val of_string : string -> t option
+      val of_string : string -> t
+    end
+
+    module Blocked_encryption_type : sig
+      type t = Sse_c | No_block | Unknown of string
+
+      val to_string : t -> string
+      val of_string : string -> t
     end
 
     module Rule : sig
       type t = {
-        sse_algorithm : Algorithm.t;
+        sse_algorithm : Algorithm.t option;
         kms_master_key_id : string option;
+        bucket_key_enabled : bool option;
+        blocked_encryption_types : Blocked_encryption_type.t list;
       }
     end
 
@@ -450,15 +459,6 @@ module type BUCKET_DATA = sig
     type result = { config : config; response : Awskit.Response.t }
   end
 
-  module Website : sig
-    type config = {
-      index_document_suffix : string option;
-      error_document_key : string option;
-    }
-
-    type result = { config : config; response : Awskit.Response.t }
-  end
-
   module Public_access_block : sig
     type config = {
       block_public_acls : bool;
@@ -482,41 +482,6 @@ module type BUCKET_DATA = sig
 
     type config = { object_ownership : Object_ownership.t }
     type result = { config : config; response : Awskit.Response.t }
-  end
-
-  module Request_payment : sig
-    module Payer : sig
-      type t = Bucket_owner | Requester
-
-      val to_string : t -> string
-      val of_string : string -> t option
-    end
-
-    type result = { payer : Payer.t option; response : Awskit.Response.t }
-  end
-
-  module Accelerate : sig
-    module Status : sig
-      type t = Enabled | Suspended
-
-      val to_string : t -> string
-      val of_string : string -> t option
-    end
-
-    type result = { status : Status.t option; response : Awskit.Response.t }
-  end
-
-  module Policy_status : sig
-    type result = { is_public : bool option; response : Awskit.Response.t }
-  end
-
-  module Logging : sig
-    type target = { target_bucket : string; target_prefix : string }
-    type config = { logging : target option }
-    type result = { config : config; response : Awskit.Response.t }
-
-    val disabled : config
-    val enabled : target_bucket:string -> target_prefix:string -> config
   end
 end
 
@@ -1016,24 +981,6 @@ module type OBJECT = sig
       key:string ->
       (Awskit.Response.t, Error.t) result io
   end
-
-  module Transfer : sig
-    val upload_string :
-      connection ->
-      bucket:string ->
-      key:string ->
-      ?options:Transfer.options ->
-      string ->
-      (Transfer.result, Error.t) result io
-
-    val upload_bytes :
-      connection ->
-      bucket:string ->
-      key:string ->
-      ?options:Transfer.options ->
-      bytes ->
-      (Transfer.result, Error.t) result io
-  end
 end
 
 module type BUCKET = sig
@@ -1048,41 +995,55 @@ module type BUCKET = sig
     (Create_bucket.result, Error.t) result io
 
   val delete :
-    connection -> bucket:string -> (Delete_bucket.result, Error.t) result io
+    ?expected_bucket_owner:string ->
+    connection ->
+    bucket:string ->
+    (Delete_bucket.result, Error.t) result io
 
   val head :
-    connection -> bucket:string -> (Head_bucket.result, Error.t) result io
+    ?expected_bucket_owner:string ->
+    connection ->
+    bucket:string ->
+    (Head_bucket.result, Error.t) result io
 
-  val exists : connection -> bucket:string -> (bool, Error.t) result io
+  val exists :
+    ?expected_bucket_owner:string ->
+    connection ->
+    bucket:string ->
+    (bool, Error.t) result io
+
   val list : connection -> (List_buckets.result, Error.t) result io
 
   val get_location :
+    ?expected_bucket_owner:string ->
     connection ->
     bucket:string ->
     (Get_bucket_location.result, Error.t) result io
 
   module Policy : sig
-    val get : connection -> bucket:string -> (Policy.t, Error.t) result io
+    val get :
+      ?expected_bucket_owner:string ->
+      connection ->
+      bucket:string ->
+      (Policy.t, Error.t) result io
 
     val put :
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
       Policy.t ->
       (Awskit.Response.t, Error.t) result io
 
     val delete :
-      connection -> bucket:string -> (Awskit.Response.t, Error.t) result io
-  end
-
-  module Policy_status : sig
-    val get :
+      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
-      (Bucket.Policy_status.result, Error.t) result io
+      (Awskit.Response.t, Error.t) result io
   end
 
   module Versioning : sig
     val get :
+      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Bucket.Versioning.result, Error.t) result io
@@ -1090,26 +1051,35 @@ module type BUCKET = sig
     val put :
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
       Bucket.Versioning.Status.t ->
       (Awskit.Response.t, Error.t) result io
   end
 
   module Tagging : sig
     val get :
-      connection -> bucket:string -> (Bucket.Tagging.result, Error.t) result io
+      ?expected_bucket_owner:string ->
+      connection ->
+      bucket:string ->
+      (Bucket.Tagging.result, Error.t) result io
 
     val put :
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
       Tag.t list ->
       (Awskit.Response.t, Error.t) result io
 
     val delete :
-      connection -> bucket:string -> (Awskit.Response.t, Error.t) result io
+      ?expected_bucket_owner:string ->
+      connection ->
+      bucket:string ->
+      (Awskit.Response.t, Error.t) result io
   end
 
   module Encryption : sig
     val get :
+      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Bucket.Encryption.result, Error.t) result io
@@ -1117,43 +1087,41 @@ module type BUCKET = sig
     val put :
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
       Bucket.Encryption.config ->
       (Awskit.Response.t, Error.t) result io
 
     val delete :
-      connection -> bucket:string -> (Awskit.Response.t, Error.t) result io
+      ?expected_bucket_owner:string ->
+      connection ->
+      bucket:string ->
+      (Awskit.Response.t, Error.t) result io
   end
 
   module Cors : sig
     val get :
-      connection -> bucket:string -> (Bucket.Cors.result, Error.t) result io
+      ?expected_bucket_owner:string ->
+      connection ->
+      bucket:string ->
+      (Bucket.Cors.result, Error.t) result io
 
     val put :
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
       Bucket.Cors.config ->
       (Awskit.Response.t, Error.t) result io
 
     val delete :
-      connection -> bucket:string -> (Awskit.Response.t, Error.t) result io
-  end
-
-  module Website : sig
-    val get :
-      connection -> bucket:string -> (Bucket.Website.result, Error.t) result io
-
-    val put :
+      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
-      Bucket.Website.config ->
       (Awskit.Response.t, Error.t) result io
-
-    val delete :
-      connection -> bucket:string -> (Awskit.Response.t, Error.t) result io
   end
 
   module Public_access_block : sig
     val get :
+      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Bucket.Public_access_block.result, Error.t) result io
@@ -1161,15 +1129,20 @@ module type BUCKET = sig
     val put :
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
       Bucket.Public_access_block.config ->
       (Awskit.Response.t, Error.t) result io
 
     val delete :
-      connection -> bucket:string -> (Awskit.Response.t, Error.t) result io
+      ?expected_bucket_owner:string ->
+      connection ->
+      bucket:string ->
+      (Awskit.Response.t, Error.t) result io
   end
 
   module Ownership_controls : sig
     val get :
+      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Bucket.Ownership_controls.result, Error.t) result io
@@ -1177,47 +1150,14 @@ module type BUCKET = sig
     val put :
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
       Bucket.Ownership_controls.config ->
       (Awskit.Response.t, Error.t) result io
 
     val delete :
-      connection -> bucket:string -> (Awskit.Response.t, Error.t) result io
-  end
-
-  module Request_payment : sig
-    val get :
+      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
-      (Bucket.Request_payment.result, Error.t) result io
-
-    val put :
-      connection ->
-      bucket:string ->
-      Bucket.Request_payment.Payer.t ->
-      (Awskit.Response.t, Error.t) result io
-  end
-
-  module Accelerate : sig
-    val get :
-      connection ->
-      bucket:string ->
-      (Bucket.Accelerate.result, Error.t) result io
-
-    val put :
-      connection ->
-      bucket:string ->
-      Bucket.Accelerate.Status.t ->
-      (Awskit.Response.t, Error.t) result io
-  end
-
-  module Logging : sig
-    val get :
-      connection -> bucket:string -> (Bucket.Logging.result, Error.t) result io
-
-    val put :
-      connection ->
-      bucket:string ->
-      Bucket.Logging.config ->
       (Awskit.Response.t, Error.t) result io
   end
 end

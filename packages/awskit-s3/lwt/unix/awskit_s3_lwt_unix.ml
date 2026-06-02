@@ -50,7 +50,6 @@ module Object = struct
   include S3.Object
 
   module Transfer = struct
-    include S3.Object.Transfer
     include File_transfer.Make (Runtime) (S3)
   end
 end

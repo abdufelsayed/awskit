@@ -66,12 +66,8 @@ type bucket_state = {
   mutable versioning : Bucket.Versioning.Status.t option;
   mutable encryption : Bucket.Encryption.config option;
   mutable cors : Bucket.Cors.config option;
-  mutable website : Bucket.Website.config option;
   mutable public_access_block : Bucket.Public_access_block.config option;
   mutable ownership_controls : Bucket.Ownership_controls.config option;
-  mutable request_payment : Bucket.Request_payment.Payer.t option;
-  mutable accelerate : Bucket.Accelerate.Status.t option;
-  mutable logging : Bucket.Logging.config;
 }
 
 type operation_record = {
