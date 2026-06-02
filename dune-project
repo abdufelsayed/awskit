@@ -27,6 +27,8 @@
   fmt
   logs
   ppx_deriving
+  (dune-release :with-dev-setup)
+  (opam-publish :with-dev-setup)
   (alcotest :with-test)
   (qcheck-core :with-test)
   (qcheck-alcotest :with-test)))

@@ -224,6 +224,67 @@ AWSKIT_S3_MINIO_SECRET_ACCESS_KEY
 AWSKIT_S3_MINIO_REGION
 ```
 
+## Release
+
+Awskit is a multi-package monorepo released as one synchronized train. Every
+public package uses the same version, one Git tag, one GitHub release, and one
+opam-repository submission:
+
+```text
+awskit
+awskit-unix
+awskit-lwt
+awskit-lwt-unix
+awskit-eio
+awskit-s3
+awskit-s3-lwt
+awskit-s3-lwt-unix
+awskit-s3-eio
+```
+
+Keep internal package dependencies pinned to the same released version. Do not
+publish packages independently unless the release policy and opam constraints
+are deliberately changed.
+
+Before publishing, run the local preflight and release check:
+
+```sh
+. scripts/release-env.sh
+scripts/release-check.sh
+
+dune-release check \
+  --working-tree \
+  --pkg-version 0.1.0 \
+  --pkg-names "$AWSKIT_RELEASE_PACKAGES"
+```
+
+Create the release tag before running `bistro`; `bistro` does not create tags:
+
+```sh
+dune-release tag v0.1.0
+git push origin v0.1.0
+```
+
+Publish with `dune-release` using the explicit package list. Keep the first
+run as a draft until the GitHub release/archive and opam-repository submission
+are inspected:
+
+```sh
+dune-release bistro \
+  --tag v0.1.0 \
+  --pkg-version 0.1.0 \
+  --pkg-names "$AWSKIT_RELEASE_PACKAGES" \
+  --draft
+```
+
+The GitHub release should be the single repository release for the tag. Use
+`gh release view` or `gh release edit` only to inspect or adjust that one
+release; do not create separate GitHub releases per opam package. If
+`dune-release` prompts for a GitHub token, use a classic token with only the
+`public_repo` scope or set `DUNE_RELEASE_GITHUB_TOKEN`.
+
+Release notes live in `CHANGES.md`.
+
 ## Layout
 
 ```text
