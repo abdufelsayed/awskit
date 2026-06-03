@@ -11,13 +11,13 @@ homepage: "https://github.com/abdufelsayed/awskit"
 bug-reports: "https://github.com/abdufelsayed/awskit/issues"
 depends: [
   "dune" {>= "3.22"}
-  "ocaml"
+  "ocaml" {>= "4.14"}
   "awskit" {= version}
-  "digestif"
+  "digestif" {>= "1.3.0"}
   "ptime"
-  "fmt"
+  "fmt" {>= "0.11.0"}
   "yojson"
-  "base64"
+  "base64" {>= "3.5.2"}
   "uri"
   "ezxmlm"
   "ppx_protocol_conv_xmlm"

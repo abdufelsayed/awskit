@@ -10,11 +10,11 @@ homepage: "https://github.com/abdufelsayed/awskit"
 bug-reports: "https://github.com/abdufelsayed/awskit/issues"
 depends: [
   "dune" {>= "3.22"}
-  "ocaml"
+  "ocaml" {>= "4.14"}
   "awskit" {= version}
-  "base"
+  "base" {>= "v0.16.3"}
   "ptime"
-  "fmt"
+  "fmt" {>= "0.11.0"}
   "odoc" {with-doc}
 ]
 build: [

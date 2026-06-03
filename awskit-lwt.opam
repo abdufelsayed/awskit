@@ -10,15 +10,15 @@ homepage: "https://github.com/abdufelsayed/awskit"
 bug-reports: "https://github.com/abdufelsayed/awskit/issues"
 depends: [
   "dune" {>= "3.22"}
-  "ocaml"
+  "ocaml" {>= "4.14"}
   "awskit" {= version}
-  "base"
+  "base" {>= "v0.16.3"}
   "lwt"
   "cohttp" {>= "6.2.1"}
   "cohttp-lwt" {>= "6.2.1"}
   "uri"
   "ptime"
-  "fmt"
+  "fmt" {>= "0.11.0"}
   "logs"
   "ppx_deriving"
   "cohttp-lwt-unix" {with-test & >= "6.2.1"}
