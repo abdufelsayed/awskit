@@ -1,75 +1,146 @@
-name: Main
+name: Main workflow
 
 on:
+  workflow_dispatch:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-
-env:
-  OCAML_VERSION: "5.3"
+  schedule:
+    # Prime the opam and dune caches every Monday.
+    - cron: 0 1 * * MON
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' || github.sha }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
-jobs:
-  ci:
-    name: CI
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
+env:
+  OCAML_LATEST: "5"
+  DEFAULT_OPAM_PACKAGES: >-
+    awskit awskit-unix awskit-lwt awskit-lwt-unix awskit-s3 awskit-s3-lwt awskit-s3-lwt-unix
+  DEFAULT_DUNE_PACKAGES: >-
+    awskit,awskit-unix,awskit-lwt,awskit-lwt-unix,awskit-s3,awskit-s3-lwt,awskit-s3-lwt-unix
+  EIO_OPAM_PACKAGES: >-
+    awskit awskit-unix awskit-eio awskit-s3 awskit-s3-eio
+  EIO_DUNE_PACKAGES: >-
+    awskit,awskit-unix,awskit-eio,awskit-s3,awskit-s3-eio
 
-      - name: Set up OCaml ${{ env.OCAML_VERSION }}
+jobs:
+  build-test-default:
+    if: github.event.pull_request.draft == false
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+        ocaml-compiler:
+          - "5"
+        local-packages:
+          - |
+            *.opam
+            !awskit-eio.opam
+            !awskit-s3-eio.opam
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v4
+
+      - name: Set-up OCaml ${{ matrix.ocaml-compiler }}
         uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: ${{ env.OCAML_VERSION }}
+          ocaml-compiler: ${{ matrix.ocaml-compiler }}
           dune-cache: true
+          opam-local-packages: ${{ matrix.local-packages }}
 
       - name: Install dependencies
-        run: |
-          opam install . --deps-only --with-test
-          opam install ocamlformat.0.29.0
+        run: opam install --with-test --deps-only ${{ env.DEFAULT_OPAM_PACKAGES }}
 
-      - name: Check formatting
-        run: |
-          opam exec -- dune build @fmt
-          git diff --exit-code
+      - name: Build packages
+        run: opam exec -- dune build -p "${{ env.DEFAULT_DUNE_PACKAGES }}" @install
 
-      - name: Build
-        run: opam exec -- dune build
+      - name: Run tests
+        run: opam exec -- dune build -p "${{ env.DEFAULT_DUNE_PACKAGES }}" @runtest
+
+  build-test-eio:
+    if: github.event.pull_request.draft == false
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+        ocaml-compiler:
+          - "5"
+          - "5.2"
+        local-packages:
+          - |
+            awskit.opam
+            awskit-unix.opam
+            awskit-eio.opam
+            awskit-s3.opam
+            awskit-s3-eio.opam
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v4
+
+      - name: Set-up OCaml ${{ matrix.ocaml-compiler }}
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ matrix.ocaml-compiler }}
+          dune-cache: true
+          opam-local-packages: ${{ matrix.local-packages }}
+
+      - name: Install dependencies
+        run: opam install --with-test --deps-only ${{ env.EIO_OPAM_PACKAGES }}
+
+      - name: Build packages
+        run: opam exec -- dune build -p "${{ env.EIO_DUNE_PACKAGES }}" @install
+
+      - name: Run tests
+        run: opam exec -- dune build -p "${{ env.EIO_DUNE_PACKAGES }}" @runtest
+
+  s3-minio-contract:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v4
+
+      - name: Set-up OCaml ${{ env.OCAML_LATEST }}
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ env.OCAML_LATEST }}
+          dune-cache: true
+          opam-local-packages: |
+            *.opam
+            !awskit-eio.opam
+            !awskit-s3-eio.opam
+
+      - name: Install dependencies
+        run: opam install --with-test --deps-only ${{ env.DEFAULT_OPAM_PACKAGES }}
 
       - name: Start MinIO
-        run: |
-          docker run -d --name minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data
+        run: docker compose up -d
 
-      - name: Create MinIO test bucket
-        run: |
-          curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
-          chmod +x /usr/local/bin/mc
-          until mc alias set local http://localhost:9000 minioadmin minioadmin; do
-            sleep 1
-          done
-          until mc ready local; do
-            sleep 1
-          done
-          mc mb --ignore-existing local/test-bucket
-
-      - name: Test
-        run: opam exec -- dune test
+      - name: Run S3 contract
+        run: opam exec -- dune build --force @minio-contract
 
       - name: Dump MinIO logs on failure
         if: failure()
-        run: docker logs minio
+        run: docker compose logs
 
-      - name: Cleanup MinIO
+      - name: Stop MinIO
         if: always()
-        run: docker rm -f minio
+        run: docker compose down -v
