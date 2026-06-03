@@ -6,6 +6,8 @@
 *)
 
 type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
+(** Requested bucket addressing style. [`Auto] uses virtual-hosted addressing
+    when the bucket and endpoint support it, otherwise path-style. *)
 
 type endpoint_variant =
   [ `Regional
@@ -14,8 +16,10 @@ type endpoint_variant =
   | `Fips_dualstack
   | `Accelerate
   | `Accelerate_dualstack ]
+(** AWS S3 endpoint variant used when no explicit endpoint is supplied. *)
 
 type resolved_style = [ `Path | `Virtual_hosted ]
+(** Concrete addressing style selected for one request. *)
 
 module Request : sig
   type t = {
@@ -24,6 +28,7 @@ module Request : sig
     signing_path : string;
     style : resolved_style;
   }
+  (** Resolved endpoint and paths for one S3 request. *)
 end
 
 type t
@@ -35,6 +40,8 @@ val create :
   ?endpoint:Awskit.Endpoint.t ->
   unit ->
   t
+(** Create S3 endpoint configuration. [endpoint] overrides AWS regional endpoint
+    construction; addressing still applies to bucket/object paths. *)
 
 val default : t
 val addressing_style : t -> addressing_style
@@ -43,6 +50,7 @@ val scheme : t -> Awskit.Endpoint.Scheme.t
 
 val endpoint :
   t -> region:Awskit.Region.t -> (Awskit.Endpoint.t, Awskit.Error.t) result
+(** Resolve the base S3 endpoint for a region. *)
 
 val resolve_bucket_request :
   t ->
@@ -51,6 +59,8 @@ val resolve_bucket_request :
   suffix:string ->
   signing_suffix:string ->
   (Request.t, Awskit.Error.t) result
+(** Resolve endpoint, transport path, and signing path for a bucket-level
+    request. *)
 
 val resolve_object_request :
   t ->
@@ -58,3 +68,4 @@ val resolve_object_request :
   bucket:string ->
   key:string ->
   (Request.t, Awskit.Error.t) result
+(** Resolve endpoint, transport path, and signing path for an object request. *)

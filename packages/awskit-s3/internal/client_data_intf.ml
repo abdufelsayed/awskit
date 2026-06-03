@@ -3,6 +3,8 @@ include Data_intf
 include Operation_data
 
 module type MULTIPART_DATA = sig
+  (** Shared multipart data constructors used by runtime-backed and standalone
+      multipart APIs. *)
   module Upload_id : sig
     type t
 
@@ -48,6 +50,9 @@ end
 
 module type TRANSFER_DATA = sig
   val min_part_size : int
+  (** Shared high-level transfer options and result types used by Unix-capable
+      S3 adapters. *)
+
   val default_part_size : int
   val default_multipart_threshold : int64
   val default_concurrency : int
@@ -106,6 +111,7 @@ module type TRANSFER_DATA = sig
 end
 
 type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
+(** Requested S3 bucket addressing style. *)
 
 type endpoint_variant =
   [ `Regional
@@ -114,8 +120,11 @@ type endpoint_variant =
   | `Fips_dualstack
   | `Accelerate
   | `Accelerate_dualstack ]
+(** AWS endpoint variant used when no explicit endpoint is supplied. *)
 
 type endpoint_config = Endpoint_resolver.t
+(** S3 endpoint and addressing configuration shared by runtime-backed clients
+    and presigned URL generation. *)
 
 let endpoint_config ?addressing_style ?endpoint_variant ?scheme ?endpoint () =
   Endpoint_resolver.create ?addressing_style ?endpoint_variant ?scheme ?endpoint
@@ -125,6 +134,8 @@ let default_endpoint_config = Endpoint_resolver.default
 
 module type RUNTIME = sig
   include Awskit.Runtime.S
+  (** Runtime implementation plus S3-specific endpoint configuration. *)
 
   val s3_endpoint_config : connection -> endpoint_config
+  (** Return endpoint configuration for bucket/object request resolution. *)
 end

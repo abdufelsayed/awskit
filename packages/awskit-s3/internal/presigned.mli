@@ -1,6 +1,7 @@
 (** Standalone S3 presigned URL generation. *)
 
 type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
+(** S3 bucket addressing style used when building the presigned URL. *)
 
 type endpoint_variant =
   [ `Regional
@@ -9,8 +10,10 @@ type endpoint_variant =
   | `Fips_dualstack
   | `Accelerate
   | `Accelerate_dualstack ]
+(** AWS S3 endpoint variant. Ignored when an explicit endpoint is supplied. *)
 
 type method_ = [ `GET | `PUT | `HEAD | `DELETE ]
+(** HTTP method a caller must use with the generated URL. *)
 
 type result = {
   url : string;
@@ -18,6 +21,8 @@ type result = {
   signed_headers : (string * string) list;
   expires_at : Ptime.t option;
 }
+(** Generated presigned request. Consumers must send [method_] and all
+    [signed_headers] exactly as returned. *)
 
 module Put_object : sig
   type options = {
@@ -28,6 +33,7 @@ module Put_object : sig
     expected_bucket_owner : string option;
     extra_signed_headers : (string * string) list;
   }
+  (** Presigned [PUT Object] options. *)
 
   val default_options : options
 end
@@ -41,6 +47,7 @@ module Get_object : sig
     expected_bucket_owner : string option;
     extra_signed_headers : (string * string) list;
   }
+  (** Presigned [GET Object] and [HEAD Object] options. *)
 
   val default_options : options
 end
@@ -52,6 +59,7 @@ module Upload_part : sig
     expected_bucket_owner : string option;
     extra_signed_headers : (string * string) list;
   }
+  (** Presigned [UploadPart] options. *)
 
   val default_options : options
 end
@@ -62,11 +70,13 @@ module Delete_object : sig
     expected_bucket_owner : string option;
     extra_signed_headers : (string * string) list;
   }
+  (** Presigned [DELETE Object] options. *)
 
   val default_options : options
 end
 
 type endpoint_config = Endpoint_resolver.t
+(** Reusable endpoint configuration for callers generating many URLs. *)
 
 val endpoint_config :
   ?addressing_style:addressing_style ->
@@ -75,6 +85,7 @@ val endpoint_config :
   ?endpoint:Awskit.Endpoint.t ->
   unit ->
   endpoint_config
+(** Build endpoint configuration for presigning. *)
 
 val get_object :
   region:Awskit.Region.t ->
@@ -89,6 +100,7 @@ val get_object :
   ?options:Get_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
+(** Generate a presigned [GET Object] URL. *)
 
 val put_object :
   region:Awskit.Region.t ->
@@ -103,6 +115,8 @@ val put_object :
   ?options:Put_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
+(** Generate a presigned [PUT Object] URL. Headers represented by [options],
+    such as content type or checksum, must be sent by the eventual uploader. *)
 
 val head_object :
   region:Awskit.Region.t ->
@@ -117,6 +131,7 @@ val head_object :
   ?options:Get_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
+(** Generate a presigned [HEAD Object] URL. *)
 
 val delete_object :
   region:Awskit.Region.t ->
@@ -131,6 +146,7 @@ val delete_object :
   ?options:Delete_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
+(** Generate a presigned [DELETE Object] URL. *)
 
 val upload_part :
   region:Awskit.Region.t ->
@@ -147,6 +163,7 @@ val upload_part :
   ?options:Upload_part.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
+(** Generate a presigned [UploadPart] URL for one multipart part number. *)
 
 val get_object_with_endpoint_config :
   region:Awskit.Region.t ->
@@ -158,6 +175,7 @@ val get_object_with_endpoint_config :
   ?options:Get_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
+(** Like {!val:get_object}, using a prebuilt endpoint configuration. *)
 
 val put_object_with_endpoint_config :
   region:Awskit.Region.t ->
@@ -169,6 +187,7 @@ val put_object_with_endpoint_config :
   ?options:Put_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
+(** Like {!val:put_object}, using a prebuilt endpoint configuration. *)
 
 val head_object_with_endpoint_config :
   region:Awskit.Region.t ->
@@ -180,6 +199,7 @@ val head_object_with_endpoint_config :
   ?options:Get_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
+(** Like {!val:head_object}, using a prebuilt endpoint configuration. *)
 
 val delete_object_with_endpoint_config :
   region:Awskit.Region.t ->
@@ -191,6 +211,7 @@ val delete_object_with_endpoint_config :
   ?options:Delete_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
+(** Like {!val:delete_object}, using a prebuilt endpoint configuration. *)
 
 val upload_part_with_endpoint_config :
   region:Awskit.Region.t ->
@@ -204,3 +225,4 @@ val upload_part_with_endpoint_config :
   ?options:Upload_part.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
+(** Like {!val:upload_part}, using a prebuilt endpoint configuration. *)

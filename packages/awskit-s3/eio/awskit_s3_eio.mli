@@ -19,7 +19,12 @@ val create :
   ?scheme:Awskit.Endpoint.Scheme.t ->
   unit ->
   t
-(** Create an Eio S3 client. [retry_policy] defaults to
+(** Create an Eio S3 client.
+
+    [region] and [credentials] are explicit. [endpoint] overrides the generated
+    AWS S3 endpoint for local services or custom endpoints. [addressing_style],
+    [endpoint_variant], and [scheme] configure S3 endpoint resolution when no
+    explicit endpoint is supplied. [retry_policy] defaults to
     {!val:Awskit.Retry.default}. *)
 
 module Object : sig
@@ -107,13 +112,17 @@ module Object : sig
   end
 end
 
+(** Bucket operations using direct-style Eio results. *)
 module Bucket : Awskit_s3.BUCKET with type connection := t and type 'a io := 'a
 
+(** Multipart operations using direct-style Eio results. *)
 module Multipart :
   Awskit_s3.MULTIPART
     with type connection := t
      and type 'a io := 'a
      and type request_body := Runtime.request_body
 
+(** Presigned URL helpers using the client's region, credentials, clock, and
+    endpoint configuration. *)
 module Presigned :
   Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a

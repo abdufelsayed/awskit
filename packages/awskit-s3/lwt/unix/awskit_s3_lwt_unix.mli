@@ -21,6 +21,13 @@ val create :
   ?imdsv1_fallback:Awskit_lwt_unix.Credentials.imdsv1_fallback ->
   unit ->
   (t, Awskit_s3.Error.t) result
+(** Create a ready-to-use Lwt + Unix S3 client.
+
+    If [region] or [credentials] are omitted, the underlying {!Awskit_lwt_unix}
+    runtime resolves them from standard AWS environment and profile sources.
+    [endpoint] is for local S3-compatible services or custom endpoints.
+    [addressing_style], [endpoint_variant], and [scheme] configure S3 endpoint
+    resolution when no explicit endpoint is supplied. *)
 
 module Object : sig
   include
@@ -109,14 +116,18 @@ module Object : sig
   end
 end
 
+(** Bucket operations returning [Lwt.t]. *)
 module Bucket :
   Awskit_s3.BUCKET with type connection := t and type 'a io := 'a Lwt.t
 
+(** Multipart operations returning [Lwt.t]. *)
 module Multipart :
   Awskit_s3.MULTIPART
     with type connection := t
      and type 'a io := 'a Lwt.t
      and type request_body := Runtime.request_body
 
+(** Presigned URL helpers using the client's resolved region, credentials,
+    clock, and endpoint configuration. *)
 module Presigned :
   Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a Lwt.t

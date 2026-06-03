@@ -2,20 +2,25 @@
 
 module Upload_id : sig
   type t
+  (** Opaque multipart upload id returned by S3. *)
 
   val of_string : string -> (t, Awskit.Error.t) result
+  (** Validate and wrap a multipart upload id. *)
+
   val of_string_exn : string -> t
   val to_string : t -> string
 end
 
 module Upload : sig
   type t = private { bucket : string; key : string; upload_id : Upload_id.t }
+  (** Identifies one multipart upload for a bucket/key pair. *)
 
   val create :
     bucket:string ->
     key:string ->
     upload_id:Upload_id.t ->
     (t, Awskit.Error.t) result
+  (** Create an upload handle after validating bucket, key, and upload id. *)
 
   val create_exn : bucket:string -> key:string -> upload_id:Upload_id.t -> t
 end
@@ -26,6 +31,7 @@ module Part : sig
     etag : Object.Etag.t;
     checksum : Object.Checksum.value option;
   }
+  (** Completed multipart part reference used by [CompleteMultipartUpload]. *)
 
   val create :
     ?checksum:Object.Checksum.value ->
@@ -33,6 +39,8 @@ module Part : sig
     etag:Object.Etag.t ->
     unit ->
     (t, Awskit.Error.t) result
+  (** Create a completed part reference. S3 part numbers must be in the valid
+      multipart part-number range. *)
 
   val create_exn :
     ?checksum:Object.Checksum.value ->
@@ -53,6 +61,7 @@ module Create : sig
     server_side_encryption : Object.Encryption.request option;
     expected_bucket_owner : string option;
   }
+  (** [CreateMultipartUpload] options and result metadata. *)
 
   type result = { upload : Upload.t; response : Awskit.Response.t }
 
@@ -64,6 +73,7 @@ module Upload_part : sig
     checksum : Object.Checksum.value option;
     expected_bucket_owner : string option;
   }
+  (** [UploadPart] options and result metadata. *)
 
   type result = {
     part : Part.t;
@@ -81,6 +91,7 @@ module Complete : sig
     checksum_type : Object.Checksum.Type.t option;
     multipart_object_size : int64 option;
   }
+  (** [CompleteMultipartUpload] options and result metadata. *)
 
   type result = {
     etag : Object.Etag.t option;
@@ -94,6 +105,8 @@ end
 
 module Abort : sig
   type options = { expected_bucket_owner : string option }
+  (** [AbortMultipartUpload] options and result metadata. *)
+
   type result = Awskit.Response.t
 
   val default_options : options
@@ -105,6 +118,7 @@ module List_parts : sig
     part_number_marker : int option;
     expected_bucket_owner : string option;
   }
+  (** [ListParts] options and page data. *)
 
   type part_info = {
     part_number : int;

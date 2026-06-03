@@ -3,8 +3,13 @@
 
 module Etag : sig
   type t
+  (** Opaque S3 ETag value. ETags are returned by S3 and can be used in
+      conditional requests; they are not guaranteed to be a plain MD5 digest. *)
 
   val of_string : string -> (t, Awskit.Error.t) result
+  (** Validate and wrap an ETag string. Quoted and unquoted values are accepted
+      according to the library's ETag parser. *)
+
   val of_string_exn : string -> t
   val to_string : t -> string
   val pp : Format.formatter -> t -> unit
@@ -13,6 +18,8 @@ end
 
 module Version_id : sig
   type t
+  (** Opaque S3 object version id. Present only for versioned buckets or APIs
+      that explicitly target a version. *)
 
   val of_string : string -> (t, Awskit.Error.t) result
   val of_string_exn : string -> t
@@ -23,6 +30,8 @@ end
 
 module Checksum : sig
   module Algorithm : sig
+    (** S3 checksum algorithm names. [Unknown] preserves forward-compatible
+        values returned by AWS. *)
     type t =
       | Crc32
       | Crc32c
@@ -37,10 +46,15 @@ module Checksum : sig
       | Unknown of string
 
     val to_string : t -> string
+    (** Render the AWS header/API spelling. *)
+
     val of_string : string -> t
+    (** Parse an AWS checksum algorithm name. Unknown values are preserved. *)
   end
 
   module Type : sig
+    (** Whether an S3 checksum covers the full object or a composite multipart
+        checksum. Unknown values are preserved. *)
     type t = Composite | Full_object | Unknown of string
 
     val to_string : t -> string
@@ -48,43 +62,66 @@ module Checksum : sig
   end
 
   module Mode : sig
+    (** Request mode for APIs that can ask S3 to return checksum metadata. *)
     type t = Enabled
 
     val to_string : t -> string
   end
 
   type value = { algorithm : Algorithm.t; value : string }
+  (** Explicit checksum value supplied by the caller or returned for a part. The
+      value is the base64/string payload expected by the selected algorithm. *)
+
   type response = { values : value list; checksum_type : Type.t option }
+  (** Modeled checksum headers returned by object and multipart operations. *)
 
   type summary = {
     algorithms : Algorithm.t list;
     checksum_type : Type.t option;
   }
+  (** Compact checksum metadata returned by list operations. *)
 end
 
 module Encryption : sig
   type kms = { key_id : string option; bucket_key_enabled : bool option }
+  (** Server-side encryption request and response metadata. *)
+
   type request = [ `AES256 | `Aws_kms of kms ]
+  (** Encryption settings that can be sent with write/copy/create requests. *)
+
   type response = [ `AES256 | `Aws_kms of kms | `Unknown of string ]
+  (** Encryption settings reported by S3. Unknown values are preserved. *)
 end
 
 module Etag_condition : sig
+  (** ETag condition used by object precondition records. *)
   type t = Any | Etag of Etag.t
 
   val any : t
+  (** Match any existing object, rendered as ["*"]. *)
+
   val etag : Etag.t -> t
+  (** Match a specific ETag. *)
 end
 
 module Preconditions : sig
+  (** Conditional request records. Failed conditions are returned as structured
+      service errors, typically [PreconditionFailed] or [NotModified]. *)
   module Write : sig
     type t = {
       if_match : Etag_condition.t option;
       if_none_match : Etag_condition.t option;
     }
+    (** Conditions for object writes. *)
 
     val none : t
+    (** No write preconditions. *)
+
     val if_absent : t
+    (** Require the destination key to be absent. *)
+
     val if_etag : Etag.t -> t
+    (** Require the destination object to match an ETag. *)
   end
 
   module Read : sig
@@ -94,12 +131,15 @@ module Preconditions : sig
       if_modified_since : Ptime.t option;
       if_unmodified_since : Ptime.t option;
     }
+    (** Conditions for object reads and heads. *)
 
     val none : t
+    (** No read preconditions. *)
   end
 
   module Delete : sig
     type t = { if_match : Etag_condition.t option }
+    (** Conditions for object deletes. *)
 
     val none : t
     val if_etag : Etag.t -> t
@@ -112,8 +152,10 @@ module Preconditions : sig
       if_modified_since : Ptime.t option;
       if_unmodified_since : Ptime.t option;
     }
+    (** Conditions applied to the source object in copy requests. *)
 
     val none : t
+    (** No source-object preconditions. *)
   end
 end
 
@@ -131,6 +173,7 @@ module Put : sig
     server_side_encryption : Encryption.request option;
     expected_bucket_owner : string option;
   }
+  (** [PutObject] request options and result metadata. *)
 
   type result = {
     etag : Etag.t option;
@@ -140,6 +183,8 @@ module Put : sig
   }
 
   val default_options : options
+  (** Default [PutObject] options: no optional headers, tags, checksum, or
+      preconditions. *)
 end
 
 module Get : sig
@@ -150,6 +195,8 @@ module Get : sig
     checksum_mode : Checksum.Mode.t option;
     expected_bucket_owner : string option;
   }
+  (** [GetObject] request options and response metadata. The object body is
+      consumed through the selected runtime and is not stored in [result]. *)
 
   type result = {
     etag : Etag.t option;
@@ -165,6 +212,8 @@ module Get : sig
   }
 
   val default_options : options
+  (** Default [GetObject] options: full current object, no checksum mode, and no
+      conditional headers. *)
 end
 
 module Head : sig
@@ -174,6 +223,7 @@ module Head : sig
     checksum_mode : Checksum.Mode.t option;
     expected_bucket_owner : string option;
   }
+  (** [HeadObject] request options and response metadata. *)
 
   type result = Get.result
 
@@ -186,6 +236,7 @@ module Delete : sig
     version_id : Version_id.t option;
     expected_bucket_owner : string option;
   }
+  (** [DeleteObject] request options and result metadata. *)
 
   type result = {
     delete_marker : bool option;
@@ -202,6 +253,7 @@ module Delete_many : sig
     version_id : Version_id.t option;
     etag : Etag.t option;
   }
+  (** [DeleteObjects] request and result data. *)
 
   type deleted = {
     key : string;
@@ -223,7 +275,10 @@ module Delete_many : sig
 end
 
 module Copy : sig
+  (** [CopyObject] request options and result metadata. *)
   type metadata_directive = [ `Copy | `Replace of Metadata.t ]
+  (** [`Copy] preserves source metadata. [`Replace metadata] writes new user
+      metadata on the destination object. *)
 
   type options = {
     source_version_id : Version_id.t option;
@@ -256,6 +311,7 @@ module Versions : sig
     version_id_marker : Version_id.t option;
     expected_bucket_owner : string option;
   }
+  (** [ListObjectVersions] options and page data. *)
 
   type object_version = {
     key : string;
@@ -304,6 +360,7 @@ module List : sig
     continuation_token : string option;
     expected_bucket_owner : string option;
   }
+  (** [ListObjectsV2] options and page data. *)
 
   type object_summary = {
     key : string;
@@ -332,6 +389,8 @@ end
 
 module Tagging : sig
   type options = { expected_bucket_owner : string option }
+  (** Object tagging request options and result data. *)
+
   type result = { tags : Tag.t list; response : Awskit.Response.t }
 
   val default_options : options
