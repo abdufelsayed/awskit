@@ -2,17 +2,48 @@
 
 Awskit is AWS infrastructure for OCaml.
 
-The core packages are pure: they define credentials, regions, endpoints,
-SigV4 signing, request and response types, retry policy, error values, S3 wire
-types, request builders, and deterministic simulation. Runtime packages sit at
-the edge and provide concrete HTTP execution for Eio or Lwt applications.
+It provides the pieces needed to build AWS clients in OCaml: credentials,
+regions, endpoints, SigV4 signing, retry handling, request and response types,
+runtime adapters, and S3 support. The core packages are pure OCaml; concrete
+HTTP execution lives in runtime-specific adapter packages for Eio and Lwt.
 
-The current service surface is AWS S3.
+Awskit currently focuses on AWS S3.
+
+## Features
+
+- Pure AWS core types, signing, endpoints, credentials, errors, and retries.
+- Runtime adapters for Eio and Lwt applications.
+- S3 bucket, object, multipart upload, policy, tagging, versioning, and
+  presigned URL support.
+- Streaming request and response bodies with explicit replayability metadata.
+- Deterministic in-memory S3 simulator for tests.
+- Unix helpers for standard AWS environment variables, shared credentials, and
+  config files.
+
+## Installation
+
+Awskit is split into small packages. From a source checkout, install
+dependencies and build with Dune:
+
+```sh
+opam install . --deps-only --with-test
+opam exec -- dune build
+```
+
+When installing released packages from opam, install the adapter that matches
+your runtime:
+
+```sh
+opam install awskit-s3-eio
+```
+
+or:
+
+```sh
+opam install awskit-s3-lwt-unix
+```
 
 ## Packages
-
-Awskit follows a Cohttp-style package split. Install only the runtime adapter
-you need.
 
 | Package | Description |
 | --- | --- |
@@ -26,60 +57,27 @@ you need.
 | `awskit-s3-lwt-unix` | Ready-to-use S3 client for Lwt + Unix applications. |
 | `awskit-s3-eio` | Ready-to-use S3 client for Eio applications. |
 
-The core `awskit` and `awskit-s3` packages do not depend on Unix, Eio, Lwt, or
-Cohttp runtime packages. Adapter packages carry those dependencies.
-
-## S3
-
-`awskit-s3` exposes AWS S3 operations for:
-
-- bucket creation, deletion, listing, and configuration;
-- object put, get, head, delete, copy, ranges, metadata, tags, and versions;
-- multipart upload and local-file transfer helpers;
-- presigned URLs;
-- bucket policies and related XML/JSON wire types;
-- S3 endpoint and addressing configuration;
-- structured S3 error classifiers;
-- deterministic in-memory simulation for tests.
-
-Awskit targets AWS S3 semantics. S3-compatible services such as MinIO are useful
-for local contract testing, but provider-specific behavior should stay in tests
-unless it matches AWS S3.
-
-## Streaming Contract
-
-Runtime request bodies carry a request descriptor with `content_length`,
-`payload_hash`, and `replayable` metadata. S3 `PutObject` and `UploadPart`
-currently require a known `content_length`; Awskit does not implement
-unknown-length SigV4 aws-chunked streaming.
-
-For already-buffered data, prefer string or bytes body helpers. Custom stream
-bodies must emit exactly the declared number of bytes, and producer callback
-errors are reported as request body failures. Mark custom streams replayable only
-when the stream can actually be replayed for a retry.
-
-Response bodies are streaming and scoped to the runtime response callback.
-Runtime adapters expose `with_response`; inside that callback, consume bodies
-through `Response_body.with_reader` or S3 helper APIs such as
-`Object.get_as_string ~max_bytes`. Buffering and draining helpers apply
-their documented response-size limits. After a response consumer succeeds,
-runtime adapters drain the remaining response body up to the configured drain
-limit so the connection can be reused. If that drain exceeds the cap, the
-operation returns the drain error. If the consumer fails, the consumer error
-wins.
+The `awskit` and `awskit-s3` packages do not depend on Unix, Eio, Lwt, or
+Cohttp runtime packages. Adapter packages carry those runtime dependencies.
 
 ## Quick Start
 
-For Eio:
+### Eio
+
+Install the Eio S3 adapter:
 
 ```sh
 opam install awskit-s3-eio eio_main
 ```
 
+Add the libraries to your Dune file:
+
 ```lisp
 ; dune
 (libraries awskit awskit-s3 awskit-s3-eio eio_main fmt)
 ```
+
+Upload an object:
 
 ```ocaml
 open Eio.Std
@@ -108,16 +106,22 @@ let () =
   | Error error -> Fmt.epr "S3 error: %a@." Awskit_s3.Error.pp error
 ```
 
-For Lwt + Unix:
+### Lwt + Unix
+
+Install the Lwt Unix S3 adapter:
 
 ```sh
 opam install awskit-s3-lwt-unix
 ```
 
+Add the libraries to your Dune file:
+
 ```lisp
 ; dune
 (libraries awskit awskit-s3 awskit-s3-lwt-unix lwt.unix)
 ```
+
+Download an object:
 
 ```ocaml
 open Lwt.Syntax
@@ -159,6 +163,23 @@ AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
 Pass an explicit `endpoint` when testing against a local service or custom AWS
 endpoint.
 
+## S3
+
+`awskit-s3` exposes AWS S3 operations for:
+
+- bucket creation, deletion, listing, and configuration;
+- object put, get, head, delete, copy, ranges, metadata, tags, and versions;
+- multipart upload and local-file transfer helpers;
+- presigned URLs;
+- bucket policies and related XML/JSON wire types;
+- S3 endpoint and addressing configuration;
+- structured S3 error classifiers;
+- deterministic in-memory simulation for tests.
+
+Awskit targets AWS S3 semantics. S3-compatible services such as MinIO are useful
+for local contract testing, but provider-specific behavior should stay in tests
+unless it matches AWS S3.
+
 ## Addressing Style
 
 S3 supports virtual-hosted and path-style bucket addressing. Awskit exposes
@@ -171,6 +192,23 @@ type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
 `Auto` uses virtual-hosted addressing when the bucket and endpoint support it,
 and falls back to path-style otherwise. Local test services commonly need
 `~addressing_style:`Path`.
+
+## Streaming
+
+Runtime request bodies carry a descriptor with `content_length`,
+`payload_hash`, and `replayable` metadata. S3 `PutObject` and `UploadPart`
+currently require a known `content_length`; Awskit does not implement
+unknown-length SigV4 aws-chunked streaming.
+
+For already-buffered data, prefer string or bytes body helpers. Custom stream
+bodies must emit exactly the declared number of bytes, and producer callback
+errors are reported as request body failures. Mark custom streams replayable
+only when the stream can actually be replayed for a retry.
+
+Response bodies are streaming and scoped to the runtime response callback.
+Runtime adapters expose `with_response`; inside that callback, consume bodies
+through `Response_body.with_reader` or S3 helper APIs such as
+`Object.get_as_string ~max_bytes`.
 
 ## Simulation
 
@@ -199,7 +237,7 @@ let () =
 
 ## Development
 
-Install dependencies and run the default build and test suite:
+Install dependencies and run the build and test suite:
 
 ```sh
 opam install . --deps-only --with-test
@@ -214,7 +252,7 @@ docker compose up -d
 opam exec -- dune build @minio-contract
 ```
 
-The MinIO contract runner defaults to `http://127.0.0.1:9000` with
+The MinIO contract runner defaults to `http://127.0.0.1:9000` with the
 `minioadmin` credentials from `docker-compose.yml`. Override with:
 
 ```text
@@ -224,85 +262,17 @@ AWSKIT_S3_MINIO_SECRET_ACCESS_KEY
 AWSKIT_S3_MINIO_REGION
 ```
 
-## Release
+## Contributing
 
-Awskit is a multi-package monorepo released as one synchronized train. Every
-public package uses the same version, one Git tag, one GitHub release, and one
-opam-repository submission:
-
-```text
-awskit
-awskit-unix
-awskit-lwt
-awskit-lwt-unix
-awskit-eio
-awskit-s3
-awskit-s3-lwt
-awskit-s3-lwt-unix
-awskit-s3-eio
-```
-
-Keep internal package dependencies pinned to the same released version. Do not
-publish packages independently unless the release policy and opam constraints
-are deliberately changed.
-
-Before publishing, run the local preflight and release check:
+Issues and pull requests are welcome. For code changes, please run:
 
 ```sh
-. scripts/release-env.sh
-scripts/release-check.sh
-
-dune-release check \
-  --working-tree \
-  --pkg-version 0.1.0 \
-  --pkg-names "$AWSKIT_RELEASE_PACKAGES"
+opam exec -- dune build
+opam exec -- dune test
 ```
 
-Create the release tag before running `bistro`; `bistro` does not create tags:
-
-```sh
-dune-release tag v0.1.0
-git push origin v0.1.0
-```
-
-Publish with `dune-release` using the explicit package list. Keep the first
-run as a draft until the GitHub release/archive and opam-repository submission
-are inspected:
-
-```sh
-dune-release bistro \
-  --tag v0.1.0 \
-  --pkg-version 0.1.0 \
-  --pkg-names "$AWSKIT_RELEASE_PACKAGES" \
-  --draft
-```
-
-The GitHub release should be the single repository release for the tag. Use
-`gh release view` or `gh release edit` only to inspect or adjust that one
-release; do not create separate GitHub releases per opam package. If
-`dune-release` prompts for a GitHub token, use a classic token with only the
-`public_repo` scope or set `DUNE_RELEASE_GITHUB_TOKEN`.
-
-Release notes live in `CHANGES.md`.
-
-## Layout
-
-```text
-packages/
-  awskit/              pure AWS core
-    unix/              Unix helpers
-    lwt/               generic Lwt runtime
-    lwt/unix/          ready-to-use Lwt + Unix runtime
-    eio/               ready-to-use Eio runtime
-  awskit-s3/           pure AWS S3 core
-    simulator.ml       in-memory S3 simulator entrypoint
-    sim_*.ml           simulator support modules
-    lwt/               S3 over generic Lwt runtime
-    lwt/unix/          ready-to-use S3 Lwt + Unix client
-    eio/               ready-to-use S3 Eio client
-doc/                   odoc landing page
-test/                  package tests and MinIO contracts
-```
+Keep changes focused, include tests for behavior changes, and prefer the
+existing package split when adding new runtime-specific functionality.
 
 ## License
 
