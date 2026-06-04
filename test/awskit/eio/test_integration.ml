@@ -98,13 +98,32 @@ let rec read_all_cohttp_body body buffer =
       read_all_cohttp_body body buffer
   | exception End_of_file -> Buffer.contents buffer
 
+let listener_bind_denied_by_sandbox = function
+  (* opam-repository macOS CI can deny local TCP listeners under sandbox.sh. *)
+  | Unix.Unix_error (Unix.EPERM, "bind", _) -> true
+  | _ -> false
+
+let test_listener_bind_denied_by_sandbox () =
+  Alcotest.(check bool)
+    "EPERM bind" true
+    (listener_bind_denied_by_sandbox (Unix.Unix_error (Unix.EPERM, "bind", "")));
+  Alcotest.(check bool)
+    "other bind error" false
+    (listener_bind_denied_by_sandbox
+       (Unix.Unix_error (Unix.EADDRINUSE, "bind", "")));
+  Alcotest.(check bool)
+    "other exception" false
+    (listener_bind_denied_by_sandbox (Failure "bind"))
+
 let with_eio_early_response_server env ~status ~response_body ~read_request_body
     test =
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
   let listening_socket =
-    Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:1
-      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+    try
+      Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:1
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+    with exn when listener_bind_denied_by_sandbox exn -> Alcotest.skip ()
   in
   let port =
     match Eio.Net.listening_addr listening_socket with
@@ -361,6 +380,8 @@ let suite env =
             test_connection_defaults env);
         Alcotest.test_case "runtime bodies" `Quick (fun () ->
             test_runtime_bodies env);
+        Alcotest.test_case "listener bind sandbox errors are skippable" `Quick
+          test_listener_bind_denied_by_sandbox;
         Alcotest.test_case "stream request body emits multiple chunks" `Quick
           (fun () -> test_stream_request_body_emits_multiple_chunks env);
         Alcotest.test_case "stream request body error propagates" `Quick
