@@ -1,5 +1,4 @@
 open Awskit_s3
-module Simulator = Awskit_s3_sim
 
 let test_time = Awskit_test.Time.fixed
 let credentials = Awskit_test.Credentials.basic
@@ -275,12 +274,3 @@ let list_parts_page ?next_part_number_marker ~truncated part_numbers =
   in
   Fmt.str "<ListPartsResult><IsTruncated>%b</IsTruncated>%s%s</ListPartsResult>"
     truncated next_marker_xml parts
-
-let make_simulator () =
-  let clock = Simulator.Clock.create ~now:test_time () in
-  let store = Simulator.create_store ~clock () in
-  let conn = Simulator.connect store ~credentials:creds in
-  ignore
-    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
-    |> ok_or_fail "bucket");
-  conn

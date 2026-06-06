@@ -11,6 +11,4 @@ let () =
          Test_retry.suite;
          Test_paginator.suite;
          Test_multipart_request.suite;
-         Test_simulator.suite;
-         Test_simulator_contract.suite;
        ])

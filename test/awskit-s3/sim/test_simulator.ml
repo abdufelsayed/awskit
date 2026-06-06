@@ -1,5 +1,6 @@
 open Awskit_s3
 open Awskit_s3_test
+open Support
 
 let test_simulator_request_body_requires_known_length () =
   let clock = Simulator.Clock.create ~now:test_time () in

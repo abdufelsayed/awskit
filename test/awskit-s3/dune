@@ -1,15 +1,4 @@
 (test
  (name test_awskit_s3)
  (package awskit-s3)
- (libraries
-  awskit-s3
-  awskit-s3-sim
-  awskit_test
-  awskit_s3_test
-  fmt
-  alcotest
-  ptime
-  qcheck-core
-  qcheck-alcotest
-  digestif
-  uri))
+ (libraries awskit awskit-s3 awskit_s3_test alcotest ptime))

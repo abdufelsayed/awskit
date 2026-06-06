@@ -1,0 +1,4 @@
+(test
+ (name test_awskit_s3_sim)
+ (package awskit-s3-sim)
+ (libraries awskit awskit-s3 awskit-s3-sim awskit_s3_test alcotest ptime))

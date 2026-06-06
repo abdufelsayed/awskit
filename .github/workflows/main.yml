@@ -19,9 +19,9 @@ permissions:
 env:
   OCAML_LATEST: "5"
   DEFAULT_OPAM_PACKAGES: >-
-    awskit awskit-unix awskit-lwt awskit-lwt-unix awskit-s3 awskit-s3-lwt awskit-s3-lwt-unix
+    awskit awskit-unix awskit-lwt awskit-lwt-unix awskit-s3 awskit-s3-sim awskit-s3-lwt awskit-s3-lwt-unix
   DEFAULT_DUNE_PACKAGES: >-
-    awskit,awskit-unix,awskit-lwt,awskit-lwt-unix,awskit-s3,awskit-s3-lwt,awskit-s3-lwt-unix
+    awskit,awskit-unix,awskit-lwt,awskit-lwt-unix,awskit-s3,awskit-s3-sim,awskit-s3-lwt,awskit-s3-lwt-unix
   EIO_OPAM_PACKAGES: >-
     awskit awskit-unix awskit-eio awskit-s3 awskit-s3-eio
   EIO_DUNE_PACKAGES: >-
@@ -49,7 +49,7 @@ jobs:
 
     steps:
       - name: Checkout tree
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set-up OCaml ${{ matrix.ocaml-compiler }}
         uses: ocaml/setup-ocaml@v3
@@ -91,7 +91,7 @@ jobs:
 
     steps:
       - name: Checkout tree
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set-up OCaml ${{ matrix.ocaml-compiler }}
         uses: ocaml/setup-ocaml@v3
@@ -116,7 +116,7 @@ jobs:
 
     steps:
       - name: Checkout tree
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set-up OCaml ${{ env.OCAML_LATEST }}
         uses: ocaml/setup-ocaml@v3

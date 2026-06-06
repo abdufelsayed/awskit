@@ -1,5 +1,6 @@
 open Awskit_s3
 open Awskit_s3_test
+open Support
 
 module Simulator_subject = struct
   include Simulator

@@ -169,9 +169,7 @@
   ppx_protocol_conv_xmlm
   ppx_deriving
   ppx_yojson_conv
-  (alcotest :with-test)
-  (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)))
+  (alcotest :with-test)))
 
 (package
  (name awskit-s3-sim)
@@ -192,7 +190,8 @@
    (>= 0.11.0))
   (base64
    (>= 3.5.2))
-  uri))
+  uri
+  (alcotest :with-test)))
 
 (package
  (name awskit-s3-lwt)
