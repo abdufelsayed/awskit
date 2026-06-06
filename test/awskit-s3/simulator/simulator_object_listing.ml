@@ -1,6 +1,6 @@
 open Core
-open Sim_state
-open Sim_checksum
+open Simulator_state
+open Simulator_checksum
 
 let visible_objects bucket_state (options : List_objects_v2.options) =
   Hashtbl.to_seq bucket_state.objects

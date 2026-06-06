@@ -60,11 +60,6 @@ optional checksum type metadata from [PutObject], [GetObject], [HeadObject],
 [UploadPart], and [CompleteMultipartUpload]. Presigned [PUT] URLs sign explicit
 checksum value headers when configured.
 
-The simulator preserves explicit checksum values for objects and multipart
-parts. It computes deterministic [SHA1] and [SHA256] values only where it owns
-the whole body, such as multipart completion after
-[CreateMultipartUpload.checksum_algorithm].
-
 {2 Preconditions}
 
 Object write, read, delete, and copy operations expose S3 conditional request
@@ -72,12 +67,6 @@ records under [Object.Preconditions]. Runtime-backed clients map those records
 to the AWS headers for [If-Match], [If-None-Match],
 [If-Modified-Since], [If-Unmodified-Since], copy-source preconditions, and
 S3 conditional delete headers.
-
-The simulator enforces these conditions for object [put], [get], [head],
-[delete], and [copy]. Failed write, delete, and copy-source conditions return
-service status [412] with code [PreconditionFailed]. Read [If-None-Match] and
-[If-Modified-Since] cache-hit conditions return service status [304] with code
-[NotModified].
 
 {2 Download}
 
@@ -195,7 +184,7 @@ independent of filesystem APIs.
 larger transfers use multipart upload or ranged [GetObject] requests.
 [multipart_upload_file] and [resume_multipart_upload_file] are explicit
 multipart upload helpers. Filesystem transfer helpers live only in the Eio and
-Lwt Unix adapters; they are not simulator operations.
+Lwt Unix adapters; they are not part of the pure [awskit-s3] core.
 
 {2 Eio}
 
@@ -550,9 +539,8 @@ Values greater than zero spread retry waits below the capped exponential delay.
 
 {1 Local MinIO Contract Testing}
 
-Normal tests use the deterministic in-memory simulator and do not require a
-network service. For local wire-level checks against MinIO, start the included
-Compose stack and run the opt-in alias:
+Normal tests do not require a network service. For local wire-level checks
+against MinIO, start the included Compose stack and run the opt-in alias:
 
 {[
 docker compose up -d
@@ -563,39 +551,3 @@ The contract runner defaults to [http://127.0.0.1:9000] with the
 [minioadmin]/[minioadmin] credentials from [docker-compose.yml]. Override with
 [AWSKIT_S3_MINIO_ENDPOINT], [AWSKIT_S3_MINIO_ACCESS_KEY_ID],
 [AWSKIT_S3_MINIO_SECRET_ACCESS_KEY], and [AWSKIT_S3_MINIO_REGION].
-
-{1 Simulator Testing}
-
-{!module:Awskit_s3.Simulator} exposes the same synchronous S3 operation shape as the
-runtime-backed client and adds test-only helpers:
-
-{ul
-  {li deterministic clock}
-  {li in-memory store inspection}
-  {li operation history}
-  {li deterministic fault injection}
-}
-
-{[
-let clock = Awskit_s3.Simulator.Clock.create () in
-let store = Awskit_s3.Simulator.create_store ~clock () in
-let conn = Awskit_s3.Simulator.connect store ~credentials in
-
-ignore
-  (Awskit_s3.Simulator.Bucket.create conn ~bucket:"test-bucket" ()
-   |> Result.get_ok);
-
-ignore
-  (Awskit_s3.Simulator.Object.put_string conn
-     ~bucket:"test-bucket"
-     ~key:"hello.txt"
-     "hello"
-   |> Result.get_ok)
-]}
-
-[Simulator.Response_lost] is modeled as a body-read failure. [Simulator.Slow_down],
-[Simulator.Internal_error], and [Simulator.Connection_reset] fail object and multipart
-operations before mutation. The simulator models enabled bucket versioning for
-object puts, gets, heads, deletes, copies, multipart completion, and delete
-markers. Suspended bucket versioning models the S3 [null] object version and
-[null] delete marker behavior.

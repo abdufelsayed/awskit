@@ -1,6 +1,6 @@
 open Core
-open Sim_state
-open Sim_error
+open Simulator_state
+open Simulator_error
 
 let bucket_state store bucket = find_bucket store bucket
 

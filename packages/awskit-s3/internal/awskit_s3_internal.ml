@@ -11,4 +11,4 @@ module Transfer = Transfer
 module Policy = Policy
 module Presigned = Presigned
 module Make = Make
-module Simulator = Simulator
+module Headers = Headers

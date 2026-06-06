@@ -1,8 +1,8 @@
 open Core
-open Sim_state
-open Sim_error
-open Sim_store
-open Sim_runtime
+open Simulator_state
+open Simulator_error
+open Simulator_store
+open Simulator_runtime
 
 module Bucket = struct
   type connection = t

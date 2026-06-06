@@ -1,7 +1,7 @@
 open Core
-open Sim_state
-open Sim_store
-open Sim_checksum
+open Simulator_state
+open Simulator_store
+open Simulator_checksum
 
 type object_metadata = {
   etag : Object.Etag.t option;
@@ -35,8 +35,8 @@ let keys store ~bucket =
       |> List.of_seq
       |> List.sort String.compare
 
-let history = Sim_state.history
-let clear_history = Sim_state.clear_history
+let history = Simulator_state.history
+let clear_history = Simulator_state.clear_history
 
 let objects_as_strings store ~bucket =
   match bucket_state store bucket with
@@ -50,10 +50,10 @@ let objects_as_strings store ~bucket =
       |> List.sort compare
 
 let inject_fault t fault = append_faults t [ fault ]
-let inject_faults = Sim_state.append_faults
-let clear_faults = Sim_state.clear_faults
-let enable_random_faults = Sim_state.enable_random_faults
-let disable_random_faults = Sim_state.disable_random_faults
+let inject_faults = Simulator_state.append_faults
+let clear_faults = Simulator_state.clear_faults
+let enable_random_faults = Simulator_state.enable_random_faults
+let disable_random_faults = Simulator_state.disable_random_faults
 
 let info_of_object ?content_length response (obj : stored_object) =
   {

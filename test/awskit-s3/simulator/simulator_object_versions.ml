@@ -1,7 +1,7 @@
 open Core
-open Sim_state
-open Sim_store
-open Sim_checksum
+open Simulator_state
+open Simulator_store
+open Simulator_checksum
 
 type version_entry =
   | Object_version of List_object_versions.object_version

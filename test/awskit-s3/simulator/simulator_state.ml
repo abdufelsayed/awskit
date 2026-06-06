@@ -147,12 +147,12 @@ let record_operation ?(faulted = false) t op bucket key =
 let allocate_upload_id t =
   let id = t.store.next_upload_id in
   t.store.next_upload_id <- id + 1;
-  Multipart.Upload_id.of_string_exn (Fmt.str "sim-upload-%d" id)
+  Multipart.Upload_id.of_string_exn (Fmt.str "simulator-upload-%d" id)
 
 let allocate_version_id t =
   let id = t.store.next_version_id in
   t.store.next_version_id <- id + 1;
-  Object.Version_id.of_string_exn (Fmt.str "sim-version-%d" id)
+  Object.Version_id.of_string_exn (Fmt.str "simulator-version-%d" id)
 
 let append_faults t faults = t.faults <- t.faults @ faults
 let clear_faults t = t.faults <- []

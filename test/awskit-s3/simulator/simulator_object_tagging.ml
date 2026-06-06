@@ -1,6 +1,6 @@
 open Core
-open Sim_error
-open Sim_store
+open Simulator_error
+open Simulator_store
 
 module Tagging = struct
   let get conn ~bucket ~key ?options:_ () =

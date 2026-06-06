@@ -275,7 +275,7 @@ let list_parts_page ?next_part_number_marker ~truncated part_numbers =
   Fmt.str "<ListPartsResult><IsTruncated>%b</IsTruncated>%s%s</ListPartsResult>"
     truncated next_marker_xml parts
 
-let make_sim () =
+let make_simulator () =
   let clock = Simulator.Clock.create ~now:test_time () in
   let store = Simulator.create_store ~clock () in
   let conn = Simulator.connect store ~credentials:creds in

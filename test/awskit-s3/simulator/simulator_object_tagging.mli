@@ -1,6 +1,6 @@
 module Tagging : sig
   val get :
-    Sim_state.t ->
+    Simulator_state.t ->
     bucket:string ->
     key:string ->
     ?options:Object.Tagging.options ->
@@ -8,7 +8,7 @@ module Tagging : sig
     (Object.Tagging.result, Awskit.Error.t) result
 
   val put :
-    Sim_state.t ->
+    Simulator_state.t ->
     bucket:string ->
     key:string ->
     ?options:Object.Tagging.options ->
@@ -16,7 +16,7 @@ module Tagging : sig
     (Awskit.Response.t, Awskit.Error.t) result
 
   val delete :
-    Sim_state.t ->
+    Simulator_state.t ->
     bucket:string ->
     key:string ->
     ?options:Object.Tagging.options ->

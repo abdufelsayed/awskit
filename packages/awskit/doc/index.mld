@@ -127,7 +127,7 @@ AWS_DEFAULT_REGION
 
 {ul
   {li {{:../awskit-s3/index.html}[awskit-s3]} — AWS S3 object-storage client,
-    presigning, and simulator}
+    presigning, and runtime-backed operations}
 }
 
 {1 Guides}

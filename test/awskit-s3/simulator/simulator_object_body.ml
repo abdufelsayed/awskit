@@ -1,6 +1,6 @@
 open Core
-open Sim_error
-open Sim_runtime
+open Simulator_error
+open Simulator_runtime
 
 let invalid_range () = service ~status:416 ~code:"InvalidRange" ()
 

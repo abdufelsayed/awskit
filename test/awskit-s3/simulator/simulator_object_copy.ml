@@ -1,9 +1,9 @@
 open Core
 open Headers
-open Sim_state
-open Sim_error
-open Sim_store
-open Sim_checksum
+open Simulator_state
+open Simulator_error
+open Simulator_store
+open Simulator_checksum
 
 let validate_opt f = function None -> Ok () | Some value -> f value
 

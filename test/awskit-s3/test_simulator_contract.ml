@@ -1,7 +1,7 @@
 open Awskit_s3
 open Awskit_s3_test
 
-module Sim_subject = struct
+module Simulator_subject = struct
   include Simulator
 
   type connection = t
@@ -17,10 +17,10 @@ module Sim_subject = struct
   let read_response_body = Runtime.Response_body.read
 end
 
-module Sim_contract = S3_contract.Make (Sim_subject)
+module Simulator_contract = S3_contract.Make (Simulator_subject)
 
-let test_sim_slow_down_fault () =
-  let conn = Sim_subject.fresh () in
+let test_simulator_slow_down_fault () =
+  let conn = Simulator_subject.fresh () in
   ignore
     (Simulator.Bucket.create conn ~bucket:"contract-bucket" ()
     |> ok_or_fail "create bucket");
@@ -38,8 +38,8 @@ let test_sim_slow_down_fault () =
       Alcotest.(check string) "fault key" "fault" (Option.get record.key)
   | _ -> Alcotest.fail "expected one faulted history record"
 
-let test_sim_response_lost_fault () =
-  let conn = Sim_subject.fresh () in
+let test_simulator_response_lost_fault () =
+  let conn = Simulator_subject.fresh () in
   ignore
     (Simulator.Bucket.create conn ~bucket:"contract-bucket" ()
     |> ok_or_fail "create bucket");
@@ -58,10 +58,11 @@ let test_sim_response_lost_fault () =
 
 let suite =
   [
-    ("sim contract", Sim_contract.cases);
-    ( "sim faults",
+    ("simulator contract", Simulator_contract.cases);
+    ( "simulator faults",
       [
-        Alcotest.test_case "slow down" `Quick test_sim_slow_down_fault;
-        Alcotest.test_case "response lost" `Quick test_sim_response_lost_fault;
+        Alcotest.test_case "slow down" `Quick test_simulator_slow_down_fault;
+        Alcotest.test_case "response lost" `Quick
+          test_simulator_response_lost_fault;
       ] );
   ]

@@ -4,9 +4,9 @@ Awskit is AWS infrastructure for OCaml.
 
 The core packages are pure: they define credentials, regions, endpoints,
 Signature Version 4 signing, request and response metadata, retry policy,
-structured errors, service wire types, request builders, and deterministic
-simulation. Runtime packages sit at the edge and provide concrete HTTP
-execution for Eio or Lwt applications.
+structured errors, service wire types, and request builders. Runtime packages
+sit at the edge and provide concrete HTTP execution for Eio or Lwt
+applications.
 
 The current service surface is AWS S3.
 
@@ -25,7 +25,7 @@ you need.
   {li [awskit-lwt-unix] — ready-to-use Lwt + Unix runtime adapter}
   {li [awskit-eio] — ready-to-use direct-style Eio runtime adapter}
   {li [awskit-s3] — pure AWS S3 core: buckets, objects, multipart upload,
-    presigned URLs, policies, endpoint resolution, and simulator}
+    presigned URLs, policies, and endpoint resolution}
   {li [awskit-s3-lwt] — S3 adapter over the generic Awskit Lwt runtime}
   {li [awskit-s3-lwt-unix] — ready-to-use S3 client for Lwt + Unix}
   {li [awskit-s3-eio] — ready-to-use S3 client for Eio}
@@ -103,30 +103,6 @@ supports ECS/container and EC2 instance metadata credential providers.
 Endpoint overrides are explicit. S3-specific endpoint and addressing options
 are exposed by the S3 adapter [create] functions.
 
-{1 Simulation}
-
-The S3 simulator provides deterministic in-memory S3 for unit tests. It does
-not require network access or AWS credentials.
-
-{[
-let credentials =
-  Awskit.Credentials.create_exn
-    ~access_key_id:"AK"
-    ~secret_access_key:"SK"
-    ()
-in
-let clock = Awskit_s3.Simulator.Clock.create () in
-let store = Awskit_s3.Simulator.create_store ~clock () in
-let conn = Awskit_s3.Simulator.connect store ~credentials in
-
-Awskit_s3.Simulator.Bucket.create conn ~bucket:"test" () |> ignore;
-Awskit_s3.Simulator.Object.put_string conn
-  ~bucket:"test"
-  ~key:"hello"
-  "world"
-|> ignore
-]}
-
 {1 Package Documentation}
 
 {ul
@@ -134,7 +110,7 @@ Awskit_s3.Simulator.Object.put_string conn
   {li {{:../awskit/guides.html}[awskit guides]} — credentials, endpoints,
     signing, errors, retries, and adapter selection}
   {li {{:../awskit-s3/index.html}[awskit-s3]} — AWS S3 objects, buckets,
-    multipart upload, presigned URLs, policies, and simulation}
+    multipart upload, presigned URLs, and policies}
   {li {{:../awskit-s3/guides.html}[awskit-s3 guides]} — S3 operations in
     depth}
 }

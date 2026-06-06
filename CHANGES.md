@@ -7,5 +7,5 @@ retry support, runtime abstractions, Unix credential helpers, Lwt and Eio
 runtime adapters, and focused S3 support for general-purpose buckets.
 
 The S3 packages include bucket configuration primitives, object operations,
-multipart upload primitives, presigned URLs, an in-memory simulator, and
-adapter-level transfer helpers for streaming file upload and download.
+multipart upload primitives, presigned URLs, and adapter-level transfer helpers
+for streaming file upload and download.

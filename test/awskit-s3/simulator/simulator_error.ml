@@ -1,5 +1,5 @@
 open Core
-open Sim_state
+open Simulator_state
 
 let service ?message ?(headers = []) ~status ~code () =
   Awskit.Error.service
@@ -34,7 +34,7 @@ let fault_error = function
       Awskit.Error.transport ~retryable:true "simulated connection reset"
   | Response_lost -> Awskit.Error.body "simulated response body loss"
 
-let take_fault t = Sim_state.take_fault t
+let take_fault t = Simulator_state.take_fault t
 
 let operation_fault t op bucket key =
   match take_fault t with

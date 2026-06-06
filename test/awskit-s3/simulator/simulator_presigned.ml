@@ -1,6 +1,6 @@
 open Core
-open Sim_state
-open Sim_runtime
+open Simulator_state
+open Simulator_runtime
 
 module Presigned = struct
   type connection = t

@@ -1,11 +1,11 @@
 open Core
-open Sim_state
-open Sim_error
-open Sim_store
-open Sim_checksum
-open Sim_runtime
-open Sim_inspect
-open Sim_object_body
+open Simulator_state
+open Simulator_error
+open Simulator_store
+open Simulator_checksum
+open Simulator_runtime
+open Simulator_inspect
+open Simulator_object_body
 
 let object_read_info (obj : stored_object) ~status ~content_length
     ~range_headers =

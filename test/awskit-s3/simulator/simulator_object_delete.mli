@@ -8,10 +8,10 @@ val delete_objects_error :
   string -> string -> string -> Object.Delete_many.item_error
 
 val delete_objects_conditions_match :
-  Object.Delete_many.object_ -> Sim_state.stored_version option -> bool
+  Object.Delete_many.object_ -> Simulator_state.stored_version option -> bool
 
 val delete :
-  Sim_state.t ->
+  Simulator_state.t ->
   bucket:string ->
   key:string ->
   ?options:Object.Delete.options ->
@@ -19,7 +19,7 @@ val delete :
   (Object.Delete.result, Awskit.Error.t) result
 
 val delete_objects :
-  Sim_state.t ->
+  Simulator_state.t ->
   bucket:string ->
   objects:Object.Delete_many.object_ list ->
   ?options:Object.Delete_many.options ->

@@ -1,16 +1,16 @@
 open Core
 open Headers
-open Sim_state
-open Sim_error
-open Sim_store
-open Sim_checksum
-open Sim_runtime
-open Sim_object_body
-open Sim_object_delete
-open Sim_object_listing
-open Sim_object_read
-open Sim_object_tagging
-open Sim_object_versions
+open Simulator_state
+open Simulator_error
+open Simulator_store
+open Simulator_checksum
+open Simulator_runtime
+open Simulator_object_body
+open Simulator_object_delete
+open Simulator_object_listing
+open Simulator_object_read
+open Simulator_object_tagging
+open Simulator_object_versions
 
 module Object = struct
   type connection = t
@@ -18,13 +18,13 @@ module Object = struct
   type request_body = Runtime.request_body
   type response_body_reader = Runtime.response_body_reader
 
-  let put = Sim_object_write.put
-  let get = Sim_object_read.get
-  let head = Sim_object_read.head
-  let exists = Sim_object_read.exists
-  let delete = Sim_object_delete.delete
-  let delete_objects = Sim_object_delete.delete_objects
-  let copy = Sim_object_copy.copy
+  let put = Simulator_object_write.put
+  let get = Simulator_object_read.get
+  let head = Simulator_object_read.head
+  let exists = Simulator_object_read.exists
+  let delete = Simulator_object_delete.delete
+  let delete_objects = Simulator_object_delete.delete_objects
+  let copy = Simulator_object_copy.copy
 
   let list_versions conn ~bucket ?options () =
     let options =
@@ -96,7 +96,7 @@ module Object = struct
             | Some error -> Error error
             | None ->
                 Ok
-                  (Sim_object_listing.page
+                  (Simulator_object_listing.page
                      ~default_max_keys:(config (store conn)).max_list_keys
                      ~bucket bucket_state options ~response:(response 200))))
 
@@ -257,8 +257,8 @@ module Object = struct
   let put_bytes conn ~bucket ~key ?options body =
     put conn ~bucket ~key ?options ~body:(Runtime.Request_body.of_bytes body) ()
 
-  let get_as_string = Sim_object_read.get_as_string
-  let get_as_bytes = Sim_object_read.get_as_bytes
+  let get_as_string = Simulator_object_read.get_as_string
+  let get_as_bytes = Simulator_object_read.get_as_bytes
 
-  module Tagging = Sim_object_tagging.Tagging
+  module Tagging = Simulator_object_tagging.Tagging
 end

@@ -19,18 +19,18 @@ val response : ?headers:(string * string) list -> int -> Awskit.Response.t
 
 val record :
   ?faulted:bool ->
-  Sim_state.t ->
-  Sim_state.operation ->
+  Simulator_state.t ->
+  Simulator_state.operation ->
   string ->
   string option ->
   unit
 
-val fault_error : Sim_state.fault -> Awskit.Error.t
-val take_fault : Sim_state.t -> Sim_state.fault option
+val fault_error : Simulator_state.fault -> Awskit.Error.t
+val take_fault : Simulator_state.t -> Simulator_state.fault option
 
 val operation_fault :
-  Sim_state.t ->
-  Sim_state.operation ->
+  Simulator_state.t ->
+  Simulator_state.operation ->
   string ->
   string option ->
   Awskit.Error.t option

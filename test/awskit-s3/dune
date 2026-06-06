@@ -5,6 +5,7 @@
   awskit-s3
   awskit_test
   awskit_s3_test
+  awskit_s3_test_simulator
   fmt
   alcotest
   ptime

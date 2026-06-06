@@ -1,7 +1,7 @@
 open Awskit_s3
 open Awskit_s3_test
 
-let test_sim_request_body_requires_known_length () =
+let test_simulator_request_body_requires_known_length () =
   let clock = Simulator.Clock.create ~now:test_time () in
   let store = Simulator.create_store ~clock () in
   let conn = Simulator.connect store ~credentials:creds in
@@ -24,9 +24,9 @@ let test_sim_request_body_requires_known_length () =
    with
   | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
   | Error error ->
-      Alcotest.failf "unexpected sim unknown-length put error: %a" Error.pp
-        error
-  | Ok _ -> Alcotest.fail "expected sim unknown-length object failure");
+      Alcotest.failf "unexpected simulator unknown-length put error: %a"
+        Error.pp error
+  | Ok _ -> Alcotest.fail "expected simulator unknown-length object failure");
   (match Simulator.Object.head conn ~bucket:"test-bucket" ~key:"unknown" () with
   | Error error when Error.is_not_found error -> ()
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
@@ -43,9 +43,9 @@ let test_sim_request_body_requires_known_length () =
    with
   | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
   | Error error ->
-      Alcotest.failf "unexpected sim unknown-length part error: %a" Error.pp
-        error
-  | Ok _ -> Alcotest.fail "expected sim unknown-length multipart failure");
+      Alcotest.failf "unexpected simulator unknown-length part error: %a"
+        Error.pp error
+  | Ok _ -> Alcotest.fail "expected simulator unknown-length multipart failure");
   let listed =
     Simulator.Multipart.list_parts conn ~bucket:"test-bucket" ~key:"large.bin"
       ~upload_id ()
@@ -53,7 +53,7 @@ let test_sim_request_body_requires_known_length () =
   in
   Alcotest.(check int) "stored parts" 0 (List.length listed.parts)
 
-let test_sim_stream_request_body_error_propagates () =
+let test_simulator_stream_request_body_error_propagates () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
@@ -62,7 +62,7 @@ let test_sim_stream_request_body_error_propagates () =
   let conn = Simulator.connect store ~credentials in
   let bucket = "stream-error-bucket" in
   ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
-  let stream_error = Awskit.Error.body "sim stream request body failed" in
+  let stream_error = Awskit.Error.body "simulator stream request body failed" in
   let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
@@ -85,7 +85,7 @@ let test_sim_stream_request_body_error_propagates () =
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream error object to be absent"
 
-let test_sim_stream_request_body_rejects_length_mismatch () =
+let test_simulator_stream_request_body_rejects_length_mismatch () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
@@ -131,7 +131,7 @@ let test_sim_stream_request_body_rejects_length_mismatch () =
       Alcotest.failf "unexpected long head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected long body object to be absent"
 
-let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
+let test_simulator_multipart_upload_part_stream_error_does_not_store_part () =
   let clock = Simulator.Clock.create ~now:test_time () in
   let store = Simulator.create_store ~clock () in
   let conn = Simulator.connect store ~credentials:creds in
@@ -144,7 +144,9 @@ let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
     |> ok_or_fail "create multipart upload"
   in
   let upload_id = created.upload.upload_id in
-  let stream_error = Awskit.Error.body "sim multipart request body failed" in
+  let stream_error =
+    Awskit.Error.body "simulator multipart request body failed"
+  in
   let descriptor : Awskit.Body.Request.descriptor =
     {
       content_length = Some 4L;
@@ -173,8 +175,8 @@ let test_sim_multipart_upload_part_stream_error_does_not_store_part () =
   in
   Alcotest.(check int) "stored parts" 0 (List.length listed.parts)
 
-let test_sim_public_helper_surface () =
-  let conn = make_sim () in
+let test_simulator_public_helper_surface () =
+  let conn = make_simulator () in
   let store = Simulator.store conn in
   let put =
     Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"ok.txt" "hello"
@@ -220,25 +222,25 @@ let test_sim_public_helper_surface () =
     [ ("after.txt", "after"); ("ok.txt", "hello") ]
     (Simulator.objects_as_strings store ~bucket:"test-bucket")
 
-let sim_operation_name (_ : Simulator.operation_record) = function
+let simulator_operation_name (_ : Simulator.operation_record) = function
   | `Put_object | `Get_object | `Head_object | `Delete_object | `List_objects_v2
   | `List_object_versions | `Copy_object | `Delete_objects
   | `Create_multipart_upload | `Upload_part | `Complete_multipart_upload
   | `Abort_multipart_upload | `List_parts ->
       ()
 
-let test_sim_history_uses_operation_names () =
-  let conn = make_sim () in
+let test_simulator_history_uses_operation_names () =
+  let conn = make_simulator () in
   ignore
     (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"history.txt"
        "history"
     |> ok_or_fail "put history");
   match Simulator.history (Simulator.store conn) with
-  | record :: _ -> sim_operation_name record record.op
+  | record :: _ -> simulator_operation_name record record.op
   | [] -> Alcotest.fail "expected simulator history record"
 
-let test_sim_buffer_roundtrip () =
-  let conn = make_sim () in
+let test_simulator_buffer_roundtrip () =
+  let conn = make_simulator () in
   let checksum : Object.Checksum.value =
     {
       Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
@@ -285,8 +287,8 @@ let test_sim_buffer_roundtrip () =
       Alcotest.(check (option int64)) "listed size" (Some 5L) object_.size
   | _ -> Alcotest.fail "expected one listed object"
 
-let test_sim_rejects_unknown_checksum_writes () =
-  let conn = make_sim () in
+let test_simulator_rejects_unknown_checksum_writes () =
+  let conn = make_simulator () in
   let checksum : Object.Checksum.value =
     {
       Object.Checksum.algorithm = Object.Checksum.Algorithm.Unknown "FUTURE";
@@ -301,7 +303,7 @@ let test_sim_rejects_unknown_checksum_writes () =
         Alcotest.failf "%s: unexpected error: %a" label Error.pp error
     | Ok _ -> Alcotest.failf "%s: expected checksum validation" label
   in
-  expect_checksum_validation "sim put"
+  expect_checksum_validation "simulator put"
     (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"bad.txt"
        ~options:{ Put_object.default_options with checksum = Some checksum }
        "body");
@@ -315,7 +317,7 @@ let test_sim_rejects_unknown_checksum_writes () =
     (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"source.txt"
        "body"
     |> ok_or_fail "source");
-  expect_checksum_validation "sim copy"
+  expect_checksum_validation "simulator copy"
     (Simulator.Object.copy conn ~source_bucket:"test-bucket"
        ~source_key:"source.txt" ~destination_bucket:"test-bucket"
        ~destination_key:"copy.txt" ~options:copy_options ());
@@ -328,7 +330,7 @@ let test_sim_rejects_unknown_checksum_writes () =
   let upload_part_options =
     { Upload_part.checksum = Some checksum; expected_bucket_owner = None }
   in
-  expect_checksum_validation "sim upload part"
+  expect_checksum_validation "simulator upload part"
     (Simulator.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"bad.bin"
        ~upload_id ~part_number:1
        ~body:(Simulator.Runtime.Request_body.of_string "body")
@@ -346,7 +348,7 @@ let test_sim_rejects_unknown_checksum_writes () =
       multipart_object_size = None;
     }
   in
-  expect_checksum_validation "sim complete checksum"
+  expect_checksum_validation "simulator complete checksum"
     (Simulator.Multipart.complete_upload conn ~bucket:"test-bucket"
        ~key:"bad.bin" ~upload_id ~options:complete_options [ part ]);
   let complete_options =
@@ -361,12 +363,13 @@ let test_sim_rejects_unknown_checksum_writes () =
   with
   | Error (Awskit.Error.Validation { field = Some "checksum_type"; _ }) -> ()
   | Error error ->
-      Alcotest.failf "sim complete checksum type: unexpected error: %a" Error.pp
-        error
-  | Ok _ -> Alcotest.fail "sim complete checksum type: expected validation"
+      Alcotest.failf "simulator complete checksum type: unexpected error: %a"
+        Error.pp error
+  | Ok _ ->
+      Alcotest.fail "simulator complete checksum type: expected validation"
 
-let test_sim_streaming_get () =
-  let conn = make_sim () in
+let test_simulator_streaming_get () =
+  let conn = make_simulator () in
   ignore
     (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"stream"
        "abcdef"
@@ -384,7 +387,7 @@ let test_sim_streaming_get () =
   Alcotest.(check string) "partial body" "abc" body
 
 let test_buffer_limit () =
-  let conn = make_sim () in
+  let conn = make_simulator () in
   ignore
     (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"large"
        "abcdef"
@@ -397,8 +400,8 @@ let test_buffer_limit () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected max_bytes failure"
 
-let test_sim_paginator_keys () =
-  let conn = make_sim () in
+let test_simulator_paginator_keys () =
+  let conn = make_simulator () in
   ignore
     (Simulator.Object.put_string conn ~bucket:"test-bucket" ~key:"logs/a.txt"
        "a"
@@ -420,7 +423,7 @@ let test_sim_paginator_keys () =
   in
   let keys =
     Simulator.Object.List_objects_v2.keys conn ~bucket:"test-bucket" ~options ()
-    |> ok_or_fail "sim paginator keys"
+    |> ok_or_fail "simulator paginator keys"
   in
   Alcotest.(check (list string)) "keys" [ "logs/a.txt"; "logs/b.txt" ] keys
 
@@ -428,25 +431,29 @@ let suite =
   [
     ( "simulator",
       [
-        Alcotest.test_case "sim request body requires known length" `Quick
-          test_sim_request_body_requires_known_length;
-        Alcotest.test_case "sim stream request body error propagates" `Quick
-          test_sim_stream_request_body_error_propagates;
-        Alcotest.test_case "sim stream request body rejects length mismatch"
-          `Quick test_sim_stream_request_body_rejects_length_mismatch;
+        Alcotest.test_case "simulator request body requires known length" `Quick
+          test_simulator_request_body_requires_known_length;
+        Alcotest.test_case "simulator stream request body error propagates"
+          `Quick test_simulator_stream_request_body_error_propagates;
         Alcotest.test_case
-          "sim multipart upload part stream error does not store part" `Quick
-          test_sim_multipart_upload_part_stream_error_does_not_store_part;
-        Alcotest.test_case "sim public helper surface" `Quick
-          test_sim_public_helper_surface;
-        Alcotest.test_case "sim history uses operation names" `Quick
-          test_sim_history_uses_operation_names;
-        Alcotest.test_case "sim in-memory roundtrip" `Quick
-          test_sim_buffer_roundtrip;
-        Alcotest.test_case "sim rejects unknown checksum writes" `Quick
-          test_sim_rejects_unknown_checksum_writes;
-        Alcotest.test_case "sim streaming get" `Quick test_sim_streaming_get;
+          "simulator stream request body rejects length mismatch" `Quick
+          test_simulator_stream_request_body_rejects_length_mismatch;
+        Alcotest.test_case
+          "simulator multipart upload part stream error does not store part"
+          `Quick
+          test_simulator_multipart_upload_part_stream_error_does_not_store_part;
+        Alcotest.test_case "simulator public helper surface" `Quick
+          test_simulator_public_helper_surface;
+        Alcotest.test_case "simulator history uses operation names" `Quick
+          test_simulator_history_uses_operation_names;
+        Alcotest.test_case "simulator in-memory roundtrip" `Quick
+          test_simulator_buffer_roundtrip;
+        Alcotest.test_case "simulator rejects unknown checksum writes" `Quick
+          test_simulator_rejects_unknown_checksum_writes;
+        Alcotest.test_case "simulator streaming get" `Quick
+          test_simulator_streaming_get;
         Alcotest.test_case "in-memory helper limit" `Quick test_buffer_limit;
-        Alcotest.test_case "sim paginator keys" `Quick test_sim_paginator_keys;
+        Alcotest.test_case "simulator paginator keys" `Quick
+          test_simulator_paginator_keys;
       ] );
   ]

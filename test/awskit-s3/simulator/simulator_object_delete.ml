@@ -1,7 +1,7 @@
 open Core
-open Sim_error
-open Sim_state
-open Sim_store
+open Simulator_error
+open Simulator_state
+open Simulator_store
 
 let delete_result ?delete_marker ?version_id () =
   {

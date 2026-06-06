@@ -36,4 +36,3 @@ module type POLICY = module type of Policy
 module type PRESIGNED_DATA = module type of Presigned
 
 module Make = Awskit_s3_internal.Make.Make
-module Simulator = Awskit_s3_internal.Simulator.Public

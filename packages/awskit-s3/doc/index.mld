@@ -1,8 +1,7 @@
 {0 awskit-s3}
 
 AWS S3 client surface for bucket/object storage operations, multipart uploads,
-S3 presigned URLs, opaque bucket policy documents, and deterministic
-simulation.
+S3 presigned URLs, and opaque bucket policy documents.
 
 See {{:../../doc/awskit.html}[awskit]} for the pure core and runtime adapter
 overview.
@@ -25,7 +24,7 @@ applications:
   {li bucket configuration helpers for policy, CORS, encryption, tagging, and
     versioning}
   {li endpoint configuration, credentials, retries, pagination, streaming
-    contracts, and deterministic simulation}
+    contracts, and structured error classifiers}
 }
 
 Bucket policy operations use opaque JSON policy documents, which lets
@@ -51,7 +50,7 @@ bodies and response body readers come from the selected runtime adapter.
 {2 awskit-s3}
 
 {!module:Awskit_s3} contains pure types, S3 endpoint configuration, standalone
-presigned URL helpers, the runtime functor, and the deterministic simulator.
+presigned URL helpers, and the runtime functor.
 
 Main modules:
 
@@ -68,7 +67,6 @@ Main modules:
   {li {!module:Awskit_s3.Presigned} — pure presigned URL generation}
   {li {!module:Awskit_s3.Policy} — validated opaque bucket policy JSON
     payloads}
-  {li {!module:Awskit_s3.Simulator} — in-memory S3 test surface}
   {li {!module:Awskit_s3.Make} — functor for wiring S3 operations to a custom
     {!module-type:Awskit.Runtime.S} implementation}
 }
@@ -139,5 +137,5 @@ let run () =
 
 {ul
   {li {{!page-guides}S3 Guides} — objects, buffers, transfers, endpoint setup,
-    buckets, multipart, presigning, errors, and simulator testing}
+    buckets, multipart, presigning, and errors}
 }

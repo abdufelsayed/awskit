@@ -1,5 +1,5 @@
 open Core
-open Sim_state
+open Simulator_state
 
 module Runtime = struct
   type connection = t
@@ -29,10 +29,10 @@ module Runtime = struct
 
   let now = now
   let region _ = Awskit.Region.of_string_exn "us-east-1"
-  let credentials t = Ok (Sim_state.credentials t)
+  let credentials t = Ok (Simulator_state.credentials t)
   let endpoint _ = None
   let retry_policy _ = Awskit.Retry.default
-  let sleep t span = Clock.advance (Sim_state.clock (store t)) span
+  let sleep t span = Clock.advance (Simulator_state.clock (store t)) span
   let s3_endpoint_config _ = default_endpoint_config
 
   let descriptor_for_string body =

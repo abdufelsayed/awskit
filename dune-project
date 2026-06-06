@@ -148,9 +148,9 @@
 (package
  (name awskit-s3)
  (synopsis
-  "S3 client core — objects, buckets, multipart, policies, and simulation")
+  "S3 client core — objects, buckets, multipart, and policies")
  (description
-  "S3 operations, bucket configuration, multipart uploads, presigned URLs, policies, simulation, and XML wire types. Runtime adapters are available as separate packages.")
+  "S3 operations, bucket configuration, multipart uploads, presigned URLs, policies, and XML wire types. Runtime adapters are available as separate packages.")
  (depends
   (ocaml
    (>= 4.14))

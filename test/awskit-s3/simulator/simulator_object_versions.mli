@@ -6,4 +6,4 @@ val version_entry_key : version_entry -> string
 val version_entry_id : version_entry -> Object.Version_id.t option
 
 val version_entries :
-  Sim_state.bucket_state -> Object.Versions.options -> version_entry list
+  Simulator_state.bucket_state -> Object.Versions.options -> version_entry list

@@ -1,11 +1,11 @@
 open Core
 open Headers
-open Sim_state
-open Sim_error
-open Sim_store
-open Sim_checksum
-open Sim_runtime
-open Sim_object_body
+open Simulator_state
+open Simulator_error
+open Simulator_store
+open Simulator_checksum
+open Simulator_runtime
+open Simulator_object_body
 
 let validate_opt f = function None -> Ok () | Some value -> f value
 

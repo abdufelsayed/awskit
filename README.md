@@ -16,7 +16,6 @@ Awskit currently focuses on AWS S3.
 - S3 bucket, object, multipart upload, policy, tagging, versioning, and
   presigned URL support.
 - Streaming request and response bodies with explicit replayability metadata.
-- Deterministic in-memory S3 simulator for tests.
 - Unix helpers for standard AWS environment variables, shared credentials, and
   config files.
 
@@ -52,7 +51,7 @@ opam install awskit-s3-lwt-unix
 | `awskit-lwt` | Generic Lwt runtime adapter over a caller-supplied Cohttp Lwt client. |
 | `awskit-lwt-unix` | Ready-to-use Lwt + Unix runtime adapter using Cohttp Lwt Unix. |
 | `awskit-eio` | Ready-to-use direct-style Eio runtime adapter using Cohttp Eio. |
-| `awskit-s3` | Pure AWS S3 core: buckets, objects, multipart upload, presigned URLs, policies, endpoint resolution, and simulator. |
+| `awskit-s3` | Pure AWS S3 core: buckets, objects, multipart upload, presigned URLs, policies, and endpoint resolution. |
 | `awskit-s3-lwt` | S3 adapter over the generic Awskit Lwt runtime. |
 | `awskit-s3-lwt-unix` | Ready-to-use S3 client for Lwt + Unix applications. |
 | `awskit-s3-eio` | Ready-to-use S3 client for Eio applications. |
@@ -173,8 +172,7 @@ endpoint.
 - presigned URLs;
 - bucket policies and related XML/JSON wire types;
 - S3 endpoint and addressing configuration;
-- structured S3 error classifiers;
-- deterministic in-memory simulation for tests.
+- structured S3 error classifiers.
 
 Awskit targets AWS S3 semantics. S3-compatible services such as MinIO are useful
 for local contract testing, but provider-specific behavior should stay in tests
@@ -209,31 +207,6 @@ Response bodies are streaming and scoped to the runtime response callback.
 Runtime adapters expose `with_response`; inside that callback, consume bodies
 through `Response_body.with_reader` or S3 helper APIs such as
 `Object.get_as_string ~max_bytes`.
-
-## Simulation
-
-The simulator provides deterministic in-memory S3 for unit tests. It does not
-require network access or AWS credentials.
-
-```ocaml
-let () =
-  let credentials =
-    Awskit.Credentials.create_exn
-      ~access_key_id:"AK"
-      ~secret_access_key:"SK"
-      ()
-  in
-  let clock = Awskit_s3.Simulator.Clock.create () in
-  let store = Awskit_s3.Simulator.create_store ~clock () in
-  let conn = Awskit_s3.Simulator.connect store ~credentials in
-
-  Awskit_s3.Simulator.Bucket.create conn ~bucket:"test" () |> ignore;
-  Awskit_s3.Simulator.Object.put_string conn
-    ~bucket:"test"
-    ~key:"hello"
-    "world"
-  |> ignore
-```
 
 ## Development
 
