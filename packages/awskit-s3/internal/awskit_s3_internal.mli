@@ -11,4 +11,3 @@ module Transfer : module type of Transfer
 module Policy : module type of Policy
 module Presigned : module type of Presigned
 module Make : module type of Make
-module Headers : module type of Headers

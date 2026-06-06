@@ -1,4 +1,5 @@
 open Awskit_s3
+module Simulator = Awskit_s3_sim
 
 let test_time = Awskit_test.Time.fixed
 let credentials = Awskit_test.Credentials.basic

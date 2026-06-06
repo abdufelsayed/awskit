@@ -26,13 +26,15 @@ you need.
   {li [awskit-eio] — ready-to-use direct-style Eio runtime adapter}
   {li [awskit-s3] — pure AWS S3 core: buckets, objects, multipart upload,
     presigned URLs, policies, and endpoint resolution}
+  {li [awskit-s3-sim] — deterministic in-memory S3 implementation for tests}
   {li [awskit-s3-lwt] — S3 adapter over the generic Awskit Lwt runtime}
   {li [awskit-s3-lwt-unix] — ready-to-use S3 client for Lwt + Unix}
   {li [awskit-s3-eio] — ready-to-use S3 client for Eio}
 }
 
 The core [awskit] and [awskit-s3] packages do not depend on Unix, Eio, Lwt, or
-Cohttp runtime packages. Adapter packages carry those dependencies.
+Cohttp runtime packages. [awskit-s3-sim] is for tests and does not perform HTTP
+requests. Adapter packages carry runtime dependencies.
 
 {1 Quick Start}
 
@@ -111,6 +113,8 @@ are exposed by the S3 adapter [create] functions.
     signing, errors, retries, and adapter selection}
   {li {{:../awskit-s3/index.html}[awskit-s3]} — AWS S3 objects, buckets,
     multipart upload, presigned URLs, and policies}
+  {li {{:../awskit-s3-sim/index.html}[awskit-s3-sim]} — deterministic
+    in-memory S3 tests}
   {li {{:../awskit-s3/guides.html}[awskit-s3 guides]} — S3 operations in
     depth}
 }

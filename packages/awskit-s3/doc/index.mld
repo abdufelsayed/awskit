@@ -71,6 +71,13 @@ Main modules:
     {!module-type:Awskit.Runtime.S} implementation}
 }
 
+{2 awskit-s3-sim}
+
+[Awskit_s3_sim] provides a deterministic in-memory S3 implementation for tests.
+It implements the same synchronous S3 operation shape as runtime-backed clients
+and adds a controllable clock, store inspection, operation history, and fault
+injection.
+
 {2 awskit-s3-eio}
 
 [Awskit_s3_eio] provides a direct-style Eio adapter. Operations return

@@ -174,6 +174,27 @@
   (qcheck-alcotest :with-test)))
 
 (package
+ (name awskit-s3-sim)
+ (synopsis "In-memory simulator for Awskit S3 tests")
+ (description
+  "Deterministic in-memory S3 implementation for tests, including buckets, objects, multipart uploads, versioning, checksums, and fault injection.")
+ (depends
+  (ocaml
+   (>= 4.14))
+  (awskit
+   (= :version))
+  (awskit-s3
+   (= :version))
+  (digestif
+   (>= 1.3.0))
+  ptime
+  (fmt
+   (>= 0.11.0))
+  (base64
+   (>= 3.5.2))
+  uri))
+
+(package
  (name awskit-s3-lwt)
  (synopsis "Lwt adapter for Awskit S3")
  (description "S3 client adapter over the generic Awskit Lwt runtime.")

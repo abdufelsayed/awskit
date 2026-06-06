@@ -1,6 +1,0 @@
-(library
- (name awskit_s3_test_simulator)
- (wrapped false)
- (flags
-  (:standard -open Awskit_s3_internal))
- (libraries awskit awskit_s3_internal digestif ptime fmt base64 uri))

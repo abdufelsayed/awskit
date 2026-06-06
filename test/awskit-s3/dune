@@ -3,9 +3,9 @@
  (package awskit-s3)
  (libraries
   awskit-s3
+  awskit-s3-sim
   awskit_test
   awskit_s3_test
-  awskit_s3_test_simulator
   fmt
   alcotest
   ptime

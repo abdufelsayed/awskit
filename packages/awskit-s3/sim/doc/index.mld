@@ -1,0 +1,46 @@
+{0 awskit-s3-sim}
+
+[awskit-s3-sim] provides a deterministic in-memory S3 implementation for tests.
+It implements the synchronous {!module-type:Awskit_s3.S} client shape and does
+not perform network IO.
+
+The public entrypoint is {!module:Awskit_s3_sim}.
+
+{1 Test Surface}
+
+{!module:Awskit_s3_sim} includes object, bucket, multipart, and presigned
+operation modules matching runtime-backed S3 clients. It also exposes
+test-oriented helpers:
+
+{ul
+  {li controllable clock}
+  {li shared in-memory store}
+  {li object metadata and body inspection}
+  {li operation history}
+  {li deterministic and pseudo-random fault injection}
+}
+
+{1 Example}
+
+{[
+let credentials =
+  Awskit.Credentials.create_exn
+    ~access_key_id:"AK"
+    ~secret_access_key:"SK"
+    ()
+in
+let clock = Awskit_s3_sim.Clock.create () in
+let store = Awskit_s3_sim.create_store ~clock () in
+let conn = Awskit_s3_sim.connect store ~credentials in
+
+ignore
+  (Awskit_s3_sim.Bucket.create conn ~bucket:"test-bucket" ()
+   |> Result.get_ok);
+
+ignore
+  (Awskit_s3_sim.Object.put_string conn
+     ~bucket:"test-bucket"
+     ~key:"hello.txt"
+     "hello"
+   |> Result.get_ok)
+]}

@@ -8,4 +8,5 @@ runtime adapters, and focused S3 support for general-purpose buckets.
 
 The S3 packages include bucket configuration primitives, object operations,
 multipart upload primitives, presigned URLs, and adapter-level transfer helpers
-for streaming file upload and download.
+for streaming file upload and download. The optional S3 simulator package
+provides deterministic in-memory S3 for tests.

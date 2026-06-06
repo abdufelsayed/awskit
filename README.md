@@ -15,6 +15,7 @@ Awskit currently focuses on AWS S3.
 - Runtime adapters for Eio and Lwt applications.
 - S3 bucket, object, multipart upload, policy, tagging, versioning, and
   presigned URL support.
+- Deterministic in-memory S3 simulation for tests.
 - Streaming request and response bodies with explicit replayability metadata.
 - Unix helpers for standard AWS environment variables, shared credentials, and
   config files.
@@ -52,12 +53,14 @@ opam install awskit-s3-lwt-unix
 | `awskit-lwt-unix` | Ready-to-use Lwt + Unix runtime adapter using Cohttp Lwt Unix. |
 | `awskit-eio` | Ready-to-use direct-style Eio runtime adapter using Cohttp Eio. |
 | `awskit-s3` | Pure AWS S3 core: buckets, objects, multipart upload, presigned URLs, policies, and endpoint resolution. |
+| `awskit-s3-sim` | Deterministic in-memory S3 implementation for tests. |
 | `awskit-s3-lwt` | S3 adapter over the generic Awskit Lwt runtime. |
 | `awskit-s3-lwt-unix` | Ready-to-use S3 client for Lwt + Unix applications. |
 | `awskit-s3-eio` | Ready-to-use S3 client for Eio applications. |
 
 The `awskit` and `awskit-s3` packages do not depend on Unix, Eio, Lwt, or
-Cohttp runtime packages. Adapter packages carry those runtime dependencies.
+Cohttp runtime packages. `awskit-s3-sim` is intended for test code and does not
+perform HTTP requests. Adapter packages carry runtime dependencies.
 
 ## Quick Start
 
@@ -177,6 +180,29 @@ endpoint.
 Awskit targets AWS S3 semantics. S3-compatible services such as MinIO are useful
 for local contract testing, but provider-specific behavior should stay in tests
 unless it matches AWS S3.
+
+## S3 Simulation
+
+Use `awskit-s3-sim` for deterministic in-memory S3 tests:
+
+```ocaml
+let credentials =
+  Awskit.Credentials.create_exn
+    ~access_key_id:"AK"
+    ~secret_access_key:"SK"
+    ()
+in
+let clock = Awskit_s3_sim.Clock.create () in
+let store = Awskit_s3_sim.create_store ~clock () in
+let conn = Awskit_s3_sim.connect store ~credentials in
+
+Awskit_s3_sim.Bucket.create conn ~bucket:"test" () |> ignore;
+Awskit_s3_sim.Object.put_string conn
+  ~bucket:"test"
+  ~key:"hello"
+  "world"
+|> ignore
+```
 
 ## Addressing Style
 

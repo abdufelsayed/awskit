@@ -1,0 +1,4 @@
+(library
+ (name awskit_s3_sim)
+ (public_name awskit-s3-sim)
+ (libraries awskit awskit-s3 digestif ptime fmt base64 uri))

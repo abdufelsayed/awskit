@@ -1,0 +1,3 @@
+(documentation
+ (package awskit-s3-sim)
+ (mld_files index))
