@@ -1,6 +1,14 @@
-open Core
+open Common
 open Headers
 open Response
+module Put_object = Object.Put
+module Get_object = Object.Get
+module Head_object = Object.Head
+module Delete_object = Object.Delete
+module Delete_objects = Object.Delete_many
+module Copy_object = Object.Copy
+module List_objects_v2 = Object.List
+module List_object_versions = Object.Versions
 
 module Make (C : Request_context.S) = struct
   open C

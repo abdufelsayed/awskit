@@ -1,5 +1,5 @@
 open Common
-open Operation_data
+module Delete_objects = Object.Delete_many
 
 let validate_objects objects =
   let rec loop = function

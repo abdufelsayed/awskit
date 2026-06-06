@@ -1,7 +1,12 @@
-open Core
+open Common
 open Headers
 open Response
 open Multipart_xml
+module Create_multipart_upload = Multipart.Create
+module Upload_part = Multipart.Upload_part
+module Complete_multipart_upload = Multipart.Complete
+module Abort_multipart_upload = Multipart.Abort
+module List_parts = Multipart.List_parts
 
 module Make (C : Request_context.S) = struct
   open C

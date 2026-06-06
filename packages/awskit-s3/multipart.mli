@@ -1,4 +1,4 @@
-(** S3 multipart upload data types and operation data. *)
+(** S3 multipart upload data types, options, and results. *)
 
 module Upload_id : sig
   type t

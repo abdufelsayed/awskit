@@ -1,5 +1,5 @@
 open Common
-open Operation_data
+module List_object_versions = Object.Versions
 
 let parse_version_id value =
   Result.to_option (Object.Version_id.of_string value)

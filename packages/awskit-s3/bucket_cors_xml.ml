@@ -1,4 +1,4 @@
-open Core
+open Common
 open Bucket_xml_support
 
 let validate_rule (rule : Bucket.Cors.rule) =

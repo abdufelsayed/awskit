@@ -1,4 +1,4 @@
-open Core
+open Common
 
 let xml status =
   Xml.el "VersioningConfiguration"

@@ -131,9 +131,9 @@ source version with [Copy_object.source_version_id].
 
 Deleting the current object in a versioned bucket creates a delete marker.
 [Object.list_versions] returns object versions and delete markers, and
-[Object.List_object_versions] provides operation pagination helpers for
-traversing the full history.
-[List_object_versions] is the operation data module for options and page types:
+[Object.List_object_versions] provides pagination helpers for traversing the
+full history. [List_object_versions] is the public alias for version-listing
+options and page types:
 
 {[
 let options =

@@ -1,5 +1,8 @@
 open Common
-open Operation_data
+module Put_object = Object.Put
+module Get_object = Object.Get
+module Delete_object = Object.Delete
+module Copy_object = Object.Copy
 
 let parse_bool = function
   | "true" | "True" | "TRUE" -> Some true

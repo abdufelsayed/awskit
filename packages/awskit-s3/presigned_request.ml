@@ -1,4 +1,4 @@
-open Core
+open Common
 
 module Make (C : Request_context.S) = struct
   open C

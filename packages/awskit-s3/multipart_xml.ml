@@ -1,4 +1,4 @@
-open Core
+open Common
 open Response
 
 let checksum_xml_name = function

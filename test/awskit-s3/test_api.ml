@@ -1,7 +1,7 @@
 open Awskit_s3
 open Awskit_s3_test
 
-let test_operation_data_module_names () =
+let test_public_operation_aliases () =
   ignore (Put_object.default_options : Put_object.options);
   ignore (Get_object.default_options : Get_object.options);
   ignore (Head_object.default_options : Head_object.options);
@@ -100,8 +100,8 @@ let suite =
   [
     ( "api",
       [
-        Alcotest.test_case "operation data module names" `Quick
-          test_operation_data_module_names;
+        Alcotest.test_case "public operation aliases" `Quick
+          test_public_operation_aliases;
         Alcotest.test_case "error classifiers" `Quick test_error_classifiers;
       ] );
   ]

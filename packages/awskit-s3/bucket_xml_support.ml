@@ -1,4 +1,4 @@
-open Core
+open Common
 
 let xml_body node = Xml.to_string node
 let bool_text value = if value then "true" else "false"

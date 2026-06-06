@@ -1,4 +1,4 @@
-open Core
+open Common
 open Bucket_xml_support
 
 module Public_access_block = struct

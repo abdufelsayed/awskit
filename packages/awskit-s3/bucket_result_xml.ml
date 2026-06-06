@@ -1,4 +1,4 @@
-open Core
+open Common
 
 let create_config region =
   Xml.el "CreateBucketConfiguration"

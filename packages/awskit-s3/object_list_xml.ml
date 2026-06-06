@@ -1,5 +1,5 @@
 open Common
-open Operation_data
+module List_objects_v2 = Object.List
 
 let parse_checksum_summary nodes =
   {

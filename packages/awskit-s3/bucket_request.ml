@@ -1,7 +1,12 @@
-open Core
+open Common
 open Headers
 open Response
 open Tagging_xml
+module Create_bucket = Bucket.Create
+module Delete_bucket = Bucket.Delete
+module Head_bucket = Bucket.Head
+module List_buckets = Bucket.List_buckets
+module Get_bucket_location = Bucket.Get_location
 
 module Make (C : Request_context.S) = struct
   open C
@@ -10,8 +15,6 @@ module Make (C : Request_context.S) = struct
 
   type nonrec connection = connection
   type 'a io = 'a R.t
-
-  module Bucket_xml = Bucket_config_xml
 
   let bucket_root_request conn bucket =
     bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/"
@@ -234,11 +237,11 @@ module Make (C : Request_context.S) = struct
   module Versioning = struct
     let get ?expected_bucket_owner conn ~bucket =
       get_xml ?expected_bucket_owner conn ~bucket ~subresource:"versioning"
-        ~max_size:1_048_576L ~parse:Bucket_xml.Versioning.parse
+        ~max_size:1_048_576L ~parse:Bucket_versioning_xml.parse
 
     let put conn ~bucket ?expected_bucket_owner status =
       put_xml ?expected_bucket_owner conn ~bucket ~subresource:"versioning"
-        ~body:(Bucket_xml.Versioning.xml (Some status))
+        ~body:(Bucket_versioning_xml.xml (Some status))
   end
 
   module Tagging = struct
@@ -266,14 +269,14 @@ module Make (C : Request_context.S) = struct
   module Encryption = struct
     let get ?expected_bucket_owner conn ~bucket =
       get_xml ?expected_bucket_owner conn ~bucket ~subresource:"encryption"
-        ~max_size:1_048_576L ~parse:Bucket_xml.Encryption.parse
+        ~max_size:1_048_576L ~parse:Bucket_encryption_xml.parse
 
     let put conn ~bucket ?expected_bucket_owner config =
-      match Bucket_xml.Encryption.validate_config config with
+      match Bucket_encryption_xml.validate_config config with
       | Error error -> return_error error
       | Ok () ->
           put_xml ?expected_bucket_owner conn ~bucket ~subresource:"encryption"
-            ~body:(Bucket_xml.Encryption.xml config)
+            ~body:(Bucket_encryption_xml.xml config)
 
     let delete ?expected_bucket_owner conn ~bucket =
       delete_subresource ?expected_bucket_owner conn ~bucket
@@ -283,14 +286,14 @@ module Make (C : Request_context.S) = struct
   module Cors = struct
     let get ?expected_bucket_owner conn ~bucket =
       get_xml ?expected_bucket_owner conn ~bucket ~subresource:"cors"
-        ~max_size:1_048_576L ~parse:Bucket_xml.Cors.parse
+        ~max_size:1_048_576L ~parse:Bucket_cors_xml.parse
 
     let put conn ~bucket ?expected_bucket_owner config =
-      match Bucket_xml.Cors.validate_config config with
+      match Bucket_cors_xml.validate_config config with
       | Error error -> return_error error
       | Ok () ->
           put_xml ?expected_bucket_owner conn ~bucket ~subresource:"cors"
-            ~body:(Bucket_xml.Cors.xml config)
+            ~body:(Bucket_cors_xml.xml config)
 
     let delete ?expected_bucket_owner conn ~bucket =
       delete_subresource ?expected_bucket_owner conn ~bucket ~subresource:"cors"
@@ -300,12 +303,12 @@ module Make (C : Request_context.S) = struct
     let get ?expected_bucket_owner conn ~bucket =
       get_xml ?expected_bucket_owner conn ~bucket
         ~subresource:"publicAccessBlock" ~max_size:1_048_576L
-        ~parse:Bucket_xml.Public_access_block.parse
+        ~parse:Bucket_access_xml.Public_access_block.parse
 
     let put conn ~bucket ?expected_bucket_owner config =
       put_xml ?expected_bucket_owner conn ~bucket
         ~subresource:"publicAccessBlock"
-        ~body:(Bucket_xml.Public_access_block.xml config)
+        ~body:(Bucket_access_xml.Public_access_block.xml config)
 
     let delete ?expected_bucket_owner conn ~bucket =
       delete_subresource ?expected_bucket_owner conn ~bucket
@@ -316,12 +319,12 @@ module Make (C : Request_context.S) = struct
     let get ?expected_bucket_owner conn ~bucket =
       get_xml ?expected_bucket_owner conn ~bucket
         ~subresource:"ownershipControls" ~max_size:1_048_576L
-        ~parse:Bucket_xml.Ownership_controls.parse
+        ~parse:Bucket_access_xml.Ownership_controls.parse
 
     let put conn ~bucket ?expected_bucket_owner config =
       put_xml ?expected_bucket_owner conn ~bucket
         ~subresource:"ownershipControls"
-        ~body:(Bucket_xml.Ownership_controls.xml config)
+        ~body:(Bucket_access_xml.Ownership_controls.xml config)
 
     let delete ?expected_bucket_owner conn ~bucket =
       delete_subresource ?expected_bucket_owner conn ~bucket

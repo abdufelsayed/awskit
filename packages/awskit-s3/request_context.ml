@@ -1,7 +1,7 @@
-open Core
+open Common
 
 module type S = sig
-  module R : RUNTIME
+  module R : Awskit_s3_intf.RUNTIME
 
   type connection = R.connection
   type 'a io = 'a R.t
@@ -12,7 +12,7 @@ module type S = sig
   val return : 'a -> 'a io
   val return_ok : 'a -> ('a, Error.t) result io
   val return_error : Error.t -> ('a, Error.t) result io
-  val endpoint_config : connection -> endpoint_config
+  val endpoint_config : connection -> Endpoint_resolver.t
 
   val object_request :
     connection ->
