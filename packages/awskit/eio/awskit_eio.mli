@@ -7,8 +7,15 @@
     ]} *)
 
 type t = Runtime.conn
+(** Eio connection handle. Create with {!val:create}. *)
 
-module Runtime : Awskit.Runtime.S with type 'a t = 'a and type connection = t
+(** Direct-style runtime implementation used by service packages. *)
+module Runtime : sig
+  include Awskit.Runtime.S with type 'a t = 'a and type connection = t
+
+  type conn = connection
+  (** Concrete Eio connection record used by {!type:Awskit_eio.t}. *)
+end
 
 val create :
   env:< clock : _ Eio.Time.clock ; net : _ Eio.Net.t ; .. > ->
@@ -23,7 +30,7 @@ val create :
   t
 (** Defaults to AWS HTTPS endpoints. Pass an explicit [endpoint] for local test
     services or custom service endpoints. [retry_policy] defaults to
-    {!val:Awskit.Retry.default}. [max_response_drain_bytes] defaults to 64 MiB.
-    If a response consumer succeeds but the remaining body exceeds this drain
-    limit, the operation fails with a body-limit error. If the consumer fails,
-    the consumer error is returned. *)
+    [Awskit.Retry.default]. [max_response_drain_bytes] defaults to 64 MiB. If a
+    response consumer succeeds but the remaining body exceeds this drain limit,
+    the operation fails with a body-limit error. If the consumer fails, the
+    consumer error is returned. *)

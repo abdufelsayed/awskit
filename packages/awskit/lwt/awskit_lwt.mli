@@ -9,12 +9,22 @@
 module Credentials : sig
   module Provider : sig
     type credentials = Awskit.Credentials.t
+    (** AWS credentials resolved by this provider. *)
+
     type t
+    (** Asynchronous credential provider. *)
 
     val create : (unit -> (credentials, Awskit.Error.t) result Lwt.t) -> t
+    (** Wrap an asynchronous credential lookup function. *)
+
     val resolve : t -> (credentials, Awskit.Error.t) result Lwt.t
+    (** Resolve credentials. *)
+
     val static : credentials -> t
+    (** Provider that always returns the same credentials. *)
+
     val chain : t list -> t
+    (** Try providers in order and return the first successful credentials. *)
   end
 end
 
@@ -40,11 +50,11 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     t
   (** [endpoint] overrides the default AWS HTTPS endpoint for local test
       services or custom service endpoints. [retry_policy] defaults to
-      {!val:Awskit.Retry.default}. [sleep] is used between retries and defaults
-      to no delay for custom Lwt backends. [max_response_drain_bytes] defaults
-      to 64 MiB. If a response consumer succeeds but the remaining body exceeds
-      this drain limit, the operation fails with a body-limit error. If the
-      consumer fails, the consumer error is returned. *)
+      [Awskit.Retry.default]. [sleep] is used between retries and defaults to no
+      delay for custom Lwt backends. [max_response_drain_bytes] defaults to 64
+      MiB. If a response consumer succeeds but the remaining body exceeds this
+      drain limit, the operation fails with a body-limit error. If the consumer
+      fails, the consumer error is returned. *)
 
   val create_with_credentials_provider :
     ?ctx:Client.ctx ->

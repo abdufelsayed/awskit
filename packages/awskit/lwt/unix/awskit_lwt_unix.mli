@@ -12,15 +12,14 @@
       (* pass [conn] to any service package, e.g. Awskit_s3_lwt_unix *)
     ]}
 
-    For MirageOS or custom Lwt HTTP backends, use the generic {!Awskit_lwt.Make}
+    For MirageOS or custom Lwt HTTP backends, use the generic [Awskit_lwt.Make]
     functor instead. *)
 
 type t
 (** Connection handle. Create with {!val:create}, then pass to service
     operations. *)
 
-(** Runtime module satisfying {!module-type:Awskit.Runtime.S}. The monad is
-    [Lwt.t]. *)
+(** Runtime module satisfying [Awskit.Runtime.S]. The monad is [Lwt.t]. *)
 module Runtime :
   Awskit.Runtime.S with type 'a t = 'a Lwt.t and type connection = t
 
@@ -111,7 +110,7 @@ val create :
     @param clock Time source for signing timestamps (default: OS clock)
     @param retry_policy
       Retry behavior for retryable AWS errors and transient transport failures
-      (default: {!val:Awskit.Retry.default})
+      (default: [Awskit.Retry.default])
     @param max_response_drain_bytes
       Maximum response body bytes to drain after callbacks (default: 64 MiB). If
       a response consumer succeeds but the remaining body exceeds this drain

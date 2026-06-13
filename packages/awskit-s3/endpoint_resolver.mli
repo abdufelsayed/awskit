@@ -32,6 +32,7 @@ module Request : sig
 end
 
 type t
+(** S3 endpoint configuration. *)
 
 val create :
   ?addressing_style:addressing_style ->
@@ -44,9 +45,16 @@ val create :
     construction; addressing still applies to bucket/object paths. *)
 
 val default : t
+(** Default AWS S3 regional HTTPS endpoint configuration. *)
+
 val addressing_style : t -> addressing_style
+(** Return the configured addressing-style preference. *)
+
 val endpoint_variant : t -> endpoint_variant
+(** Return the configured AWS endpoint variant. *)
+
 val scheme : t -> Awskit.Endpoint.Scheme.t
+(** Return the scheme used for generated AWS endpoints. *)
 
 val endpoint :
   t -> region:Awskit.Region.t -> (Awskit.Endpoint.t, Awskit.Error.t) result

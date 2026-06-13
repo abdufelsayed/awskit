@@ -8,7 +8,11 @@ module Upload_id : sig
   (** Validate and wrap a multipart upload id. *)
 
   val of_string_exn : string -> t
+  (** Like {!val:of_string}, but raises [Invalid_argument] on validation
+      failure. *)
+
   val to_string : t -> string
+  (** Return the upload id string. *)
 end
 
 module Upload : sig
@@ -23,6 +27,8 @@ module Upload : sig
   (** Create an upload handle after validating bucket, key, and upload id. *)
 
   val create_exn : bucket:string -> key:string -> upload_id:Upload_id.t -> t
+  (** Like {!val:create}, but raises [Invalid_argument] on validation failure.
+  *)
 end
 
 module Part : sig
@@ -52,18 +58,24 @@ end
 
 module Create : sig
   type options = {
-    content_type : string option;
-    metadata : Metadata.t;
+    content_type : string option;  (** Final object's [Content-Type]. *)
+    metadata : Metadata.t;  (** User metadata for the final object. *)
     storage_class : Storage_class.t option;
-    tags : Tag.t list;
+        (** Storage class for the final object. *)
+    tags : Tag.t list;  (** Tags for the final object. *)
     checksum_algorithm : Object.Checksum.Algorithm.t option;
+        (** Checksum algorithm requested for the multipart upload. *)
     checksum_type : Object.Checksum.Type.t option;
+        (** Whether S3 should treat checksums as full-object or composite. *)
     server_side_encryption : Object.Encryption.request option;
-    expected_bucket_owner : string option;
+        (** Server-side encryption for the final object. *)
+    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [CreateMultipartUpload] options and result metadata. *)
+  (** [CreateMultipartUpload] request options. *)
 
   type result = { upload : Upload.t; response : Awskit.Response.t }
+  (** [CreateMultipartUpload] result metadata, including the upload handle used
+      by subsequent part requests. *)
 
   val default_options : options
 end
@@ -71,15 +83,19 @@ end
 module Upload_part : sig
   type options = {
     checksum : Object.Checksum.value option;
-    expected_bucket_owner : string option;
+        (** Explicit checksum for this part body. *)
+    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [UploadPart] options and result metadata. *)
+  (** [UploadPart] request options. *)
 
   type result = {
     part : Part.t;
+        (** Completed part reference for [CompleteMultipartUpload]. *)
     checksum : Object.Checksum.response;
-    response : Awskit.Response.t;
+        (** Checksum response headers for the uploaded part. *)
+    response : Awskit.Response.t;  (** Raw response metadata. *)
   }
+  (** [UploadPart] result metadata. *)
 
   val default_options : options
 end
@@ -87,27 +103,35 @@ end
 module Complete : sig
   type options = {
     expected_bucket_owner : string option;
+        (** [x-amz-expected-bucket-owner]. *)
     checksum : Object.Checksum.value option;
+        (** Optional full-object checksum supplied at completion time. *)
     checksum_type : Object.Checksum.Type.t option;
+        (** Checksum aggregation mode for S3 to apply. *)
     multipart_object_size : int64 option;
+        (** Expected final object size sent as [x-amz-mp-object-size]. *)
   }
-  (** [CompleteMultipartUpload] options and result metadata. *)
+  (** [CompleteMultipartUpload] request options. *)
 
   type result = {
-    etag : Object.Etag.t option;
+    etag : Object.Etag.t option;  (** Final object ETag. *)
     version_id : Object.Version_id.t option;
+        (** Final object version id for versioned buckets. *)
     checksum : Object.Checksum.response;
-    response : Awskit.Response.t;
+        (** Final checksum response headers. *)
+    response : Awskit.Response.t;  (** Raw response metadata. *)
   }
+  (** [CompleteMultipartUpload] result metadata. *)
 
   val default_options : options
 end
 
 module Abort : sig
   type options = { expected_bucket_owner : string option }
-  (** [AbortMultipartUpload] options and result metadata. *)
+  (** [AbortMultipartUpload] request options. *)
 
   type result = Awskit.Response.t
+  (** [AbortMultipartUpload] returns only raw response metadata. *)
 
   val default_options : options
 end
@@ -115,26 +139,32 @@ end
 module List_parts : sig
   type options = {
     max_parts : int option;
+        (** Maximum number of parts S3 should return in one page. *)
     part_number_marker : int option;
-    expected_bucket_owner : string option;
+        (** Pagination marker, usually from [next_part_number_marker]. *)
+    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [ListParts] options and page data. *)
+  (** [ListParts] request options. *)
 
   type part_info = {
-    part_number : int;
-    etag : Object.Etag.t option;
-    size : int64 option;
-    last_modified : Ptime.t option;
-    checksum : Object.Checksum.response;
+    part_number : int;  (** Uploaded part number. *)
+    etag : Object.Etag.t option;  (** Part ETag. *)
+    size : int64 option;  (** Part size in bytes. *)
+    last_modified : Ptime.t option;  (** Part upload timestamp. *)
+    checksum : Object.Checksum.response;  (** Part checksum metadata. *)
   }
+  (** Uploaded part summary returned by [ListParts]. *)
 
   type page = {
-    parts : part_info list;
-    is_truncated : bool;
+    parts : part_info list;  (** Uploaded parts in this page. *)
+    is_truncated : bool;  (** Whether more part pages are available. *)
     next_part_number_marker : int option;
+        (** Marker to use for the next page. *)
     checksum_type : Object.Checksum.Type.t option;
-    response : Awskit.Response.t;
+        (** Checksum aggregation mode reported by S3. *)
+    response : Awskit.Response.t;  (** Raw response metadata. *)
   }
+  (** One [ListParts] page. *)
 
   val default_options : options
 end

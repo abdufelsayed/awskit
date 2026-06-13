@@ -1,8 +1,8 @@
 {0 awskit-s3-sim}
 
 [awskit-s3-sim] provides a deterministic in-memory S3 implementation for tests.
-It implements the synchronous {!module-type:Awskit_s3.S} client shape and does
-not perform network IO.
+It implements the synchronous [Awskit_s3.S] client shape and does not perform
+network IO.
 
 The public entrypoint is {!module:Awskit_s3_sim}.
 

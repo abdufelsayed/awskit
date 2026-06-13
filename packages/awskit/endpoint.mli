@@ -16,7 +16,10 @@ type t
     paths and query strings. *)
 
 val pp : Format.formatter -> t -> unit
+(** Pretty-print an endpoint as [scheme://authority]. *)
+
 val equal : t -> t -> bool
+(** Compare endpoint values structurally. *)
 
 val create :
   scheme:Scheme.t -> host:string -> ?port:int -> unit -> (t, Error.t) result
@@ -38,14 +41,22 @@ val http : host:string -> ?port:int -> unit -> (t, Error.t) result
 (** Create an HTTP endpoint. *)
 
 val http_exn : host:string -> ?port:int -> unit -> t
+(** Like {!val:http}, but raises [Invalid_argument] on validation failure. *)
 
 val https : host:string -> ?port:int -> unit -> (t, Error.t) result
 (** Create an HTTPS endpoint. *)
 
 val https_exn : host:string -> ?port:int -> unit -> t
+(** Like {!val:https}, but raises [Invalid_argument] on validation failure. *)
+
 val scheme : t -> Scheme.t
+(** Return the endpoint scheme. *)
+
 val host : t -> string
+(** Return the host without scheme, path, query, or port. *)
+
 val port : t -> int option
+(** Return the explicit port, if one was configured. *)
 
 val authority : t -> string
 (** Host plus optional port, suitable for the HTTP [Host] header. *)

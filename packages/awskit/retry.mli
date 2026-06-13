@@ -27,6 +27,7 @@ val create_exn :
   ?jitter:float ->
   unit ->
   t
+(** Like {!val:create}, but raises [Invalid_argument] on validation failure. *)
 
 val default : t
 (** Conservative default policy for AWS SDK calls. *)
@@ -35,9 +36,16 @@ val disabled : t
 (** Policy that never retries. *)
 
 val max_attempts : t -> int
+(** Maximum attempts, including the first request. *)
+
 val base_delay : t -> Ptime.Span.t
+(** Initial exponential-backoff delay. *)
+
 val max_delay : t -> Ptime.Span.t
+(** Upper bound for computed backoff delays. *)
+
 val jitter : t -> float
+(** Jitter fraction in the range [[0, 1]]. *)
 
 val delay :
   ?random_float:(unit -> float) ->

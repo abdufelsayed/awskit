@@ -14,6 +14,8 @@ module Method : sig
   (** Parse a supported HTTP method name case-insensitively. *)
 
   val of_string_exn : string -> t
+  (** Like {!val:of_string}, but raises [Invalid_argument] on validation
+      failure. *)
 end
 
 module Target : sig

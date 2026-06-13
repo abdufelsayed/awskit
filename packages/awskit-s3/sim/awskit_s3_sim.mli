@@ -1,36 +1,81 @@
+(** Deterministic in-memory S3 implementation for tests.
+
+    The simulator implements the same synchronous S3 client shape as
+    runtime-backed clients. It stores objects in memory, records operation
+    history, exposes inspection helpers, and supports deterministic fault
+    injection. *)
+
 open Awskit_s3
 
 module Clock : sig
   type t
+  (** Mutable deterministic clock used for timestamps and retry sleeps. *)
 
   val create : ?now:Ptime.t -> unit -> t
+  (** Create a clock. Defaults to a stable initial timestamp when [now] is
+      omitted. *)
+
   val now : t -> Ptime.t
+  (** Return the current simulated time. *)
+
   val advance : t -> Ptime.Span.t -> unit
+  (** Advance simulated time by a span. *)
+
   val advance_ms : t -> int -> unit
+  (** Advance simulated time by milliseconds. *)
 end
 
 type config = { max_list_keys : int }
+(** Simulator configuration. [max_list_keys] caps list-page sizes when the
+    request does not provide a smaller [max_keys]. *)
 
 val default_config : config
+(** Default simulator configuration. *)
 
 type store
+(** Shared in-memory S3 store. Multiple connections can share one store. *)
 
 val create_store : ?config:config -> clock:Clock.t -> unit -> store
+(** Create an empty store using a deterministic clock. *)
 
 type t
+(** Simulator connection handle. *)
 
 val connect : store -> credentials:Awskit.Credentials.t -> t
-val store : t -> store
+(** Connect to a store with credentials used by presigning/signing helpers. *)
 
+val store : t -> store
+(** Return the underlying shared store. *)
+
+(** Direct-style runtime used by the simulator. *)
 module Runtime : Awskit_s3.RUNTIME with type 'a t = 'a and type connection = t
 
-type fault = Slow_down | Internal_error | Connection_reset | Response_lost
+type fault =
+  | Slow_down
+  | Internal_error
+  | Connection_reset
+  | Response_lost
+      (** Faults that can be injected before operations.
+
+          [Slow_down] and [Internal_error] simulate S3 service errors.
+          [Connection_reset] simulates a retryable transport failure.
+          [Response_lost] simulates a response-body failure. *)
 
 val inject_fault : t -> fault -> unit
+(** Queue one fault for the next applicable operation. *)
+
 val inject_faults : t -> fault list -> unit
+(** Queue several faults in order. *)
+
 val clear_faults : t -> unit
+(** Remove queued faults. *)
+
 val enable_random_faults : t -> seed:int -> prob:float -> unit
+(** Enable deterministic pseudo-random fault injection with probability [prob].
+*)
+
 val disable_random_faults : t -> unit
+(** Disable random fault injection. Queued explicit faults are unchanged. *)
 
 type operation_record = {
   op :
@@ -47,25 +92,37 @@ type operation_record = {
     | `Complete_multipart_upload
     | `Abort_multipart_upload
     | `List_parts ];
-  bucket : string;
+      (** Operation kind. *)
+  bucket : string;  (** Bucket targeted by the operation. *)
   key : string option;
-  timestamp : Ptime.t;
-  faulted : bool;
+      (** Object key targeted by object/multipart operations. *)
+  timestamp : Ptime.t;  (** Simulated operation time. *)
+  faulted : bool;  (** Whether the operation consumed an injected fault. *)
 }
+(** Recorded simulator operation. *)
 
 type object_metadata = {
-  etag : Object.Etag.t option;
-  size : int64 option;
-  last_modified : Ptime.t option;
+  etag : Object.Etag.t option;  (** Current object ETag. *)
+  size : int64 option;  (** Current object size in bytes. *)
+  last_modified : Ptime.t option;  (** Current object last-modified timestamp. *)
 }
+(** Inspectable metadata for the current version of an object. *)
 
 val object_metadata :
   store -> bucket:string -> key:string -> object_metadata option
+(** Return metadata for the current object version, if present. *)
 
 val keys : store -> bucket:string -> string list
+(** Return current object keys in a bucket. *)
+
 val history : store -> operation_record list
+(** Return recorded operations in chronological order. *)
+
 val clear_history : store -> unit
+(** Clear recorded operation history. *)
+
 val objects_as_strings : store -> bucket:string -> (string * string) list
+(** Return current bucket objects whose bodies can be decoded as strings. *)
 
 include
   S

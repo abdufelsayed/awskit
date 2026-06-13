@@ -17,9 +17,13 @@ type method_ = [ `GET | `PUT | `HEAD | `DELETE ]
 
 type result = {
   url : string;
-  method_ : method_;
+      (** Fully signed URL, including query-string authentication parameters. *)
+  method_ : method_;  (** HTTP method the caller must use. *)
   signed_headers : (string * string) list;
+      (** Headers that were part of the signature and must be sent with exactly
+          the same names/values. *)
   expires_at : Ptime.t option;
+      (** Absolute expiration time when [expires_in] was supplied. *)
 }
 (** Generated presigned request. Consumers must send [method_] and all
     [signed_headers] exactly as returned. *)
@@ -27,11 +31,20 @@ type result = {
 module Put_object : sig
   type options = {
     expires_in : Ptime.Span.t option;
+        (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
+            authentication. *)
     content_type : string option;
+        (** Optional [Content-Type] header to sign. The uploader must send the
+            same value. *)
     checksum : Object.Checksum.value option;
+        (** Optional checksum header to sign. *)
     server_side_encryption : Object.Encryption.request option;
+        (** Optional server-side encryption headers to sign. *)
     expected_bucket_owner : string option;
+        (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
+        (** Additional headers to include in the signature. Callers must send
+            them with the eventual request. *)
   }
   (** Presigned [PUT Object] options. *)
 
@@ -41,11 +54,17 @@ end
 module Get_object : sig
   type options = {
     expires_in : Ptime.Span.t option;
+        (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
+            authentication. *)
     response_content_type : string option;
+        (** Optional [response-content-type] query override. *)
     response_content_disposition : string option;
-    version_id : Object.Version_id.t option;
+        (** Optional [response-content-disposition] query override. *)
+    version_id : Object.Version_id.t option;  (** Object version to presign. *)
     expected_bucket_owner : string option;
+        (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
+        (** Additional headers to include in the signature. *)
   }
   (** Presigned [GET Object] and [HEAD Object] options. *)
 
@@ -55,9 +74,14 @@ end
 module Upload_part : sig
   type options = {
     expires_in : Ptime.Span.t option;
+        (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
+            authentication. *)
     checksum : Object.Checksum.value option;
+        (** Optional checksum header to sign for the part body. *)
     expected_bucket_owner : string option;
+        (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
+        (** Additional headers to include in the signature. *)
   }
   (** Presigned [UploadPart] options. *)
 
@@ -67,8 +91,12 @@ end
 module Delete_object : sig
   type options = {
     expires_in : Ptime.Span.t option;
+        (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
+            authentication. *)
     expected_bucket_owner : string option;
+        (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
+        (** Additional headers to include in the signature. *)
   }
   (** Presigned [DELETE Object] options. *)
 
@@ -85,7 +113,11 @@ val endpoint_config :
   ?endpoint:Awskit.Endpoint.t ->
   unit ->
   endpoint_config
-(** Build endpoint configuration for presigning. *)
+(** Build endpoint configuration for presigning.
+
+    [endpoint] is used for custom S3-compatible services or local tests. When
+    omitted, [endpoint_variant] and [scheme] select the generated AWS endpoint.
+*)
 
 val get_object :
   region:Awskit.Region.t ->

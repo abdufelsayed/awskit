@@ -3,11 +3,12 @@
 AWS S3 client surface for bucket/object storage operations, multipart uploads,
 S3 presigned URLs, and opaque bucket policy documents.
 
-See {{:../../doc/awskit.html}[awskit]} for the pure core and runtime adapter
+See {{:../awskit/index.html}[awskit]} for the pure core and runtime adapter
 overview.
 
-The public entrypoint is {!module:Awskit_s3}. Implementation modules, XML
-codecs, request builders, and response parsers are private.
+The main entrypoint is {!module:Awskit_s3}. The package also exposes lower-level
+request builders, XML codecs, and response parsers for advanced integrations and
+tests; application code should normally use the facade modules documented below.
 
 {1 Client Surface}
 
@@ -68,7 +69,7 @@ Main modules:
   {li {!module:Awskit_s3.Policy} — validated opaque bucket policy JSON
     payloads}
   {li {!module:Awskit_s3.Make} — functor for wiring S3 operations to a custom
-    {!module-type:Awskit.Runtime.S} implementation}
+    [Awskit.Runtime.S] implementation}
 }
 
 {2 awskit-s3-sim}

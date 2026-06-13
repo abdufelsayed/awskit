@@ -32,6 +32,11 @@ val sign_request_params :
   payload_hash:Body.Payload_hash.t ->
   now:Ptime.t ->
   (signed_headers, Error.t) result
+(** Sign a request from structured query parameters.
+
+    The returned header list includes the caller's headers plus SigV4 headers.
+    Header validation rejects duplicate [Host] headers and unsafe header names
+    or values. *)
 
 val sign_request_params_exn :
   credentials:Credentials.t ->
@@ -44,6 +49,8 @@ val sign_request_params_exn :
   payload_hash:Body.Payload_hash.t ->
   now:Ptime.t ->
   signed_headers
+(** Like {!val:sign_request_params}, but raises [Invalid_argument] on signing or
+    validation failure. *)
 
 val sign_request :
   credentials:Credentials.t ->
@@ -56,6 +63,11 @@ val sign_request :
   payload_hash:Body.Payload_hash.t ->
   now:Ptime.t ->
   (signed_headers, Error.t) result
+(** Sign a request from a raw query string.
+
+    Prefer {!val:sign_request_params} when constructing requests from structured
+    parameters, because repeated query keys are represented without reparsing.
+*)
 
 val sign_request_exn :
   credentials:Credentials.t ->
@@ -68,3 +80,5 @@ val sign_request_exn :
   payload_hash:Body.Payload_hash.t ->
   now:Ptime.t ->
   signed_headers
+(** Like {!val:sign_request}, but raises [Invalid_argument] on signing or
+    validation failure. *)

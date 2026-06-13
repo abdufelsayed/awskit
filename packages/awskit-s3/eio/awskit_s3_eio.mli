@@ -1,10 +1,12 @@
 (** Eio S3 adapter.
 
     Primitive operations are direct-style and stream through
-    {!Awskit_eio.Runtime}. Local-path helpers live under {!Object.Transfer}. *)
+    [Awskit_eio.Runtime]. Local-path helpers live under {!Object.Transfer}. *)
 
 type t
+(** Eio S3 client connection. Create with {!val:create}. *)
 
+(** Direct-style S3 runtime used by [Awskit_s3.Make]. *)
 module Runtime : Awskit_s3.RUNTIME with type 'a t = 'a and type connection = t
 
 val create :
@@ -25,7 +27,7 @@ val create :
     AWS S3 endpoint for local services or custom endpoints. [addressing_style],
     [endpoint_variant], and [scheme] configure S3 endpoint resolution when no
     explicit endpoint is supplied. [retry_policy] defaults to
-    {!val:Awskit.Retry.default}. *)
+    [Awskit.Retry.default]. *)
 
 module Object : sig
   include
