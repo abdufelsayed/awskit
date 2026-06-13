@@ -74,7 +74,7 @@ Endpoints are scheme/host/port records:
 
 {[
 let endpoint =
-  Awskit.Endpoint.https
+  Awskit.Endpoint.https_exn
     ~host:"s3.us-east-1.amazonaws.com"
     ()
 ]}
@@ -192,11 +192,11 @@ unknown lengths. For example, S3 [PutObject] and [UploadPart] currently require
 a known [content_length]; Awskit does not implement SigV4 aws-chunked streaming
 for unknown-length request bodies.
 
-For custom [Runtime.Request_body.of_stream] values, the producer callback is part of the
-request operation. Errors returned by that callback are request body failures.
-When a known
-length is declared, the producer must emit exactly that number of bytes; prefer
-[Runtime.Request_body.of_string] or [Runtime.Request_body.of_bytes] when data is already buffered. Mark a custom
+For custom [Runtime.Request_body.of_stream] values, the producer callback is
+part of the request operation. Errors returned by that callback are request body
+failures. When a known length is declared, the producer must emit exactly that
+number of bytes; prefer [Runtime.Request_body.of_string] or
+[Runtime.Request_body.of_bytes] when data is already buffered. Mark a custom
 stream [replayable] only if a retry can recreate the same body.
 
 Response bodies must be consumed inside the [with_response] callback, normally

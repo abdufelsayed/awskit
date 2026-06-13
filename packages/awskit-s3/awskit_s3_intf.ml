@@ -1,14 +1,30 @@
 module type RUNTIME = sig
+  (** Runtime required by the S3 functor.
+
+      This extends [Awskit.Runtime.S] with S3-specific endpoint resolution
+      configuration. Runtime adapters implement this once and then reuse the
+      pure S3 operation functor. *)
+
   include Awskit.Runtime.S
 
   val s3_endpoint_config : connection -> Endpoint_resolver.t
+  (** Return S3 addressing/endpoint configuration for this connection. *)
 end
 
 module type OBJECT = sig
+  (** Object operations produced by runtime-backed S3 clients. *)
+
   type connection
+  (** Client connection handle. *)
+
   type +'a io
+  (** Runtime effect type. *)
+
   type request_body
+  (** Runtime-owned request body type. *)
+
   type response_body_reader
+  (** Scoped runtime response-body reader type. *)
 
   val put :
     connection ->
@@ -18,6 +34,11 @@ module type OBJECT = sig
     body:request_body ->
     unit ->
     (Object.Put.result, Awskit.Error.t) result io
+  (** Upload an object body with [PutObject].
+
+      [body] must carry an accurate request-body descriptor. S3 uploads require
+      a known content length in this library; runtime helpers such as
+      [Runtime.Request_body.of_string] and [of_bytes] satisfy that contract. *)
 
   val get :
     connection ->
@@ -27,6 +48,10 @@ module type OBJECT = sig
     consume:(response_body_reader -> ('a, Awskit.Error.t) result io) ->
     unit ->
     (Object.Get.result * 'a, Awskit.Error.t) result io
+  (** Fetch an object and consume its body inside [consume].
+
+      The response-body reader is scoped to the callback and must not escape it.
+      The returned pair contains response metadata and the callback result. *)
 
   val head :
     connection ->
@@ -35,12 +60,17 @@ module type OBJECT = sig
     ?options:Object.Head.options ->
     unit ->
     (Object.Head.result, Awskit.Error.t) result io
+  (** Fetch object metadata without reading an object body. *)
 
   val exists :
     connection ->
     bucket:string ->
     key:string ->
     (bool, Awskit.Error.t) result io
+  (** Return [false] for S3 not-found responses and [true] for success.
+
+      Other errors, including auth/transport/decode failures, are returned as
+      [Error]. *)
 
   val delete :
     connection ->
@@ -49,6 +79,7 @@ module type OBJECT = sig
     ?options:Object.Delete.options ->
     unit ->
     (Object.Delete.result, Awskit.Error.t) result io
+  (** Delete an object or a specific object version. *)
 
   val delete_objects :
     connection ->
@@ -57,6 +88,10 @@ module type OBJECT = sig
     ?options:Object.Delete_many.options ->
     unit ->
     (Object.Delete_many.result, Awskit.Error.t) result io
+  (** Delete multiple objects with [DeleteObjects].
+
+      Per-object failures are represented in [Object.Delete_many.result.errors]
+      even when the operation itself returns [Ok]. *)
 
   val copy :
     connection ->
@@ -67,6 +102,7 @@ module type OBJECT = sig
     ?options:Object.Copy.options ->
     unit ->
     (Object.Copy.result, Awskit.Error.t) result io
+  (** Copy an object from one bucket/key to another. *)
 
   val list_versions :
     connection ->
@@ -74,6 +110,8 @@ module type OBJECT = sig
     ?options:Object.Versions.options ->
     unit ->
     (Object.Versions.page, Awskit.Error.t) result io
+  (** Fetch one [ListObjectVersions] page. Use [List_object_versions] helpers to
+      follow pagination. *)
 
   val list :
     connection ->
@@ -81,6 +119,8 @@ module type OBJECT = sig
     ?options:Object.List.options ->
     unit ->
     (Object.List.page, Awskit.Error.t) result io
+  (** Fetch one [ListObjectsV2] page. Use [List_objects_v2] helpers to follow
+      pagination. *)
 
   val list_keys :
     connection ->
@@ -88,8 +128,11 @@ module type OBJECT = sig
     ?options:Object.List.options ->
     unit ->
     (string list, Awskit.Error.t) result io
+  (** Fetch one listing page and return only object keys from that page. *)
 
   module List_objects_v2 : sig
+    (** Pagination helpers for [ListObjectsV2]. *)
+
     val fold_pages :
       connection ->
       bucket:string ->
@@ -99,6 +142,8 @@ module type OBJECT = sig
       f:('acc -> Object.List.page -> ('acc, Awskit.Error.t) result io) ->
       unit ->
       ('acc, Awskit.Error.t) result io
+    (** Follow continuation tokens and fold pages until S3 stops returning a
+        next token or [max_pages] is reached. *)
 
     val pages :
       connection ->
@@ -107,6 +152,7 @@ module type OBJECT = sig
       ?max_pages:int ->
       unit ->
       (Object.List.page list, Awskit.Error.t) result io
+    (** Collect listing pages. *)
 
     val objects :
       connection ->
@@ -115,6 +161,7 @@ module type OBJECT = sig
       ?max_pages:int ->
       unit ->
       (Object.List.object_summary list, Awskit.Error.t) result io
+    (** Collect object summaries across listing pages. *)
 
     val keys :
       connection ->
@@ -123,9 +170,12 @@ module type OBJECT = sig
       ?max_pages:int ->
       unit ->
       (string list, Awskit.Error.t) result io
+    (** Collect object keys across listing pages. *)
   end
 
   module List_object_versions : sig
+    (** Pagination helpers for [ListObjectVersions]. *)
+
     val fold_pages :
       connection ->
       bucket:string ->
@@ -135,6 +185,8 @@ module type OBJECT = sig
       f:('acc -> Object.Versions.page -> ('acc, Awskit.Error.t) result io) ->
       unit ->
       ('acc, Awskit.Error.t) result io
+    (** Follow key/version markers and fold pages until S3 stops returning next
+        markers or [max_pages] is reached. *)
 
     val pages :
       connection ->
@@ -143,6 +195,7 @@ module type OBJECT = sig
       ?max_pages:int ->
       unit ->
       (Object.Versions.page list, Awskit.Error.t) result io
+    (** Collect version listing pages. *)
 
     val object_versions :
       connection ->
@@ -151,6 +204,7 @@ module type OBJECT = sig
       ?max_pages:int ->
       unit ->
       (Object.Versions.object_version list, Awskit.Error.t) result io
+    (** Collect object-version entries across pages. *)
 
     val delete_markers :
       connection ->
@@ -159,6 +213,7 @@ module type OBJECT = sig
       ?max_pages:int ->
       unit ->
       (Object.Versions.delete_marker list, Awskit.Error.t) result io
+    (** Collect delete-marker entries across pages. *)
   end
 
   val put_string :
@@ -168,6 +223,7 @@ module type OBJECT = sig
     ?options:Object.Put.options ->
     string ->
     (Object.Put.result, Awskit.Error.t) result io
+  (** Upload a string as a replayable in-memory body. *)
 
   val put_bytes :
     connection ->
@@ -176,6 +232,7 @@ module type OBJECT = sig
     ?options:Object.Put.options ->
     bytes ->
     (Object.Put.result, Awskit.Error.t) result io
+  (** Upload bytes as a replayable in-memory body. *)
 
   val get_as_string :
     connection ->
@@ -185,6 +242,8 @@ module type OBJECT = sig
     ?options:Object.Get.options ->
     unit ->
     (Object.Get.result * string, Awskit.Error.t) result io
+  (** Read an object into a string, failing with a body-limit error if the
+      response exceeds [max_bytes]. *)
 
   val get_as_bytes :
     connection ->
@@ -194,8 +253,12 @@ module type OBJECT = sig
     ?options:Object.Get.options ->
     unit ->
     (Object.Get.result * bytes, Awskit.Error.t) result io
+  (** Read an object into bytes, failing with a body-limit error if the response
+      exceeds [max_bytes]. *)
 
   module Tagging : sig
+    (** Object tagging operations. *)
+
     val get :
       connection ->
       bucket:string ->
@@ -203,6 +266,7 @@ module type OBJECT = sig
       ?options:Object.Tagging.options ->
       unit ->
       (Object.Tagging.result, Awskit.Error.t) result io
+    (** Fetch object tags. *)
 
     val put :
       connection ->
@@ -211,6 +275,7 @@ module type OBJECT = sig
       ?options:Object.Tagging.options ->
       Tag.t list ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Replace the object's tag set. *)
 
     val delete :
       connection ->
@@ -219,12 +284,18 @@ module type OBJECT = sig
       ?options:Object.Tagging.options ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Remove all tags from the object. *)
   end
 end
 
 module type BUCKET = sig
+  (** Bucket lifecycle and bucket-configuration operations. *)
+
   type connection
+  (** Client connection handle. *)
+
   type +'a io
+  (** Runtime effect type. *)
 
   val create :
     connection ->
@@ -232,40 +303,49 @@ module type BUCKET = sig
     ?options:Bucket.Create.options ->
     unit ->
     (Bucket.Create.result, Awskit.Error.t) result io
+  (** Create a bucket. *)
 
   val delete :
     ?expected_bucket_owner:string ->
     connection ->
     bucket:string ->
     (Bucket.Delete.result, Awskit.Error.t) result io
+  (** Delete an empty bucket. *)
 
   val head :
     ?expected_bucket_owner:string ->
     connection ->
     bucket:string ->
     (Bucket.Head.result, Awskit.Error.t) result io
+  (** Check bucket existence and return metadata such as the region hint. *)
 
   val exists :
     ?expected_bucket_owner:string ->
     connection ->
     bucket:string ->
     (bool, Awskit.Error.t) result io
+  (** Return [false] for S3 not-found responses and [true] for success. *)
 
   val list :
     connection -> (Bucket.List_buckets.result, Awskit.Error.t) result io
+  (** List buckets visible to the credentials. *)
 
   val get_location :
     ?expected_bucket_owner:string ->
     connection ->
     bucket:string ->
     (Bucket.Get_location.result, Awskit.Error.t) result io
+  (** Fetch the bucket location constraint/region. *)
 
   module Policy : sig
+    (** Bucket policy operations. Policy documents are opaque validated JSON. *)
+
     val get :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Policy.t, Awskit.Error.t) result io
+    (** Fetch a bucket policy document. *)
 
     val put :
       connection ->
@@ -273,20 +353,25 @@ module type BUCKET = sig
       ?expected_bucket_owner:string ->
       Policy.t ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Replace the bucket policy document. *)
 
     val delete :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Delete the bucket policy. *)
   end
 
   module Versioning : sig
+    (** Bucket versioning operations. *)
+
     val get :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Bucket.Versioning.result, Awskit.Error.t) result io
+    (** Fetch bucket versioning state. *)
 
     val put :
       connection ->
@@ -294,14 +379,18 @@ module type BUCKET = sig
       ?expected_bucket_owner:string ->
       Bucket.Versioning.Status.t ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Set bucket versioning to [Enabled] or [Suspended]. *)
   end
 
   module Tagging : sig
+    (** Bucket tagging operations. *)
+
     val get :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Bucket.Tagging.result, Awskit.Error.t) result io
+    (** Fetch the bucket tag set. *)
 
     val put :
       connection ->
@@ -309,20 +398,25 @@ module type BUCKET = sig
       ?expected_bucket_owner:string ->
       Tag.t list ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Replace the bucket tag set. *)
 
     val delete :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Remove all bucket tags. *)
   end
 
   module Encryption : sig
+    (** Bucket default-encryption operations. *)
+
     val get :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Bucket.Encryption.result, Awskit.Error.t) result io
+    (** Fetch bucket default-encryption configuration. *)
 
     val put :
       connection ->
@@ -330,20 +424,25 @@ module type BUCKET = sig
       ?expected_bucket_owner:string ->
       Bucket.Encryption.config ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Replace bucket default-encryption configuration. *)
 
     val delete :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Delete bucket default-encryption configuration. *)
   end
 
   module Cors : sig
+    (** Bucket CORS operations. *)
+
     val get :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Bucket.Cors.result, Awskit.Error.t) result io
+    (** Fetch bucket CORS configuration. *)
 
     val put :
       connection ->
@@ -351,20 +450,25 @@ module type BUCKET = sig
       ?expected_bucket_owner:string ->
       Bucket.Cors.config ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Replace bucket CORS configuration. *)
 
     val delete :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Delete bucket CORS configuration. *)
   end
 
   module Public_access_block : sig
+    (** Bucket public-access-block operations. *)
+
     val get :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Bucket.Public_access_block.result, Awskit.Error.t) result io
+    (** Fetch public-access-block configuration. *)
 
     val put :
       connection ->
@@ -372,20 +476,25 @@ module type BUCKET = sig
       ?expected_bucket_owner:string ->
       Bucket.Public_access_block.config ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Replace public-access-block configuration. *)
 
     val delete :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Delete public-access-block configuration. *)
   end
 
   module Ownership_controls : sig
+    (** Bucket ownership-controls operations. *)
+
     val get :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Bucket.Ownership_controls.result, Awskit.Error.t) result io
+    (** Fetch ownership-controls configuration. *)
 
     val put :
       connection ->
@@ -393,19 +502,28 @@ module type BUCKET = sig
       ?expected_bucket_owner:string ->
       Bucket.Ownership_controls.config ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Replace ownership-controls configuration. *)
 
     val delete :
       ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
       (Awskit.Response.t, Awskit.Error.t) result io
+    (** Delete ownership-controls configuration. *)
   end
 end
 
 module type MULTIPART = sig
+  (** Multipart upload operations. *)
+
   type connection
+  (** Client connection handle. *)
+
   type +'a io
+  (** Runtime effect type. *)
+
   type request_body
+  (** Runtime-owned request body type. *)
 
   val create_upload :
     connection ->
@@ -414,6 +532,7 @@ module type MULTIPART = sig
     ?options:Multipart.Create.options ->
     unit ->
     (Multipart.Create.result, Awskit.Error.t) result io
+  (** Start a multipart upload and return its upload id. *)
 
   val upload_part :
     connection ->
@@ -425,6 +544,10 @@ module type MULTIPART = sig
     ?options:Multipart.Upload_part.options ->
     unit ->
     (Multipart.Upload_part.result, Awskit.Error.t) result io
+  (** Upload one multipart part.
+
+      [part_number] must be in S3's valid range, and [body] must have an
+      accurate known content length. *)
 
   val complete_upload :
     connection ->
@@ -434,6 +557,7 @@ module type MULTIPART = sig
     ?options:Multipart.Complete.options ->
     Multipart.Part.t list ->
     (Multipart.Complete.result, Awskit.Error.t) result io
+  (** Complete a multipart upload using the supplied completed part list. *)
 
   val abort_upload :
     connection ->
@@ -443,6 +567,7 @@ module type MULTIPART = sig
     ?options:Multipart.Abort.options ->
     unit ->
     (Multipart.Abort.result, Awskit.Error.t) result io
+  (** Abort a multipart upload. *)
 
   val list_parts :
     connection ->
@@ -452,8 +577,12 @@ module type MULTIPART = sig
     ?options:Multipart.List_parts.options ->
     unit ->
     (Multipart.List_parts.page, Awskit.Error.t) result io
+  (** Fetch one [ListParts] page. Use [List_parts] helpers to follow pagination.
+  *)
 
   module List_parts : sig
+    (** Pagination helpers for [ListParts]. *)
+
     val fold_pages :
       connection ->
       bucket:string ->
@@ -465,6 +594,8 @@ module type MULTIPART = sig
       f:('acc -> Multipart.List_parts.page -> ('acc, Awskit.Error.t) result io) ->
       unit ->
       ('acc, Awskit.Error.t) result io
+    (** Follow part-number markers and fold pages until S3 stops returning a
+        next marker or [max_pages] is reached. *)
 
     val pages :
       connection ->
@@ -475,6 +606,7 @@ module type MULTIPART = sig
       ?max_pages:int ->
       unit ->
       (Multipart.List_parts.page list, Awskit.Error.t) result io
+    (** Collect uploaded-part pages. *)
 
     val parts :
       connection ->
@@ -485,12 +617,18 @@ module type MULTIPART = sig
       ?max_pages:int ->
       unit ->
       (Multipart.List_parts.part_info list, Awskit.Error.t) result io
+    (** Collect uploaded part summaries across pages. *)
   end
 end
 
 module type PRESIGNED = sig
+  (** Presigned URL helpers bound to a client connection. *)
+
   type connection
+  (** Client connection handle. *)
+
   type +'a io
+  (** Runtime effect type. *)
 
   val get_object :
     connection ->
@@ -499,6 +637,7 @@ module type PRESIGNED = sig
     ?options:Presigned.Get_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
+  (** Generate a presigned [GET Object] URL. *)
 
   val put_object :
     connection ->
@@ -507,6 +646,8 @@ module type PRESIGNED = sig
     ?options:Presigned.Put_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
+  (** Generate a presigned [PUT Object] URL. Headers returned in the result must
+      be sent by the eventual uploader. *)
 
   val head_object :
     connection ->
@@ -515,6 +656,7 @@ module type PRESIGNED = sig
     ?options:Presigned.Get_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
+  (** Generate a presigned [HEAD Object] URL. *)
 
   val delete_object :
     connection ->
@@ -523,6 +665,7 @@ module type PRESIGNED = sig
     ?options:Presigned.Delete_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
+  (** Generate a presigned [DELETE Object] URL. *)
 
   val upload_part :
     connection ->
@@ -533,13 +676,23 @@ module type PRESIGNED = sig
     ?options:Presigned.Upload_part.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
+  (** Generate a presigned [UploadPart] URL for one multipart part. *)
 end
 
 module type S = sig
+  (** Complete S3 client surface for one runtime. *)
+
   type connection
+  (** Client connection handle. *)
+
   type +'a io
+  (** Runtime effect type. *)
+
   type request_body
+  (** Runtime-owned request body type. *)
+
   type response_body_reader
+  (** Scoped runtime response-body reader type. *)
 
   module Object :
     OBJECT

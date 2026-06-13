@@ -23,10 +23,11 @@ Primitive uploads require a known content length. The runtime records length
 and payload hash in its request-body descriptor before signing. Unknown-length
 SigV4 aws-chunked streaming is not implemented today.
 
-For custom [Runtime.Request_body.of_stream] values, declare the exact [content_length]
-and emit exactly that number of bytes. Producer callback errors are returned as
-request body failures. Prefer [Runtime.Request_body.of_string] or [Runtime.Request_body.of_bytes] when the
-body is already buffered.
+For custom [Runtime.Request_body.of_stream] values, declare the exact
+[content_length] and emit exactly that number of bytes. Producer callback errors
+are returned as request body failures. Prefer
+[Runtime.Request_body.of_string] or [Runtime.Request_body.of_bytes] when the body
+is already buffered.
 
 Options carry object metadata, content type, storage class, tags,
 preconditions, checksum headers, and server-side encryption headers:
@@ -344,7 +345,7 @@ subresources:
 access configuration. Applications can construct those documents with their own
 policy model and pass the serialized JSON to the client.
 
-Retained bucket operations that target an existing bucket accept
+Relevant bucket operations that target an existing bucket accept
 [expected_bucket_owner]. Awskit sends it as [x-amz-expected-bucket-owner] so AWS
 can reject calls that resolve to a bucket owned by a different account.
 
@@ -491,7 +492,7 @@ Lwt-Unix runtime credential source and refreshed before expiration.
 S3 operations return [(value, Awskit_s3.Error.t) result] or that result inside
 the selected runtime monad.
 
-[Awskit_s3.Error.t] is {!type:Awskit.Error.t}. It preserves validation,
+[Awskit_s3.Error.t] is [Awskit.Error.t]. It preserves validation,
 signing, transport, service, decode, and body-consumption failures.
 
 Use S3 classifiers for service-specific checks:
@@ -509,16 +510,16 @@ code when present.
 
 {1 Retries}
 
-Runtime-backed S3 clients use {!val:Awskit.Retry.default} unless a runtime
+Runtime-backed S3 clients use [Awskit.Retry.default] unless a runtime
 adapter receives a custom [retry_policy]. Retries are centralized around the
 signed S3 request, so retryable service responses are classified before being
 returned to callers.
 
 Only replayable request bodies are retried. In-memory bodies created with
-[Runtime.Request_body.of_string] and [Runtime.Request_body.of_bytes] are replayable. Custom stream
-bodies are retried only when their {!type:Awskit.Body.Request.descriptor}
-marks them replayable. Do not mark a stream replayable unless retrying can
-recreate the same bytes from the beginning.
+[Runtime.Request_body.of_string] and [Runtime.Request_body.of_bytes] are
+replayable. Custom stream bodies are retried only when their
+[Awskit.Body.Request.descriptor] marks them replayable. Do not mark a stream
+replayable unless retrying can recreate the same bytes from the beginning.
 
 Configure retry attempts, capped exponential backoff, and jitter explicitly:
 

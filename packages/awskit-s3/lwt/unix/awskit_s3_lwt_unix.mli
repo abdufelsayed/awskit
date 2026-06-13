@@ -1,10 +1,12 @@
 (** Ready-to-use Lwt + Unix S3 adapter.
 
-    Primitive operations stream through {!Awskit_lwt_unix.Runtime}. Local-path
+    Primitive operations stream through [Awskit_lwt_unix.Runtime]. Local-path
     helpers live under {!Object.Transfer}. *)
 
 type t
+(** Ready-to-use Lwt + Unix S3 client connection. Create with {!val:create}. *)
 
+(** Lwt + Unix S3 runtime used by [Awskit_s3.Make]. *)
 module Runtime :
   Awskit_s3.RUNTIME with type 'a t = 'a Lwt.t and type connection = t
 
@@ -23,7 +25,7 @@ val create :
   (t, Awskit_s3.Error.t) result
 (** Create a ready-to-use Lwt + Unix S3 client.
 
-    If [region] or [credentials] are omitted, the underlying {!Awskit_lwt_unix}
+    If [region] or [credentials] are omitted, the underlying [Awskit_lwt_unix]
     runtime resolves them from standard AWS environment and profile sources.
     [endpoint] is for local S3-compatible services or custom endpoints.
     [addressing_style], [endpoint_variant], and [scheme] configure S3 endpoint

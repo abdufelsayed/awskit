@@ -8,6 +8,7 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
   type t
   (** S3 connection handle for the supplied Cohttp client. *)
 
+  (** Lwt S3 runtime used by [Awskit_s3.Make]. *)
   module Runtime :
     Awskit_s3.RUNTIME with type 'a t = 'a Lwt.t and type connection = t
 

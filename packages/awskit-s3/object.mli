@@ -11,9 +11,17 @@ module Etag : sig
       according to the library's ETag parser. *)
 
   val of_string_exn : string -> t
+  (** Like {!val:of_string}, but raises [Invalid_argument] on validation
+      failure. *)
+
   val to_string : t -> string
+  (** Render the normalized ETag value. *)
+
   val pp : Format.formatter -> t -> unit
+  (** Pretty-print an ETag. *)
+
   val equal : t -> t -> bool
+  (** Compare two ETags. *)
 end
 
 module Version_id : sig
@@ -22,10 +30,20 @@ module Version_id : sig
       that explicitly target a version. *)
 
   val of_string : string -> (t, Awskit.Error.t) result
+  (** Validate and wrap a version id. Empty version ids are rejected. *)
+
   val of_string_exn : string -> t
+  (** Like {!val:of_string}, but raises [Invalid_argument] on validation
+      failure. *)
+
   val to_string : t -> string
+  (** Return the version id string. *)
+
   val pp : Format.formatter -> t -> unit
+  (** Pretty-print a version id. *)
+
   val equal : t -> t -> bool
+  (** Compare two version ids. *)
 end
 
 module Checksum : sig
@@ -161,26 +179,36 @@ end
 
 module Put : sig
   type options = {
-    content_type : string option;
-    metadata : Metadata.t;
+    content_type : string option;  (** [Content-Type] header for the object. *)
+    metadata : Metadata.t;  (** User metadata sent as [x-amz-meta-*] headers. *)
     storage_class : Storage_class.t option;
-    tags : Tag.t list;
-    cache_control : string option;
+        (** Optional S3 storage class for the new object. *)
+    tags : Tag.t list;  (** Object tags sent with the write request. *)
+    cache_control : string option;  (** Optional [Cache-Control] header. *)
     content_encoding : string option;
+        (** Optional [Content-Encoding] header. *)
     content_disposition : string option;
-    preconditions : Preconditions.Write.t;
+        (** Optional [Content-Disposition] header. *)
+    preconditions : Preconditions.Write.t;  (** Conditional write headers. *)
     checksum : Checksum.value option;
+        (** Explicit checksum header for the request body. *)
     server_side_encryption : Encryption.request option;
+        (** Server-side encryption headers for the new object. *)
     expected_bucket_owner : string option;
+        (** [x-amz-expected-bucket-owner], used to guard against bucket-owner
+            confusion. *)
   }
-  (** [PutObject] request options and result metadata. *)
+  (** [PutObject] request options. *)
 
   type result = {
-    etag : Etag.t option;
+    etag : Etag.t option;  (** ETag returned by S3, when present. *)
     version_id : Version_id.t option;
-    checksum : Checksum.response;
+        (** New object version id for versioned buckets. *)
+    checksum : Checksum.response;  (** Checksum headers returned by S3. *)
     response : Awskit.Response.t;
+        (** Raw response metadata, including status and request ids. *)
   }
+  (** [PutObject] result metadata. The uploaded body is not retained. *)
 
   val default_options : options
   (** Default [PutObject] options: no optional headers, tags, checksum, or
@@ -189,27 +217,35 @@ end
 
 module Get : sig
   type options = {
-    range : Range.t option;
-    preconditions : Preconditions.Read.t;
+    range : Range.t option;  (** Optional HTTP byte range. *)
+    preconditions : Preconditions.Read.t;  (** Conditional read headers. *)
     version_id : Version_id.t option;
+        (** Object version to read instead of the current version. *)
     checksum_mode : Checksum.Mode.t option;
-    expected_bucket_owner : string option;
+        (** Request S3 checksum metadata in the response. *)
+    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [GetObject] request options and response metadata. The object body is
-      consumed through the selected runtime and is not stored in [result]. *)
+  (** [GetObject] request options. *)
 
   type result = {
-    etag : Etag.t option;
-    content_type : string option;
+    etag : Etag.t option;  (** Object ETag returned by S3. *)
+    content_type : string option;  (** Object [Content-Type] response header. *)
     content_length : int64 option;
+        (** Number of response-body bytes when S3 supplied [Content-Length]. *)
     last_modified : Ptime.t option;
+        (** Last modified timestamp parsed from the response. *)
     metadata : Metadata.t;
+        (** User metadata parsed from [x-amz-meta-*] headers. *)
     storage_class : Storage_class.t option;
-    version_id : Version_id.t option;
-    checksum : Checksum.response;
+        (** Storage class reported for the object, if present. *)
+    version_id : Version_id.t option;  (** Version id of the returned object. *)
+    checksum : Checksum.response;  (** Checksum response headers. *)
     server_side_encryption : Encryption.response option;
-    response : Awskit.Response.t;
+        (** Server-side encryption metadata reported by S3. *)
+    response : Awskit.Response.t;  (** Raw response metadata. *)
   }
+  (** [GetObject] response metadata. The object body is consumed through the
+      selected runtime and is not stored in [result]. *)
 
   val default_options : options
   (** Default [GetObject] options: full current object, no checksum mode, and no
@@ -219,57 +255,73 @@ end
 module Head : sig
   type options = {
     preconditions : Preconditions.Read.t;
+        (** Conditional headers for the object metadata request. *)
     version_id : Version_id.t option;
+        (** Object version to inspect instead of the current version. *)
     checksum_mode : Checksum.Mode.t option;
-    expected_bucket_owner : string option;
+        (** Request S3 checksum metadata in the response. *)
+    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [HeadObject] request options and response metadata. *)
+  (** [HeadObject] request options. *)
 
   type result = Get.result
+  (** [HeadObject] metadata has the same shape as {!type:Get.result}; no object
+      body is returned. *)
 
   val default_options : options
 end
 
 module Delete : sig
   type options = {
-    preconditions : Preconditions.Delete.t;
+    preconditions : Preconditions.Delete.t;  (** Conditional delete headers. *)
     version_id : Version_id.t option;
-    expected_bucket_owner : string option;
+        (** Object version to delete instead of the current version. *)
+    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [DeleteObject] request options and result metadata. *)
+  (** [DeleteObject] request options. *)
 
   type result = {
     delete_marker : bool option;
+        (** Whether S3 created or addressed a delete marker. *)
     version_id : Version_id.t option;
-    response : Awskit.Response.t;
+        (** Version id affected by the delete operation. *)
+    response : Awskit.Response.t;  (** Raw response metadata. *)
   }
+  (** [DeleteObject] result metadata. *)
 
   val default_options : options
 end
 
 module Delete_many : sig
   type object_ = {
-    key : string;
-    version_id : Version_id.t option;
+    key : string;  (** Object key to delete. *)
+    version_id : Version_id.t option;  (** Optional version id to delete. *)
     etag : Etag.t option;
+        (** Optional ETag condition for conditional delete support. *)
   }
-  (** [DeleteObjects] request and result data. *)
+  (** One [DeleteObjects] request member. *)
 
   type deleted = {
-    key : string;
-    version_id : Version_id.t option;
-    delete_marker : bool option;
+    key : string;  (** Deleted key reported by S3. *)
+    version_id : Version_id.t option;  (** Deleted version id, when present. *)
+    delete_marker : bool option;  (** Delete-marker flag reported by S3. *)
   }
+  (** One successful [DeleteObjects] member result. *)
 
   type item_error = { key : string; code : string; message : string option }
+  (** Per-object [DeleteObjects] failure returned inside an otherwise decoded
+      response. *)
 
   type result = {
-    deleted : deleted list;
-    errors : item_error list;
-    response : Awskit.Response.t;
+    deleted : deleted list;  (** Successfully deleted members. *)
+    errors : item_error list;  (** Per-member failures reported by S3. *)
+    response : Awskit.Response.t;  (** Raw response metadata. *)
   }
+  (** [DeleteObjects] result data. Check [errors] even when the operation itself
+      returned [Ok]. *)
 
   type options = { expected_bucket_owner : string option }
+  (** [DeleteObjects] request options. *)
 
   val default_options : options
 end
@@ -282,22 +334,34 @@ module Copy : sig
 
   type options = {
     source_version_id : Version_id.t option;
+        (** Source object version to copy. *)
     source_preconditions : Preconditions.Copy_source.t;
+        (** Preconditions applied to the source object. *)
     metadata_directive : metadata_directive option;
+        (** Whether to copy source metadata or replace it. *)
     storage_class : Storage_class.t option;
+        (** Storage class for the destination object. *)
     checksum_algorithm : Checksum.Algorithm.t option;
+        (** Checksum algorithm S3 should use for the destination object. *)
     server_side_encryption : Encryption.request option;
+        (** Server-side encryption for the destination object. *)
     expected_bucket_owner : string option;
+        (** Expected owner for the destination bucket. *)
     source_expected_bucket_owner : string option;
+        (** Expected owner for the source bucket. *)
   }
+  (** [CopyObject] request options. *)
 
   type result = {
-    etag : Etag.t option;
+    etag : Etag.t option;  (** Destination object ETag. *)
     last_modified : Ptime.t option;
-    version_id : Version_id.t option;
+        (** Destination last-modified timestamp returned in the copy payload. *)
+    version_id : Version_id.t option;  (** Destination object version id. *)
     copy_source_version_id : Version_id.t option;
-    response : Awskit.Response.t;
+        (** Source version id reported by S3. *)
+    response : Awskit.Response.t;  (** Raw response metadata. *)
   }
+  (** [CopyObject] result metadata. *)
 
   val default_options : options
 end
@@ -305,93 +369,118 @@ end
 module Versions : sig
   type options = {
     prefix : string option;
+        (** Return versions whose keys begin with this prefix. *)
     delimiter : string option;
+        (** Group keys using this delimiter, commonly ["/"]. *)
     max_keys : int option;
+        (** Maximum number of keys/markers S3 should return in one page. *)
     key_marker : string option;
+        (** Pagination marker for keys. Usually supplied from the previous
+            page's [next_key_marker]. *)
     version_id_marker : Version_id.t option;
-    expected_bucket_owner : string option;
+        (** Pagination marker for versions. Usually supplied with [key_marker].
+        *)
+    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [ListObjectVersions] options and page data. *)
+  (** [ListObjectVersions] request options. *)
 
   type object_version = {
-    key : string;
-    version_id : Version_id.t option;
+    key : string;  (** Object key. *)
+    version_id : Version_id.t option;  (** Object version id. *)
     is_latest : bool option;
-    last_modified : Ptime.t option;
-    etag : Etag.t option;
-    size : int64 option;
+        (** Whether this entry is the latest version for the key. *)
+    last_modified : Ptime.t option;  (** Last modified timestamp. *)
+    etag : Etag.t option;  (** Version ETag. *)
+    size : int64 option;  (** Object size in bytes. *)
     storage_class : Storage_class.t option;
-    owner : string option;
-    checksum : Checksum.summary;
+        (** Storage class for this version. *)
+    owner : string option;  (** Owner id/display name when returned by S3. *)
+    checksum : Checksum.summary;  (** Checksum summary metadata. *)
   }
+  (** One object version entry from [ListObjectVersions]. *)
 
   type delete_marker = {
-    key : string;
-    version_id : Version_id.t option;
+    key : string;  (** Object key. *)
+    version_id : Version_id.t option;  (** Delete marker version id. *)
     is_latest : bool option;
-    last_modified : Ptime.t option;
-    owner : string option;
+        (** Whether this delete marker is latest for the key. *)
+    last_modified : Ptime.t option;  (** Delete marker timestamp. *)
+    owner : string option;  (** Owner id/display name when returned by S3. *)
   }
+  (** One delete marker entry from [ListObjectVersions]. *)
 
   type page = {
-    bucket : string option;
-    prefix : string option;
-    delimiter : string option;
-    versions : object_version list;
-    delete_markers : delete_marker list;
+    bucket : string option;  (** Bucket name echoed by S3. *)
+    prefix : string option;  (** Prefix applied to this page. *)
+    delimiter : string option;  (** Delimiter applied to this page. *)
+    versions : object_version list;  (** Object versions in this page. *)
+    delete_markers : delete_marker list;  (** Delete markers in this page. *)
     common_prefixes : string list;
-    is_truncated : bool;
-    key_marker : string option;
+        (** Grouped prefixes returned when [delimiter] is set. *)
+    is_truncated : bool;  (** Whether more pages are available. *)
+    key_marker : string option;  (** Current page key marker. *)
     version_id_marker : Version_id.t option;
-    next_key_marker : string option;
+        (** Current page version marker. *)
+    next_key_marker : string option;  (** Marker to use for the next page. *)
     next_version_id_marker : Version_id.t option;
-    response : Awskit.Response.t;
+        (** Version marker to use for the next page. *)
+    response : Awskit.Response.t;  (** Raw response metadata. *)
   }
+  (** One [ListObjectVersions] page. *)
 
   val default_options : options
 end
 
 module List : sig
   type options = {
-    prefix : string option;
+    prefix : string option;  (** Return keys that begin with this prefix. *)
     delimiter : string option;
+        (** Group keys using this delimiter, commonly ["/"]. *)
     max_keys : int option;
+        (** Maximum number of objects S3 should return in one page. *)
     start_after : string option;
+        (** Start listing after this key for the first page. *)
     continuation_token : string option;
-    expected_bucket_owner : string option;
+        (** Pagination token, usually supplied from a previous page. *)
+    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [ListObjectsV2] options and page data. *)
+  (** [ListObjectsV2] request options. *)
 
   type object_summary = {
-    key : string;
-    size : int64 option;
-    etag : Etag.t option;
-    last_modified : Ptime.t option;
-    storage_class : Storage_class.t option;
-    checksum : Checksum.summary;
+    key : string;  (** Object key. *)
+    size : int64 option;  (** Object size in bytes. *)
+    etag : Etag.t option;  (** Object ETag. *)
+    last_modified : Ptime.t option;  (** Last modified timestamp. *)
+    storage_class : Storage_class.t option;  (** Object storage class. *)
+    checksum : Checksum.summary;  (** Checksum summary metadata. *)
   }
+  (** One object summary from a listing page. *)
 
   type page = {
-    bucket : string option;
-    prefix : string option;
-    delimiter : string option;
-    objects : object_summary list;
+    bucket : string option;  (** Bucket name echoed by S3. *)
+    prefix : string option;  (** Prefix applied to this page. *)
+    delimiter : string option;  (** Delimiter applied to this page. *)
+    objects : object_summary list;  (** Object summaries in this page. *)
     common_prefixes : string list;
-    key_count : int option;
-    is_truncated : bool;
-    continuation_token : string option;
+        (** Grouped prefixes returned when [delimiter] is set. *)
+    key_count : int option;  (** Number of keys S3 reports in this page. *)
+    is_truncated : bool;  (** Whether more pages are available. *)
+    continuation_token : string option;  (** Token used to request this page. *)
     next_continuation_token : string option;
-    response : Awskit.Response.t;
+        (** Token to use for the next page. *)
+    response : Awskit.Response.t;  (** Raw response metadata. *)
   }
+  (** One [ListObjectsV2] page. *)
 
   val default_options : options
 end
 
 module Tagging : sig
   type options = { expected_bucket_owner : string option }
-  (** Object tagging request options and result data. *)
+  (** Object tagging request options. *)
 
   type result = { tags : Tag.t list; response : Awskit.Response.t }
+  (** Object tag set returned by [GetObjectTagging]. *)
 
   val default_options : options
 end

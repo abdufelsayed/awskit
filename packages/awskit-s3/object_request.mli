@@ -1,3 +1,9 @@
+(** Runtime-backed S3 object request implementation functor.
+
+    Most callers use this through {!module:Awskit_s3.Make} or an adapter
+    package. *)
+
+(** Build object operations over a request context. *)
 module Make (C : Request_context.S) :
   Awskit_s3_intf.OBJECT
     with type connection = C.connection

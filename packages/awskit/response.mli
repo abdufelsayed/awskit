@@ -17,8 +17,13 @@ val create :
     fields are extracted from standard S3/AWS headers when present. *)
 
 val create_exn : status:int -> ?headers:(string * string) list -> unit -> t
+(** Like {!val:create}, but raises [Invalid_argument] on validation failure. *)
+
 val status : t -> int
+(** Return the HTTP status code. *)
+
 val headers : t -> (string * string) list
+(** Return response headers in their stored order. *)
 
 val header : t -> string -> string option
 (** Look up a header case-insensitively. *)
@@ -33,4 +38,7 @@ val is_success : t -> bool
 (** [true] for HTTP 2xx statuses. *)
 
 val request_id : t -> string option
+(** Return the AWS request id, when present. *)
+
 val host_id : t -> string option
+(** Return the extended AWS host id, when present. *)
