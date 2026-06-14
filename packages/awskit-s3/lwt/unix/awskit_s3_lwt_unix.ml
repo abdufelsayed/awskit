@@ -30,6 +30,9 @@ end
 
 module S3 = Awskit_s3.Make (Runtime)
 module File_transfer = Transfer
+module Body_reader = File_transfer.Make_body_reader (Runtime) (S3)
+module Body = Body_reader.Body
+module Reader = Body_reader.Reader
 
 let create ?ctx ?endpoint ?addressing_style ?endpoint_variant ?scheme ?region
     ?credentials ?clock ?retry_policy ?imdsv1_fallback () =
@@ -50,7 +53,7 @@ module Object = struct
   include S3.Object
 
   module Transfer = struct
-    include File_transfer.Make (Runtime) (S3)
+    include File_transfer.Make (Runtime) (S3) (Body) (Reader)
   end
 end
 

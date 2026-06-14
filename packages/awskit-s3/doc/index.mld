@@ -37,14 +37,16 @@ construction in application code.
 Object APIs are split into explicit layers:
 
 {ul
-  {li primitive streaming operations under [Object]}
-  {li bounded in-memory helpers under [Object]}
-  {li local-path helpers under [Object.Transfer] in Unix-capable adapter
-    packages}
+  {li primitive object operations under [Object]}
+  {li upload body constructors under adapter [Body] modules}
+  {li download consumers under adapter [Reader] modules}
+  {li managed local-file transfer helpers under [Object.Transfer] in
+    Unix-capable adapter packages}
 }
 
-Primitive operations never expose string bodies as the primary API. Request
-bodies and response body readers come from the selected runtime adapter.
+Normal uploads pass [Body] values to [Object.put]. Normal downloads pass
+[Reader] consumers to [Object.get]. Direct [Runtime] access remains available
+for advanced integrations that need the raw runtime body layer.
 
 {1 Libraries}
 
@@ -82,7 +84,8 @@ injection.
 {2 awskit-s3-eio}
 
 [Awskit_s3_eio] provides a direct-style Eio adapter. Operations return
-plain results. It also exposes local-path helpers under [Object.Transfer].
+plain results. It also exposes local-path helpers under [Body] and [Reader],
+plus managed local-file helpers under [Object.Transfer].
 
 {2 awskit-s3-lwt}
 
@@ -93,7 +96,9 @@ Operations return [Lwt.t].
 
 [Awskit_s3_lwt_unix] provides the ready-to-use Lwt + Unix adapter.
 It can read credentials and region from the standard AWS environment variables
-through the underlying [awskit-lwt-unix] runtime.
+through the underlying [awskit-lwt-unix] runtime. It exposes local-path helpers
+under [Body] and [Reader], plus managed local-file helpers under
+[Object.Transfer].
 
 {1 Minimal Eio Example}
 
@@ -111,10 +116,11 @@ let run env =
   let region = Awskit.Region.of_string_exn "us-east-1" in
   let s3 = Awskit_s3_eio.create ~sw ~env ~region ~credentials () in
   match
-    Awskit_s3_eio.Object.put_string s3
+    Awskit_s3_eio.Object.put s3
       ~bucket:"my-bucket"
       ~key:"hello.txt"
-      "Hello, S3!"
+      ~body:(Awskit_s3_eio.Body.of_string "Hello, S3!")
+      ()
   with
   | Ok _ -> ()
   | Error err -> Fmt.epr "%a@." Awskit_s3.Error.pp err
@@ -130,10 +136,10 @@ let run () =
       Lwt_io.eprintf "%s\n" (Awskit_s3.Error.to_string_hum err)
   | Ok s3 ->
       let* result =
-        Awskit_s3_lwt_unix.Object.get_as_string s3
+        Awskit_s3_lwt_unix.Object.get s3
           ~bucket:"my-bucket"
           ~key:"hello.txt"
-          ~max_bytes:1_048_576L
+          ~consume:(Awskit_s3_lwt_unix.Reader.to_string ~max_bytes:1_048_576L)
           ()
       in
       match result with

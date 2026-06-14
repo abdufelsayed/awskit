@@ -32,13 +32,27 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
       no-op unless supplied, so production callers that want retry backoff
       should pass a real sleep function. *)
 
+  module Body : sig
+    include
+      Awskit_s3.BODY
+        with type 'a io := 'a Lwt.t
+         and type t = Runtime.request_body
+
+    val of_lwt_stream : content_length:int64 -> string Lwt_stream.t -> t
+  end
+
+  module Reader :
+    Awskit_s3.READER
+      with type 'a io := 'a Lwt.t
+       and type t = Runtime.response_body_reader
+
   (** Object operations returning [Lwt.t]. *)
   module Object :
     Awskit_s3.OBJECT
       with type connection := t
        and type 'a io := 'a Lwt.t
-       and type request_body := Runtime.request_body
-       and type response_body_reader := Runtime.response_body_reader
+       and type request_body := Body.t
+       and type response_body_reader := Reader.t
 
   (** Bucket operations returning [Lwt.t]. *)
   module Bucket :
@@ -49,7 +63,7 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     Awskit_s3.MULTIPART
       with type connection := t
        and type 'a io := 'a Lwt.t
-       and type request_body := Runtime.request_body
+       and type request_body := Body.t
 
   (** Presigned URL helpers returning [Lwt.t]. *)
   module Presigned :

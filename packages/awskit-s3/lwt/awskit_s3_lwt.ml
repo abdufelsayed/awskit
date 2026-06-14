@@ -30,6 +30,25 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
   module S3 = Awskit_s3.Make (Runtime)
 
+  module Body = struct
+    include S3.Body
+
+    let of_lwt_stream ~content_length stream =
+      let open Lwt.Infix in
+      of_stream ~content_length ~write:(fun writer ->
+          let rec loop () =
+            Lwt_stream.get stream >>= function
+            | None -> Lwt.return_ok ()
+            | Some chunk -> (
+                Writer.write_string writer chunk >>= function
+                | Ok () -> loop ()
+                | Error _ as error -> Lwt.return error)
+          in
+          loop ())
+  end
+
+  module Reader = S3.Reader
+
   let create ?ctx ?endpoint ?addressing_style ?endpoint_variant ?scheme ~region
       ~credentials ~clock ?retry_policy ?sleep () =
     let aws =

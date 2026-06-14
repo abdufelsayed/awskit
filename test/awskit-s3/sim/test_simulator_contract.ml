@@ -3,19 +3,61 @@ open Awskit_s3_test
 open Support
 
 module Simulator_subject = struct
-  include Simulator
+  type connection = Simulator.t
+  type request_body = Simulator.Body.t
+  type response_body_reader = Simulator.Reader.t
 
-  type connection = t
-  type request_body = Runtime.request_body
-  type response_body_reader = Runtime.response_body_reader
+  module Runtime = Simulator.Runtime
+
+  module Body = struct
+    type 'a io = 'a
+
+    include Simulator.Body
+  end
+
+  module Reader = struct
+    type 'a io = 'a
+
+    include Simulator.Reader
+  end
+
+  module Object = struct
+    type connection = Simulator.t
+    type 'a io = 'a
+    type request_body = Body.t
+    type response_body_reader = Reader.t
+
+    include Simulator.Object
+  end
+
+  module Bucket = struct
+    type connection = Simulator.t
+    type 'a io = 'a
+
+    include Simulator.Bucket
+  end
+
+  module Multipart = struct
+    type connection = Simulator.t
+    type 'a io = 'a
+    type request_body = Body.t
+
+    include Simulator.Multipart
+  end
+
+  module Presigned = struct
+    type connection = Simulator.t
+    type 'a io = 'a
+
+    include Simulator.Presigned
+  end
 
   let fresh () =
-    let clock = Clock.create ~now:test_time () in
-    let store = create_store ~clock () in
-    connect store ~credentials
+    let clock = Simulator.Clock.create ~now:test_time () in
+    let store = Simulator.create_store ~clock () in
+    Simulator.connect store ~credentials
 
-  let request_body_of_string = Runtime.Request_body.of_string
-  let read_response_body = Runtime.Response_body.read
+  let read_response_body = Simulator.Reader.read
 end
 
 module Simulator_contract = S3_contract.Make (Simulator_subject)
@@ -27,8 +69,9 @@ let test_simulator_slow_down_fault () =
     |> ok_or_fail "create bucket");
   Simulator.inject_fault conn Simulator.Slow_down;
   (match
-     Simulator.Object.put_string conn ~bucket:"contract-bucket" ~key:"fault"
-       "body"
+     Simulator.Object.put conn ~bucket:"contract-bucket" ~key:"fault"
+       ~body:(Simulator.Body.of_string "body")
+       ()
    with
   | Error error when Error.service_code error = Some "SlowDown" -> ()
   | Error error -> Alcotest.failf "unexpected fault: %a" Error.pp error
@@ -45,13 +88,15 @@ let test_simulator_response_lost_fault () =
     (Simulator.Bucket.create conn ~bucket:"contract-bucket" ()
     |> ok_or_fail "create bucket");
   ignore
-    (Simulator.Object.put_string conn ~bucket:"contract-bucket" ~key:"body"
-       "abcdef"
+    (Simulator.Object.put conn ~bucket:"contract-bucket" ~key:"body"
+       ~body:(Simulator.Body.of_string "abcdef")
+       ()
     |> ok_or_fail "put body");
   Simulator.inject_fault conn Simulator.Response_lost;
   match
-    Simulator.Object.get_as_string conn ~bucket:"contract-bucket" ~key:"body"
-      ~max_bytes:16L ()
+    Simulator.Object.get conn ~bucket:"contract-bucket" ~key:"body"
+      ~consume:(Simulator.Reader.to_string ~max_bytes:16L)
+      ()
   with
   | Error (Awskit.Error.Body _) -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error

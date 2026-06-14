@@ -66,10 +66,11 @@ let run env =
   let region = Awskit.Region.of_string_exn "us-east-1" in
   let s3 = Awskit_s3_eio.create ~sw ~env ~region ~credentials () in
   match
-    Awskit_s3_eio.Object.put_string s3
+    Awskit_s3_eio.Object.put s3
       ~bucket:"my-bucket"
       ~key:"hello.txt"
-      "Hello, S3!"
+      ~body:(Awskit_s3_eio.Body.of_string "Hello, S3!")
+      ()
   with
   | Ok _ -> ()
   | Error error -> Fmt.epr "%a@." Awskit_s3.Error.pp error
@@ -85,10 +86,10 @@ let run () =
       Lwt_io.eprintf "%a\n" Awskit_s3.Error.pp error
   | Ok s3 ->
       let* result =
-        Awskit_s3_lwt_unix.Object.get_as_string s3
+        Awskit_s3_lwt_unix.Object.get s3
           ~bucket:"my-bucket"
           ~key:"hello.txt"
-          ~max_bytes:1_048_576L
+          ~consume:(Awskit_s3_lwt_unix.Reader.to_string ~max_bytes:1_048_576L)
           ()
       in
       match result with

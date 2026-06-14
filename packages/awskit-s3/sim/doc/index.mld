@@ -38,9 +38,10 @@ ignore
    |> Result.get_ok);
 
 ignore
-  (Awskit_s3_sim.Object.put_string conn
+  (Awskit_s3_sim.Object.put conn
      ~bucket:"test-bucket"
      ~key:"hello.txt"
-     "hello"
+     ~body:(Awskit_s3_sim.Body.of_string "hello")
+     ()
    |> Result.get_ok)
 ]}

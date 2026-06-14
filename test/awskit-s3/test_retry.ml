@@ -9,7 +9,9 @@ let test_retry_slow_down_then_success () =
     Recording_runtime.connect [ response 503 slow_down; response 200 "" ]
   in
   let result =
-    Recording_s3.Object.put_string conn ~bucket:"my-bucket" ~key:"file" "body"
+    Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+      ~body:(Recording_s3.Body.of_string "body")
+      ()
   in
   ignore (ok_or_fail "retry put" result);
   Alcotest.(check int) "attempts" 2 (List.length conn.calls);
@@ -23,7 +25,9 @@ let test_retry_fatal_error_not_retried () =
     Recording_runtime.connect [ response 403 denied; response 200 "" ]
   in
   (match
-     Recording_s3.Object.put_string conn ~bucket:"my-bucket" ~key:"file" "body"
+     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+       ~body:(Recording_s3.Body.of_string "body")
+       ()
    with
   | Error error when Error.service_code error = Some "AccessDenied" -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
@@ -40,7 +44,9 @@ let test_retry_disabled_policy () =
       [ response 503 slow_down; response 200 "" ]
   in
   (match
-     Recording_s3.Object.put_string conn ~bucket:"my-bucket" ~key:"file" "body"
+     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+       ~body:(Recording_s3.Body.of_string "body")
+       ()
    with
   | Error error when Error.service_code error = Some "SlowDown" -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
@@ -224,8 +230,9 @@ let test_in_memory_helper_limit_error_uses_max_bytes () =
       ]
   in
   match
-    Recording_s3.Object.get_as_string conn ~bucket:"my-bucket" ~key:"file"
-      ~max_bytes:3L ()
+    Recording_s3.Object.get conn ~bucket:"my-bucket" ~key:"file"
+      ~consume:(Recording_s3.Reader.to_string ~max_bytes:3L)
+      ()
   with
   | Error (Awskit.Error.Body { message; limit = Some 3L }) ->
       Alcotest.(check string)

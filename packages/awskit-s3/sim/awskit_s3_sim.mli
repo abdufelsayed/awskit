@@ -50,16 +50,15 @@ val store : t -> store
 (** Direct-style runtime used by the simulator. *)
 module Runtime : Awskit_s3.RUNTIME with type 'a t = 'a and type connection = t
 
-type fault =
-  | Slow_down
-  | Internal_error
-  | Connection_reset
-  | Response_lost
-      (** Faults that can be injected before operations.
+module Body :
+  Awskit_s3.BODY with type 'a io := 'a and type t = Runtime.request_body
 
-          [Slow_down] and [Internal_error] simulate S3 service errors.
-          [Connection_reset] simulates a retryable transport failure.
-          [Response_lost] simulates a response-body failure. *)
+module Reader :
+  Awskit_s3.READER
+    with type 'a io := 'a
+     and type t = Runtime.response_body_reader
+
+type fault = Slow_down | Internal_error | Connection_reset | Response_lost
 
 val inject_fault : t -> fault -> unit
 (** Queue one fault for the next applicable operation. *)
@@ -124,9 +123,20 @@ val clear_history : store -> unit
 val objects_as_strings : store -> bucket:string -> (string * string) list
 (** Return current bucket objects whose bodies can be decoded as strings. *)
 
-include
-  S
+module Object :
+  Awskit_s3.OBJECT
     with type connection := t
      and type 'a io := 'a
-     and type request_body := Runtime.request_body
-     and type response_body_reader := Runtime.response_body_reader
+     and type request_body := Body.t
+     and type response_body_reader := Reader.t
+
+module Bucket : Awskit_s3.BUCKET with type connection := t and type 'a io := 'a
+
+module Multipart :
+  Awskit_s3.MULTIPART
+    with type connection := t
+     and type 'a io := 'a
+     and type request_body := Body.t
+
+module Presigned :
+  Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a

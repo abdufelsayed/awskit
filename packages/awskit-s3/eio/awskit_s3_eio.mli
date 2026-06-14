@@ -1,7 +1,9 @@
 (** Eio S3 adapter.
 
     Primitive operations are direct-style and stream through
-    [Awskit_eio.Runtime]. Local-path helpers live under {!Object.Transfer}. *)
+    {!Awskit_eio.Runtime}. Local-path body and reader helpers live under {!Body}
+    and {!Reader}; managed upload/download helpers live under
+    {!Object.Transfer}. *)
 
 type t
 (** Eio S3 client connection. Create with {!val:create}. *)
@@ -29,39 +31,56 @@ val create :
     explicit endpoint is supplied. [retry_policy] defaults to
     [Awskit.Retry.default]. *)
 
+module Body : sig
+  include Awskit_s3.BODY with type 'a io := 'a and type t = Runtime.request_body
+
+  val of_flow :
+    content_length:int64 ->
+    ?on_progress:(int64 -> unit) ->
+    'flow Eio.Flow.source ->
+    t
+  (** Build a non-replayable request body from an existing Eio source flow.
+      [content_length] must match the produced bytes, and the flow must remain
+      valid until the request finishes. *)
+
+  val of_path :
+    ?on_progress:(int64 -> unit) ->
+    _ Eio.Path.t ->
+    (t, Awskit_s3.Error.t) result
+  (** Build a replayable request body from a regular file path. The file is
+      reopened for each request attempt. *)
+end
+
+module Reader : sig
+  include
+    Awskit_s3.READER
+      with type 'a io := 'a
+       and type t = Runtime.response_body_reader
+
+  val to_flow :
+    ?on_progress:(int64 -> unit) ->
+    'flow Eio.Flow.sink ->
+    t ->
+    (unit, Awskit_s3.Error.t) result
+  (** Stream a response body into an existing Eio sink flow. *)
+
+  val to_path :
+    ?on_progress:(int64 -> unit) ->
+    _ Eio.Path.t ->
+    t ->
+    (unit, Awskit_s3.Error.t) result
+  (** Stream a response body into a private [0o600] file. *)
+end
+
 module Object : sig
   include
     Awskit_s3.OBJECT
       with type connection := t
        and type 'a io := 'a
-       and type request_body := Runtime.request_body
-       and type response_body_reader := Runtime.response_body_reader
+       and type request_body := Body.t
+       and type response_body_reader := Reader.t
 
   module Transfer : sig
-    val put_file :
-      t ->
-      bucket:string ->
-      key:string ->
-      ?options:Awskit_s3.Put_object.options ->
-      ?on_progress:(int64 -> unit) ->
-      path:_ Eio.Path.t ->
-      unit ->
-      (Awskit_s3.Put_object.result, Awskit_s3.Error.t) result
-    (** Stream a local file to S3. [on_progress], when provided, receives the
-        cumulative number of bytes written to the request body. *)
-
-    val get_file :
-      t ->
-      bucket:string ->
-      key:string ->
-      ?options:Awskit_s3.Get_object.options ->
-      ?on_progress:(int64 -> unit) ->
-      path:_ Eio.Path.t ->
-      unit ->
-      (Awskit_s3.Get_object.result, Awskit_s3.Error.t) result
-    (** Stream an S3 object to a local file. [on_progress], when provided,
-        receives the cumulative number of bytes written to disk. *)
-
     val upload_file :
       t ->
       bucket:string ->
@@ -122,7 +141,7 @@ module Multipart :
   Awskit_s3.MULTIPART
     with type connection := t
      and type 'a io := 'a
-     and type request_body := Runtime.request_body
+     and type request_body := Body.t
 
 (** Presigned URL helpers using the client's region, credentials, clock, and
     endpoint configuration. *)
