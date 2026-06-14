@@ -5,10 +5,9 @@ module type SUBJECT = sig
   include S with type 'a io := 'a
 
   val fresh : unit -> connection
-  val request_body_of_string : string -> request_body
 
   val read_response_body :
-    response_body_reader -> bytes -> off:int -> len:int -> (int, Error.t) result
+    Reader.t -> bytes -> off:int -> len:int -> (int, Error.t) result
 end
 
 module Make (Client : SUBJECT) = struct
@@ -17,10 +16,19 @@ module Make (Client : SUBJECT) = struct
   let create_bucket conn =
     ignore (Client.Bucket.create conn ~bucket () |> ok_or_fail "create bucket")
 
+  let put_object_string conn ~bucket ~key ?options value =
+    Client.Object.put conn ~bucket ~key ?options
+      ~body:(Client.Body.of_string value)
+      ()
+
+  let get_object_as_string conn ~bucket ~key ?options ~max_bytes () =
+    Client.Object.get conn ~bucket ~key ?options
+      ~consume:(Client.Reader.to_string ~max_bytes)
+      ()
+
   let put_string conn key value =
     ignore
-      (Client.Object.put_string conn ~bucket ~key value
-      |> ok_or_fail ("put " ^ key))
+      (put_object_string conn ~bucket ~key value |> ok_or_fail ("put " ^ key))
 
   let require_version label = function
     | Some version_id -> version_id
@@ -72,15 +80,14 @@ module Make (Client : SUBJECT) = struct
       }
     in
     let put =
-      Client.Object.put_string conn ~bucket ~key:"hello.txt" ~options "hello"
+      put_object_string conn ~bucket ~key:"hello.txt" ~options "hello"
       |> ok_or_fail "put object"
     in
     Alcotest.(check bool) "put etag" true (Option.is_some put.etag);
     check_checksum "put checksum" Object.Checksum.Algorithm.Sha256
       "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" put.checksum;
     let info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"hello.txt" ~max_bytes:16L
-        ()
+      get_object_as_string conn ~bucket ~key:"hello.txt" ~max_bytes:16L ()
       |> ok_or_fail "get object"
     in
     Alcotest.(check string) "body" "hello" body;
@@ -114,7 +121,7 @@ module Make (Client : SUBJECT) = struct
     create_bucket conn;
     ignore
       (Client.Object.put conn ~bucket ~key:"stream.txt"
-         ~body:(Client.request_body_of_string "abcdef")
+         ~body:(Client.Body.of_string "abcdef")
          ()
       |> ok_or_fail "put streaming");
     let consume reader =
@@ -137,7 +144,7 @@ module Make (Client : SUBJECT) = struct
     let body = String.concat "" (List.init chunks (fun _ -> chunk)) in
     ignore
       (Client.Object.put conn ~bucket ~key:"large-stream.bin"
-         ~body:(Client.request_body_of_string body)
+         ~body:(Client.Body.of_string body)
          ()
       |> ok_or_fail "put large stream");
     let consume reader =
@@ -183,8 +190,8 @@ module Make (Client : SUBJECT) = struct
       }
     in
     ignore
-      (Client.Object.put_string conn ~bucket ~key:"range.txt"
-         ~options:put_options "abcdefghij"
+      (put_object_string conn ~bucket ~key:"range.txt" ~options:put_options
+         "abcdefghij"
       |> ok_or_fail "put range source");
     let range_options =
       {
@@ -193,8 +200,8 @@ module Make (Client : SUBJECT) = struct
       }
     in
     let info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"range.txt"
-        ~options:range_options ~max_bytes:16L ()
+      get_object_as_string conn ~bucket ~key:"range.txt" ~options:range_options
+        ~max_bytes:16L ()
       |> ok_or_fail "get byte range"
     in
     Alcotest.(check string) "range body" "cdef" body;
@@ -210,8 +217,8 @@ module Make (Client : SUBJECT) = struct
       { Get_object.default_options with range = Some (Range.suffix_exn 3L) }
     in
     let _info, suffix =
-      Client.Object.get_as_string conn ~bucket ~key:"range.txt"
-        ~options:suffix_options ~max_bytes:16L ()
+      get_object_as_string conn ~bucket ~key:"range.txt" ~options:suffix_options
+        ~max_bytes:16L ()
       |> ok_or_fail "get suffix range"
     in
     Alcotest.(check string) "suffix body" "hij" suffix;
@@ -219,7 +226,7 @@ module Make (Client : SUBJECT) = struct
       { Get_object.default_options with range = Some (Range.from_exn 99L) }
     in
     expect_status "invalid range" 416
-      (Client.Object.get_as_string conn ~bucket ~key:"range.txt"
+      (get_object_as_string conn ~bucket ~key:"range.txt"
          ~options:invalid_range_options ~max_bytes:16L ());
     ignore
       (Client.Object.copy conn ~source_bucket:bucket ~source_key:"range.txt"
@@ -339,18 +346,17 @@ module Make (Client : SUBJECT) = struct
          Bucket.Versioning.Status.Enabled
       |> ok_or_fail "enable versioning");
     let put1 =
-      Client.Object.put_string conn ~bucket ~key:"versioned.txt" "one"
+      put_object_string conn ~bucket ~key:"versioned.txt" "one"
       |> ok_or_fail "put version one"
     in
     let v1 = require_version "put version one" put1.version_id in
     let put2 =
-      Client.Object.put_string conn ~bucket ~key:"versioned.txt" "two"
+      put_object_string conn ~bucket ~key:"versioned.txt" "two"
       |> ok_or_fail "put version two"
     in
     let v2 = require_version "put version two" put2.version_id in
     let info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"versioned.txt"
-        ~max_bytes:16L ()
+      get_object_as_string conn ~bucket ~key:"versioned.txt" ~max_bytes:16L ()
       |> ok_or_fail "get current version"
     in
     Alcotest.(check string) "current body" "two" body;
@@ -362,8 +368,8 @@ module Make (Client : SUBJECT) = struct
       { Get_object.default_options with version_id = Some v1 }
     in
     let info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"versioned.txt"
-        ~max_bytes:16L ~options:previous_options ()
+      get_object_as_string conn ~bucket ~key:"versioned.txt" ~max_bytes:16L
+        ~options:previous_options ()
       |> ok_or_fail "get previous version"
     in
     Alcotest.(check string) "previous body" "one" body;
@@ -409,8 +415,8 @@ module Make (Client : SUBJECT) = struct
       (Some (Object.Version_id.to_string v1))
       (version_string copy_previous.copy_source_version_id);
     let _info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"copy-previous.txt"
-        ~max_bytes:16L ()
+      get_object_as_string conn ~bucket ~key:"copy-previous.txt" ~max_bytes:16L
+        ()
       |> ok_or_fail "get copied previous"
     in
     Alcotest.(check string) "copied previous body" "one" body;
@@ -421,7 +427,7 @@ module Make (Client : SUBJECT) = struct
     let part =
       Client.Multipart.upload_part conn ~bucket ~key:"multi-versioned.txt"
         ~upload_id:upload.upload.upload_id ~part_number:1
-        ~body:(Client.request_body_of_string "multipart")
+        ~body:(Client.Body.of_string "multipart")
         ()
       |> ok_or_fail "upload versioned part"
     in
@@ -446,8 +452,8 @@ module Make (Client : SUBJECT) = struct
       { Get_object.default_options with version_id = Some marker }
     in
     expect_status "get delete marker version" 405
-      (Client.Object.get_as_string conn ~bucket ~key:"versioned.txt"
-         ~max_bytes:16L ~options:marker_get_options ());
+      (get_object_as_string conn ~bucket ~key:"versioned.txt" ~max_bytes:16L
+         ~options:marker_get_options ());
     let versions_options =
       {
         List_object_versions.default_options with
@@ -507,8 +513,8 @@ module Make (Client : SUBJECT) = struct
       { Get_object.default_options with version_id = Some v2 }
     in
     let _info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"versioned.txt"
-        ~max_bytes:16L ~options:version_two_options ()
+      get_object_as_string conn ~bucket ~key:"versioned.txt" ~max_bytes:16L
+        ~options:version_two_options ()
       |> ok_or_fail "get hidden version"
     in
     Alcotest.(check string) "hidden body" "two" body;
@@ -520,8 +526,7 @@ module Make (Client : SUBJECT) = struct
          ~options:delete_marker_options ()
       |> ok_or_fail "delete delete marker");
     let _info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"versioned.txt"
-        ~max_bytes:16L ()
+      get_object_as_string conn ~bucket ~key:"versioned.txt" ~max_bytes:16L ()
       |> ok_or_fail "get restored current"
     in
     Alcotest.(check string) "restored current" "two" body;
@@ -533,8 +538,7 @@ module Make (Client : SUBJECT) = struct
          ~options:delete_v2_options ()
       |> ok_or_fail "delete version two");
     let _info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"versioned.txt"
-        ~max_bytes:16L ()
+      get_object_as_string conn ~bucket ~key:"versioned.txt" ~max_bytes:16L ()
       |> ok_or_fail "get remaining version"
     in
     Alcotest.(check string) "remaining current" "one" body;
@@ -568,7 +572,7 @@ module Make (Client : SUBJECT) = struct
       (Client.Object.exists conn ~bucket ~key:"versioned.txt"
       |> ok_or_fail "exists after delete objects version");
     let enabled_put =
-      Client.Object.put_string conn ~bucket ~key:"suspended.txt" "enabled"
+      put_object_string conn ~bucket ~key:"suspended.txt" "enabled"
       |> ok_or_fail "put before suspend"
     in
     let enabled_version =
@@ -579,15 +583,14 @@ module Make (Client : SUBJECT) = struct
          Bucket.Versioning.Status.Suspended
       |> ok_or_fail "suspend versioning");
     let suspended_put =
-      Client.Object.put_string conn ~bucket ~key:"suspended.txt" "suspended"
+      put_object_string conn ~bucket ~key:"suspended.txt" "suspended"
       |> ok_or_fail "put while suspended"
     in
     Alcotest.(check (option string))
       "suspended put version" (Some "null")
       (version_string suspended_put.version_id);
     let _info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"suspended.txt"
-        ~max_bytes:16L ()
+      get_object_as_string conn ~bucket ~key:"suspended.txt" ~max_bytes:16L ()
       |> ok_or_fail "get suspended current"
     in
     Alcotest.(check string) "suspended current body" "suspended" body;
@@ -595,8 +598,8 @@ module Make (Client : SUBJECT) = struct
       { Get_object.default_options with version_id = Some enabled_version }
     in
     let _info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"suspended.txt"
-        ~max_bytes:16L ~options:enabled_options ()
+      get_object_as_string conn ~bucket ~key:"suspended.txt" ~max_bytes:16L
+        ~options:enabled_options ()
       |> ok_or_fail "get enabled version after suspend"
     in
     Alcotest.(check string) "enabled version body" "enabled" body;
@@ -645,8 +648,7 @@ module Make (Client : SUBJECT) = struct
          ~options:null_marker_options ()
       |> ok_or_fail "delete suspended marker");
     let _info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"suspended.txt"
-        ~max_bytes:16L ()
+      get_object_as_string conn ~bucket ~key:"suspended.txt" ~max_bytes:16L ()
       |> ok_or_fail "get restored enabled version"
     in
     Alcotest.(check string) "restored enabled body" "enabled" body
@@ -792,7 +794,7 @@ module Make (Client : SUBJECT) = struct
     create_bucket conn;
     put_string conn "large.txt" "abcdef";
     match
-      Client.Object.get_as_string conn ~bucket ~key:"large.txt" ~max_bytes:3L ()
+      get_object_as_string conn ~bucket ~key:"large.txt" ~max_bytes:3L ()
     with
     | Error (Awskit.Error.Body _) -> ()
     | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
@@ -802,7 +804,7 @@ module Make (Client : SUBJECT) = struct
     let conn = Client.fresh () in
     create_bucket conn;
     let put =
-      Client.Object.put_string conn ~bucket ~key:"conditional.txt" "body"
+      put_object_string conn ~bucket ~key:"conditional.txt" "body"
       |> ok_or_fail "put conditional"
     in
     let etag =
@@ -818,7 +820,7 @@ module Make (Client : SUBJECT) = struct
       }
     in
     expect_precondition_failed "put if absent existing"
-      (Client.Object.put_string conn ~bucket ~key:"conditional.txt"
+      (put_object_string conn ~bucket ~key:"conditional.txt"
          ~options:absent_options "new-body");
     let match_options =
       {
@@ -827,7 +829,7 @@ module Make (Client : SUBJECT) = struct
       }
     in
     expect_precondition_failed "put if match bad etag"
-      (Client.Object.put_string conn ~bucket ~key:"conditional.txt"
+      (put_object_string conn ~bucket ~key:"conditional.txt"
          ~options:match_options "new-body");
     let read_options =
       {
@@ -840,7 +842,7 @@ module Make (Client : SUBJECT) = struct
       }
     in
     expect_precondition_failed "get if match bad etag"
-      (Client.Object.get_as_string conn ~bucket ~key:"conditional.txt"
+      (get_object_as_string conn ~bucket ~key:"conditional.txt"
          ~options:read_options ~max_bytes:16L ());
     let not_modified_options =
       {
@@ -853,7 +855,7 @@ module Make (Client : SUBJECT) = struct
       }
     in
     expect_not_modified "get if none match etag"
-      (Client.Object.get_as_string conn ~bucket ~key:"conditional.txt"
+      (get_object_as_string conn ~bucket ~key:"conditional.txt"
          ~options:not_modified_options ~max_bytes:16L ());
     let head_not_modified_options =
       {
@@ -913,7 +915,7 @@ module Make (Client : SUBJECT) = struct
          ());
     let delete_key = "delete-conditional.txt" in
     let delete_put =
-      Client.Object.put_string conn ~bucket ~key:delete_key "abc"
+      put_object_string conn ~bucket ~key:delete_key "abc"
       |> ok_or_fail "put delete conditional"
     in
     let delete_etag =
@@ -985,14 +987,14 @@ module Make (Client : SUBJECT) = struct
     let part1 =
       Client.Multipart.upload_part conn ~bucket ~key:"multi.bin" ~upload_id
         ~part_number:1
-        ~body:(Client.request_body_of_string "hello-")
+        ~body:(Client.Body.of_string "hello-")
         ~options:part_options ()
       |> ok_or_fail "upload part 1"
     in
     let part2 =
       Client.Multipart.upload_part conn ~bucket ~key:"multi.bin" ~upload_id
         ~part_number:2
-        ~body:(Client.request_body_of_string "world")
+        ~body:(Client.Body.of_string "world")
         ~options:part_options ()
       |> ok_or_fail "upload part 2"
     in
@@ -1026,8 +1028,7 @@ module Make (Client : SUBJECT) = struct
     check_checksum "complete checksum" Object.Checksum.Algorithm.Sha256
       "r6J7RNQ7Aqn+pB0TztwuQBbPz4fF2/mQ5ZNmmqjOKG0=" complete.checksum;
     let info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"multi.bin" ~max_bytes:16L
-        ()
+      get_object_as_string conn ~bucket ~key:"multi.bin" ~max_bytes:16L ()
       |> ok_or_fail "get completed multipart object"
     in
     Alcotest.(check string) "completed body" "hello-world" body;
@@ -1041,7 +1042,7 @@ module Make (Client : SUBJECT) = struct
     ignore
       (Client.Multipart.upload_part conn ~bucket ~key:"abort.bin"
          ~upload_id:aborted_upload_id ~part_number:1
-         ~body:(Client.request_body_of_string "discarded")
+         ~body:(Client.Body.of_string "discarded")
          ()
       |> ok_or_fail "upload aborted part");
     ignore
@@ -1068,21 +1069,21 @@ module Make (Client : SUBJECT) = struct
     let first =
       Client.Multipart.upload_part conn ~bucket ~key:"edges.bin" ~upload_id
         ~part_number:1
-        ~body:(Client.request_body_of_string "first")
+        ~body:(Client.Body.of_string "first")
         ()
       |> ok_or_fail "upload first part"
     in
     let second =
       Client.Multipart.upload_part conn ~bucket ~key:"edges.bin" ~upload_id
         ~part_number:2
-        ~body:(Client.request_body_of_string "second")
+        ~body:(Client.Body.of_string "second")
         ()
       |> ok_or_fail "upload second part"
     in
     let overwritten =
       Client.Multipart.upload_part conn ~bucket ~key:"edges.bin" ~upload_id
         ~part_number:1
-        ~body:(Client.request_body_of_string "FIRST")
+        ~body:(Client.Body.of_string "FIRST")
         ()
       |> ok_or_fail "overwrite first part"
     in
@@ -1097,8 +1098,7 @@ module Make (Client : SUBJECT) = struct
          [ overwritten.part; second.part ]
       |> ok_or_fail "complete overwritten parts");
     let _info, body =
-      Client.Object.get_as_string conn ~bucket ~key:"edges.bin" ~max_bytes:16L
-        ()
+      get_object_as_string conn ~bucket ~key:"edges.bin" ~max_bytes:16L ()
       |> ok_or_fail "get edge multipart object"
     in
     Alcotest.(check string) "completed overwritten body" "FIRSTsecond" body;

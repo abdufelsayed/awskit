@@ -209,9 +209,9 @@ Runtime.with_response conn request body ~f:(fun response body ->
 ]}
 
 Service packages expose higher-level helpers when buffering is intentional.
-For example, [awskit-s3] uses [Object.get_as_string ~max_bytes]. These
-helpers keep response-size limits explicit when buffering or draining a
-streaming response.
+For example, [awskit-s3] adapters expose [Reader.to_string ~max_bytes] and
+[Reader.to_bytes ~max_bytes]. These helpers keep response-size limits explicit
+when buffering or draining a streaming response.
 
 Response body readers are scoped. After the consumer returns successfully, the
 runtime drains the remaining response body up to [max_response_drain_bytes] so

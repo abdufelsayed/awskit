@@ -15,6 +15,9 @@ let connect = Simulator_state.connect
 let store = Simulator_state.store
 
 module Runtime = Simulator_runtime.Runtime
+module S3 = Awskit_s3.Make (Runtime)
+module Body = S3.Body
+module Reader = S3.Reader
 
 type fault = Simulator_state.fault =
   | Slow_down

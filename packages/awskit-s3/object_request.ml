@@ -522,20 +522,5 @@ module Make (C : Request_context.S) = struct
       return (Result.map List.rev result)
   end
 
-  let put_string conn ~bucket ~key ?options body =
-    put conn ~bucket ~key ?options ~body:(R.Request_body.of_string body) ()
-
-  let put_bytes conn ~bucket ~key ?options body =
-    put conn ~bucket ~key ?options ~body:(R.Request_body.of_bytes body) ()
-
-  let get_as_string conn ~bucket ~key ~max_bytes ?options () =
-    let consume reader = read_body reader ~max_size:max_bytes in
-    get conn ~bucket ~key ?options ~consume ()
-
-  let get_as_bytes conn ~bucket ~key ~max_bytes ?options () =
-    let* result = get_as_string conn ~bucket ~key ~max_bytes ?options () in
-    return
-      (Result.map (fun (info, body) -> (info, Bytes.of_string body)) result)
-
   module Tagging = Object_tagging_request.Make (C)
 end

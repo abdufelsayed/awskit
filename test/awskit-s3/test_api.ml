@@ -62,6 +62,23 @@ let test_public_operation_aliases () =
   ignore (None : Abort_multipart_upload.result option);
   ignore (List_parts.default_options : List_parts.options)
 
+let test_native_body_api_compiles () =
+  let module S3 = Recording_s3 in
+  let _empty : S3.Body.t = S3.Body.empty in
+  let _string_body : S3.Body.t = S3.Body.of_string "hello" in
+  let _bytes_body : S3.Body.t = S3.Body.of_bytes (Bytes.of_string "hello") in
+  let _stream_body : S3.Body.t =
+    S3.Body.of_stream ~content_length:11L ~write:(fun writer ->
+        match S3.Body.Writer.write_string writer "hello " with
+        | Error _ as error -> error
+        | Ok () -> S3.Body.Writer.write_bytes writer (Bytes.of_string "world"))
+  in
+  let consume (reader : S3.Reader.t) =
+    S3.Reader.to_bytes ~max_bytes:1_048_576L reader
+  in
+  ignore (consume : S3.Reader.t -> (bytes, Error.t) result);
+  ()
+
 let service_error ?code ?message status =
   Awskit.Error.service
     {
@@ -102,6 +119,8 @@ let suite =
       [
         Alcotest.test_case "public operation aliases" `Quick
           test_public_operation_aliases;
+        Alcotest.test_case "native body api compiles" `Quick
+          test_native_body_api_compiles;
         Alcotest.test_case "error classifiers" `Quick test_error_classifiers;
       ] );
   ]

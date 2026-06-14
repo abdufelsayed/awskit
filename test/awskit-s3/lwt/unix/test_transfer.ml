@@ -33,7 +33,9 @@ module Runtime = struct
   type response_body_reader = { body : string; mutable offset : int }
 
   let write_error_after_bytes = ref None
+  let read_error_after_bytes = ref None
   let reset_write_fault () = write_error_after_bytes := None
+  let reset_read_fault () = read_error_after_bytes := None
   let return = Lwt.return
   let bind = Lwt.bind
   let now _ = Ptime.epoch
@@ -92,13 +94,17 @@ module Runtime = struct
   let read_response_body reader bytes ~off ~len =
     if len = 0 then Lwt.return_ok 0
     else
-      let remaining = String.length reader.body - reader.offset in
-      if remaining <= 0 then Lwt.return_ok 0
-      else
-        let copied = min len remaining in
-        String.blit reader.body reader.offset bytes off copied;
-        reader.offset <- reader.offset + copied;
-        Lwt.return_ok copied
+      match !read_error_after_bytes with
+      | Some limit when reader.offset >= limit ->
+          Lwt.return_error (Awskit.Error.body "simulated response read failure")
+      | _ ->
+          let remaining = String.length reader.body - reader.offset in
+          if remaining <= 0 then Lwt.return_ok 0
+          else
+            let copied = min len remaining in
+            String.blit reader.body reader.offset bytes off copied;
+            reader.offset <- reader.offset + copied;
+            Lwt.return_ok copied
 
   let with_response_body body ~consume = consume { body; offset = 0 }
   let discard_response_body _ = Lwt.return_ok ()
@@ -348,33 +354,22 @@ module S3 = struct
   end
 end
 
-module Transfer = Awskit_s3_lwt_unix__Transfer.Make (Runtime) (S3)
+module Core = Awskit_s3.Make (Runtime)
+
+module Body_reader =
+  Awskit_s3_lwt_unix__Transfer.Make_body_reader (Runtime) (Core)
+
+module Body = Body_reader.Body
+module Reader = Body_reader.Reader
+
+module Transfer =
+  Awskit_s3_lwt_unix__Transfer.Make (Runtime) (S3) (Body) (Reader)
 
 let remove_file path = try Sys.remove path with Sys_error _ -> ()
 
 let with_umask mask f =
   let previous = Unix.umask mask in
   Fun.protect ~finally:(fun () -> ignore (Unix.umask previous)) f
-
-let test_get_file_creates_private_file () =
-  let path = Filename.temp_file "awskit-download-perm" ".bin" in
-  let body = "secret downloaded file body" in
-  remove_file path;
-  Fun.protect
-    ~finally:(fun () -> remove_file path)
-    (fun () ->
-      with_umask 0 (fun () ->
-          match
-            Lwt_main.run
-              (Transfer.get_file
-                 (connection ~response_body:body ())
-                 ~bucket:"bucket" ~key:"key" ~path ())
-          with
-          | Error error ->
-              Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
-          | Ok _ -> ());
-      let stat = Unix.stat path in
-      Alcotest.(check int) "mode" 0o600 (stat.Unix.st_perm land 0o777))
 
 let write_file path body =
   let channel = open_out_bin path in
@@ -388,10 +383,86 @@ let read_file path =
     ~finally:(fun () -> close_in_noerr channel)
     (fun () -> really_input_string channel (in_channel_length channel))
 
+let download_temp_paths path =
+  let dir = Filename.dirname path in
+  let base = Filename.basename path in
+  let prefix = "." ^ base ^ ".awskit-download." in
+  Sys.readdir dir
+  |> Array.to_list
+  |> List.filter (fun name ->
+      let prefix_length = String.length prefix in
+      String.length name >= prefix_length
+      && String.sub name 0 prefix_length = prefix)
+  |> List.map (Filename.concat dir)
+
+let remove_download_temps path =
+  List.iter remove_file (download_temp_paths path)
+
+let response_reader body = { Runtime.body; offset = 0 }
+
+let check_body_descriptor label ~content_length ~replayable body =
+  let descriptor = Runtime.Request_body.descriptor body in
+  let open Awskit.Body.Request in
+  Alcotest.(check (option int64))
+    (label ^ " content length")
+    (Some content_length) descriptor.content_length;
+  Alcotest.(check bool) (label ^ " replayable") replayable descriptor.replayable
+
 let checksum_value : Awskit_s3.Object.Checksum.value =
   { algorithm = Awskit_s3.Object.Checksum.Algorithm.Sha256; value = "checksum" }
 
-let test_put_file_streams_file_body () =
+let test_body_of_lwt_stream_streams_chunks () =
+  Runtime.reset_write_fault ();
+  let conn = connection () in
+  let body =
+    Body.of_lwt_stream ~content_length:11L
+      (Lwt_stream.of_list [ "one"; "two"; "three" ])
+  in
+  check_body_descriptor "stream body" ~content_length:11L ~replayable:false body;
+  match
+    Lwt_main.run (S3.Object.put conn ~bucket:"bucket" ~key:"key" ~body ())
+  with
+  | Error error -> Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
+  | Ok _ ->
+      Alcotest.(check (option string))
+        "uploaded body" (Some "onetwothree") conn.Runtime.uploaded_body
+
+let test_body_of_channel_streams_channel () =
+  Runtime.reset_write_fault ();
+  let path = Filename.temp_file "awskit-upload-channel" ".bin" in
+  let payload = "channel upload body" in
+  write_file path payload;
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection () in
+      let progress = ref [] in
+      match
+        Lwt_main.run
+          (Lwt_io.with_file ~mode:Lwt_io.Input path (fun channel ->
+               let body =
+                 Body.of_channel
+                   ~content_length:(Int64.of_int (String.length payload))
+                   ~on_progress:(fun transferred ->
+                     progress := transferred :: !progress)
+                   channel
+               in
+               check_body_descriptor "channel body"
+                 ~content_length:(Int64.of_int (String.length payload))
+                 ~replayable:false body;
+               S3.Object.put conn ~bucket:"bucket" ~key:"key" ~body ()))
+      with
+      | Error error ->
+          Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
+      | Ok _ ->
+          Alcotest.(check (option string))
+            "uploaded body" (Some payload) conn.Runtime.uploaded_body;
+          Alcotest.(check (list int64))
+            "progress"
+            [ Int64.of_int (String.length payload) ]
+            (List.rev !progress))
+
+let test_body_of_path_streams_file_body () =
   Runtime.reset_write_fault ();
   let path = Filename.temp_file "awskit-upload" ".bin" in
   let body = "first line\nsecond line\n" in
@@ -403,10 +474,19 @@ let test_put_file_streams_file_body () =
       let progress = ref [] in
       match
         Lwt_main.run
-          (Transfer.put_file conn ~bucket:"bucket" ~key:"key" ~path
-             ~on_progress:(fun transferred ->
-               progress := transferred :: !progress)
-             ())
+          (Lwt.bind
+             (Body.of_path
+                ~on_progress:(fun transferred ->
+                  progress := transferred :: !progress)
+                path)
+             (function
+               | Error _ as error -> Lwt.return error
+               | Ok request_body ->
+                   check_body_descriptor "path body"
+                     ~content_length:(Int64.of_int (String.length body))
+                     ~replayable:true request_body;
+                   S3.Object.put conn ~bucket:"bucket" ~key:"key"
+                     ~body:request_body ()))
       with
       | Error error ->
           Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
@@ -418,7 +498,7 @@ let test_put_file_streams_file_body () =
             [ Int64.of_int (String.length body) ]
             (List.rev !progress))
 
-let test_put_file_returns_stream_write_error () =
+let test_body_of_path_returns_stream_write_error () =
   Runtime.write_error_after_bytes := Some 0;
   let path = Filename.temp_file "awskit-upload-error" ".bin" in
   write_file path "body that cannot be written";
@@ -430,7 +510,9 @@ let test_put_file_returns_stream_write_error () =
       let conn = connection () in
       match
         Lwt_main.run
-          (Transfer.put_file conn ~bucket:"bucket" ~key:"key" ~path ())
+          (Lwt.bind (Body.of_path path) (function
+            | Error _ as error -> Lwt.return error
+            | Ok body -> S3.Object.put conn ~bucket:"bucket" ~key:"key" ~body ()))
       with
       | Ok _ -> Alcotest.fail "upload succeeded despite write failure"
       | Error error ->
@@ -439,6 +521,83 @@ let test_put_file_returns_stream_write_error () =
           Alcotest.(check string)
             "error" "body: simulated upload write failure"
             (Fmt.str "%a" Awskit_s3.Error.pp error))
+
+let test_body_of_path_rejects_non_regular_file () =
+  let path = Filename.temp_file "awskit-upload-directory" "" in
+  remove_file path;
+  Unix.mkdir path 0o700;
+  Fun.protect
+    ~finally:(fun () -> Unix.rmdir path)
+    (fun () ->
+      match Lwt_main.run (Body.of_path path) with
+      | Error (Awskit.Error.Validation { field = Some "path"; _ }) -> ()
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "expected path validation")
+
+let test_reader_to_channel_writes_response_body () =
+  let path = Filename.temp_file "awskit-download-channel" ".bin" in
+  let body = "channel download body" in
+  remove_file path;
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let progress = ref [] in
+      match
+        Lwt_main.run
+          (Lwt_io.with_file ~mode:Lwt_io.Output path (fun channel ->
+               Reader.to_channel
+                 ~on_progress:(fun transferred ->
+                   progress := transferred :: !progress)
+                 channel (response_reader body)))
+      with
+      | Error error ->
+          Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
+      | Ok () ->
+          Alcotest.(check string) "body" body (read_file path);
+          Alcotest.(check (list int64))
+            "progress"
+            [ Int64.of_int (String.length body) ]
+            (List.rev !progress))
+
+let test_reader_to_path_creates_private_file () =
+  let path = Filename.temp_file "awskit-download-perm" ".bin" in
+  let body = "secret downloaded file body" in
+  write_file path "old body";
+  Unix.chmod path 0o666;
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      with_umask 0 (fun () ->
+          match Lwt_main.run (Reader.to_path path (response_reader body)) with
+          | Error error ->
+              Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
+          | Ok () -> ());
+      Alcotest.(check string) "body" body (read_file path);
+      let stat = Unix.stat path in
+      Alcotest.(check int) "mode" 0o600 (stat.Unix.st_perm land 0o777))
+
+let test_reader_to_path_failure_preserves_target () =
+  let path = Filename.temp_file "awskit-download-failure" ".bin" in
+  let old_body = "old body" in
+  let new_body = "new body" in
+  write_file path old_body;
+  Runtime.read_error_after_bytes := Some 0;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.reset_read_fault ();
+      remove_download_temps path;
+      remove_file path)
+    (fun () ->
+      match Lwt_main.run (Reader.to_path path (response_reader new_body)) with
+      | Ok () -> Alcotest.fail "download succeeded despite read failure"
+      | Error (Awskit.Error.Body _) ->
+          Alcotest.(check string) "preserved body" old_body (read_file path);
+          Alcotest.(check int)
+            "temp files removed" 0
+            (List.length (download_temp_paths path))
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error)
 
 let test_upload_file_uses_put_below_threshold () =
   Runtime.reset_write_fault ();
@@ -904,22 +1063,30 @@ let test_download_file_ranged_failure_preserves_target () =
       | Ok _ -> Alcotest.fail "download succeeded despite ranged failure"
       | Error _ ->
           Alcotest.(check string) "target preserved" original (read_file path);
-          Alcotest.(check bool)
-            "temp removed" false
-            (Sys.file_exists
-               (Filename.concat (Filename.dirname path)
-                  ("." ^ Filename.basename path ^ ".awskit-download.tmp"))))
+          Alcotest.(check int)
+            "temp files removed" 0
+            (List.length (download_temp_paths path)))
 
 let suite () =
   [
     ( "transfer",
       [
-        Alcotest.test_case "get creates private file" `Quick
-          test_get_file_creates_private_file;
-        Alcotest.test_case "put streams file body" `Quick
-          test_put_file_streams_file_body;
-        Alcotest.test_case "put returns stream write error" `Quick
-          test_put_file_returns_stream_write_error;
+        Alcotest.test_case "body streams lwt stream" `Quick
+          test_body_of_lwt_stream_streams_chunks;
+        Alcotest.test_case "body streams channel" `Quick
+          test_body_of_channel_streams_channel;
+        Alcotest.test_case "body streams path" `Quick
+          test_body_of_path_streams_file_body;
+        Alcotest.test_case "body path returns stream write error" `Quick
+          test_body_of_path_returns_stream_write_error;
+        Alcotest.test_case "body path rejects non-regular file" `Quick
+          test_body_of_path_rejects_non_regular_file;
+        Alcotest.test_case "reader writes channel" `Quick
+          test_reader_to_channel_writes_response_body;
+        Alcotest.test_case "reader path creates private file" `Quick
+          test_reader_to_path_creates_private_file;
+        Alcotest.test_case "reader path failure preserves target" `Quick
+          test_reader_to_path_failure_preserves_target;
         Alcotest.test_case "upload uses put below threshold" `Quick
           test_upload_file_uses_put_below_threshold;
         Alcotest.test_case "upload allows put checksum below threshold" `Quick

@@ -11,6 +11,63 @@ module type RUNTIME = sig
   (** Return S3 addressing/endpoint configuration for this connection. *)
 end
 
+module type BODY = sig
+  type +'a io
+  type t
+  type writer
+
+  val empty : t
+  val of_string : string -> t
+  val of_bytes : bytes -> t
+
+  val of_stream :
+    content_length:int64 ->
+    write:(writer -> (unit, Awskit.Error.t) result io) ->
+    t
+
+  val content_length : t -> int64 option
+
+  module Writer : sig
+    type t = writer
+
+    val write_string : t -> string -> (unit, Awskit.Error.t) result io
+    val write_bytes : t -> bytes -> (unit, Awskit.Error.t) result io
+  end
+end
+
+module type READER = sig
+  type +'a io
+  type t
+
+  val read : t -> bytes -> off:int -> len:int -> (int, Awskit.Error.t) result io
+  val next : ?chunk_size:int -> t -> (bytes option, Awskit.Error.t) result io
+
+  val fold :
+    ?chunk_size:int ->
+    t ->
+    init:'a ->
+    f:('a -> bytes -> ('a, Awskit.Error.t) result io) ->
+    ('a, Awskit.Error.t) result io
+
+  val iter :
+    ?chunk_size:int ->
+    t ->
+    f:(bytes -> (unit, Awskit.Error.t) result io) ->
+    (unit, Awskit.Error.t) result io
+
+  val to_bytes :
+    ?chunk_size:int ->
+    ?max_bytes:int64 ->
+    t ->
+    (bytes, Awskit.Error.t) result io
+
+  val to_string :
+    ?chunk_size:int ->
+    ?max_bytes:int64 ->
+    t ->
+    (string, Awskit.Error.t) result io
+end
+
 module type OBJECT = sig
   (** Object operations produced by runtime-backed S3 clients. *)
 
@@ -215,46 +272,6 @@ module type OBJECT = sig
       (Object.Versions.delete_marker list, Awskit.Error.t) result io
     (** Collect delete-marker entries across pages. *)
   end
-
-  val put_string :
-    connection ->
-    bucket:string ->
-    key:string ->
-    ?options:Object.Put.options ->
-    string ->
-    (Object.Put.result, Awskit.Error.t) result io
-  (** Upload a string as a replayable in-memory body. *)
-
-  val put_bytes :
-    connection ->
-    bucket:string ->
-    key:string ->
-    ?options:Object.Put.options ->
-    bytes ->
-    (Object.Put.result, Awskit.Error.t) result io
-  (** Upload bytes as a replayable in-memory body. *)
-
-  val get_as_string :
-    connection ->
-    bucket:string ->
-    key:string ->
-    max_bytes:int64 ->
-    ?options:Object.Get.options ->
-    unit ->
-    (Object.Get.result * string, Awskit.Error.t) result io
-  (** Read an object into a string, failing with a body-limit error if the
-      response exceeds [max_bytes]. *)
-
-  val get_as_bytes :
-    connection ->
-    bucket:string ->
-    key:string ->
-    max_bytes:int64 ->
-    ?options:Object.Get.options ->
-    unit ->
-    (Object.Get.result * bytes, Awskit.Error.t) result io
-  (** Read an object into bytes, failing with a body-limit error if the response
-      exceeds [max_bytes]. *)
 
   module Tagging : sig
     (** Object tagging operations. *)
@@ -694,6 +711,18 @@ module type S = sig
   type response_body_reader
   (** Scoped runtime response-body reader type. *)
 
+  module Runtime :
+    RUNTIME
+      with type connection = connection
+       and type 'a t = 'a io
+       and type request_body = request_body
+       and type response_body_reader = response_body_reader
+
+  module Body : BODY with type 'a io = 'a io and type t = request_body
+
+  module Reader :
+    READER with type 'a io = 'a io and type t = response_body_reader
+
   module Object :
     OBJECT
       with type connection = connection
@@ -789,6 +818,8 @@ module type Sigs = sig
   module List_parts = Multipart.List_parts
 
   module type RUNTIME = RUNTIME
+  module type BODY = BODY
+  module type READER = READER
   module type OBJECT = OBJECT
   module type BUCKET = BUCKET
   module type MULTIPART = MULTIPART

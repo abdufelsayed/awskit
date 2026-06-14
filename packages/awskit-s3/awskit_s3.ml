@@ -57,6 +57,11 @@ module Make (R : RUNTIME) = struct
   type request_body = R.request_body
   type response_body_reader = R.response_body_reader
 
+  module Runtime = R
+  module Streaming = Streaming.Make (R)
+  module Body = Streaming.Body
+  module Reader = Streaming.Reader
+
   module Context = struct
     module R = R
 

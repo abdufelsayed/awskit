@@ -30,8 +30,9 @@ let test_object_checksum_headers_and_response () =
     }
   in
   let put =
-    Recording_s3.Object.put_string conn ~bucket:"my-bucket" ~key:"file" ~options
-      "hello"
+    Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~options
+      ~body:(Recording_s3.Body.of_string "hello")
+      ()
     |> ok_or_fail "put checksum"
   in
   check_checksum "put response sha1" Object.Checksum.Algorithm.Sha1
@@ -82,8 +83,10 @@ let test_object_precondition_headers () =
     { Put_object.default_options with preconditions = write_preconditions }
   in
   ignore
-    (Recording_s3.Object.put_string conn ~bucket:"my-bucket" ~key:"file"
-       ~options:put_options "body"
+    (Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+       ~options:put_options
+       ~body:(Recording_s3.Body.of_string "body")
+       ()
     |> ok_or_fail "put preconditions");
   let read_preconditions =
     {
@@ -98,8 +101,10 @@ let test_object_precondition_headers () =
     { Get_object.default_options with preconditions = read_preconditions }
   in
   ignore
-    (Recording_s3.Object.get_as_string conn ~bucket:"my-bucket" ~key:"file"
-       ~options:get_options ~max_bytes:16L ()
+    (Recording_s3.Object.get conn ~bucket:"my-bucket" ~key:"file"
+       ~options:get_options
+       ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
+       ()
     |> ok_or_fail "get preconditions");
   let head_options =
     { Head_object.default_options with preconditions = read_preconditions }
@@ -370,8 +375,10 @@ let test_object_checksum_mode_and_expected_owner_headers () =
     }
   in
   ignore
-    (Recording_s3.Object.get_as_string conn ~bucket:"my-bucket" ~key:"file"
-       ~options:read_options ~max_bytes:16L ()
+    (Recording_s3.Object.get conn ~bucket:"my-bucket" ~key:"file"
+       ~options:read_options
+       ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
+       ()
     |> ok_or_fail "get checksum mode");
   let head_options =
     {

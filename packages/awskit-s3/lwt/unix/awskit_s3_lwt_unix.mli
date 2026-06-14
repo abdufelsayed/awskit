@@ -1,7 +1,8 @@
 (** Ready-to-use Lwt + Unix S3 adapter.
 
-    Primitive operations stream through [Awskit_lwt_unix.Runtime]. Local-path
-    helpers live under {!Object.Transfer}. *)
+    Primitive operations stream through {!Awskit_lwt_unix.Runtime}. Local-path
+    body and reader helpers live under {!Body} and {!Reader}; managed
+    upload/download helpers live under {!Object.Transfer}. *)
 
 type t
 (** Ready-to-use Lwt + Unix S3 client connection. Create with {!val:create}. *)
@@ -31,39 +32,62 @@ val create :
     [addressing_style], [endpoint_variant], and [scheme] configure S3 endpoint
     resolution when no explicit endpoint is supplied. *)
 
+module Body : sig
+  include
+    Awskit_s3.BODY with type 'a io := 'a Lwt.t and type t = Runtime.request_body
+
+  val of_lwt_stream : content_length:int64 -> string Lwt_stream.t -> t
+  (** Build a non-replayable request body from an existing Lwt stream.
+      [content_length] must match the produced bytes, and the stream must remain
+      valid until the request finishes. *)
+
+  val of_channel :
+    content_length:int64 ->
+    ?on_progress:(int64 -> unit) ->
+    Lwt_io.input_channel ->
+    t
+  (** Build a non-replayable request body from an existing input channel.
+      [content_length] must match the produced bytes, and the channel must
+      remain valid until the request finishes. *)
+
+  val of_path :
+    ?on_progress:(int64 -> unit) ->
+    string ->
+    (t, Awskit_s3.Error.t) result Lwt.t
+  (** Build a replayable request body from a regular file path. The file is
+      reopened for each request attempt. *)
+end
+
+module Reader : sig
+  include
+    Awskit_s3.READER
+      with type 'a io := 'a Lwt.t
+       and type t = Runtime.response_body_reader
+
+  val to_channel :
+    ?on_progress:(int64 -> unit) ->
+    Lwt_io.output_channel ->
+    t ->
+    (unit, Awskit_s3.Error.t) result Lwt.t
+  (** Stream a response body into an existing output channel. *)
+
+  val to_path :
+    ?on_progress:(int64 -> unit) ->
+    string ->
+    t ->
+    (unit, Awskit_s3.Error.t) result Lwt.t
+  (** Stream a response body into a private [0o600] file. *)
+end
+
 module Object : sig
   include
     Awskit_s3.OBJECT
       with type connection := t
        and type 'a io := 'a Lwt.t
-       and type request_body := Runtime.request_body
-       and type response_body_reader := Runtime.response_body_reader
+       and type request_body := Body.t
+       and type response_body_reader := Reader.t
 
   module Transfer : sig
-    val put_file :
-      t ->
-      bucket:string ->
-      key:string ->
-      ?options:Awskit_s3.Put_object.options ->
-      ?on_progress:(int64 -> unit) ->
-      path:string ->
-      unit ->
-      (Awskit_s3.Put_object.result, Awskit_s3.Error.t) result Lwt.t
-    (** Stream a local file to S3. [on_progress], when provided, receives the
-        cumulative number of bytes written to the request body. *)
-
-    val get_file :
-      t ->
-      bucket:string ->
-      key:string ->
-      ?options:Awskit_s3.Get_object.options ->
-      ?on_progress:(int64 -> unit) ->
-      path:string ->
-      unit ->
-      (Awskit_s3.Get_object.result, Awskit_s3.Error.t) result Lwt.t
-    (** Stream an S3 object to a local file. [on_progress], when provided,
-        receives the cumulative number of bytes written to disk. *)
-
     val upload_file :
       t ->
       bucket:string ->
@@ -127,7 +151,7 @@ module Multipart :
   Awskit_s3.MULTIPART
     with type connection := t
      and type 'a io := 'a Lwt.t
-     and type request_body := Runtime.request_body
+     and type request_body := Body.t
 
 (** Presigned URL helpers using the client's resolved region, credentials,
     clock, and endpoint configuration. *)
