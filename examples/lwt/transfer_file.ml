@@ -4,7 +4,9 @@ module S3 = Awskit_s3_lwt_unix
 let env name =
   match Sys.getenv_opt name with
   | Some value when String.trim value <> "" -> value
-  | _ -> failwith (Printf.sprintf "Set %s" name)
+  | _ ->
+      Awskit.Error.validation ~field:name "environment variable is required"
+      |> Awskit.Error.raise
 
 let env_default name default =
   match Sys.getenv_opt name with
@@ -13,18 +15,7 @@ let env_default name default =
 
 let unwrap label = function
   | Ok value -> value
-  | Error error ->
-      failwith (Format.asprintf "%s: %a" label Awskit_s3.Error.pp error)
-
-let bucket = env "AWSKIT_EXAMPLE_BUCKET"
-let upload_path = env_default "AWSKIT_EXAMPLE_FILE" "README.md"
-
-let key =
-  env_default "AWSKIT_EXAMPLE_KEY"
-    ("awskit-examples/files/" ^ Filename.basename upload_path)
-
-let download_path =
-  env_default "AWSKIT_EXAMPLE_DOWNLOAD" (Filename.temp_file "awskit-s3-" ".bin")
+  | Error error -> Awskit.Error.with_context label error |> Awskit.Error.raise
 
 let strategy_to_string = function
   | `Put -> "put-object"
@@ -37,6 +28,16 @@ let download_strategy_to_string = function
 let progress label bytes = Format.printf "%s %Ld bytes@." label bytes
 
 let run () =
+  let bucket = env "AWSKIT_EXAMPLE_BUCKET" in
+  let upload_path = env_default "AWSKIT_EXAMPLE_FILE" "README.md" in
+  let key =
+    env_default "AWSKIT_EXAMPLE_KEY"
+      ("awskit-examples/files/" ^ Filename.basename upload_path)
+  in
+  let download_path =
+    env_default "AWSKIT_EXAMPLE_DOWNLOAD"
+      (Filename.temp_file "awskit-s3-" ".bin")
+  in
   let s3 = S3.create () |> unwrap "create S3 client" in
   let* uploaded =
     S3.Object.Transfer.upload_file s3 ~bucket ~key ~path:upload_path
@@ -55,4 +56,17 @@ let run () =
     |> download_strategy_to_string);
   Lwt.return_unit
 
-let () = Lwt_main.run (run ())
+let main () =
+  Lwt.catch
+    (fun () ->
+      let* () = run () in
+      Lwt.return 0)
+    (function
+      | Awskit.Error.Awskit_error error ->
+          let* () =
+            Lwt_io.eprintf "error: %s\n" (Awskit.Error.to_string_hum error)
+          in
+          Lwt.return 1
+      | exn -> Lwt.fail exn)
+
+let () = exit (Lwt_main.run (main ()))
