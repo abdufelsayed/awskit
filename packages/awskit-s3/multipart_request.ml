@@ -23,6 +23,10 @@ module Make (C : Request_context.S) = struct
     let options =
       Option.value ~default:Create_multipart_upload.default_options options
     in
+    let return_error =
+      return_s3_error return_error ~operation:"CreateMultipartUpload" ~bucket
+        ~key
+    in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
@@ -93,6 +97,9 @@ module Make (C : Request_context.S) = struct
 
   let upload_part conn ~bucket ~key ~upload_id ~part_number ~body ?options () =
     let options = Option.value ~default:Upload_part.default_options options in
+    let return_error =
+      return_s3_error return_error ~operation:"UploadPart" ~bucket ~key
+    in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
@@ -161,6 +168,10 @@ module Make (C : Request_context.S) = struct
   let complete_upload conn ~bucket ~key ~upload_id ?options parts =
     let options =
       Option.value ~default:Complete_multipart_upload.default_options options
+    in
+    let return_error =
+      return_s3_error return_error ~operation:"CompleteMultipartUpload" ~bucket
+        ~key
     in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -252,6 +263,10 @@ module Make (C : Request_context.S) = struct
     let options =
       Option.value ~default:Abort_multipart_upload.default_options options
     in
+    let return_error =
+      return_s3_error return_error ~operation:"AbortMultipartUpload" ~bucket
+        ~key
+    in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
@@ -284,6 +299,9 @@ module Make (C : Request_context.S) = struct
 
   let list_parts conn ~bucket ~key ~upload_id ?options () =
     let options = Option.value ~default:List_parts.default_options options in
+    let return_error =
+      return_s3_error return_error ~operation:"ListParts" ~bucket ~key
+    in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
@@ -377,8 +395,11 @@ module Make (C : Request_context.S) = struct
 
     let fold_pages conn ~bucket ~key ~upload_id ?options ?max_pages ~init ~f ()
         =
+      let return_context_error =
+        return_s3_error return_error ~operation:"ListParts" ~bucket ~key
+      in
       match validate_max_pages max_pages with
-      | Error error -> return_error error
+      | Error error -> return_context_error error
       | Ok () ->
           let base = Option.value ~default:List_parts.default_options options in
           let rec loop part_number_marker page_count acc =
@@ -389,7 +410,7 @@ module Make (C : Request_context.S) = struct
             | Ok page -> (
                 let* next_acc = f acc page in
                 match next_acc with
-                | Error error -> return_error error
+                | Error error -> return_context_error error
                 | Ok acc -> (
                     let page_count = page_count + 1 in
                     if not page.is_truncated then return_ok acc
@@ -401,7 +422,7 @@ module Make (C : Request_context.S) = struct
                           match page.next_part_number_marker with
                           | Some marker -> loop (Some marker) page_count acc
                           | None ->
-                              return_error
+                              return_context_error
                                 (decode
                                    "truncated list-parts response missing \
                                     NextPartNumberMarker"))))

@@ -86,7 +86,12 @@ let test_simulator_stream_request_body_error_propagates () =
         | Ok () -> Error stream_error)
   in
   (match Simulator.Object.put conn ~bucket ~key:"bad" ~body () with
-  | Error error when Awskit.Error.equal error stream_error -> ()
+  | Error error
+    when is_body_error error
+         && string_contains
+              (Awskit.Error.to_string_hum error)
+              ~substring:"simulator stream request body failed" ->
+      ()
   | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream request body error");
   match Simulator.Object.head conn ~bucket ~key:"bad" () with

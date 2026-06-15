@@ -9,40 +9,46 @@ open Simulator_runtime
 open Simulator_object_body
 
 let validate_opt f = function None -> Ok () | Some value -> f value
+let s3_uri ~bucket ~key = Fmt.str "s3://%s/%s" bucket key
+
+let with_put_context ~bucket ~key error =
+  Awskit.Error.with_operation ~service:"S3" ~name:"PutObject"
+    ~resource:(s3_uri ~bucket ~key) () error
 
 let put conn ~bucket ~key ?options ~body () =
   let options = Option.value ~default:Put_object.default_options options in
+  let return_error error = Error (with_put_context ~bucket ~key error) in
   match validate_bucket_key bucket key with
-  | Error error -> Error error
+  | Error error -> return_error error
   | Ok () -> (
       match require_bucket conn bucket with
-      | Error error -> Error error
+      | Error error -> return_error error
       | Ok bucket_state -> (
           match validate_metadata options.metadata with
-          | Error error -> Error error
+          | Error error -> return_error error
           | Ok () -> (
               match validate_tags options.tags with
-              | Error error -> Error error
+              | Error error -> return_error error
               | Ok () -> (
                   match
                     validate_opt validate_checksum_value options.checksum
                   with
-                  | Error error -> Error error
+                  | Error error -> return_error error
                   | Ok () -> (
                       match
                         operation_fault conn `Put_object bucket (Some key)
                       with
-                      | Some error -> Error error
+                      | Some error -> return_error error
                       | None -> (
                           match
                             ensure_write_preconditions
                               (current_object bucket_state key)
                               options.preconditions
                           with
-                          | Error error -> Error error
+                          | Error error -> return_error error
                           | Ok () -> (
                               match request_body_result body with
-                              | Error error -> Error error
+                              | Error error -> return_error error
                               | Ok body ->
                                   let etag = etag body in
                                   let checksum =

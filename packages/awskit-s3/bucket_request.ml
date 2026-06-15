@@ -24,8 +24,9 @@ module Make (C : Request_context.S) = struct
   let expected_owner_headers expected_bucket_owner =
     [] |> add_opt_header "x-amz-expected-bucket-owner" expected_bucket_owner
 
-  let get_xml ?expected_bucket_owner conn ~bucket ~subresource ~max_size ~parse
-      =
+  let get_xml ?expected_bucket_owner conn ~bucket ~operation ~subresource
+      ~max_size ~parse =
+    let return_error = return_s3_error return_error ~operation ~bucket in
     match validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
@@ -41,7 +42,9 @@ module Make (C : Request_context.S) = struct
                 | Error error -> return_error error
                 | Ok body -> return (parse body response)))
 
-  let put_xml ?expected_bucket_owner conn ~bucket ~subresource ~body =
+  let put_xml ?expected_bucket_owner conn ~bucket ~operation ~subresource ~body
+      =
+    let return_error = return_s3_error return_error ~operation ~bucket in
     match validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
@@ -64,7 +67,9 @@ module Make (C : Request_context.S) = struct
                 | Error error -> return_error error
                 | Ok () -> return_ok response))
 
-  let delete_subresource ?expected_bucket_owner conn ~bucket ~subresource =
+  let delete_subresource ?expected_bucket_owner conn ~bucket ~operation
+      ~subresource =
+    let return_error = return_s3_error return_error ~operation ~bucket in
     match validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
@@ -82,6 +87,9 @@ module Make (C : Request_context.S) = struct
 
   let create conn ~bucket ?options () =
     let options = Option.value ~default:Create_bucket.default_options options in
+    let return_error =
+      return_s3_error return_error ~operation:"CreateBucket" ~bucket
+    in
     match validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
@@ -108,6 +116,9 @@ module Make (C : Request_context.S) = struct
                 | Ok () -> return_ok { Create_bucket.response }))
 
   let delete ?expected_bucket_owner conn ~bucket =
+    let return_error =
+      return_s3_error return_error ~operation:"DeleteBucket" ~bucket
+    in
     match validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
@@ -123,6 +134,9 @@ module Make (C : Request_context.S) = struct
                 | Ok () -> return_ok { Delete_bucket.response }))
 
   let head ?expected_bucket_owner conn ~bucket =
+    let return_error =
+      return_s3_error return_error ~operation:"HeadBucket" ~bucket
+    in
     match validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
@@ -152,6 +166,7 @@ module Make (C : Request_context.S) = struct
     | Error error -> return_error error
 
   let list conn =
+    let return_error = return_s3_error return_error ~operation:"ListBuckets" in
     match root_request conn with
     | Error error -> return_error error
     | Ok request ->
@@ -167,6 +182,9 @@ module Make (C : Request_context.S) = struct
                      (Bucket_result_xml.parse_list body)))
 
   let get_location ?expected_bucket_owner conn ~bucket =
+    let return_error =
+      return_s3_error return_error ~operation:"GetBucketLocation" ~bucket
+    in
     match validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
@@ -189,6 +207,9 @@ module Make (C : Request_context.S) = struct
 
   module Policy = struct
     let get ?expected_bucket_owner conn ~bucket =
+      let return_error =
+        return_s3_error return_error ~operation:"GetBucketPolicy" ~bucket
+      in
       match validate_bucket bucket with
       | Error error -> return_error error
       | Ok () -> (
@@ -205,6 +226,9 @@ module Make (C : Request_context.S) = struct
                   | Ok body -> return (Policy.of_json body)))
 
     let put conn ~bucket ?expected_bucket_owner policy =
+      let return_error =
+        return_s3_error return_error ~operation:"PutBucketPolicy" ~bucket
+      in
       match validate_bucket bucket with
       | Error error -> return_error error
       | Ok () -> (
@@ -231,16 +255,18 @@ module Make (C : Request_context.S) = struct
 
     let delete ?expected_bucket_owner conn ~bucket =
       delete_subresource ?expected_bucket_owner conn ~bucket
-        ~subresource:"policy"
+        ~operation:"DeleteBucketPolicy" ~subresource:"policy"
   end
 
   module Versioning = struct
     let get ?expected_bucket_owner conn ~bucket =
       get_xml ?expected_bucket_owner conn ~bucket ~subresource:"versioning"
-        ~max_size:1_048_576L ~parse:Bucket_versioning_xml.parse
+        ~operation:"GetBucketVersioning" ~max_size:1_048_576L
+        ~parse:Bucket_versioning_xml.parse
 
     let put conn ~bucket ?expected_bucket_owner status =
       put_xml ?expected_bucket_owner conn ~bucket ~subresource:"versioning"
+        ~operation:"PutBucketVersioning"
         ~body:(Bucket_versioning_xml.xml (Some status))
   end
 
@@ -252,82 +278,99 @@ module Make (C : Request_context.S) = struct
 
     let get ?expected_bucket_owner conn ~bucket =
       get_xml ?expected_bucket_owner conn ~bucket ~subresource:"tagging"
-        ~max_size:1_048_576L ~parse
+        ~operation:"GetBucketTagging" ~max_size:1_048_576L ~parse
 
     let put conn ~bucket ?expected_bucket_owner tags =
+      let return_error =
+        return_s3_error return_error ~operation:"PutBucketTagging" ~bucket
+      in
       match validate_tags tags with
       | Error error -> return_error error
       | Ok () ->
           put_xml ?expected_bucket_owner conn ~bucket ~subresource:"tagging"
-            ~body:(xml_tags tags)
+            ~operation:"PutBucketTagging" ~body:(xml_tags tags)
 
     let delete ?expected_bucket_owner conn ~bucket =
       delete_subresource ?expected_bucket_owner conn ~bucket
-        ~subresource:"tagging"
+        ~operation:"DeleteBucketTagging" ~subresource:"tagging"
   end
 
   module Encryption = struct
     let get ?expected_bucket_owner conn ~bucket =
       get_xml ?expected_bucket_owner conn ~bucket ~subresource:"encryption"
-        ~max_size:1_048_576L ~parse:Bucket_encryption_xml.parse
+        ~operation:"GetBucketEncryption" ~max_size:1_048_576L
+        ~parse:Bucket_encryption_xml.parse
 
     let put conn ~bucket ?expected_bucket_owner config =
+      let return_error =
+        return_s3_error return_error ~operation:"PutBucketEncryption" ~bucket
+      in
       match Bucket_encryption_xml.validate_config config with
       | Error error -> return_error error
       | Ok () ->
           put_xml ?expected_bucket_owner conn ~bucket ~subresource:"encryption"
+            ~operation:"PutBucketEncryption"
             ~body:(Bucket_encryption_xml.xml config)
 
     let delete ?expected_bucket_owner conn ~bucket =
       delete_subresource ?expected_bucket_owner conn ~bucket
-        ~subresource:"encryption"
+        ~operation:"DeleteBucketEncryption" ~subresource:"encryption"
   end
 
   module Cors = struct
     let get ?expected_bucket_owner conn ~bucket =
       get_xml ?expected_bucket_owner conn ~bucket ~subresource:"cors"
-        ~max_size:1_048_576L ~parse:Bucket_cors_xml.parse
+        ~operation:"GetBucketCors" ~max_size:1_048_576L
+        ~parse:Bucket_cors_xml.parse
 
     let put conn ~bucket ?expected_bucket_owner config =
+      let return_error =
+        return_s3_error return_error ~operation:"PutBucketCors" ~bucket
+      in
       match Bucket_cors_xml.validate_config config with
       | Error error -> return_error error
       | Ok () ->
           put_xml ?expected_bucket_owner conn ~bucket ~subresource:"cors"
+            ~operation:"PutBucketCors"
             ~body:(Bucket_cors_xml.xml config)
 
     let delete ?expected_bucket_owner conn ~bucket =
-      delete_subresource ?expected_bucket_owner conn ~bucket ~subresource:"cors"
+      delete_subresource ?expected_bucket_owner conn ~bucket
+        ~operation:"DeleteBucketCors" ~subresource:"cors"
   end
 
   module Public_access_block = struct
     let get ?expected_bucket_owner conn ~bucket =
       get_xml ?expected_bucket_owner conn ~bucket
         ~subresource:"publicAccessBlock" ~max_size:1_048_576L
+        ~operation:"GetPublicAccessBlock"
         ~parse:Bucket_access_xml.Public_access_block.parse
 
     let put conn ~bucket ?expected_bucket_owner config =
       put_xml ?expected_bucket_owner conn ~bucket
-        ~subresource:"publicAccessBlock"
+        ~operation:"PutPublicAccessBlock" ~subresource:"publicAccessBlock"
         ~body:(Bucket_access_xml.Public_access_block.xml config)
 
     let delete ?expected_bucket_owner conn ~bucket =
       delete_subresource ?expected_bucket_owner conn ~bucket
-        ~subresource:"publicAccessBlock"
+        ~operation:"DeletePublicAccessBlock" ~subresource:"publicAccessBlock"
   end
 
   module Ownership_controls = struct
     let get ?expected_bucket_owner conn ~bucket =
       get_xml ?expected_bucket_owner conn ~bucket
         ~subresource:"ownershipControls" ~max_size:1_048_576L
+        ~operation:"GetBucketOwnershipControls"
         ~parse:Bucket_access_xml.Ownership_controls.parse
 
     let put conn ~bucket ?expected_bucket_owner config =
       put_xml ?expected_bucket_owner conn ~bucket
-        ~subresource:"ownershipControls"
+        ~operation:"PutBucketOwnershipControls" ~subresource:"ownershipControls"
         ~body:(Bucket_access_xml.Ownership_controls.xml config)
 
     let delete ?expected_bucket_owner conn ~bucket =
       delete_subresource ?expected_bucket_owner conn ~bucket
+        ~operation:"DeleteBucketOwnershipControls"
         ~subresource:"ownershipControls"
   end
 end

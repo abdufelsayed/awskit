@@ -38,6 +38,9 @@ module Make (C : Request_context.S) = struct
 
   let put conn ~bucket ~key ?options ~body () =
     let options = Option.value ~default:Put_object.default_options options in
+    let return_error =
+      return_s3_error return_error ~operation:"PutObject" ~bucket ~key
+    in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
@@ -89,6 +92,9 @@ module Make (C : Request_context.S) = struct
 
   let get conn ~bucket ~key ?options ~consume () =
     let options = Option.value ~default:Get_object.default_options options in
+    let return_error =
+      return_s3_error return_error ~operation:"GetObject" ~bucket ~key
+    in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
@@ -118,6 +124,9 @@ module Make (C : Request_context.S) = struct
 
   let head conn ~bucket ~key ?options () =
     let options = Option.value ~default:Head_object.default_options options in
+    let return_error =
+      return_s3_error return_error ~operation:"HeadObject" ~bucket ~key
+    in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
@@ -152,6 +161,9 @@ module Make (C : Request_context.S) = struct
 
   let delete conn ~bucket ~key ?options () =
     let options = Option.value ~default:Delete_object.default_options options in
+    let return_error =
+      return_s3_error return_error ~operation:"DeleteObject" ~bucket ~key
+    in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
@@ -179,6 +191,9 @@ module Make (C : Request_context.S) = struct
   let delete_objects conn ~bucket ~objects ?options () =
     let options =
       Option.value ~default:Delete_objects.default_options options
+    in
+    let return_error =
+      return_s3_error return_error ~operation:"DeleteObjects" ~bucket
     in
     match validate_bucket bucket with
     | Error error -> return_error error
@@ -219,8 +234,16 @@ module Make (C : Request_context.S) = struct
   let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
       ?options () =
     let options = Option.value ~default:Copy_object.default_options options in
+    let source_error =
+      return_s3_error return_error ~operation:"CopyObject" ~bucket:source_bucket
+        ~key:source_key
+    in
+    let return_error =
+      return_s3_error return_error ~operation:"CopyObject"
+        ~bucket:destination_bucket ~key:destination_key
+    in
     match validate_bucket_key source_bucket source_key with
-    | Error error -> return_error error
+    | Error error -> source_error error
     | Ok () -> (
         match validate_bucket_key destination_bucket destination_key with
         | Error error -> return_error error
@@ -288,6 +311,9 @@ module Make (C : Request_context.S) = struct
     let options =
       Option.value ~default:List_object_versions.default_options options
     in
+    let return_error =
+      return_s3_error return_error ~operation:"ListObjectVersions" ~bucket
+    in
     match validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
@@ -323,6 +349,9 @@ module Make (C : Request_context.S) = struct
   let list conn ~bucket ?options () =
     let options =
       Option.value ~default:List_objects_v2.default_options options
+    in
+    let return_error =
+      return_s3_error return_error ~operation:"ListObjectsV2" ~bucket
     in
     match validate_bucket bucket with
     | Error error -> return_error error
@@ -383,8 +412,11 @@ module Make (C : Request_context.S) = struct
       }
 
     let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
+      let return_context_error =
+        return_s3_error return_error ~operation:"ListObjectsV2" ~bucket
+      in
       match validate_max_pages max_pages with
-      | Error error -> return_error error
+      | Error error -> return_context_error error
       | Ok () ->
           let base =
             Option.value ~default:List_objects_v2.default_options options
@@ -397,7 +429,7 @@ module Make (C : Request_context.S) = struct
             | Ok page -> (
                 let* next_acc = f acc page in
                 match next_acc with
-                | Error error -> return_error error
+                | Error error -> return_context_error error
                 | Ok acc -> (
                     let page_count = page_count + 1 in
                     if not page.is_truncated then return_ok acc
@@ -409,7 +441,7 @@ module Make (C : Request_context.S) = struct
                           match page.next_continuation_token with
                           | Some token -> loop (Some token) page_count acc
                           | None ->
-                              return_error
+                              return_context_error
                                 (decode
                                    "truncated list response missing \
                                     NextContinuationToken"))))
@@ -463,8 +495,11 @@ module Make (C : Request_context.S) = struct
       }
 
     let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
+      let return_context_error =
+        return_s3_error return_error ~operation:"ListObjectVersions" ~bucket
+      in
       match validate_max_pages max_pages with
-      | Error error -> return_error error
+      | Error error -> return_context_error error
       | Ok () ->
           let base =
             Option.value ~default:List_object_versions.default_options options
@@ -476,7 +511,7 @@ module Make (C : Request_context.S) = struct
             | Ok page -> (
                 let* next_acc = f acc page in
                 match next_acc with
-                | Error error -> return_error error
+                | Error error -> return_context_error error
                 | Ok acc -> (
                     let page_count = page_count + 1 in
                     if not page.is_truncated then return_ok acc
@@ -489,7 +524,7 @@ module Make (C : Request_context.S) = struct
                           | Some _ ->
                               loop (options_for_page base page) page_count acc
                           | None ->
-                              return_error
+                              return_context_error
                                 (decode
                                    "truncated version listing response missing \
                                     NextKeyMarker"))))

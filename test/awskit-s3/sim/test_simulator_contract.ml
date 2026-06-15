@@ -106,6 +106,23 @@ let test_simulator_response_lost_fault () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected response-lost body error"
 
+let test_s3_operation_context_for_validation_error () =
+  let conn = Simulator_subject.fresh () in
+  match
+    Simulator.Object.put conn ~bucket:"ab" ~key:"k"
+      ~body:(Simulator.Body.of_string "body")
+      ()
+  with
+  | Ok _ -> Alcotest.fail "expected invalid bucket"
+  | Error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions operation" true
+        (string_contains text ~substring:"PutObject");
+      Alcotest.(check bool)
+        "mentions resource" true
+        (string_contains text ~substring:"s3://ab/k")
+
 let suite =
   [
     ("simulator contract", Simulator_contract.cases);
@@ -114,5 +131,7 @@ let suite =
         Alcotest.test_case "slow down" `Quick test_simulator_slow_down_fault;
         Alcotest.test_case "response lost" `Quick
           test_simulator_response_lost_fault;
+        Alcotest.test_case "operation context for validation" `Quick
+          test_s3_operation_context_for_validation_error;
       ] );
   ]

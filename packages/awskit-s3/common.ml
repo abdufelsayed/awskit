@@ -45,6 +45,18 @@ let ptime_of_string value =
 
 let ptime_to_header value = Ptime.to_rfc3339 value
 
+let s3_uri ?key bucket =
+  match key with
+  | None -> Fmt.str "s3://%s" bucket
+  | Some key -> Fmt.str "s3://%s/%s" bucket key
+
+let with_s3_operation ~operation ?bucket ?key error =
+  let resource = Option.map (fun bucket -> s3_uri ?key bucket) bucket in
+  Awskit.Error.with_operation ~service:"S3" ~name:operation ?resource () error
+
+let return_s3_error return_error ~operation ?bucket ?key error =
+  return_error (with_s3_operation ~operation ?bucket ?key error)
+
 module Xml = struct
   let el name children = `El ((("", name), []), children)
   let text name value = el name [ `Data value ]
