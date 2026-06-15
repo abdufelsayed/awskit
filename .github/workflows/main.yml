@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, release/**]
   schedule:
     # Prime the opam and dune caches every Monday.
     - cron: 0 1 * * MON
@@ -37,6 +37,7 @@ jobs:
           - ubuntu-latest
           - macos-latest
         ocaml-compiler:
+          - "4.14"
           - "5"
         local-packages:
           - |
