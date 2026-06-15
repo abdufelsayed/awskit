@@ -587,6 +587,17 @@ let test_with_response_body_drain_enforces_limit () =
           Lwt.return_ok ()))
   |> expect_body_limit "scoped drain limit" 3L
 
+let test_with_response_body_preserves_consumer_error () =
+  let consumer_error = Awskit.Error.body "consumer failed" in
+  with_limited_response ~max_response_drain_bytes:3 "abcdef" ~f:(fun body ->
+      LimitedAws.Runtime.Response_body.with_reader body ~consume:(fun _ ->
+          Lwt.return_error consumer_error))
+  |> function
+  | Error error when Awskit.Error.equal error consumer_error -> ()
+  | Error error ->
+      Alcotest.failf "expected consumer error, got: %a" Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "expected consumer error"
+
 let suite =
   [
     ( "integration:connection",
@@ -616,5 +627,7 @@ let suite =
           test_discard_response_body_enforces_limit;
         Alcotest.test_case "scoped drain body limit" `Quick
           test_with_response_body_drain_enforces_limit;
+        Alcotest.test_case "consumer error wins over drain error" `Quick
+          test_with_response_body_preserves_consumer_error;
       ] );
   ]

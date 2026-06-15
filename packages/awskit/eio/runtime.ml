@@ -413,7 +413,7 @@ let with_response_body (body : response_body) ~consume =
   | Error _ as error -> (
       match discard_response_body_reader reader body with
       | Ok () -> error
-      | Error _ as drain_error -> drain_error)
+      | Error _ -> error)
 
 let discard_response_body (body : response_body) =
   discard_response_body_reader { body = body.body; chunk = ""; offset = 0 } body

@@ -398,6 +398,18 @@ let test_with_response_body_drain_enforces_limit _env =
   Awskit_eio__Runtime.Response_body.with_reader body ~consume:(fun _ -> Ok ())
   |> expect_body_limit "scoped drain limit" 3L
 
+let test_with_response_body_preserves_consumer_error _env =
+  let consumer_error = Awskit.Error.body "consumer failed" in
+  let body = eio_response_body ~max_response_drain_bytes:3 "abcdef" in
+  match
+    Awskit_eio__Runtime.Response_body.with_reader body ~consume:(fun _ ->
+        Error consumer_error)
+  with
+  | Error error when Awskit.Error.equal error consumer_error -> ()
+  | Error error ->
+      Alcotest.failf "expected consumer error, got: %a" Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "expected consumer error"
+
 let suite env =
   [
     ( "integration:connection",
@@ -433,5 +445,7 @@ let suite env =
             test_discard_response_body_enforces_limit env);
         Alcotest.test_case "scoped drain body limit" `Quick (fun () ->
             test_with_response_body_drain_enforces_limit env);
+        Alcotest.test_case "consumer error wins over drain error" `Quick
+          (fun () -> test_with_response_body_preserves_consumer_error env);
       ] );
   ]

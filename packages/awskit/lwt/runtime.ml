@@ -416,9 +416,14 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         { stream = Cohttp_lwt.Body.to_stream body.body; chunk = ""; offset = 0 }
       in
       Lwt.bind (consume reader) (fun result ->
-          Lwt.bind (drain_response_body_reader reader body) (function
-            | Ok () -> Lwt.return result
-            | Error error -> Lwt.return_error error))
+          match result with
+          | Ok _ ->
+              Lwt.bind (drain_response_body_reader reader body) (function
+                | Ok () -> Lwt.return result
+                | Error error -> Lwt.return_error error)
+          | Error _ ->
+              Lwt.bind (drain_response_body_reader reader body) (fun _ ->
+                  Lwt.return result))
 
     let discard_response_body body =
       let reader =
