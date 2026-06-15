@@ -355,6 +355,24 @@ let test_stream_request_body_success_response_body_is_scoped env =
             (String.length body);
           Alcotest.(check string) "response body" response_body body)
 
+let test_callback_exception_is_not_transport_error env =
+  let callback_exn = Failure "callback exploded" in
+  with_eio_early_response_server env ~status:200 ~response_body:"ok"
+    ~read_request_body:false (fun endpoint ->
+      Eio.Switch.run @@ fun sw ->
+      let conn = request_conn env sw in
+      let request = request_body_request_for_endpoint endpoint in
+      let body = Awskit_eio__Runtime.Request_body.of_string "ok" in
+      try
+        ignore
+          (Awskit_eio__Runtime.with_response conn request body
+             ~f:(fun _response _body -> raise callback_exn)
+            : (unit, Awskit.Error.t) Result.t);
+        Alcotest.fail "expected callback exception"
+      with
+      | exn when Stdlib.( == ) exn callback_exn -> ()
+      | exn -> Alcotest.failf "unexpected exception: %s" (Exn.to_string exn))
+
 let eio_response_body ~max_response_drain_bytes body =
   {
     Awskit_eio__Runtime.body = Cohttp_eio.Body.of_string body;
@@ -409,6 +427,8 @@ let suite env =
         Alcotest.test_case "stream request body success response body is scoped"
           `Quick (fun () ->
             test_stream_request_body_success_response_body_is_scoped env);
+        Alcotest.test_case "callback exception is not transport error" `Quick
+          (fun () -> test_callback_exception_is_not_transport_error env);
         Alcotest.test_case "discard body limit" `Quick (fun () ->
             test_discard_response_body_enforces_limit env);
         Alcotest.test_case "scoped drain body limit" `Quick (fun () ->

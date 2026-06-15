@@ -338,6 +338,28 @@ let test_stream_request_body_error_propagates () =
       Alcotest.failf "unexpected request body error: %a" Awskit.Error.pp error
   | Ok () -> Alcotest.fail "expected stream request body error"
 
+let test_callback_exception_is_not_transport_error () =
+  let callback_exn = Failure "callback exploded" in
+  let body = RequestAws.Runtime.Request_body.of_string "ok" in
+  match
+    Lwt_main.run
+      (Lwt.catch
+         (fun () ->
+           Lwt.map
+             (fun result -> `Returned result)
+             (RequestAws.Runtime.with_response (request_conn ())
+                request_body_request body ~f:(fun _response _body ->
+                  Lwt.fail callback_exn)))
+         (fun exn -> Lwt.return (`Raised exn)))
+  with
+  | `Raised exn when Stdlib.( == ) exn callback_exn -> ()
+  | `Raised exn ->
+      Alcotest.failf "unexpected raised exception: %s" (Exn.to_string exn)
+  | `Returned (Error error) ->
+      Alcotest.failf "callback exception became SDK error: %a" Awskit.Error.pp
+        error
+  | `Returned (Ok _) -> Alcotest.fail "expected callback exception"
+
 let expect_request_body_error label result =
   match result with
   | Error error when is_body_error error -> ()
@@ -549,6 +571,8 @@ let suite =
           test_stream_request_body_reaches_client;
         Alcotest.test_case "stream request body error propagates" `Quick
           test_stream_request_body_error_propagates;
+        Alcotest.test_case "callback exception is not transport error" `Quick
+          test_callback_exception_is_not_transport_error;
         Alcotest.test_case "stream request body early response preserves body"
           `Quick test_stream_request_body_early_response_preserves_body;
         Alcotest.test_case "stream request body backpressure limits read ahead"

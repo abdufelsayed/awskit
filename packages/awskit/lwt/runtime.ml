@@ -259,6 +259,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let make_response_body body =
       { body; max_response_drain_bytes = conn.max_response_drain_bytes }
     in
+    let exception Callback_raised of exn in
     let ready_request_body_result () =
       match Lwt.state bridge.finished with
       | Lwt.Return result -> Some result
@@ -268,7 +269,11 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     in
     let call_f response response_body =
       Log.debug (fun m -> m "HTTP %d" (Awskit.Response.status response));
-      f response response_body
+      Lwt.catch
+        (fun () -> f response response_body)
+        (function
+          | Lwt.Canceled -> Lwt.fail Lwt.Canceled
+          | exn -> Lwt.fail (Callback_raised exn))
     in
     let response =
       Lwt.catch
@@ -297,6 +302,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                         Lwt.return_unit)))
         (function
           | Lwt.Canceled -> Lwt.fail Lwt.Canceled
+          | Callback_raised exn -> Lwt.fail exn
           | exn ->
               let message = Exn.to_string exn in
               Log.warn (fun m -> m "HTTP call failed: %s" message);
