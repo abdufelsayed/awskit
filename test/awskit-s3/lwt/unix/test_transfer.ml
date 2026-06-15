@@ -1093,6 +1093,50 @@ let test_download_file_progress_exception_propagates () =
       | Returned (Ok _) ->
           Alcotest.fail "download succeeded despite callback exception")
 
+let test_download_file_ranged_progress_exception_propagates () =
+  let exception Progress_failed in
+  let path = Filename.temp_file "awskit-download-ranged-progress-exn" ".bin" in
+  remove_file path;
+  Fun.protect
+    ~finally:(fun () ->
+      remove_download_temps path;
+      remove_file path)
+    (fun () ->
+      let part_size = Awskit_s3.Transfer.min_part_size in
+      let body = String.make part_size 'a' ^ "tail" in
+      let conn = connection ~response_body:body () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = Int64.of_int part_size;
+          part_size;
+          concurrency = 2;
+        }
+      in
+      let observed =
+        Lwt_main.run
+          (Lwt.catch
+             (fun () ->
+               Lwt.map
+                 (fun result -> Returned result)
+                 (Transfer.download_file conn ~bucket:"bucket" ~key:"key"
+                    ~options
+                    ~on_progress:(fun _transferred -> raise Progress_failed)
+                    ~path ()))
+             (fun exn -> Lwt.return (Raised exn)))
+      in
+      Alcotest.(check bool)
+        "ranged get attempted" true
+        (List.length conn.Runtime.get_ranges > 0);
+      match observed with
+      | Raised exn ->
+          Alcotest.(check bool)
+            "raised callback exception" true (exn == Progress_failed)
+      | Returned (Error error) ->
+          Alcotest.failf "callback returned error: %a" Awskit_s3.Error.pp error
+      | Returned (Ok _) ->
+          Alcotest.fail "download succeeded despite callback exception")
+
 let test_download_file_uses_ranges_at_threshold () =
   let path = Filename.temp_file "awskit-download-ranged" ".bin" in
   remove_file path;
@@ -1279,6 +1323,8 @@ let suite () =
           test_download_file_uses_get_below_threshold;
         Alcotest.test_case "download progress exception propagates" `Quick
           test_download_file_progress_exception_propagates;
+        Alcotest.test_case "download ranged progress exception propagates"
+          `Quick test_download_file_ranged_progress_exception_propagates;
         Alcotest.test_case "download uses ranges at threshold" `Quick
           test_download_file_uses_ranges_at_threshold;
         Alcotest.test_case "download allows small range parts" `Quick
