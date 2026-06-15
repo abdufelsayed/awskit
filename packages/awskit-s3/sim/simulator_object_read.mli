@@ -11,6 +11,17 @@ val get :
   unit ->
   (Object.Get.result * 'a, Awskit.Error.t) result
 
+val find :
+  Simulator_state.t ->
+  bucket:string ->
+  key:string ->
+  ?options:Object.Get.options ->
+  consume:
+    (Simulator_runtime.Runtime.response_body_reader ->
+    ('a, Awskit.Error.t) result) ->
+  unit ->
+  ((Object.Get.result * 'a) option, Awskit.Error.t) result
+
 val head :
   Simulator_state.t ->
   bucket:string ->

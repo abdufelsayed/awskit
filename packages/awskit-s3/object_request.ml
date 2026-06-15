@@ -130,11 +130,46 @@ module Make (C : Request_context.S) = struct
                       (Result.map (fun value -> (info, value)) consumed)))
 
   let find conn ~bucket ~key ?options ~consume () =
-    let* result = get conn ~bucket ~key ?options ~consume () in
-    match result with
-    | Ok value -> return_ok (Some value)
-    | Error error when Error.is_not_found error -> return_ok None
+    let options = Option.value ~default:Get_object.default_options options in
+    let return_error =
+      return_s3_error return_error ~operation:"GetObject" ~bucket ~key
+    in
+    match validate_bucket_key bucket key with
     | Error error -> return_error error
+    | Ok () -> (
+        let headers =
+          read_precondition_headers options.preconditions
+          @ checksum_mode_header options.checksum_mode
+          |> add_opt_header "range" (Option.map Range.to_header options.range)
+          |> add_opt_header "x-amz-expected-bucket-owner"
+               options.expected_bucket_owner
+        in
+        let query =
+          match options.version_id with
+          | None -> []
+          | Some version_id ->
+              [ ("versionId", [ Object.Version_id.to_string version_id ]) ]
+        in
+        match object_request conn ~bucket ~key with
+        | Error error -> return_error error
+        | Ok request -> (
+            let* result =
+              with_empty_response conn ~method_:`GET ~request ~query ~headers
+                ~f:(fun response body ->
+                  match object_info response with
+                  | Error error -> return_ok (Error error)
+                  | Ok info ->
+                      let* consumed =
+                        R.Response_body.with_reader body ~consume
+                      in
+                      return_ok
+                        (Result.map (fun value -> (info, value)) consumed))
+            in
+            match result with
+            | Ok (Ok value) -> return_ok (Some value)
+            | Ok (Error error) -> return_error error
+            | Error error when Error.is_not_found error -> return_ok None
+            | Error error -> return_error error))
 
   let head conn ~bucket ~key ?options () =
     let options = Option.value ~default:Head_object.default_options options in

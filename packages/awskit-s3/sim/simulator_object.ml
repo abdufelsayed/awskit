@@ -21,13 +21,7 @@ module Object = struct
 
   let put = Simulator_object_write.put
   let get = Simulator_object_read.get
-
-  let find conn ~bucket ~key ?options ~consume () =
-    match get conn ~bucket ~key ?options ~consume () with
-    | Ok value -> Ok (Some value)
-    | Error error when Error.is_not_found error -> Ok None
-    | Error error -> Error error
-
+  let find = Simulator_object_read.find
   let head = Simulator_object_read.head
 
   let find_metadata conn ~bucket ~key ?options () =

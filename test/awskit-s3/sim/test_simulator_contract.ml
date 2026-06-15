@@ -149,6 +149,38 @@ let test_find_missing_object_returns_none () =
   | Ok (Some _) -> Alcotest.fail "expected None for missing object"
   | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
 
+let test_find_preserves_consumer_not_found_error () =
+  let conn = Simulator_subject.fresh () in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "create bucket");
+  ignore
+    (Simulator.Object.put conn ~bucket:"test-bucket" ~key:"present"
+       ~body:(Simulator.Body.of_string "body")
+       ()
+    |> ok_or_fail "put object");
+  let consumer_error =
+    Awskit.Error.service
+      {
+        status = 404;
+        code = Some "NoSuchKey";
+        message = Some "consumer-owned missing resource";
+        request_id = None;
+        host_id = None;
+        headers = [];
+        body = None;
+      }
+  in
+  match
+    Simulator.Object.find conn ~bucket:"test-bucket" ~key:"present"
+      ~consume:(fun _reader -> Error consumer_error)
+      ()
+  with
+  | Error error when error == consumer_error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+  | Ok None -> Alcotest.fail "expected consumer error, got None"
+  | Ok (Some _) -> Alcotest.fail "expected consumer error"
+
 let suite =
   [
     ("simulator contract", Simulator_contract.cases);
@@ -163,5 +195,7 @@ let suite =
           test_find_metadata_missing_object_returns_none;
         Alcotest.test_case "find missing object returns none" `Quick
           test_find_missing_object_returns_none;
+        Alcotest.test_case "find preserves consumer not found error" `Quick
+          test_find_preserves_consumer_not_found_error;
       ] );
   ]
