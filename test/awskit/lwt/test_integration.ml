@@ -338,6 +338,35 @@ let test_stream_request_body_error_propagates () =
       Alcotest.failf "unexpected request body error: %a" Awskit.Error.pp error
   | Ok () -> Alcotest.fail "expected stream request body error"
 
+let test_stream_request_body_cancellation_propagates () =
+  Request_body_client.request_body := None;
+  let body =
+    RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
+      ~write:(fun writer ->
+        Lwt.bind (RequestAws.Runtime.Request_body.write_string writer "ab")
+          (function
+          | Error _ as error -> Lwt.return error
+          | Ok () -> Lwt.fail Lwt.Canceled))
+  in
+  match
+    Lwt_main.run
+      (Lwt.catch
+         (fun () ->
+           Lwt.map
+             (fun result -> `Returned result)
+             (RequestAws.Runtime.with_response (request_conn ())
+                request_body_request body ~f:(fun _ body ->
+                  RequestAws.Runtime.Response_body.discard body)))
+         (fun exn -> Lwt.return (`Raised exn)))
+  with
+  | `Raised Lwt.Canceled -> ()
+  | `Raised exn ->
+      Alcotest.failf "unexpected raised exception: %s" (Exn.to_string exn)
+  | `Returned (Error error) ->
+      Alcotest.failf "request body cancellation became SDK error: %a"
+        Awskit.Error.pp error
+  | `Returned (Ok _) -> Alcotest.fail "expected request body cancellation"
+
 let test_callback_exception_is_not_transport_error () =
   let callback_exn = Failure "callback exploded" in
   let body = RequestAws.Runtime.Request_body.of_string "ok" in
@@ -571,6 +600,8 @@ let suite =
           test_stream_request_body_reaches_client;
         Alcotest.test_case "stream request body error propagates" `Quick
           test_stream_request_body_error_propagates;
+        Alcotest.test_case "stream request body cancellation propagates" `Quick
+          test_stream_request_body_cancellation_propagates;
         Alcotest.test_case "callback exception is not transport error" `Quick
           test_callback_exception_is_not_transport_error;
         Alcotest.test_case "stream request body early response preserves body"

@@ -201,11 +201,18 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         let finished, wake_finished = Lwt.wait () in
         let wake_finished_once =
           let woken = ref false in
-          fun result ->
+          fun wake ->
             if not !woken then (
               woken := true;
-              Lwt.wakeup_later wake_finished result)
+              wake ())
         in
+        let wake_finished_result_once result =
+          wake_finished_once (fun () -> Lwt.wakeup_later wake_finished result)
+        in
+        let wake_finished_exn_once exn =
+          wake_finished_once (fun () -> Lwt.wakeup_later_exn wake_finished exn)
+        in
+        let cancel_requested = ref false in
         let producer =
           Lwt.catch
             (fun () ->
@@ -213,28 +220,31 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                 | Ok () ->
                     let result = check_finished_length writer in
                     writer.close ();
-                    wake_finished_once result;
+                    wake_finished_result_once result;
                     Lwt.return_unit
                 | Error error ->
                     Log.warn (fun m ->
                         m "request body stream failed: %s"
                           (Awskit.Error.to_string_hum error));
                     writer.close ();
-                    wake_finished_once (Error error);
+                    wake_finished_result_once (Error error);
                     Lwt.return_unit))
             (fun exn ->
               writer.close ();
               match exn with
-              | Lwt.Canceled ->
-                  wake_finished_once
+              | Lwt.Canceled when !cancel_requested ->
+                  wake_finished_result_once
                     (Error (body_error "request body stream canceled"));
+                  Lwt.return_unit
+              | Lwt.Canceled ->
+                  wake_finished_exn_once Lwt.Canceled;
                   Lwt.return_unit
               | exn ->
                   let error = body_error (Exn.to_string exn) in
                   Log.warn (fun m ->
                       m "request body stream raised: %s"
                         (Awskit.Error.to_string_hum error));
-                  wake_finished_once (Error error);
+                  wake_finished_result_once (Error error);
                   Lwt.return_unit)
         in
         Lwt.async (fun () -> producer);
@@ -243,6 +253,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           finished;
           cancel =
             (fun () ->
+              cancel_requested := true;
               writer.close ();
               Lwt.cancel producer);
         }
