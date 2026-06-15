@@ -144,9 +144,11 @@ module type OBJECT = sig
   (** Return object metadata when the object is present.
 
       This is the option-returning lookup form. It returns [Ok None] for object
-      not-found errors; other service, auth, transport, and decode failures
-      remain [Error]. Use {!val:head} when callers need the raw HeadObject
-      service behavior. *)
+      not-found errors. S3 [HeadObject] responses may only expose HTTP status,
+      so a code-less 404 response is treated as an absent object. Coded
+      [NoSuchBucket] responses and other service, auth, transport, and decode
+      failures remain [Error]. Use {!val:head} when callers need the raw
+      HeadObject service behavior. *)
 
   val exists :
     connection ->

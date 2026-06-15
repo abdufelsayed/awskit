@@ -203,11 +203,16 @@ module Make (C : Request_context.S) = struct
                     return_result return_error return_ok (object_info response))
         )
 
+  let is_head_object_missing error =
+    Error.is_no_such_key error
+    || Error.service_code error = None
+       && Awskit.Error.service_status error = Some 404
+
   let find_metadata conn ~bucket ~key ?options () =
     let* result = head conn ~bucket ~key ?options () in
     match result with
     | Ok value -> return_ok (Some value)
-    | Error error when Error.is_no_such_key error -> return_ok None
+    | Error error when is_head_object_missing error -> return_ok None
     | Error error -> return_error error
 
   let exists conn ~bucket ~key =

@@ -79,7 +79,10 @@ S3.Object.get s3 ~bucket ~key
 Use [Object.head] when only metadata is needed. Use [Object.exists] for boolean
 existence checks. Use [Object.find_metadata] and [Object.find] when a missing
 object should be an optional result. Missing-object and missing-bucket behavior
-is reported as structured service errors by primitive operations.
+is reported as structured service errors by primitive operations. S3 can return
+status-only [HeadObject] 404 responses, so [Object.find_metadata] treats a
+code-less 404 as an absent object; coded [NoSuchBucket] responses remain
+[Error].
 
 {[
 module S3 = Awskit_s3_eio
@@ -552,7 +555,10 @@ code when present.
 Optional lookup helpers keep common not-found handling out of exception paths.
 [Object.find] and [Object.find_metadata] return [Ok None] for absent objects
 and preserve missing buckets, authorization failures, transport errors, decode
-errors, and body errors as structured [Awskit.Error.t] values:
+errors, and body errors as structured [Awskit.Error.t] values. S3 can return
+status-only [HeadObject] 404 responses, so [Object.find_metadata] treats a
+code-less 404 as an absent object; coded [NoSuchBucket] responses remain
+[Error]:
 
 {[
 module S3 = Awskit_s3_eio

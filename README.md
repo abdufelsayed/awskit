@@ -73,13 +73,10 @@ HTTP status, AWS error code, request id, retry class, and retry attempts. Use
 `Awskit.Error.pp` or `Awskit.Error.to_string_hum` for human logs, and
 `Awskit.Error.sexp_of_t` for structured diagnostics and tests.
 
-Convenience `_exn` APIs raise `Awskit.Error.Awskit_error` carrying the same
-structured error. Cancellation and user callback exceptions are not converted
-into SDK errors.
-
 Functions ending in `_exn` raise `Awskit.Error.Awskit_error` on SDK validation
 or construction failure. Prefer the result-returning form in libraries and
-long-running services.
+long-running services. Cancellation and user callback exceptions are not
+converted into SDK errors.
 
 ## Quick Start
 
@@ -201,7 +198,9 @@ for local contract testing, but provider-specific behavior should stay in tests
 unless it matches AWS S3.
 
 Optional lookup helpers convert object-not-found responses to `Ok None` while
-leaving other failures structured:
+leaving other failures structured. S3 can return status-only `HeadObject` 404
+responses, so `find_metadata` treats a code-less 404 as an absent object; coded
+`NoSuchBucket` responses remain `Error`.
 
 ```ocaml
 module S3 = Awskit_s3_eio
