@@ -18,10 +18,7 @@ module Payload_hash = struct
            "SHA256 payload hash must be lowercase hex")
     else Ok (Sha256_hex value)
 
-  let of_sha256_hex_exn value =
-    match of_sha256_hex value with
-    | Ok value -> value
-    | Error error -> invalid_arg (Aws_error.to_string_hum error)
+  let of_sha256_hex_exn value = Aws_error.get_ok_exn (of_sha256_hex value)
 
   let sha256_of_string value =
     Sha256_hex Digestif.SHA256.(digest_string value |> to_hex)

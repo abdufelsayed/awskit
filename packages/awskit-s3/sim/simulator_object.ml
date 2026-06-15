@@ -21,7 +21,15 @@ module Object = struct
 
   let put = Simulator_object_write.put
   let get = Simulator_object_read.get
+  let find = Simulator_object_read.find
   let head = Simulator_object_read.head
+
+  let find_metadata conn ~bucket ~key ?options () =
+    match head conn ~bucket ~key ?options () with
+    | Ok value -> Ok (Some value)
+    | Error error when Error.is_no_such_key error -> Ok None
+    | Error error -> Error error
+
   let exists = Simulator_object_read.exists
   let delete = Simulator_object_delete.delete
   let delete_objects = Simulator_object_delete.delete_objects

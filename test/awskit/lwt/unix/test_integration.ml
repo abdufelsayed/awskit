@@ -169,7 +169,7 @@ aws_secret_access_key = FILE_SK
       ]
   in
   match Awskit_unix.Credentials.default_chain ~getenv () with
-  | Error (Awskit.Error.Validation _) -> ()
+  | Error error when Awskit.Error.is_validation error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
   | Ok _ -> Alcotest.fail "expected partial env to fail"
 
@@ -222,7 +222,7 @@ let test_container_full_uri_rejects_untrusted_http () =
     Awskit_lwt_unix.Credentials.container_provider ~getenv ~http_call ()
   in
   match resolve_provider provider with
-  | Error (Awskit.Error.Validation _) -> ()
+  | Error error when Awskit.Error.is_validation error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
   | Ok _ -> Alcotest.fail "expected untrusted HTTP endpoint to fail"
 
@@ -274,15 +274,18 @@ let test_instance_metadata_provider_uses_imdsv2 () =
   Alcotest.(check int) "imds call count" 3 (List.length !calls)
 
 let expect_validation label = function
-  | Error (Awskit.Error.Validation _) -> ()
+  | Error error when Awskit.Error.is_validation error -> ()
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected validation error" label
 
 let expect_transport label = function
-  | Error (Awskit.Error.Transport _) -> ()
-  | Error error ->
-      Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
+  | Error error -> (
+      let open Awskit.Error in
+      match kind error with
+      | Transport _ -> ()
+      | _ ->
+          Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error)
   | Ok _ -> Alcotest.failf "%s: expected transport error" label
 
 let imds_role_headers headers =

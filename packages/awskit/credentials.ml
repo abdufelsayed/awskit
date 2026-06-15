@@ -39,9 +39,8 @@ let create ~access_key_id ~secret_access_key ?session_token () =
           | Ok () -> Ok { access_key_id; secret_access_key; session_token }))
 
 let create_exn ~access_key_id ~secret_access_key ?session_token () =
-  match create ~access_key_id ~secret_access_key ?session_token () with
-  | Ok value -> value
-  | Error error -> invalid_arg (Aws_error.to_string_hum error)
+  Aws_error.get_ok_exn
+    (create ~access_key_id ~secret_access_key ?session_token ())
 
 let hmac_sha256 ~key data =
   Digestif.SHA256.(hmac_string ~key data |> to_raw_string)
@@ -61,15 +60,18 @@ module Provider = struct
    fun () ->
     let rec loop errors = function
       | [] ->
-          let message =
-            match List.rev errors with
-            | [] -> "no credential providers configured"
+          let errors = List.rev errors in
+          let error =
+            match errors with
+            | [] ->
+                Aws_error.validation ~field:"credentials"
+                  "no credential providers configured"
             | errors ->
-                "no credential provider resolved credentials: "
-                ^ String.concat ~sep:"; "
-                    (List.map errors ~f:Aws_error.to_string_hum)
+                Aws_error.multiple errors
+                |> Aws_error.with_context
+                     "no credential provider resolved credentials"
           in
-          Error (Aws_error.validation ~field:"credentials" message)
+          Error error
       | provider :: rest -> (
           match provider () with
           | Ok _ as ok -> ok

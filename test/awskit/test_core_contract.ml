@@ -3,7 +3,7 @@ open Base
 let check_validation_error name result =
   match result with
   | Ok _ -> Alcotest.failf "%s should fail validation" name
-  | Error (Awskit.Error.Validation _) -> ()
+  | Error error when Awskit.Error.is_validation error -> ()
   | Error error ->
       Alcotest.failf "%s returned unexpected error: %s" name
         (Awskit.Error.to_string_hum error)
@@ -100,6 +100,186 @@ let test_request_response_contracts () =
     "content length" (Ok (Some 42))
     (Awskit.Response.header_int response "content-length")
 
+let test_error_context_and_sexp () =
+  let error =
+    Awskit.Error.validation ~field:"bucket" "bucket must be 3-63 characters"
+    |> Awskit.Error.with_operation ~service:"s3" ~name:"CreateBucket"
+         ~resource:"s3://ab" ()
+    |> Awskit.Error.with_context "validating caller input"
+  in
+  Alcotest.(check bool)
+    "validation classifier" true
+    (Awskit.Error.is_validation error);
+  Alcotest.(check (option string))
+    "validation field" (Some "bucket")
+    (Awskit.Error.validation_field error);
+  let sexp = Awskit.Error.sexp_of_t error |> Base.Sexp.to_string_hum in
+  Alcotest.(check bool)
+    "sexp names operation" true
+    (String.is_substring sexp ~substring:"CreateBucket"
+    && String.is_substring sexp ~substring:"s3://ab");
+  let human = Awskit.Error.to_string_hum error in
+  Alcotest.(check bool)
+    "human includes operation" true
+    (String.is_substring human ~substring:"CreateBucket"
+    && String.is_substring human ~substring:"s3://ab")
+
+let test_error_multiple_preserves_all_failures () =
+  let primary = Awskit.Error.body "download failed" in
+  let cleanup = Awskit.Error.body "cleanup failed" in
+  let combined = Awskit.Error.multiple [ primary; cleanup ] in
+  let human = Awskit.Error.to_string_hum combined in
+  Alcotest.(check bool)
+    "mentions primary" true
+    (String.is_substring human ~substring:"download failed");
+  Alcotest.(check bool)
+    "mentions cleanup" true
+    (String.is_substring human ~substring:"cleanup failed")
+
+let test_provider_chain_uses_multiple_errors () =
+  let first =
+    Awskit.Credentials.Provider.create (fun () ->
+        Error (Awskit.Error.validation ~field:"env" "missing env credentials"))
+  in
+  let second =
+    Awskit.Credentials.Provider.create (fun () ->
+        Error
+          (Awskit.Error.validation ~field:"profile"
+             "missing profile credentials"))
+  in
+  match
+    Awskit.Credentials.Provider.resolve
+      (Awskit.Credentials.Provider.chain [ first; second ])
+  with
+  | Ok _ -> Alcotest.fail "expected provider chain failure"
+  | Error error -> (
+      let human = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions provider chain context" true
+        (String.is_substring human
+           ~substring:"no credential provider resolved credentials");
+      match Awskit.Error.kind error with
+      | Awskit.Error.Multiple [ env_error; profile_error ] ->
+          Alcotest.(check (option string))
+            "first provider field" (Some "env")
+            (Awskit.Error.validation_field env_error);
+          Alcotest.(check (option string))
+            "second provider field" (Some "profile")
+            (Awskit.Error.validation_field profile_error)
+      | Awskit.Error.Multiple errors ->
+          Alcotest.failf "expected two provider errors, got %d"
+            (List.length errors)
+      | _ ->
+          Alcotest.failf "expected Multiple, got %s"
+            (Awskit.Error.to_string_hum error))
+
+let make_service_error ~status ~code =
+  Awskit.Error.service
+    {
+      status;
+      code;
+      message = None;
+      request_id = None;
+      host_id = None;
+      headers = [];
+      body = None;
+    }
+
+let retry_class_to_string = function
+  | Awskit.Error.Retryable -> "Retryable"
+  | Awskit.Error.Throttled -> "Throttled"
+  | Awskit.Error.Auth -> "Auth"
+  | Awskit.Error.Conflict -> "Conflict"
+  | Awskit.Error.Not_found -> "Not_found"
+  | Awskit.Error.Fatal -> "Fatal"
+  | Awskit.Error.Unknown -> "Unknown"
+
+let check_retry_class name expected actual =
+  let matches =
+    match (expected, actual) with
+    | Awskit.Error.Retryable, Awskit.Error.Retryable
+    | Awskit.Error.Throttled, Awskit.Error.Throttled
+    | Awskit.Error.Auth, Awskit.Error.Auth
+    | Awskit.Error.Conflict, Awskit.Error.Conflict
+    | Awskit.Error.Not_found, Awskit.Error.Not_found
+    | Awskit.Error.Fatal, Awskit.Error.Fatal
+    | Awskit.Error.Unknown, Awskit.Error.Unknown ->
+        true
+    | _ -> false
+  in
+  if not matches then
+    Alcotest.failf "%s: expected %s, got %s" name
+      (retry_class_to_string expected)
+      (retry_class_to_string actual)
+
+let test_error_multiple_retry_policy () =
+  let validation_error = Awskit.Error.validation "bad caller input" in
+  let retryable_transport =
+    Awskit.Error.transport ~retryable:true "connection reset"
+  in
+  let retryable_over_fatal =
+    Awskit.Error.multiple [ validation_error; retryable_transport ]
+  in
+  check_retry_class "retryable outranks fatal" Awskit.Error.Retryable
+    (Awskit.Error.retry_class retryable_over_fatal);
+  let not_found_service =
+    make_service_error ~status:404 ~code:(Some "NoSuchKey")
+  in
+  let auth_service =
+    make_service_error ~status:403 ~code:(Some "AccessDenied")
+  in
+  let auth_over_not_found =
+    Awskit.Error.multiple [ not_found_service; auth_service ]
+  in
+  check_retry_class "auth outranks not found" Awskit.Error.Auth
+    (Awskit.Error.retry_class auth_over_not_found)
+
+let test_error_multiple_classifiers_recurse () =
+  let service_error = make_service_error ~status:503 ~code:(Some "SlowDown") in
+  let auth_error = make_service_error ~status:403 ~code:(Some "AccessDenied") in
+  let combined =
+    Awskit.Error.multiple
+      [
+        Awskit.Error.body "first error has no classifier data";
+        Awskit.Error.multiple
+          [
+            Awskit.Error.validation "validation without field";
+            service_error;
+            Awskit.Error.validation ~field:"bucket" "bucket is invalid";
+          ];
+        auth_error;
+      ]
+  in
+  Alcotest.(check bool)
+    "nested validation classifier" true
+    (Awskit.Error.is_validation combined);
+  Alcotest.(check (option string))
+    "nested validation field" (Some "bucket")
+    (Awskit.Error.validation_field combined);
+  Alcotest.(check (option string))
+    "nested service code" (Some "SlowDown")
+    (Awskit.Error.service_code combined);
+  Alcotest.(check (option int))
+    "nested service status" (Some 503)
+    (Awskit.Error.service_status combined);
+  check_retry_class "aggregated retry class" Awskit.Error.Auth
+    (Awskit.Error.retry_class combined)
+
+let test_exn_apis_raise_sdk_exception () =
+  let raised =
+    try
+      ignore (Awskit.Region.of_string_exn "" : Awskit.Region.t);
+      false
+    with
+    | Awskit.Error.Awskit_error error ->
+        Awskit.Error.is_validation error
+        && Option.equal String.equal
+             (Awskit.Error.validation_field error)
+             (Some "region")
+    | _ -> false
+  in
+  Alcotest.(check bool) "raises SDK exception" true raised
+
 let suite =
   [
     ( "core:contracts",
@@ -115,5 +295,17 @@ let suite =
           test_runtime_request_response_body_names;
         Alcotest.test_case "request/response metadata" `Quick
           test_request_response_contracts;
+        Alcotest.test_case "error context and sexp" `Quick
+          test_error_context_and_sexp;
+        Alcotest.test_case "error multiple preserves failures" `Quick
+          test_error_multiple_preserves_all_failures;
+        Alcotest.test_case "provider chain uses multiple errors" `Quick
+          test_provider_chain_uses_multiple_errors;
+        Alcotest.test_case "error multiple retry policy" `Quick
+          test_error_multiple_retry_policy;
+        Alcotest.test_case "error multiple classifiers recurse" `Quick
+          test_error_multiple_classifiers_recurse;
+        Alcotest.test_case "exn APIs raise SDK exception" `Quick
+          test_exn_apis_raise_sdk_exception;
       ] );
   ]

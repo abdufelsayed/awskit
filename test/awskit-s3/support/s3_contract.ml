@@ -13,6 +13,10 @@ end
 module Make (Client : SUBJECT) = struct
   let bucket = "contract-bucket"
 
+  let is_body_error error =
+    let open Awskit.Error in
+    match kind error with Body _ -> true | _ -> false
+
   let create_bucket conn =
     ignore (Client.Bucket.create conn ~bucket () |> ok_or_fail "create bucket")
 
@@ -796,7 +800,7 @@ module Make (Client : SUBJECT) = struct
     match
       get_object_as_string conn ~bucket ~key:"large.txt" ~max_bytes:3L ()
     with
-    | Error (Awskit.Error.Body _) -> ()
+    | Error error when is_body_error error -> ()
     | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
     | Ok _ -> Alcotest.fail "expected max_bytes failure"
 

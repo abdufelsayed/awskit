@@ -62,6 +62,10 @@ end
 
 module Simulator_contract = S3_contract.Make (Simulator_subject)
 
+let is_body_error error =
+  let open Awskit.Error in
+  match kind error with Body _ -> true | _ -> false
+
 let test_simulator_slow_down_fault () =
   let conn = Simulator_subject.fresh () in
   ignore
@@ -98,9 +102,106 @@ let test_simulator_response_lost_fault () =
       ~consume:(Simulator.Reader.to_string ~max_bytes:16L)
       ()
   with
-  | Error (Awskit.Error.Body _) -> ()
+  | Error error when is_body_error error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected response-lost body error"
+
+let test_s3_operation_context_for_validation_error () =
+  let conn = Simulator_subject.fresh () in
+  match
+    Simulator.Object.put conn ~bucket:"ab" ~key:"k"
+      ~body:(Simulator.Body.of_string "body")
+      ()
+  with
+  | Ok _ -> Alcotest.fail "expected invalid bucket"
+  | Error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions operation" true
+        (string_contains text ~substring:"PutObject");
+      Alcotest.(check bool)
+        "mentions resource" true
+        (string_contains text ~substring:"s3://ab/k")
+
+let test_find_metadata_missing_object_returns_none () =
+  let conn = Simulator_subject.fresh () in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "create bucket");
+  match
+    Simulator.Object.find_metadata conn ~bucket:"test-bucket" ~key:"missing" ()
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "expected None for missing object"
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+
+let test_find_metadata_missing_bucket_returns_error () =
+  let conn = Simulator_subject.fresh () in
+  match
+    Simulator.Object.find_metadata conn ~bucket:"missing-bucket" ~key:"file" ()
+  with
+  | Error error when Error.is_no_such_bucket error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+  | Ok None -> Alcotest.fail "expected missing bucket error, got None"
+  | Ok (Some _) -> Alcotest.fail "expected missing bucket error"
+
+let test_find_missing_object_returns_none () =
+  let conn = Simulator_subject.fresh () in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "create bucket");
+  match
+    Simulator.Object.find conn ~bucket:"test-bucket" ~key:"missing"
+      ~consume:(fun _reader -> Ok "unused")
+      ()
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "expected None for missing object"
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+
+let test_find_missing_bucket_returns_error () =
+  let conn = Simulator_subject.fresh () in
+  match
+    Simulator.Object.find conn ~bucket:"missing-bucket" ~key:"file"
+      ~consume:(fun _reader -> Ok "unused")
+      ()
+  with
+  | Error error when Error.is_no_such_bucket error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+  | Ok None -> Alcotest.fail "expected missing bucket error, got None"
+  | Ok (Some _) -> Alcotest.fail "expected missing bucket error"
+
+let test_find_preserves_consumer_not_found_error () =
+  let conn = Simulator_subject.fresh () in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "create bucket");
+  ignore
+    (Simulator.Object.put conn ~bucket:"test-bucket" ~key:"present"
+       ~body:(Simulator.Body.of_string "body")
+       ()
+    |> ok_or_fail "put object");
+  let consumer_error =
+    Awskit.Error.service
+      {
+        status = 404;
+        code = Some "NoSuchKey";
+        message = Some "consumer-owned missing resource";
+        request_id = None;
+        host_id = None;
+        headers = [];
+        body = None;
+      }
+  in
+  match
+    Simulator.Object.find conn ~bucket:"test-bucket" ~key:"present"
+      ~consume:(fun _reader -> Error consumer_error)
+      ()
+  with
+  | Error error when error == consumer_error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+  | Ok None -> Alcotest.fail "expected consumer error, got None"
+  | Ok (Some _) -> Alcotest.fail "expected consumer error"
 
 let suite =
   [
@@ -110,5 +211,17 @@ let suite =
         Alcotest.test_case "slow down" `Quick test_simulator_slow_down_fault;
         Alcotest.test_case "response lost" `Quick
           test_simulator_response_lost_fault;
+        Alcotest.test_case "operation context for validation" `Quick
+          test_s3_operation_context_for_validation_error;
+        Alcotest.test_case "find metadata missing object returns none" `Quick
+          test_find_metadata_missing_object_returns_none;
+        Alcotest.test_case "find metadata missing bucket returns error" `Quick
+          test_find_metadata_missing_bucket_returns_error;
+        Alcotest.test_case "find missing object returns none" `Quick
+          test_find_missing_object_returns_none;
+        Alcotest.test_case "find missing bucket returns error" `Quick
+          test_find_missing_bucket_returns_error;
+        Alcotest.test_case "find preserves consumer not found error" `Quick
+          test_find_preserves_consumer_not_found_error;
       ] );
   ]

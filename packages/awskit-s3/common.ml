@@ -5,14 +5,16 @@ module Region = Awskit.Region
 let ( let* ) result f =
   match result with Ok value -> f value | Error _ as e -> e
 
-let result_exn = function
-  | Ok value -> value
-  | Error error -> invalid_arg (Awskit.Error.to_string_hum error)
+let result_exn = Awskit.Error.get_ok_exn
 
 let invalid ?field fmt =
   Fmt.kstr (fun message -> Error (Awskit.Error.validation ?field message)) fmt
 
 let decode fmt = Fmt.kstr Awskit.Error.decode fmt
+
+let decode_with_context ~what message =
+  Awskit.Error.decode message
+  |> Awskit.Error.with_context (Fmt.str "decoding %s" what)
 
 let is_prefix ~prefix value =
   let prefix_len = String.length prefix in
@@ -47,6 +49,29 @@ let ptime_of_string value =
 
 let ptime_to_header value = Ptime.to_rfc3339 value
 
+let s3_uri ?key bucket =
+  match key with
+  | None -> Fmt.str "s3://%s" bucket
+  | Some key -> Fmt.str "s3://%s/%s" bucket key
+
+let with_s3_operation ~operation ?bucket ?key error =
+  let resource = Option.map (fun bucket -> s3_uri ?key bucket) bucket in
+  let already_present =
+    List.exists
+      (function
+        | Awskit.Error.Operation
+            { service = Some "S3"; name; resource = existing } ->
+            String.equal name operation && existing = resource
+        | _ -> false)
+      (Awskit.Error.context error)
+  in
+  if already_present then error
+  else
+    Awskit.Error.with_operation ~service:"S3" ~name:operation ?resource () error
+
+let return_s3_error return_error ~operation ?bucket ?key error =
+  return_error (with_s3_operation ~operation ?bucket ?key error)
+
 module Xml = struct
   let el name children = `El ((("", name), []), children)
   let text name value = el name [ `Data value ]
@@ -63,8 +88,10 @@ module Xml = struct
           nodes
       with
       | Some root -> Ok root
-      | None -> Error (Awskit.Error.decode "empty XML document")
-    with exn -> Error (Awskit.Error.decode (Printexc.to_string exn))
+      | None ->
+          Error (decode_with_context ~what:"XML document" "empty XML document")
+    with exn ->
+      Error (decode_with_context ~what:"XML document" (Printexc.to_string exn))
 
   let children name nodes =
     List.filter_map
@@ -109,10 +136,7 @@ module Error = struct
   let pp = Awskit.Error.pp
   let equal = Awskit.Error.equal
   let to_string_hum = Awskit.Error.to_string_hum
-
-  let service_code = function
-    | Awskit.Error.Service { code; _ } -> code
-    | _ -> None
+  let service_code = Awskit.Error.service_code
 
   let code_is expected error =
     match service_code error with
@@ -123,9 +147,9 @@ module Error = struct
   let is_no_such_bucket error = code_is "NoSuchBucket" error
   let is_no_such_key error = code_is "NoSuchKey" error
 
-  let is_precondition_failed = function
-    | Awskit.Error.Service { status = 412; _ } -> true
-    | error -> code_is "PreconditionFailed" error
+  let is_precondition_failed error =
+    Awskit.Error.service_status error = Some 412
+    || code_is "PreconditionFailed" error
 
   let is_conditional_request_conflict error =
     code_is "ConditionalRequestConflict" error

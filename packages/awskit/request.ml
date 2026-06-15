@@ -8,10 +8,7 @@ let has_ctl_or_del s =
 
 let has_leading_or_trailing_ws s = not (String.equal s (String.strip s))
 let invalid ?field message = Error (Aws_error.validation ?field message)
-
-let result_exn = function
-  | Ok value -> value
-  | Error error -> invalid_arg (Aws_error.to_string_hum error)
+let result_exn = Aws_error.get_ok_exn
 
 module Method = struct
   type t = [ `GET | `PUT | `POST | `DELETE | `HEAD | `PATCH ]

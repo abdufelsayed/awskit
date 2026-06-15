@@ -67,9 +67,9 @@ let cleanup_temp_download path error =
   | Ok () -> Error error
   | Error cleanup_error ->
       Error
-        (Awskit.Error.body
-           (Fmt.str "%a; additionally %a" Awskit.Error.pp error Awskit.Error.pp
-              cleanup_error))
+        (Awskit.Error.multiple [ error; cleanup_error ]
+        |> Awskit.Error.with_context
+             "download failed and temporary file cleanup also failed")
 
 let cleanup_temp_download_before_raise path exn =
   Eio.Cancel.protect (fun () -> ignore (remove_temp_download path));
@@ -527,10 +527,16 @@ struct
     in
     let upload_id = created.upload.upload_id in
     let abort_and_return error =
-      ignore
-        (S3.Multipart.abort_upload conn ~bucket ~key ~upload_id
-           ~options:options.abort_options ());
-      Error error
+      match
+        S3.Multipart.abort_upload conn ~bucket ~key ~upload_id
+          ~options:options.abort_options ()
+      with
+      | Ok _ -> Error error
+      | Error cleanup_error ->
+          Error
+            (Awskit.Error.multiple [ error; cleanup_error ]
+            |> Awskit.Error.with_context
+                 "multipart upload failed and abort also failed")
     in
     match
       upload_missing_parts conn ~bucket ~key ~upload_id ~options ~path

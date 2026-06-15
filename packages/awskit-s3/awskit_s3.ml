@@ -116,7 +116,8 @@ module Make (R : RUNTIME) = struct
             if Int64.compare total max_size > 0 then
               return_error
                 (Awskit.Error.body ~limit:max_size
-                   "response body exceeded max_bytes")
+                   "response body exceeded max_bytes"
+                |> Awskit.Error.with_context "reading bounded response body")
             else begin
               Buffer.add_subbytes buffer chunk 0 n;
               loop total
@@ -175,11 +176,25 @@ module Make (R : RUNTIME) = struct
                   | Ok request -> return_ok request)))
 
     let retry_or_error conn ~attempt ~replayable error retry =
-      match Awskit.Retry.delay (R.retry_policy conn) ~attempt ~error with
+      let policy = R.retry_policy conn in
+      let max_attempts = Awskit.Retry.max_attempts policy in
+      match Awskit.Retry.delay policy ~attempt ~error with
       | Some delay when replayable ->
           let* () = R.sleep conn delay in
           retry (attempt + 1)
-      | _ -> return_error error
+      | Some _delay ->
+          return_error
+            (Awskit.Error.with_retry ~attempt ~max_attempts
+               ~reason:"not retried because request body is not replayable"
+               error)
+      | None when attempt >= max_attempts ->
+          return_error
+            (Awskit.Error.with_retry ~attempt ~max_attempts
+               ~reason:"retry attempts exhausted" error)
+      | None ->
+          return_error
+            (Awskit.Error.with_retry ~attempt ~max_attempts
+               ~reason:"error is not retryable by policy" error)
 
     type 'a response_action =
       | Done of ('a, Awskit.Error.t) result

@@ -1,6 +1,38 @@
 let ( let* ) result f =
   match result with Ok value -> f value | Error _ as error -> error
 
+let is_body_error error =
+  let open Awskit.Error in
+  match kind error with Body _ -> true | _ -> false
+
+let is_validation_field field error =
+  Awskit.Error.is_validation error
+  && Awskit.Error.validation_field error = Some field
+
+let string_contains haystack needle =
+  let haystack_length = String.length haystack in
+  let needle_length = String.length needle in
+  let rec loop offset =
+    offset + needle_length <= haystack_length
+    && (String.sub haystack offset needle_length = needle || loop (offset + 1))
+  in
+  needle_length = 0 || loop 0
+
+let check_multiple_error_text label error snippets =
+  match Awskit.Error.kind error with
+  | Multiple errors ->
+      Alcotest.(check int)
+        (label ^ " count") (List.length snippets) (List.length errors);
+      let text = Fmt.str "%a" Awskit.Error.pp error in
+      List.iter
+        (fun snippet ->
+          Alcotest.(check bool)
+            (label ^ " includes " ^ snippet)
+            true
+            (string_contains text snippet))
+        snippets
+  | _ -> Alcotest.failf "expected Multiple error, got %a" Awskit.Error.pp error
+
 module Runtime = struct
   type connection = {
     response_body : string;
@@ -11,6 +43,9 @@ module Runtime = struct
     mutable multipart_create_count : int;
     mutable upload_part_count : int;
     mutable complete_count : int;
+    mutable abort_count : int;
+    mutable fail_complete_upload : bool;
+    mutable fail_abort_upload : bool;
     mutable get_ranges : string list;
   }
 
@@ -126,6 +161,9 @@ let connection ?(response_body = "") () =
     multipart_create_count = 0;
     upload_part_count = 0;
     complete_count = 0;
+    abort_count = 0;
+    fail_complete_upload = false;
+    fail_abort_upload = false;
     get_ranges = [];
   }
 
@@ -288,16 +326,22 @@ module S3 = struct
 
     let complete_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ _ =
       conn.Runtime.complete_count <- conn.Runtime.complete_count + 1;
-      Ok
-        {
-          Awskit_s3.Complete_multipart_upload.etag = None;
-          version_id = None;
-          checksum = empty_checksum;
-          response = response 200;
-        }
+      if conn.Runtime.fail_complete_upload then
+        Error (Awskit.Error.body "simulated complete failure")
+      else
+        Ok
+          {
+            Awskit_s3.Complete_multipart_upload.etag = None;
+            version_id = None;
+            checksum = empty_checksum;
+            response = response 200;
+          }
 
-    let abort_upload _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
-      Ok (response 204)
+    let abort_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
+      conn.Runtime.abort_count <- conn.Runtime.abort_count + 1;
+      if conn.Runtime.fail_abort_upload then
+        Error (Awskit.Error.body "simulated abort failure")
+      else Ok (response 204)
 
     let list_parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () = assert false
 
@@ -427,7 +471,7 @@ let test_body_of_path_rejects_non_regular_file env () =
     ~finally:(fun () -> Unix.rmdir native_path)
     (fun () ->
       match Body.of_path (path_of_native env native_path) with
-      | Error (Awskit.Error.Validation { field = Some "path"; _ }) -> ()
+      | Error error when is_validation_field "path" error -> ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected path validation")
@@ -489,7 +533,7 @@ let test_reader_to_path_failure_preserves_target env () =
           (response_reader new_body)
       with
       | Ok () -> Alcotest.fail "download succeeded despite read failure"
-      | Error (Awskit.Error.Body _) ->
+      | Error error when is_body_error error ->
           Alcotest.(check string)
             "preserved body" old_body (read_file native_path);
           Alcotest.(check int)
@@ -601,6 +645,35 @@ let test_multipart_upload_file env () =
           Alcotest.(check int)
             "upload part count" 1 conn.Runtime.upload_part_count;
           Alcotest.(check int) "complete count" 1 conn.Runtime.complete_count)
+
+let test_multipart_upload_reports_abort_failure env () =
+  let native_path =
+    Filename.temp_file "awskit-eio-upload-abort-failure" ".bin"
+  in
+  write_file native_path (String.make Awskit_s3.Transfer.min_part_size 'a');
+  Fun.protect
+    ~finally:(fun () -> remove_file native_path)
+    (fun () ->
+      let conn = connection () in
+      conn.Runtime.fail_complete_upload <- true;
+      conn.Runtime.fail_abort_upload <- true;
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          part_size = Awskit_s3.Transfer.min_part_size;
+        }
+      in
+      match
+        Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key" ~options
+          ~path:(path_of_native env native_path)
+          ()
+      with
+      | Ok _ -> Alcotest.fail "multipart upload succeeded despite failures"
+      | Error error ->
+          Alcotest.(check int) "complete count" 1 conn.Runtime.complete_count;
+          Alcotest.(check int) "abort count" 1 conn.Runtime.abort_count;
+          check_multiple_error_text "abort error" error
+            [ "simulated complete failure"; "simulated abort failure" ])
 
 let test_resume_multipart_upload_file env () =
   let native_path = Filename.temp_file "awskit-eio-resume-multipart" ".bin" in
@@ -718,6 +791,8 @@ let suite env =
           (test_upload_file_strategies env);
         Alcotest.test_case "multipart upload" `Quick
           (test_multipart_upload_file env);
+        Alcotest.test_case "multipart upload reports abort failure" `Quick
+          (test_multipart_upload_reports_abort_failure env);
         Alcotest.test_case "resume multipart upload" `Quick
           (test_resume_multipart_upload_file env);
         Alcotest.test_case "download uses get below threshold" `Quick

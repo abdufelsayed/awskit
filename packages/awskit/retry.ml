@@ -37,9 +37,7 @@ let create ?(max_attempts = 3) ?(base_delay = default_base_delay)
   else Ok { max_attempts; base_delay; max_delay; jitter }
 
 let create_exn ?max_attempts ?base_delay ?max_delay ?jitter () =
-  match create ?max_attempts ?base_delay ?max_delay ?jitter () with
-  | Ok policy -> policy
-  | Error error -> invalid_arg (Error.to_string_hum error)
+  Error.get_ok_exn (create ?max_attempts ?base_delay ?max_delay ?jitter ())
 
 let default = create_exn ()
 let disabled = create_exn ~max_attempts:1 ()
@@ -50,8 +48,8 @@ let jitter t = t.jitter
 
 let retryable error =
   match Error.retry_class error with
-  | `Retryable | `Throttled -> true
-  | `Auth | `Conflict | `Not_found | `Fatal | `Unknown -> false
+  | Retryable | Throttled -> true
+  | Auth | Conflict | Not_found | Fatal | Unknown -> false
 
 let capped_exponential_delay t ~attempt =
   let exponent = max 0 (attempt - 1) in

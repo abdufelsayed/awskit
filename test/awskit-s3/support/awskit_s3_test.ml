@@ -37,7 +37,7 @@ let expect_not_found label = function
   | Ok _ -> Alcotest.failf "%s: expected not found" label
 
 let expect_status label status = function
-  | Error (Awskit.Error.Service service) when service.status = status -> ()
+  | Error error when Awskit.Error.service_status error = Some status -> ()
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected service status %d" label status
@@ -46,7 +46,7 @@ let expect_precondition_failed label result = expect_status label 412 result
 let expect_not_modified label result = expect_status label 304 result
 
 let expect_validation label = function
-  | Error (Awskit.Error.Validation _) -> ()
+  | Error error when Awskit.Error.is_validation error -> ()
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected validation error" label

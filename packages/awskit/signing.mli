@@ -49,8 +49,8 @@ val sign_request_params_exn :
   payload_hash:Body.Payload_hash.t ->
   now:Ptime.t ->
   signed_headers
-(** Like {!val:sign_request_params}, but raises [Invalid_argument] on signing or
-    validation failure. *)
+(** Like {!val:sign_request_params}, but raises [Error.Awskit_error] carrying
+    the structured error on signing or validation failure. *)
 
 val sign_request :
   credentials:Credentials.t ->
@@ -80,5 +80,5 @@ val sign_request_exn :
   payload_hash:Body.Payload_hash.t ->
   now:Ptime.t ->
   signed_headers
-(** Like {!val:sign_request}, but raises [Invalid_argument] on signing or
-    validation failure. *)
+(** Like {!val:sign_request}, but raises [Error.Awskit_error] carrying the
+    structured error on signing or validation failure. *)

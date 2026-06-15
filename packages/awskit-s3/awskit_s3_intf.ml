@@ -110,6 +110,21 @@ module type OBJECT = sig
       The response-body reader is scoped to the callback and must not escape it.
       The returned pair contains response metadata and the callback result. *)
 
+  val find :
+    connection ->
+    bucket:string ->
+    key:string ->
+    ?options:Object.Get.options ->
+    consume:(response_body_reader -> ('a, Awskit.Error.t) result io) ->
+    unit ->
+    ((Object.Get.result * 'a) option, Awskit.Error.t) result io
+  (** Return and consume an object when it is present.
+
+      This is the option-returning lookup form. It returns [Ok None] for object
+      not-found errors; other service, auth, transport, and decode failures
+      remain [Error]. Use {!val:get} when callers need the raw GetObject service
+      behavior. *)
+
   val head :
     connection ->
     bucket:string ->
@@ -118,6 +133,22 @@ module type OBJECT = sig
     unit ->
     (Object.Head.result, Awskit.Error.t) result io
   (** Fetch object metadata without reading an object body. *)
+
+  val find_metadata :
+    connection ->
+    bucket:string ->
+    key:string ->
+    ?options:Object.Head.options ->
+    unit ->
+    (Object.Head.result option, Awskit.Error.t) result io
+  (** Return object metadata when the object is present.
+
+      This is the option-returning lookup form. It returns [Ok None] for object
+      not-found errors. S3 [HeadObject] responses may only expose HTTP status,
+      so a code-less 404 response is treated as an absent object. Coded
+      [NoSuchBucket] responses and other service, auth, transport, and decode
+      failures remain [Error]. Use {!val:head} when callers need the raw
+      HeadObject service behavior. *)
 
   val exists :
     connection ->

@@ -43,7 +43,7 @@ module Credentials : sig
       - [AWS_SECRET_ACCESS_KEY] (required)
       - [AWS_SESSION_TOKEN] (optional, for temporary credentials)
 
-      @return [Ok credentials] or [Error (Awskit.Error.Validation _)] *)
+      @return [Ok credentials] or a validation error. *)
 
   val from_profile :
     ?getenv:Env.getenv ->

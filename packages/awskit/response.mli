@@ -17,7 +17,8 @@ val create :
     fields are extracted from standard S3/AWS headers when present. *)
 
 val create_exn : status:int -> ?headers:(string * string) list -> unit -> t
-(** Like {!val:create}, but raises [Invalid_argument] on validation failure. *)
+(** Like {!val:create}, but raises [Error.Awskit_error] carrying the structured
+    validation error on validation failure. *)
 
 val status : t -> int
 (** Return the HTTP status code. *)

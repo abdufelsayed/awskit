@@ -1,3 +1,35 @@
+let is_body_error error =
+  let open Awskit.Error in
+  match kind error with Body _ -> true | _ -> false
+
+let is_validation_field field error =
+  Awskit.Error.is_validation error
+  && Awskit.Error.validation_field error = Some field
+
+let string_contains haystack needle =
+  let haystack_length = String.length haystack in
+  let needle_length = String.length needle in
+  let rec loop offset =
+    offset + needle_length <= haystack_length
+    && (String.sub haystack offset needle_length = needle || loop (offset + 1))
+  in
+  needle_length = 0 || loop 0
+
+let check_multiple_error_text label error snippets =
+  match Awskit.Error.kind error with
+  | Multiple errors ->
+      Alcotest.(check int)
+        (label ^ " count") (List.length snippets) (List.length errors);
+      let text = Fmt.str "%a" Awskit.Error.pp error in
+      List.iter
+        (fun snippet ->
+          Alcotest.(check bool)
+            (label ^ " includes " ^ snippet)
+            true
+            (string_contains text snippet))
+        snippets
+  | _ -> Alcotest.failf "expected Multiple error, got %a" Awskit.Error.pp error
+
 module Runtime = struct
   type connection = {
     response_body : string;
@@ -11,6 +43,8 @@ module Runtime = struct
     mutable abort_count : int;
     mutable get_ranges : string list;
     mutable fail_ranged_get : bool;
+    mutable fail_complete_upload : bool;
+    mutable fail_abort_upload : bool;
     mutable list_parts_expected_owner : string option;
   }
 
@@ -144,6 +178,8 @@ let connection ?(response_body = "") () =
     abort_count = 0;
     get_ranges = [];
     fail_ranged_get = false;
+    fail_complete_upload = false;
+    fail_abort_upload = false;
     list_parts_expected_owner = None;
   }
 
@@ -322,17 +358,22 @@ module S3 = struct
 
     let complete_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ _ =
       conn.Runtime.complete_count <- conn.Runtime.complete_count + 1;
-      Lwt.return_ok
-        {
-          Awskit_s3.Complete_multipart_upload.etag = None;
-          version_id = None;
-          checksum = empty_checksum;
-          response = response 200;
-        }
+      if conn.Runtime.fail_complete_upload then
+        Lwt.return_error (Awskit.Error.body "simulated complete failure")
+      else
+        Lwt.return_ok
+          {
+            Awskit_s3.Complete_multipart_upload.etag = None;
+            version_id = None;
+            checksum = empty_checksum;
+            response = response 200;
+          }
 
     let abort_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
       conn.Runtime.abort_count <- conn.Runtime.abort_count + 1;
-      Lwt.return_ok (response 204)
+      if conn.Runtime.fail_abort_upload then
+        Lwt.return_error (Awskit.Error.body "simulated abort failure")
+      else Lwt.return_ok (response 204)
 
     let list_parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
       unsupported ()
@@ -400,6 +441,13 @@ let remove_download_temps path =
 
 let response_reader body = { Runtime.body; offset = 0 }
 
+type 'a observed = Returned of 'a | Raised of exn
+
+let observe_lwt promise =
+  Lwt.catch
+    (fun () -> Lwt.map (fun value -> Returned value) promise)
+    (fun exn -> Lwt.return (Raised exn))
+
 let check_body_descriptor label ~content_length ~replayable body =
   let descriptor = Runtime.Request_body.descriptor body in
   let open Awskit.Body.Request in
@@ -426,6 +474,21 @@ let test_body_of_lwt_stream_streams_chunks () =
   | Ok _ ->
       Alcotest.(check (option string))
         "uploaded body" (Some "onetwothree") conn.Runtime.uploaded_body
+
+let test_body_of_lwt_stream_propagates_cancellation () =
+  Runtime.reset_write_fault ();
+  let conn = connection () in
+  let stream = Lwt_stream.from (fun () -> Lwt.fail Lwt.Canceled) in
+  let body = Body.of_lwt_stream ~content_length:1L stream in
+  match
+    Lwt_main.run
+      (observe_lwt (S3.Object.put conn ~bucket:"bucket" ~key:"key" ~body ()))
+  with
+  | Raised exn ->
+      Alcotest.(check bool) "raised cancellation" true (exn == Lwt.Canceled)
+  | Returned (Error error) ->
+      Alcotest.failf "cancellation returned error: %a" Awskit_s3.Error.pp error
+  | Returned (Ok _) -> Alcotest.fail "upload succeeded despite cancellation"
 
 let test_body_of_channel_streams_channel () =
   Runtime.reset_write_fault ();
@@ -530,10 +593,40 @@ let test_body_of_path_rejects_non_regular_file () =
     ~finally:(fun () -> Unix.rmdir path)
     (fun () ->
       match Lwt_main.run (Body.of_path path) with
-      | Error (Awskit.Error.Validation { field = Some "path"; _ }) -> ()
+      | Error error when is_validation_field "path" error -> ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected path validation")
+
+let test_upload_file_progress_exception_propagates () =
+  Runtime.reset_write_fault ();
+  let exception Progress_failed in
+  let path = Filename.temp_file "awskit-upload-progress-exn" ".bin" in
+  write_file path "small";
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          multipart_threshold = 1024L;
+        }
+      in
+      match
+        Lwt_main.run
+          (observe_lwt
+             (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~options
+                ~on_progress:(fun _transferred -> raise Progress_failed)
+                ~path ()))
+      with
+      | Raised exn ->
+          Alcotest.(check bool)
+            "raised callback exception" true (exn == Progress_failed)
+      | Returned (Error error) ->
+          Alcotest.failf "callback returned error: %a" Awskit_s3.Error.pp error
+      | Returned (Ok _) ->
+          Alcotest.fail "upload succeeded despite callback exception")
 
 let test_reader_to_channel_writes_response_body () =
   let path = Filename.temp_file "awskit-download-channel" ".bin" in
@@ -591,13 +684,45 @@ let test_reader_to_path_failure_preserves_target () =
     (fun () ->
       match Lwt_main.run (Reader.to_path path (response_reader new_body)) with
       | Ok () -> Alcotest.fail "download succeeded despite read failure"
-      | Error (Awskit.Error.Body _) ->
+      | Error error when is_body_error error ->
           Alcotest.(check string) "preserved body" old_body (read_file path);
           Alcotest.(check int)
             "temp files removed" 0
             (List.length (download_temp_paths path))
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error)
+
+let test_reader_to_path_reports_cleanup_failure () =
+  let dir = Filename.temp_file "awskit-download-cleanup" "" in
+  remove_file dir;
+  Unix.mkdir dir 0o700;
+  let path = Filename.concat dir "target.bin" in
+  let old_body = "old body" in
+  let new_body = String.make ((128 * 1024) + 1) 'n' in
+  write_file path old_body;
+  Runtime.read_error_after_bytes := Some (128 * 1024);
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.reset_read_fault ();
+      Unix.chmod dir 0o700;
+      remove_download_temps path;
+      remove_file path;
+      Unix.rmdir dir)
+    (fun () ->
+      match
+        Lwt_main.run
+          (Reader.to_path
+             ~on_progress:(fun _transferred -> Unix.chmod dir 0o500)
+             path (response_reader new_body))
+      with
+      | Ok () -> Alcotest.fail "download succeeded despite read failure"
+      | Error error ->
+          Alcotest.(check string) "preserved body" old_body (read_file path);
+          check_multiple_error_text "cleanup error" error
+            [
+              "simulated response read failure";
+              "failed to remove temporary download";
+            ])
 
 let test_upload_file_uses_put_below_threshold () =
   Runtime.reset_write_fault ();
@@ -713,7 +838,7 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_concurrency ~path ())
        with
-      | Error (Awskit.Error.Validation { field = Some "concurrency"; _ }) -> ()
+      | Error error when is_validation_field "concurrency" error -> ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected concurrency validation");
@@ -735,10 +860,7 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_put_checksum ~path ())
        with
-      | Error
-          (Awskit.Error.Validation { field = Some "put_options.checksum"; _ })
-        ->
-          ()
+      | Error error when is_validation_field "put_options.checksum" error -> ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected put checksum validation");
@@ -747,10 +869,7 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_put_checksum ~path ())
        with
-      | Error
-          (Awskit.Error.Validation { field = Some "put_options.checksum"; _ })
-        ->
-          ()
+      | Error error when is_validation_field "put_options.checksum" error -> ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected explicit multipart checksum validation");
@@ -768,9 +887,8 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_part_checksum ~path ())
        with
-      | Error
-          (Awskit.Error.Validation
-             { field = Some "upload_part_options.checksum"; _ }) ->
+      | Error error
+        when is_validation_field "upload_part_options.checksum" error ->
           ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
@@ -789,9 +907,8 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_create_checksum ~path ())
        with
-      | Error
-          (Awskit.Error.Validation
-             { field = Some "create_options.checksum_algorithm"; _ }) ->
+      | Error error
+        when is_validation_field "create_options.checksum_algorithm" error ->
           ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
@@ -810,9 +927,8 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_complete_checksum ~path ())
        with
-      | Error
-          (Awskit.Error.Validation
-             { field = Some "complete_options.checksum"; _ }) ->
+      | Error error when is_validation_field "complete_options.checksum" error
+        ->
           ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
@@ -831,9 +947,8 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_create_checksum_type ~path ())
        with
-      | Error
-          (Awskit.Error.Validation
-             { field = Some "create_options.checksum_type"; _ }) ->
+      | Error error
+        when is_validation_field "create_options.checksum_type" error ->
           ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
@@ -852,9 +967,8 @@ let test_upload_file_rejects_invalid_options () =
           (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
              ~options:bad_complete_checksum_type ~path ())
       with
-      | Error
-          (Awskit.Error.Validation
-             { field = Some "complete_options.checksum_type"; _ }) ->
+      | Error error
+        when is_validation_field "complete_options.checksum_type" error ->
           ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
@@ -889,6 +1003,33 @@ let test_resume_multipart_upload_file_uses_list_parts_options () =
             "list expected owner" (Some "123456789012")
             conn.Runtime.list_parts_expected_owner)
 
+let test_multipart_upload_reports_abort_failure () =
+  let path = Filename.temp_file "awskit-upload-abort-failure" ".bin" in
+  write_file path (String.make Awskit_s3.Transfer.min_part_size 'a');
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection () in
+      conn.Runtime.fail_complete_upload <- true;
+      conn.Runtime.fail_abort_upload <- true;
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          part_size = Awskit_s3.Transfer.min_part_size;
+        }
+      in
+      match
+        Lwt_main.run
+          (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+             ~options ~path ())
+      with
+      | Ok _ -> Alcotest.fail "multipart upload succeeded despite failures"
+      | Error error ->
+          Alcotest.(check int) "complete count" 1 conn.Runtime.complete_count;
+          Alcotest.(check int) "abort count" 1 conn.Runtime.abort_count;
+          check_multiple_error_text "abort error" error
+            [ "simulated complete failure"; "simulated abort failure" ])
+
 let test_download_file_uses_get_below_threshold () =
   let path = Filename.temp_file "awskit-download-get" ".bin" in
   remove_file path;
@@ -920,6 +1061,81 @@ let test_download_file_uses_get_below_threshold () =
           Alcotest.(check int)
             "range count" 0
             (List.length conn.Runtime.get_ranges))
+
+let test_download_file_progress_exception_propagates () =
+  let exception Progress_failed in
+  let path = Filename.temp_file "awskit-download-progress-exn" ".bin" in
+  remove_file path;
+  Fun.protect
+    ~finally:(fun () ->
+      remove_download_temps path;
+      remove_file path)
+    (fun () ->
+      let conn = connection ~response_body:"small download" () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = 1024L;
+        }
+      in
+      match
+        Lwt_main.run
+          (observe_lwt
+             (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+                ~on_progress:(fun _transferred -> raise Progress_failed)
+                ~path ()))
+      with
+      | Raised exn ->
+          Alcotest.(check bool)
+            "raised callback exception" true (exn == Progress_failed)
+      | Returned (Error error) ->
+          Alcotest.failf "callback returned error: %a" Awskit_s3.Error.pp error
+      | Returned (Ok _) ->
+          Alcotest.fail "download succeeded despite callback exception")
+
+let test_download_file_ranged_progress_exception_propagates () =
+  let exception Progress_failed in
+  let path = Filename.temp_file "awskit-download-ranged-progress-exn" ".bin" in
+  remove_file path;
+  Fun.protect
+    ~finally:(fun () ->
+      remove_download_temps path;
+      remove_file path)
+    (fun () ->
+      let part_size = Awskit_s3.Transfer.min_part_size in
+      let body = String.make part_size 'a' ^ "tail" in
+      let conn = connection ~response_body:body () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = Int64.of_int part_size;
+          part_size;
+          concurrency = 2;
+        }
+      in
+      let observed =
+        Lwt_main.run
+          (Lwt.catch
+             (fun () ->
+               Lwt.map
+                 (fun result -> Returned result)
+                 (Transfer.download_file conn ~bucket:"bucket" ~key:"key"
+                    ~options
+                    ~on_progress:(fun _transferred -> raise Progress_failed)
+                    ~path ()))
+             (fun exn -> Lwt.return (Raised exn)))
+      in
+      Alcotest.(check bool)
+        "ranged get attempted" true
+        (List.length conn.Runtime.get_ranges > 0);
+      match observed with
+      | Raised exn ->
+          Alcotest.(check bool)
+            "raised callback exception" true (exn == Progress_failed)
+      | Returned (Error error) ->
+          Alcotest.failf "callback returned error: %a" Awskit_s3.Error.pp error
+      | Returned (Ok _) ->
+          Alcotest.fail "download succeeded despite callback exception")
 
 let test_download_file_uses_ranges_at_threshold () =
   let path = Filename.temp_file "awskit-download-ranged" ".bin" in
@@ -1031,9 +1247,7 @@ let test_download_file_rejects_range_option () =
           (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
              ~path ())
       with
-      | Error (Awskit.Error.Validation { field = Some "get_options.range"; _ })
-        ->
-          ()
+      | Error error when is_validation_field "get_options.range" error -> ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected range validation")
@@ -1073,6 +1287,8 @@ let suite () =
       [
         Alcotest.test_case "body streams lwt stream" `Quick
           test_body_of_lwt_stream_streams_chunks;
+        Alcotest.test_case "body lwt stream propagates cancellation" `Quick
+          test_body_of_lwt_stream_propagates_cancellation;
         Alcotest.test_case "body streams channel" `Quick
           test_body_of_channel_streams_channel;
         Alcotest.test_case "body streams path" `Quick
@@ -1081,12 +1297,16 @@ let suite () =
           test_body_of_path_returns_stream_write_error;
         Alcotest.test_case "body path rejects non-regular file" `Quick
           test_body_of_path_rejects_non_regular_file;
+        Alcotest.test_case "upload progress exception propagates" `Quick
+          test_upload_file_progress_exception_propagates;
         Alcotest.test_case "reader writes channel" `Quick
           test_reader_to_channel_writes_response_body;
         Alcotest.test_case "reader path creates private file" `Quick
           test_reader_to_path_creates_private_file;
         Alcotest.test_case "reader path failure preserves target" `Quick
           test_reader_to_path_failure_preserves_target;
+        Alcotest.test_case "reader path reports cleanup failure" `Quick
+          test_reader_to_path_reports_cleanup_failure;
         Alcotest.test_case "upload uses put below threshold" `Quick
           test_upload_file_uses_put_below_threshold;
         Alcotest.test_case "upload allows put checksum below threshold" `Quick
@@ -1097,8 +1317,14 @@ let suite () =
           test_upload_file_rejects_invalid_options;
         Alcotest.test_case "resume uses list-parts options" `Quick
           test_resume_multipart_upload_file_uses_list_parts_options;
+        Alcotest.test_case "multipart upload reports abort failure" `Quick
+          test_multipart_upload_reports_abort_failure;
         Alcotest.test_case "download uses get below threshold" `Quick
           test_download_file_uses_get_below_threshold;
+        Alcotest.test_case "download progress exception propagates" `Quick
+          test_download_file_progress_exception_propagates;
+        Alcotest.test_case "download ranged progress exception propagates"
+          `Quick test_download_file_ranged_progress_exception_propagates;
         Alcotest.test_case "download uses ranges at threshold" `Quick
           test_download_file_uses_ranges_at_threshold;
         Alcotest.test_case "download allows small range parts" `Quick

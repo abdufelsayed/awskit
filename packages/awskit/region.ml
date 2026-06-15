@@ -22,11 +22,7 @@ let of_string region =
          "AWS region contains control characters")
   else Ok region
 
-let of_string_exn region =
-  match of_string region with
-  | Ok region -> region
-  | Error error -> invalid_arg (Aws_error.to_string_hum error)
-
+let of_string_exn region = Aws_error.get_ok_exn (of_string region)
 let to_string t = t
 let pp formatter t = Format.pp_print_string formatter t
 let equal = String.equal

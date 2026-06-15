@@ -2,6 +2,14 @@ open Awskit_s3
 open Awskit_s3_test
 open Support
 
+let is_body_error error =
+  let open Awskit.Error in
+  match kind error with Body _ -> true | _ -> false
+
+let is_validation_field field error =
+  Awskit.Error.is_validation error
+  && Awskit.Error.validation_field error = Some field
+
 let test_simulator_request_body_requires_known_length () =
   let clock = Simulator.Clock.create ~now:test_time () in
   let store = Simulator.create_store ~clock () in
@@ -23,7 +31,7 @@ let test_simulator_request_body_requires_known_length () =
   (match
      Simulator.Object.put conn ~bucket:"test-bucket" ~key:"unknown" ~body ()
    with
-  | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
+  | Error error when is_validation_field "content_length" error -> ()
   | Error error ->
       Alcotest.failf "unexpected simulator unknown-length put error: %a"
         Error.pp error
@@ -42,7 +50,7 @@ let test_simulator_request_body_requires_known_length () =
      Simulator.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"large.bin"
        ~upload_id ~part_number:1 ~body ()
    with
-  | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
+  | Error error when is_validation_field "content_length" error -> ()
   | Error error ->
       Alcotest.failf "unexpected simulator unknown-length part error: %a"
         Error.pp error
@@ -78,7 +86,12 @@ let test_simulator_stream_request_body_error_propagates () =
         | Ok () -> Error stream_error)
   in
   (match Simulator.Object.put conn ~bucket ~key:"bad" ~body () with
-  | Error error when Awskit.Error.equal error stream_error -> ()
+  | Error error
+    when is_body_error error
+         && string_contains
+              (Awskit.Error.to_string_hum error)
+              ~substring:"simulator stream request body failed" ->
+      ()
   | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream request body error");
   match Simulator.Object.head conn ~bucket ~key:"bad" () with
@@ -107,7 +120,7 @@ let test_simulator_stream_request_body_rejects_length_mismatch () =
         Simulator.Runtime.Request_body.write_string writer "ab")
   in
   (match Simulator.Object.put conn ~bucket ~key:"short" ~body:short_body () with
-  | Error (Awskit.Error.Body _) -> ()
+  | Error error when is_body_error error -> ()
   | Error error ->
       Alcotest.failf "unexpected short put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected short request body error");
@@ -118,7 +131,7 @@ let test_simulator_stream_request_body_rejects_length_mismatch () =
         | Ok () -> Simulator.Runtime.Request_body.write_string writer "e")
   in
   (match Simulator.Object.put conn ~bucket ~key:"long" ~body:long_body () with
-  | Error (Awskit.Error.Body _) -> ()
+  | Error error when is_body_error error -> ()
   | Error error -> Alcotest.failf "unexpected long put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected long request body error");
   (match Simulator.Object.head conn ~bucket ~key:"short" () with
@@ -304,9 +317,7 @@ let test_simulator_rejects_unknown_checksum_writes () =
     }
   in
   let expect_checksum_validation label = function
-    | Error (Awskit.Error.Validation { field = Some "checksum_algorithm"; _ })
-      ->
-        ()
+    | Error error when is_validation_field "checksum_algorithm" error -> ()
     | Error error ->
         Alcotest.failf "%s: unexpected error: %a" label Error.pp error
     | Ok _ -> Alcotest.failf "%s: expected checksum validation" label
@@ -371,7 +382,7 @@ let test_simulator_rejects_unknown_checksum_writes () =
     Simulator.Multipart.complete_upload conn ~bucket:"test-bucket"
       ~key:"bad.bin" ~upload_id ~options:complete_options [ part ]
   with
-  | Error (Awskit.Error.Validation { field = Some "checksum_type"; _ }) -> ()
+  | Error error when is_validation_field "checksum_type" error -> ()
   | Error error ->
       Alcotest.failf "simulator complete checksum type: unexpected error: %a"
         Error.pp error
@@ -409,7 +420,7 @@ let test_buffer_limit () =
       ~consume:(Simulator.Reader.to_string ~max_bytes:3L)
       ()
   with
-  | Error (Awskit.Error.Body _) -> ()
+  | Error error when is_body_error error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected max_bytes failure"
 

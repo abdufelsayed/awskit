@@ -16,8 +16,8 @@ val of_string : string -> (t, Error.t) result
     credential scopes are rejected. *)
 
 val of_string_exn : string -> t
-(** Like {!val:of_string}, but raises [Invalid_argument] on validation failure.
-*)
+(** Like {!val:of_string}, but raises [Error.Awskit_error] carrying the
+    structured validation error on validation failure. *)
 
 val to_string : t -> string
 (** Return the region string used in endpoints and SigV4 signing scopes. *)

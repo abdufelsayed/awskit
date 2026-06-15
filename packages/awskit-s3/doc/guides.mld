@@ -77,8 +77,26 @@ S3.Object.get s3 ~bucket ~key
 ]}
 
 Use [Object.head] when only metadata is needed. Use [Object.exists] for boolean
-existence checks. Missing-object and missing-bucket behavior is reported as
-structured service errors by primitive operations.
+existence checks. Use [Object.find_metadata] and [Object.find] when a missing
+object should be an optional result. Missing-object and missing-bucket behavior
+is reported as structured service errors by primitive operations. S3 can return
+status-only [HeadObject] 404 responses, so [Object.find_metadata] treats a
+code-less 404 as an absent object; coded [NoSuchBucket] responses remain
+[Error].
+
+{[
+module S3 = Awskit_s3_eio
+
+match S3.Object.find_metadata s3 ~bucket ~key () with
+| Ok (Some info) ->
+    Fmt.pr "content length: %s@."
+      (Option.fold ~none:"unknown" ~some:Int64.to_string info.content_length)
+| Ok None -> Fmt.pr "object is absent@."
+| Error error when Awskit_s3.Error.is_no_such_bucket error ->
+    Fmt.epr "bucket is absent: %a@." Awskit.Error.pp error
+| Error error ->
+    Fmt.epr "S3 request failed: %a@." Awskit.Error.pp error
+]}
 
 {2 Copy, Delete, List, Tagging}
 
@@ -158,8 +176,11 @@ Awskit_s3_eio.Object.get s3
   ()
 ]}
 
-If the response body exceeds [max_bytes], the helper returns
-[Error (Awskit.Error.Body _)].
+If the response body exceeds [max_bytes], the helper returns a body-classified
+{!type:Awskit.Error.t}. Use {!val:Awskit.Error.pp} or
+{!val:Awskit.Error.to_string_hum} for a human message, and
+{!val:Awskit.Error.kind} when code needs to distinguish body failures from
+other SDK errors.
 
 {2 One-Request File Operations}
 
@@ -509,8 +530,14 @@ Lwt-Unix runtime credential source and refreshed before expiration.
 S3 operations return [(value, Awskit_s3.Error.t) result] or that result inside
 the selected runtime monad.
 
-[Awskit_s3.Error.t] is [Awskit.Error.t]. It preserves validation,
-signing, transport, service, decode, and body-consumption failures.
+[Awskit_s3.Error.t] is [Awskit.Error.t]. It is opaque and preserves validation,
+signing, transport, service, decode, and body-consumption failures with
+structured context. Use [Awskit.Error.pp] or [Awskit.Error.to_string_hum] for
+human logs, and [Awskit.Error.sexp_of_t] for structured diagnostics and tests.
+
+Functions ending in [_exn] raise [Awskit.Error.Awskit_error] on SDK validation
+or construction failure. Prefer the result-returning form in libraries and
+long-running services.
 
 Use S3 classifiers for service-specific checks:
 
@@ -524,6 +551,24 @@ match result with
 
 For service failures, [Awskit_s3.Error.service_code] exposes the AWS error
 code when present.
+
+Optional lookup helpers keep common not-found handling out of exception paths.
+[Object.find] and [Object.find_metadata] return [Ok None] for absent objects
+and preserve missing buckets, authorization failures, transport errors, decode
+errors, and body errors as structured [Awskit.Error.t] values. S3 can return
+status-only [HeadObject] 404 responses, so [Object.find_metadata] treats a
+code-less 404 as an absent object; coded [NoSuchBucket] responses remain
+[Error]:
+
+{[
+module S3 = Awskit_s3_eio
+
+match S3.Object.find_metadata s3 ~bucket ~key () with
+| Ok (Some info) -> use_metadata info
+| Ok None -> handle_absent_object ()
+| Error err when Awskit_s3.Error.is_no_such_bucket err -> handle_absent_bucket ()
+| Error err -> log_error err
+]}
 
 {1 Retries}
 

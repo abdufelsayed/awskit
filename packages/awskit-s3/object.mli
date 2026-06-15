@@ -11,8 +11,8 @@ module Etag : sig
       according to the library's ETag parser. *)
 
   val of_string_exn : string -> t
-  (** Like {!val:of_string}, but raises [Invalid_argument] on validation
-      failure. *)
+  (** Like {!val:of_string}, but raises [Awskit.Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
 
   val to_string : t -> string
   (** Render the normalized ETag value. *)
@@ -33,8 +33,8 @@ module Version_id : sig
   (** Validate and wrap a version id. Empty version ids are rejected. *)
 
   val of_string_exn : string -> t
-  (** Like {!val:of_string}, but raises [Invalid_argument] on validation
-      failure. *)
+  (** Like {!val:of_string}, but raises [Awskit.Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
 
   val to_string : t -> string
   (** Return the version id string. *)

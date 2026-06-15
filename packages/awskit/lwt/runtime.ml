@@ -201,11 +201,18 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         let finished, wake_finished = Lwt.wait () in
         let wake_finished_once =
           let woken = ref false in
-          fun result ->
+          fun wake ->
             if not !woken then (
               woken := true;
-              Lwt.wakeup_later wake_finished result)
+              wake ())
         in
+        let wake_finished_result_once result =
+          wake_finished_once (fun () -> Lwt.wakeup_later wake_finished result)
+        in
+        let wake_finished_exn_once exn =
+          wake_finished_once (fun () -> Lwt.wakeup_later_exn wake_finished exn)
+        in
+        let cancel_requested = ref false in
         let producer =
           Lwt.catch
             (fun () ->
@@ -213,28 +220,31 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                 | Ok () ->
                     let result = check_finished_length writer in
                     writer.close ();
-                    wake_finished_once result;
+                    wake_finished_result_once result;
                     Lwt.return_unit
                 | Error error ->
                     Log.warn (fun m ->
                         m "request body stream failed: %s"
                           (Awskit.Error.to_string_hum error));
                     writer.close ();
-                    wake_finished_once (Error error);
+                    wake_finished_result_once (Error error);
                     Lwt.return_unit))
             (fun exn ->
               writer.close ();
               match exn with
-              | Lwt.Canceled ->
-                  wake_finished_once
+              | Lwt.Canceled when !cancel_requested ->
+                  wake_finished_result_once
                     (Error (body_error "request body stream canceled"));
+                  Lwt.return_unit
+              | Lwt.Canceled ->
+                  wake_finished_exn_once Lwt.Canceled;
                   Lwt.return_unit
               | exn ->
                   let error = body_error (Exn.to_string exn) in
                   Log.warn (fun m ->
                       m "request body stream raised: %s"
                         (Awskit.Error.to_string_hum error));
-                  wake_finished_once (Error error);
+                  wake_finished_result_once (Error error);
                   Lwt.return_unit)
         in
         Lwt.async (fun () -> producer);
@@ -243,6 +253,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           finished;
           cancel =
             (fun () ->
+              cancel_requested := true;
               writer.close ();
               Lwt.cancel producer);
         }
@@ -259,6 +270,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let make_response_body body =
       { body; max_response_drain_bytes = conn.max_response_drain_bytes }
     in
+    let exception Callback_raised of exn in
     let ready_request_body_result () =
       match Lwt.state bridge.finished with
       | Lwt.Return result -> Some result
@@ -268,7 +280,11 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     in
     let call_f response response_body =
       Log.debug (fun m -> m "HTTP %d" (Awskit.Response.status response));
-      f response response_body
+      Lwt.catch
+        (fun () -> f response response_body)
+        (function
+          | Lwt.Canceled -> Lwt.fail Lwt.Canceled
+          | exn -> Lwt.fail (Callback_raised exn))
     in
     let response =
       Lwt.catch
@@ -297,6 +313,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                         Lwt.return_unit)))
         (function
           | Lwt.Canceled -> Lwt.fail Lwt.Canceled
+          | Callback_raised exn -> Lwt.fail exn
           | exn ->
               let message = Exn.to_string exn in
               Log.warn (fun m -> m "HTTP call failed: %s" message);
@@ -399,9 +416,14 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         { stream = Cohttp_lwt.Body.to_stream body.body; chunk = ""; offset = 0 }
       in
       Lwt.bind (consume reader) (fun result ->
-          Lwt.bind (drain_response_body_reader reader body) (function
-            | Ok () -> Lwt.return result
-            | Error error -> Lwt.return_error error))
+          match result with
+          | Ok _ ->
+              Lwt.bind (drain_response_body_reader reader body) (function
+                | Ok () -> Lwt.return result
+                | Error error -> Lwt.return_error error)
+          | Error _ ->
+              Lwt.bind (drain_response_body_reader reader body) (fun _ ->
+                  Lwt.return result))
 
     let discard_response_body body =
       let reader =

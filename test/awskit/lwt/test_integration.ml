@@ -218,6 +218,40 @@ let test_runtime_bodies () =
     (Option.value (Aws.Runtime.Request_body.descriptor body).content_length
        ~default:(-1L))
 
+let test_provider_chain_uses_multiple_errors () =
+  let first =
+    Awskit_lwt.Credentials.Provider.create (fun () ->
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"env" "missing env credentials"))
+  in
+  let second =
+    Awskit_lwt.Credentials.Provider.create (fun () ->
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"profile"
+             "missing profile credentials"))
+  in
+  match
+    Lwt_main.run
+      (Awskit_lwt.Credentials.Provider.resolve
+         (Awskit_lwt.Credentials.Provider.chain [ first; second ]))
+  with
+  | Ok _ -> Alcotest.fail "expected provider chain failure"
+  | Error error -> (
+      match Awskit.Error.kind error with
+      | Awskit.Error.Multiple [ env_error; profile_error ] ->
+          Alcotest.(check (option string))
+            "first provider field" (Some "env")
+            (Awskit.Error.validation_field env_error);
+          Alcotest.(check (option string))
+            "second provider field" (Some "profile")
+            (Awskit.Error.validation_field profile_error)
+      | Awskit.Error.Multiple errors ->
+          Alcotest.failf "expected two provider errors, got %d"
+            (List.length errors)
+      | _ ->
+          Alcotest.failf "expected Multiple, got %s"
+            (Awskit.Error.to_string_hum error))
+
 let request_conn () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
@@ -252,6 +286,14 @@ let stream_descriptor length =
     payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
     replayable = false;
   }
+
+let is_body_error error =
+  let open Awskit.Error in
+  match kind error with Body _ -> true | _ -> false
+
+let body_limit error =
+  let open Awskit.Error in
+  match kind error with Body { limit; _ } -> limit | _ -> None
 
 let test_stream_request_body_reaches_client () =
   Request_body_client.request_body := None;
@@ -296,9 +338,60 @@ let test_stream_request_body_error_propagates () =
       Alcotest.failf "unexpected request body error: %a" Awskit.Error.pp error
   | Ok () -> Alcotest.fail "expected stream request body error"
 
+let test_stream_request_body_cancellation_propagates () =
+  Request_body_client.request_body := None;
+  let body =
+    RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
+      ~write:(fun writer ->
+        Lwt.bind (RequestAws.Runtime.Request_body.write_string writer "ab")
+          (function
+          | Error _ as error -> Lwt.return error
+          | Ok () -> Lwt.fail Lwt.Canceled))
+  in
+  match
+    Lwt_main.run
+      (Lwt.catch
+         (fun () ->
+           Lwt.map
+             (fun result -> `Returned result)
+             (RequestAws.Runtime.with_response (request_conn ())
+                request_body_request body ~f:(fun _ body ->
+                  RequestAws.Runtime.Response_body.discard body)))
+         (fun exn -> Lwt.return (`Raised exn)))
+  with
+  | `Raised Lwt.Canceled -> ()
+  | `Raised exn ->
+      Alcotest.failf "unexpected raised exception: %s" (Exn.to_string exn)
+  | `Returned (Error error) ->
+      Alcotest.failf "request body cancellation became SDK error: %a"
+        Awskit.Error.pp error
+  | `Returned (Ok _) -> Alcotest.fail "expected request body cancellation"
+
+let test_callback_exception_is_not_transport_error () =
+  let callback_exn = Failure "callback exploded" in
+  let body = RequestAws.Runtime.Request_body.of_string "ok" in
+  match
+    Lwt_main.run
+      (Lwt.catch
+         (fun () ->
+           Lwt.map
+             (fun result -> `Returned result)
+             (RequestAws.Runtime.with_response (request_conn ())
+                request_body_request body ~f:(fun _response _body ->
+                  Lwt.fail callback_exn)))
+         (fun exn -> Lwt.return (`Raised exn)))
+  with
+  | `Raised exn when Stdlib.( == ) exn callback_exn -> ()
+  | `Raised exn ->
+      Alcotest.failf "unexpected raised exception: %s" (Exn.to_string exn)
+  | `Returned (Error error) ->
+      Alcotest.failf "callback exception became SDK error: %a" Awskit.Error.pp
+        error
+  | `Returned (Ok _) -> Alcotest.fail "expected callback exception"
+
 let expect_request_body_error label result =
   match result with
-  | Error (Awskit.Error.Body _) -> ()
+  | Error error when is_body_error error -> ()
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected request body error" label
@@ -475,7 +568,9 @@ let with_limited_response ~max_response_drain_bytes body ~f =
        LimitedAws.Runtime.Request_body.empty ~f:(fun _ body -> f body))
 
 let expect_body_limit label expected = function
-  | Error (Awskit.Error.Body { limit = Some limit; _ }) ->
+  | Error error when Option.equal Int64.equal (body_limit error) (Some expected)
+    ->
+      let limit = Option.value_exn (body_limit error) in
       Alcotest.(check int64) label expected limit
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
@@ -492,6 +587,17 @@ let test_with_response_body_drain_enforces_limit () =
           Lwt.return_ok ()))
   |> expect_body_limit "scoped drain limit" 3L
 
+let test_with_response_body_preserves_consumer_error () =
+  let consumer_error = Awskit.Error.body "consumer failed" in
+  with_limited_response ~max_response_drain_bytes:3 "abcdef" ~f:(fun body ->
+      LimitedAws.Runtime.Response_body.with_reader body ~consume:(fun _ ->
+          Lwt.return_error consumer_error))
+  |> function
+  | Error error when Awskit.Error.equal error consumer_error -> ()
+  | Error error ->
+      Alcotest.failf "expected consumer error, got: %a" Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "expected consumer error"
+
 let suite =
   [
     ( "integration:connection",
@@ -499,10 +605,16 @@ let suite =
         Alcotest.test_case "roundtrip" `Quick test_connection_roundtrip;
         Alcotest.test_case "defaults" `Quick test_connection_defaults;
         Alcotest.test_case "runtime bodies" `Quick test_runtime_bodies;
+        Alcotest.test_case "provider chain uses multiple errors" `Quick
+          test_provider_chain_uses_multiple_errors;
         Alcotest.test_case "stream request body reaches client" `Quick
           test_stream_request_body_reaches_client;
         Alcotest.test_case "stream request body error propagates" `Quick
           test_stream_request_body_error_propagates;
+        Alcotest.test_case "stream request body cancellation propagates" `Quick
+          test_stream_request_body_cancellation_propagates;
+        Alcotest.test_case "callback exception is not transport error" `Quick
+          test_callback_exception_is_not_transport_error;
         Alcotest.test_case "stream request body early response preserves body"
           `Quick test_stream_request_body_early_response_preserves_body;
         Alcotest.test_case "stream request body backpressure limits read ahead"
@@ -515,5 +627,7 @@ let suite =
           test_discard_response_body_enforces_limit;
         Alcotest.test_case "scoped drain body limit" `Quick
           test_with_response_body_drain_enforces_limit;
+        Alcotest.test_case "consumer error wins over drain error" `Quick
+          test_with_response_body_preserves_consumer_error;
       ] );
   ]
