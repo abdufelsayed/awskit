@@ -441,6 +441,13 @@ let remove_download_temps path =
 
 let response_reader body = { Runtime.body; offset = 0 }
 
+type 'a observed = Returned of 'a | Raised of exn
+
+let observe_lwt promise =
+  Lwt.catch
+    (fun () -> Lwt.map (fun value -> Returned value) promise)
+    (fun exn -> Lwt.return (Raised exn))
+
 let check_body_descriptor label ~content_length ~replayable body =
   let descriptor = Runtime.Request_body.descriptor body in
   let open Awskit.Body.Request in
@@ -467,6 +474,21 @@ let test_body_of_lwt_stream_streams_chunks () =
   | Ok _ ->
       Alcotest.(check (option string))
         "uploaded body" (Some "onetwothree") conn.Runtime.uploaded_body
+
+let test_body_of_lwt_stream_propagates_cancellation () =
+  Runtime.reset_write_fault ();
+  let conn = connection () in
+  let stream = Lwt_stream.from (fun () -> Lwt.fail Lwt.Canceled) in
+  let body = Body.of_lwt_stream ~content_length:1L stream in
+  match
+    Lwt_main.run
+      (observe_lwt (S3.Object.put conn ~bucket:"bucket" ~key:"key" ~body ()))
+  with
+  | Raised exn ->
+      Alcotest.(check bool) "raised cancellation" true (exn == Lwt.Canceled)
+  | Returned (Error error) ->
+      Alcotest.failf "cancellation returned error: %a" Awskit_s3.Error.pp error
+  | Returned (Ok _) -> Alcotest.fail "upload succeeded despite cancellation"
 
 let test_body_of_channel_streams_channel () =
   Runtime.reset_write_fault ();
@@ -575,6 +597,36 @@ let test_body_of_path_rejects_non_regular_file () =
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected path validation")
+
+let test_upload_file_progress_exception_propagates () =
+  Runtime.reset_write_fault ();
+  let exception Progress_failed in
+  let path = Filename.temp_file "awskit-upload-progress-exn" ".bin" in
+  write_file path "small";
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          multipart_threshold = 1024L;
+        }
+      in
+      match
+        Lwt_main.run
+          (observe_lwt
+             (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~options
+                ~on_progress:(fun _transferred -> raise Progress_failed)
+                ~path ()))
+      with
+      | Raised exn ->
+          Alcotest.(check bool)
+            "raised callback exception" true (exn == Progress_failed)
+      | Returned (Error error) ->
+          Alcotest.failf "callback returned error: %a" Awskit_s3.Error.pp error
+      | Returned (Ok _) ->
+          Alcotest.fail "upload succeeded despite callback exception")
 
 let test_reader_to_channel_writes_response_body () =
   let path = Filename.temp_file "awskit-download-channel" ".bin" in
@@ -1010,6 +1062,37 @@ let test_download_file_uses_get_below_threshold () =
             "range count" 0
             (List.length conn.Runtime.get_ranges))
 
+let test_download_file_progress_exception_propagates () =
+  let exception Progress_failed in
+  let path = Filename.temp_file "awskit-download-progress-exn" ".bin" in
+  remove_file path;
+  Fun.protect
+    ~finally:(fun () ->
+      remove_download_temps path;
+      remove_file path)
+    (fun () ->
+      let conn = connection ~response_body:"small download" () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = 1024L;
+        }
+      in
+      match
+        Lwt_main.run
+          (observe_lwt
+             (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+                ~on_progress:(fun _transferred -> raise Progress_failed)
+                ~path ()))
+      with
+      | Raised exn ->
+          Alcotest.(check bool)
+            "raised callback exception" true (exn == Progress_failed)
+      | Returned (Error error) ->
+          Alcotest.failf "callback returned error: %a" Awskit_s3.Error.pp error
+      | Returned (Ok _) ->
+          Alcotest.fail "download succeeded despite callback exception")
+
 let test_download_file_uses_ranges_at_threshold () =
   let path = Filename.temp_file "awskit-download-ranged" ".bin" in
   remove_file path;
@@ -1160,6 +1243,8 @@ let suite () =
       [
         Alcotest.test_case "body streams lwt stream" `Quick
           test_body_of_lwt_stream_streams_chunks;
+        Alcotest.test_case "body lwt stream propagates cancellation" `Quick
+          test_body_of_lwt_stream_propagates_cancellation;
         Alcotest.test_case "body streams channel" `Quick
           test_body_of_channel_streams_channel;
         Alcotest.test_case "body streams path" `Quick
@@ -1168,6 +1253,8 @@ let suite () =
           test_body_of_path_returns_stream_write_error;
         Alcotest.test_case "body path rejects non-regular file" `Quick
           test_body_of_path_rejects_non_regular_file;
+        Alcotest.test_case "upload progress exception propagates" `Quick
+          test_upload_file_progress_exception_propagates;
         Alcotest.test_case "reader writes channel" `Quick
           test_reader_to_channel_writes_response_body;
         Alcotest.test_case "reader path creates private file" `Quick
@@ -1190,6 +1277,8 @@ let suite () =
           test_multipart_upload_reports_abort_failure;
         Alcotest.test_case "download uses get below threshold" `Quick
           test_download_file_uses_get_below_threshold;
+        Alcotest.test_case "download progress exception propagates" `Quick
+          test_download_file_progress_exception_propagates;
         Alcotest.test_case "download uses ranges at threshold" `Quick
           test_download_file_uses_ranges_at_threshold;
         Alcotest.test_case "download allows small range parts" `Quick
