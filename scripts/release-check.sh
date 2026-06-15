@@ -28,6 +28,8 @@ if [ "$actual_count" != "$expected_count" ]; then
   exit 1
 fi
 
+awskit_require_release_version
+
 opam exec -- dune build @opam
 opam lint ./*.opam
 opam install . --yes --working-dir
@@ -35,6 +37,8 @@ opam exec -- dune fmt
 opam exec -- dune runtest --force
 opam exec -- dune build @all @doc @install
 git diff --check
+opam exec -- dune-release check -V "$AWSKIT_RELEASE_VERSION"
+opam exec -- dune-release distrib -V "$AWSKIT_RELEASE_VERSION"
 
 docker compose up -d
 MINIO_STARTED=1
