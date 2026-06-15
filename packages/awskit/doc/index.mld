@@ -11,6 +11,51 @@ Service packages such as {{:../awskit-s3/index.html}[awskit-s3]} build on the
 runtime abstraction defined here instead of depending directly on Eio, Lwt, or
 Unix.
 
+The current service surface is AWS S3.
+
+{1 Package Split}
+
+Awskit follows a Cohttp-style package split. Install only the runtime adapter
+you need.
+
+{ul
+  {li [awskit] — pure AWS core: credentials, regions, endpoints, signing,
+    retries, request/response types, errors, and the runtime module type}
+  {li [awskit-unix] — Unix helpers for clocks, environment variables, shared
+    AWS credentials, and config files}
+  {li [awskit-lwt] — generic Lwt runtime adapter over a caller-supplied
+    Cohttp Lwt client}
+  {li [awskit-lwt-unix] — ready-to-use Lwt + Unix runtime adapter}
+  {li [awskit-eio] — ready-to-use direct-style Eio runtime adapter}
+  {li [awskit-s3] — pure AWS S3 core: buckets, objects, multipart upload,
+    presigned URLs, policies, and endpoint resolution}
+  {li [awskit-s3-sim] — deterministic in-memory S3 implementation for tests}
+  {li [awskit-s3-lwt] — S3 adapter over the generic Awskit Lwt runtime}
+  {li [awskit-s3-lwt-unix] — ready-to-use S3 client for Lwt + Unix}
+  {li [awskit-s3-eio] — ready-to-use S3 client for Eio}
+}
+
+The core [awskit] and [awskit-s3] packages do not depend on Unix, Eio, Lwt, or
+Cohttp runtime packages. [awskit-s3-sim] is for tests and does not perform HTTP
+requests. Adapter packages carry runtime dependencies.
+
+{1 Quick Start}
+
+For Eio S3 applications:
+
+{[
+opam install awskit-s3-eio eio_main
+]}
+
+For Lwt + Unix S3 applications:
+
+{[
+opam install awskit-s3-lwt-unix
+]}
+
+See {{:../awskit-s3/index.html}[awskit-s3]} for object-storage examples and
+S3-specific endpoint configuration.
+
 {1 Libraries}
 
 {2 awskit}
