@@ -50,8 +50,8 @@ let jitter t = t.jitter
 
 let retryable error =
   match Error.retry_class error with
-  | `Retryable | `Throttled -> true
-  | `Auth | `Conflict | `Not_found | `Fatal | `Unknown -> false
+  | Retryable | Throttled -> true
+  | Auth | Conflict | Not_found | Fatal | Unknown -> false
 
 let capped_exponential_delay t ~attempt =
   let exponent = max 0 (attempt - 1) in

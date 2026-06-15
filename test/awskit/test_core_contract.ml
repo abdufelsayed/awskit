@@ -3,7 +3,7 @@ open Base
 let check_validation_error name result =
   match result with
   | Ok _ -> Alcotest.failf "%s should fail validation" name
-  | Error (Awskit.Error.Validation _) -> ()
+  | Error error when Awskit.Error.is_validation error -> ()
   | Error error ->
       Alcotest.failf "%s returned unexpected error: %s" name
         (Awskit.Error.to_string_hum error)
@@ -100,6 +100,36 @@ let test_request_response_contracts () =
     "content length" (Ok (Some 42))
     (Awskit.Response.header_int response "content-length")
 
+let test_error_context_and_sexp () =
+  let error =
+    Awskit.Error.validation ~field:"bucket" "bucket must be 3-63 characters"
+    |> Awskit.Error.with_operation ~service:"s3" ~name:"CreateBucket"
+         ~resource:"s3://ab" ()
+    |> Awskit.Error.with_context "validating caller input"
+  in
+  Alcotest.(check bool)
+    "validation classifier" true
+    (Awskit.Error.is_validation error);
+  Alcotest.(check (option string))
+    "validation field" (Some "bucket")
+    (Awskit.Error.validation_field error);
+  let sexp = Awskit.Error.sexp_of_t error |> Base.Sexp.to_string_hum in
+  Alcotest.(check bool)
+    "sexp names operation" true
+    (String.contains sexp 'C' && String.contains sexp 'b');
+  let human = Awskit.Error.to_string_hum error in
+  Alcotest.(check bool)
+    "human includes operation" true
+    (String.contains human 'C' && String.contains human 'b')
+
+let test_error_multiple_preserves_all_failures () =
+  let primary = Awskit.Error.body "download failed" in
+  let cleanup = Awskit.Error.body "cleanup failed" in
+  let combined = Awskit.Error.multiple [ primary; cleanup ] in
+  let human = Awskit.Error.to_string_hum combined in
+  Alcotest.(check bool) "mentions primary" true (String.contains human 'd');
+  Alcotest.(check bool) "mentions cleanup" true (String.contains human 'c')
+
 let suite =
   [
     ( "core:contracts",
@@ -115,5 +145,9 @@ let suite =
           test_runtime_request_response_body_names;
         Alcotest.test_case "request/response metadata" `Quick
           test_request_response_contracts;
+        Alcotest.test_case "error context and sexp" `Quick
+          test_error_context_and_sexp;
+        Alcotest.test_case "error multiple preserves failures" `Quick
+          test_error_multiple_preserves_all_failures;
       ] );
   ]
