@@ -80,7 +80,14 @@ val with_operation :
   ?service:string -> name:string -> ?resource:string -> unit -> t -> t
 
 val with_retry : attempt:int -> ?max_attempts:int -> reason:string -> t -> t
+
 val retry_class : t -> retry_class
+(** Coarse retry/handling classification. [retry_class] aggregates [Multiple]
+    errors by caller-handling priority: [Auth] > [Throttled] > [Retryable] >
+    [Conflict] > [Not_found] > [Fatal] > [Unknown]. This means a retryable or
+    throttled nested error can outrank a fatal nested validation/body/decode
+    error. Empty [Multiple] errors classify as [Unknown]. *)
+
 val is_validation : t -> bool
 val validation_field : t -> string option
 val is_not_found : t -> bool

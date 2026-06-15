@@ -116,45 +116,69 @@ let test_error_context_and_sexp () =
   let sexp = Awskit.Error.sexp_of_t error |> Base.Sexp.to_string_hum in
   Alcotest.(check bool)
     "sexp names operation" true
-    (String.contains sexp 'C' && String.contains sexp 'b');
+    (String.is_substring sexp ~substring:"CreateBucket"
+    && String.is_substring sexp ~substring:"s3://ab");
   let human = Awskit.Error.to_string_hum error in
   Alcotest.(check bool)
     "human includes operation" true
-    (String.contains human 'C' && String.contains human 'b')
+    (String.is_substring human ~substring:"CreateBucket"
+    && String.is_substring human ~substring:"s3://ab")
 
 let test_error_multiple_preserves_all_failures () =
   let primary = Awskit.Error.body "download failed" in
   let cleanup = Awskit.Error.body "cleanup failed" in
   let combined = Awskit.Error.multiple [ primary; cleanup ] in
   let human = Awskit.Error.to_string_hum combined in
-  Alcotest.(check bool) "mentions primary" true (String.contains human 'd');
-  Alcotest.(check bool) "mentions cleanup" true (String.contains human 'c')
+  Alcotest.(check bool)
+    "mentions primary" true
+    (String.is_substring human ~substring:"download failed");
+  Alcotest.(check bool)
+    "mentions cleanup" true
+    (String.is_substring human ~substring:"cleanup failed")
+
+let make_service_error ~status ~code =
+  Awskit.Error.service
+    {
+      status;
+      code;
+      message = None;
+      request_id = None;
+      host_id = None;
+      headers = [];
+      body = None;
+    }
+
+let test_error_multiple_retry_policy () =
+  let validation_error = Awskit.Error.validation "bad caller input" in
+  let retryable_transport =
+    Awskit.Error.transport ~retryable:true "connection reset"
+  in
+  let retryable_over_fatal =
+    Awskit.Error.multiple [ validation_error; retryable_transport ]
+  in
+  Alcotest.(check string)
+    "retryable outranks fatal" "Retryable"
+    (Awskit.Error.retry_class retryable_over_fatal
+    |> Awskit.Error.sexp_of_retry_class
+    |> Base.Sexp.to_string_hum);
+  let not_found_service =
+    make_service_error ~status:404 ~code:(Some "NoSuchKey")
+  in
+  let auth_service =
+    make_service_error ~status:403 ~code:(Some "AccessDenied")
+  in
+  let auth_over_not_found =
+    Awskit.Error.multiple [ not_found_service; auth_service ]
+  in
+  Alcotest.(check string)
+    "auth outranks not found" "Auth"
+    (Awskit.Error.retry_class auth_over_not_found
+    |> Awskit.Error.sexp_of_retry_class
+    |> Base.Sexp.to_string_hum)
 
 let test_error_multiple_classifiers_recurse () =
-  let service_error =
-    Awskit.Error.service
-      {
-        status = 503;
-        code = Some "SlowDown";
-        message = Some "please slow down";
-        request_id = None;
-        host_id = None;
-        headers = [];
-        body = None;
-      }
-  in
-  let auth_error =
-    Awskit.Error.service
-      {
-        status = 403;
-        code = Some "AccessDenied";
-        message = Some "denied";
-        request_id = None;
-        host_id = None;
-        headers = [];
-        body = None;
-      }
-  in
+  let service_error = make_service_error ~status:503 ~code:(Some "SlowDown") in
+  let auth_error = make_service_error ~status:403 ~code:(Some "AccessDenied") in
   let combined =
     Awskit.Error.multiple
       [
@@ -205,6 +229,8 @@ let suite =
           test_error_context_and_sexp;
         Alcotest.test_case "error multiple preserves failures" `Quick
           test_error_multiple_preserves_all_failures;
+        Alcotest.test_case "error multiple retry policy" `Quick
+          test_error_multiple_retry_policy;
         Alcotest.test_case "error multiple classifiers recurse" `Quick
           test_error_multiple_classifiers_recurse;
       ] );
