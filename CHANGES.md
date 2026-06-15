@@ -1,3 +1,19 @@
+# 0.2.0
+
+This release updates S3 streaming and transfer APIs.
+
+Breaking change: object and multipart uploads now use adapter `Body` helpers,
+and downloads use scoped reader consumption with `Object.get ~consume`.
+Update upload call sites to construct request bodies through the selected
+runtime adapter, and consume download streams inside the provided scope.
+
+S3 support now includes native streaming object bodies, multipart upload body
+handling, and live SDK examples for common object, bucket, and transfer flows.
+The README examples have been updated for the streaming API.
+
+Awskit now provides structured `Awskit.Error` handling for SDK failures, and
+the package API documentation has been expanded.
+
 # 0.1.0
 
 Initial public release of Awskit.
