@@ -62,6 +62,10 @@ end
 
 module Simulator_contract = S3_contract.Make (Simulator_subject)
 
+let is_body_error error =
+  let open Awskit.Error in
+  match kind error with Body _ -> true | _ -> false
+
 let test_simulator_slow_down_fault () =
   let conn = Simulator_subject.fresh () in
   ignore
@@ -98,7 +102,7 @@ let test_simulator_response_lost_fault () =
       ~consume:(Simulator.Reader.to_string ~max_bytes:16L)
       ()
   with
-  | Error (Awskit.Error.Body _) -> ()
+  | Error error when is_body_error error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected response-lost body error"
 

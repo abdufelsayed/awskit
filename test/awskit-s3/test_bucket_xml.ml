@@ -1,6 +1,10 @@
 open Awskit_s3
 open Awskit_s3_test
 
+let is_validation_field field error =
+  Awskit.Error.is_validation error
+  && Awskit.Error.validation_field error = Some field
+
 let test_bucket_config_parse () =
   let versioning =
     {|<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>|}
@@ -149,7 +153,7 @@ let test_bucket_encryption_unknown_write_rejected () =
   in
   let conn = Recording_runtime.connect [ response 200 "" ] in
   match Recording_s3.Bucket.Encryption.put conn ~bucket:"my-bucket" config with
-  | Error (Awskit.Error.Validation { field = Some "sse_algorithm"; _ }) -> ()
+  | Error error when is_validation_field "sse_algorithm" error -> ()
   | Error error ->
       Alcotest.failf "unexpected validation error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected unknown encryption write rejection"

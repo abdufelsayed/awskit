@@ -60,6 +60,14 @@ let stream_descriptor length =
     replayable = false;
   }
 
+let is_body_error error =
+  let open Awskit.Error in
+  match kind error with Body _ -> true | _ -> false
+
+let body_limit error =
+  let open Awskit.Error in
+  match kind error with Body { limit; _ } -> limit | _ -> None
+
 let request_conn env sw =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
@@ -233,7 +241,7 @@ let test_stream_request_body_error_propagates env =
   | Ok () -> Alcotest.fail "expected stream request body error"
 
 let expect_request_body_error label = function
-  | Error (Awskit.Error.Body _) -> ()
+  | Error error when is_body_error error -> ()
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
   | Ok () -> Alcotest.failf "%s: expected request body error" label
@@ -354,7 +362,9 @@ let eio_response_body ~max_response_drain_bytes body =
   }
 
 let expect_body_limit label expected = function
-  | Error (Awskit.Error.Body { limit = Some limit; _ }) ->
+  | Error error when Option.equal Int64.equal (body_limit error) (Some expected)
+    ->
+      let limit = Option.value_exn (body_limit error) in
       Alcotest.(check int64) label expected limit
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error

@@ -1,6 +1,10 @@
 open Awskit_s3
 open Awskit_s3_test
 
+let is_validation_field field error =
+  Awskit.Error.is_validation error
+  && Awskit.Error.validation_field error = Some field
+
 let test_presigned_result () =
   let result =
     Presigned.get_object
@@ -204,7 +208,7 @@ let test_presigned_rejects_header_newline () =
       ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
       ~options ()
   with
-  | Error (Awskit.Error.Validation _) -> ()
+  | Error error when Awskit.Error.is_validation error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected header validation error"
 
@@ -224,8 +228,7 @@ let test_presigned_rejects_unknown_checksum () =
        ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
        ~options:put_options ()
    with
-  | Error (Awskit.Error.Validation { field = Some "checksum_algorithm"; _ }) ->
-      ()
+  | Error error when is_validation_field "checksum_algorithm" error -> ()
   | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected presigned put checksum validation");
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
@@ -238,8 +241,7 @@ let test_presigned_rejects_unknown_checksum () =
       ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"large.bin"
       ~upload_id ~part_number:1 ~options:upload_part_options ()
   with
-  | Error (Awskit.Error.Validation { field = Some "checksum_algorithm"; _ }) ->
-      ()
+  | Error error when is_validation_field "checksum_algorithm" error -> ()
   | Error error ->
       Alcotest.failf "unexpected upload part error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected presigned upload-part checksum validation"

@@ -15,7 +15,7 @@ val create :
 (** Create credentials from AWS access key material.
 
     Empty access keys, empty secret keys, and invalid session token values are
-    rejected with {!Awskit.Error.Validation}. *)
+    rejected with a validation error. *)
 
 val create_exn :
   access_key_id:string ->

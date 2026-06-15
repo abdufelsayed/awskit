@@ -109,10 +109,7 @@ module Error = struct
   let pp = Awskit.Error.pp
   let equal = Awskit.Error.equal
   let to_string_hum = Awskit.Error.to_string_hum
-
-  let service_code = function
-    | Awskit.Error.Service { code; _ } -> code
-    | _ -> None
+  let service_code = Awskit.Error.service_code
 
   let code_is expected error =
     match service_code error with
@@ -123,9 +120,9 @@ module Error = struct
   let is_no_such_bucket error = code_is "NoSuchBucket" error
   let is_no_such_key error = code_is "NoSuchKey" error
 
-  let is_precondition_failed = function
-    | Awskit.Error.Service { status = 412; _ } -> true
-    | error -> code_is "PreconditionFailed" error
+  let is_precondition_failed error =
+    Awskit.Error.service_status error = Some 412
+    || code_is "PreconditionFailed" error
 
   let is_conditional_request_conflict error =
     code_is "ConditionalRequestConflict" error

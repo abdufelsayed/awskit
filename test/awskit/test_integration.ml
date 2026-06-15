@@ -153,7 +153,12 @@ let test_duplicate_host_rejected () =
       ~now:test_time
   with
   | Ok _ -> Alcotest.fail "duplicate host should be rejected"
-  | Error (Awskit.Error.Validation { field = Some "host"; _ }) -> ()
+  | Error error
+    when Awskit.Error.is_validation error
+         && Option.equal String.equal
+              (Awskit.Error.validation_field error)
+              (Some "host") ->
+      ()
   | Error error ->
       Alcotest.failf "unexpected error: %s" (Awskit.Error.to_string_hum error)
 
@@ -220,7 +225,12 @@ let test_credentials_reject_whitespace () =
     Awskit.Credentials.create ~access_key_id:" AK " ~secret_access_key:"SK" ()
   with
   | Ok _ -> Alcotest.fail "credentials should reject whitespace"
-  | Error (Awskit.Error.Validation { field = Some "access_key_id"; _ }) -> ()
+  | Error error
+    when Awskit.Error.is_validation error
+         && Option.equal String.equal
+              (Awskit.Error.validation_field error)
+              (Some "access_key_id") ->
+      ()
   | Error error ->
       Alcotest.failf "unexpected error: %s" (Awskit.Error.to_string_hum error)
 

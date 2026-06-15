@@ -1,6 +1,10 @@
 open Awskit_s3
 open Awskit_s3_test
 
+let is_decode_error error =
+  let open Awskit.Error in
+  match kind error with Decode _ -> true | _ -> false
+
 let test_object_checksum_headers_and_response () =
   let conn =
     Recording_runtime.connect
@@ -312,17 +316,17 @@ let test_malformed_xml_responses () =
       ]
   in
   (match Recording_s3.Bucket.list conn with
-  | Error (Awskit.Error.Decode _) -> ()
+  | Error error when is_decode_error error -> ()
   | Error error ->
       Alcotest.failf "unexpected bucket decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected bucket list decode error");
   (match Recording_s3.Object.list conn ~bucket:"my-bucket" () with
-  | Error (Awskit.Error.Decode _) -> ()
+  | Error error when is_decode_error error -> ()
   | Error error ->
       Alcotest.failf "unexpected object decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected object list decode error");
   (match Recording_s3.Object.list_versions conn ~bucket:"my-bucket" () with
-  | Error (Awskit.Error.Decode _) -> ()
+  | Error error when is_decode_error error -> ()
   | Error error ->
       Alcotest.failf "unexpected version decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected version list decode error");
@@ -331,7 +335,7 @@ let test_malformed_xml_responses () =
     Recording_s3.Multipart.list_parts conn ~bucket:"my-bucket" ~key:"large.bin"
       ~upload_id ()
   with
-  | Error (Awskit.Error.Decode _) -> ()
+  | Error error when is_decode_error error -> ()
   | Error error ->
       Alcotest.failf "unexpected multipart decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected list parts decode error"

@@ -1,6 +1,18 @@
 open Awskit_s3
 open Awskit_s3_test
 
+let is_body_error error =
+  let open Awskit.Error in
+  match kind error with Body _ -> true | _ -> false
+
+let body_details error =
+  let open Awskit.Error in
+  match kind error with Body body -> Some body | _ -> None
+
+let is_validation_field field error =
+  Awskit.Error.is_validation error
+  && Awskit.Error.validation_field error = Some field
+
 let test_retry_slow_down_then_success () =
   let slow_down =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
@@ -125,7 +137,7 @@ let test_retry_jitter_bounds () =
   Alcotest.(check (float 0.0001)) "low jitter" 0.5 (Ptime.Span.to_float_s low);
   Alcotest.(check (float 0.0001)) "high jitter" 1.0 (Ptime.Span.to_float_s high);
   match Awskit.Retry.create ~jitter:1.5 () with
-  | Error (Awskit.Error.Validation _) -> ()
+  | Error error when Awskit.Error.is_validation error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected invalid jitter"
 
@@ -145,7 +157,7 @@ let test_request_body_descriptor_validation () =
   (match
      Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~body ()
    with
-  | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
+  | Error error when is_validation_field "content_length" error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected descriptor validation failure");
   Alcotest.(check int) "object put not called" 0 (List.length conn.calls);
@@ -154,7 +166,7 @@ let test_request_body_descriptor_validation () =
      Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket"
        ~key:"large.bin" ~upload_id ~part_number:1 ~body ()
    with
-  | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
+  | Error error when is_validation_field "content_length" error -> ()
   | Error error ->
       Alcotest.failf "unexpected multipart error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected multipart descriptor validation failure");
@@ -175,7 +187,7 @@ let test_request_body_descriptor_validation () =
   (match
      Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"unknown" ~body ()
    with
-  | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
+  | Error error when is_validation_field "content_length" error -> ()
   | Error error ->
       Alcotest.failf "unexpected unknown-length put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected unknown-length object validation failure");
@@ -183,7 +195,7 @@ let test_request_body_descriptor_validation () =
      Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket"
        ~key:"large.bin" ~upload_id ~part_number:1 ~body ()
    with
-  | Error (Awskit.Error.Validation { field = Some "content_length"; _ }) -> ()
+  | Error error when is_validation_field "content_length" error -> ()
   | Error error ->
       Alcotest.failf "unexpected unknown-length part error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected unknown-length multipart validation failure");
@@ -211,11 +223,11 @@ let test_response_body_drain_errors () =
   (match
      Recording_s3.Object.get conn ~bucket:"my-bucket" ~key:"file" ~consume ()
    with
-  | Error (Awskit.Error.Body _) -> ()
+  | Error error when is_body_error error -> ()
   | Error error -> Alcotest.failf "unexpected get error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected drain failure after successful consume");
   (match Recording_s3.Object.head conn ~bucket:"my-bucket" ~key:"file" () with
-  | Error (Awskit.Error.Body _) -> ()
+  | Error error when is_body_error error -> ()
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected discard failure after successful head");
   Alcotest.(check int) "calls" 2 (List.length conn.calls)
@@ -234,10 +246,12 @@ let test_in_memory_helper_limit_error_uses_max_bytes () =
       ~consume:(Recording_s3.Reader.to_string ~max_bytes:3L)
       ()
   with
-  | Error (Awskit.Error.Body { message; limit = Some 3L }) ->
-      Alcotest.(check string)
-        "message" "response body exceeded max_bytes" message
-  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Error error -> (
+      match body_details error with
+      | Some { message; limit = Some 3L } ->
+          Alcotest.(check string)
+            "message" "response body exceeded max_bytes" message
+      | _ -> Alcotest.failf "unexpected error: %a" Error.pp error)
   | Ok _ -> Alcotest.fail "expected max_bytes body limit failure"
 
 let suite =

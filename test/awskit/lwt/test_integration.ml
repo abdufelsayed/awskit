@@ -253,6 +253,14 @@ let stream_descriptor length =
     replayable = false;
   }
 
+let is_body_error error =
+  let open Awskit.Error in
+  match kind error with Body _ -> true | _ -> false
+
+let body_limit error =
+  let open Awskit.Error in
+  match kind error with Body { limit; _ } -> limit | _ -> None
+
 let test_stream_request_body_reaches_client () =
   Request_body_client.request_body := None;
   let body =
@@ -298,7 +306,7 @@ let test_stream_request_body_error_propagates () =
 
 let expect_request_body_error label result =
   match result with
-  | Error (Awskit.Error.Body _) -> ()
+  | Error error when is_body_error error -> ()
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected request body error" label
@@ -475,7 +483,9 @@ let with_limited_response ~max_response_drain_bytes body ~f =
        LimitedAws.Runtime.Request_body.empty ~f:(fun _ body -> f body))
 
 let expect_body_limit label expected = function
-  | Error (Awskit.Error.Body { limit = Some limit; _ }) ->
+  | Error error when Option.equal Int64.equal (body_limit error) (Some expected)
+    ->
+      let limit = Option.value_exn (body_limit error) in
       Alcotest.(check int64) label expected limit
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error

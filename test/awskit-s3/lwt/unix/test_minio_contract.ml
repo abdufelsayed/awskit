@@ -47,7 +47,7 @@ let await label promise = Lwt_main.run promise |> ok_or_fail label
 
 let expect_status label status result =
   match result with
-  | Error (Awskit.Error.Service service) when service.status = status -> ()
+  | Error error when Awskit.Error.service_status error = Some status -> ()
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Awskit_s3.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected service status %d" label status

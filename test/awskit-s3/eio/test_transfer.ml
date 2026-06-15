@@ -1,6 +1,14 @@
 let ( let* ) result f =
   match result with Ok value -> f value | Error _ as error -> error
 
+let is_body_error error =
+  let open Awskit.Error in
+  match kind error with Body _ -> true | _ -> false
+
+let is_validation_field field error =
+  Awskit.Error.is_validation error
+  && Awskit.Error.validation_field error = Some field
+
 module Runtime = struct
   type connection = {
     response_body : string;
@@ -427,7 +435,7 @@ let test_body_of_path_rejects_non_regular_file env () =
     ~finally:(fun () -> Unix.rmdir native_path)
     (fun () ->
       match Body.of_path (path_of_native env native_path) with
-      | Error (Awskit.Error.Validation { field = Some "path"; _ }) -> ()
+      | Error error when is_validation_field "path" error -> ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected path validation")
@@ -489,7 +497,7 @@ let test_reader_to_path_failure_preserves_target env () =
           (response_reader new_body)
       with
       | Ok () -> Alcotest.fail "download succeeded despite read failure"
-      | Error (Awskit.Error.Body _) ->
+      | Error error when is_body_error error ->
           Alcotest.(check string)
             "preserved body" old_body (read_file native_path);
           Alcotest.(check int)

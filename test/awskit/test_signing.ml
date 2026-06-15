@@ -225,7 +225,7 @@ let test_sign_different_payloads =
         (String.equal (get_auth (sign p1).headers) (get_auth (sign p2).headers)))
 
 let expect_validation label = function
-  | Error (Awskit.Error.Validation _) -> ()
+  | Error error when Awskit.Error.is_validation error -> ()
   | Error error ->
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected validation error" label

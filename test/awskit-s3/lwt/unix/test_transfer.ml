@@ -1,3 +1,11 @@
+let is_body_error error =
+  let open Awskit.Error in
+  match kind error with Body _ -> true | _ -> false
+
+let is_validation_field field error =
+  Awskit.Error.is_validation error
+  && Awskit.Error.validation_field error = Some field
+
 module Runtime = struct
   type connection = {
     response_body : string;
@@ -530,7 +538,7 @@ let test_body_of_path_rejects_non_regular_file () =
     ~finally:(fun () -> Unix.rmdir path)
     (fun () ->
       match Lwt_main.run (Body.of_path path) with
-      | Error (Awskit.Error.Validation { field = Some "path"; _ }) -> ()
+      | Error error when is_validation_field "path" error -> ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected path validation")
@@ -591,7 +599,7 @@ let test_reader_to_path_failure_preserves_target () =
     (fun () ->
       match Lwt_main.run (Reader.to_path path (response_reader new_body)) with
       | Ok () -> Alcotest.fail "download succeeded despite read failure"
-      | Error (Awskit.Error.Body _) ->
+      | Error error when is_body_error error ->
           Alcotest.(check string) "preserved body" old_body (read_file path);
           Alcotest.(check int)
             "temp files removed" 0
@@ -713,7 +721,7 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_concurrency ~path ())
        with
-      | Error (Awskit.Error.Validation { field = Some "concurrency"; _ }) -> ()
+      | Error error when is_validation_field "concurrency" error -> ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected concurrency validation");
@@ -735,10 +743,7 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_put_checksum ~path ())
        with
-      | Error
-          (Awskit.Error.Validation { field = Some "put_options.checksum"; _ })
-        ->
-          ()
+      | Error error when is_validation_field "put_options.checksum" error -> ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected put checksum validation");
@@ -747,10 +752,7 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_put_checksum ~path ())
        with
-      | Error
-          (Awskit.Error.Validation { field = Some "put_options.checksum"; _ })
-        ->
-          ()
+      | Error error when is_validation_field "put_options.checksum" error -> ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected explicit multipart checksum validation");
@@ -768,9 +770,8 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_part_checksum ~path ())
        with
-      | Error
-          (Awskit.Error.Validation
-             { field = Some "upload_part_options.checksum"; _ }) ->
+      | Error error
+        when is_validation_field "upload_part_options.checksum" error ->
           ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
@@ -789,9 +790,8 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_create_checksum ~path ())
        with
-      | Error
-          (Awskit.Error.Validation
-             { field = Some "create_options.checksum_algorithm"; _ }) ->
+      | Error error
+        when is_validation_field "create_options.checksum_algorithm" error ->
           ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
@@ -810,9 +810,8 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_complete_checksum ~path ())
        with
-      | Error
-          (Awskit.Error.Validation
-             { field = Some "complete_options.checksum"; _ }) ->
+      | Error error when is_validation_field "complete_options.checksum" error
+        ->
           ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
@@ -831,9 +830,8 @@ let test_upload_file_rejects_invalid_options () =
            (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
               ~options:bad_create_checksum_type ~path ())
        with
-      | Error
-          (Awskit.Error.Validation
-             { field = Some "create_options.checksum_type"; _ }) ->
+      | Error error
+        when is_validation_field "create_options.checksum_type" error ->
           ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
@@ -852,9 +850,8 @@ let test_upload_file_rejects_invalid_options () =
           (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
              ~options:bad_complete_checksum_type ~path ())
       with
-      | Error
-          (Awskit.Error.Validation
-             { field = Some "complete_options.checksum_type"; _ }) ->
+      | Error error
+        when is_validation_field "complete_options.checksum_type" error ->
           ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
@@ -1031,9 +1028,7 @@ let test_download_file_rejects_range_option () =
           (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
              ~path ())
       with
-      | Error (Awskit.Error.Validation { field = Some "get_options.range"; _ })
-        ->
-          ()
+      | Error error when is_validation_field "get_options.range" error -> ()
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected range validation")
