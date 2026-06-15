@@ -116,7 +116,8 @@ module Make (R : RUNTIME) = struct
             if Int64.compare total max_size > 0 then
               return_error
                 (Awskit.Error.body ~limit:max_size
-                   "response body exceeded max_bytes")
+                   "response body exceeded max_bytes"
+                |> Awskit.Error.with_context "reading bounded response body")
             else begin
               Buffer.add_subbytes buffer chunk 0 n;
               loop total

@@ -12,6 +12,10 @@ let invalid ?field fmt =
 
 let decode fmt = Fmt.kstr Awskit.Error.decode fmt
 
+let decode_with_context ~what message =
+  Awskit.Error.decode message
+  |> Awskit.Error.with_context (Fmt.str "decoding %s" what)
+
 let is_prefix ~prefix value =
   let prefix_len = String.length prefix in
   String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
@@ -73,8 +77,10 @@ module Xml = struct
           nodes
       with
       | Some root -> Ok root
-      | None -> Error (Awskit.Error.decode "empty XML document")
-    with exn -> Error (Awskit.Error.decode (Printexc.to_string exn))
+      | None ->
+          Error (decode_with_context ~what:"XML document" "empty XML document")
+    with exn ->
+      Error (decode_with_context ~what:"XML document" (Printexc.to_string exn))
 
   let children name nodes =
     List.filter_map

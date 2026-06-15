@@ -158,6 +158,15 @@ let test_bucket_encryption_unknown_write_rejected () =
       Alcotest.failf "unexpected validation error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected unknown encryption write rejection"
 
+let test_decode_error_mentions_xml_document () =
+  match Awskit_s3__Bucket_result_xml.parse_location "<not xml" with
+  | Ok _ -> Alcotest.fail "expected decode error"
+  | Error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions XML document" true
+        (string_contains ~substring:"decoding XML document" text)
+
 let suite =
   [
     ( "bucket xml",
@@ -169,5 +178,7 @@ let suite =
           test_bucket_encryption_unknown_read_values;
         Alcotest.test_case "bucket encryption unknown write rejected" `Quick
           test_bucket_encryption_unknown_write_rejected;
+        Alcotest.test_case "decode error mentions XML document" `Quick
+          test_decode_error_mentions_xml_document;
       ] );
   ]
