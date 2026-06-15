@@ -136,6 +136,30 @@ let test_error_multiple_preserves_all_failures () =
     "mentions cleanup" true
     (String.is_substring human ~substring:"cleanup failed")
 
+let test_provider_chain_uses_multiple_errors () =
+  let first =
+    Awskit.Credentials.Provider.create (fun () ->
+        Error (Awskit.Error.validation ~field:"env" "missing env credentials"))
+  in
+  let second =
+    Awskit.Credentials.Provider.create (fun () ->
+        Error
+          (Awskit.Error.validation ~field:"profile"
+             "missing profile credentials"))
+  in
+  match
+    Awskit.Credentials.Provider.resolve
+      (Awskit.Credentials.Provider.chain [ first; second ])
+  with
+  | Ok _ -> Alcotest.fail "expected provider chain failure"
+  | Error error -> (
+      match Awskit.Error.kind error with
+      | Awskit.Error.Multiple errors ->
+          Alcotest.(check int) "two provider errors" 2 (List.length errors)
+      | _ ->
+          Alcotest.failf "expected Multiple, got %s"
+            (Awskit.Error.to_string_hum error))
+
 let make_service_error ~status ~code =
   Awskit.Error.service
     {
@@ -262,6 +286,8 @@ let suite =
           test_error_context_and_sexp;
         Alcotest.test_case "error multiple preserves failures" `Quick
           test_error_multiple_preserves_all_failures;
+        Alcotest.test_case "provider chain uses multiple errors" `Quick
+          test_provider_chain_uses_multiple_errors;
         Alcotest.test_case "error multiple retry policy" `Quick
           test_error_multiple_retry_policy;
         Alcotest.test_case "error multiple classifiers recurse" `Quick

@@ -67,9 +67,9 @@ let cleanup_temp_download path error =
   | Ok () -> Error error
   | Error cleanup_error ->
       Error
-        (Awskit.Error.body
-           (Fmt.str "%a; additionally %a" Awskit.Error.pp error Awskit.Error.pp
-              cleanup_error))
+        (Awskit.Error.multiple [ error; cleanup_error ]
+        |> Awskit.Error.with_context
+             "download failed and temporary file cleanup also failed")
 
 let cleanup_temp_download_before_raise path exn =
   Eio.Cancel.protect (fun () -> ignore (remove_temp_download path));
