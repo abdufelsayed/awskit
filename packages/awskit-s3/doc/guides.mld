@@ -286,10 +286,35 @@ S3 endpoint configuration is part of client construction. The defaults use the
 standard regional AWS S3 endpoint for the selected region.
 
 {[
+module Https = struct
+  let connector () =
+    Mirage_crypto_rng_unix.use_default ();
+    let authenticator =
+      match Ca_certs.authenticator () with
+      | Ok authenticator -> authenticator
+      | Error (`Msg msg) -> invalid_arg ("failed to load CA roots: " ^ msg)
+    in
+    let tls_config =
+      match Tls.Config.client ~authenticator () with
+      | Ok config -> config
+      | Error (`Msg msg) -> invalid_arg ("failed to create TLS config: " ^ msg)
+    in
+    Some
+      (fun uri raw ->
+        let host =
+          Uri.host uri
+          |> Option.map (fun host ->
+                 Domain_name.(host_exn (of_string_exn host)))
+        in
+        Tls_eio.client_of_flow ?host tls_config raw)
+end
+
+let https = Https.connector () in
 let s3 =
   Awskit_s3_eio.create
     ~sw
     ~env
+    ~https
     ~region
     ~credentials
     ~endpoint_variant:`Dualstack
@@ -308,6 +333,7 @@ let s3 =
   Awskit_s3_eio.create
     ~sw
     ~env
+    ~https:Awskit_eio.http_only
     ~region
     ~credentials
     ~endpoint
@@ -485,7 +511,9 @@ A typical direct-upload multipart flow is:
 
 {1 Credentials}
 
-Eio S3 connections require explicit [region] and [credentials].
+Eio S3 connections require explicit [region], [credentials], and [https]. This
+example reuses the [Https] helper from the endpoint configuration example
+above.
 
 {[
 let credentials =
@@ -495,7 +523,8 @@ let credentials =
     ()
 in
 let region = Awskit.Region.of_string_exn "us-east-1" in
-Awskit_s3_eio.create ~sw ~env ~region ~credentials ()
+let https = Https.connector () in
+Awskit_s3_eio.create ~sw ~env ~https ~region ~credentials ()
 ]}
 
 [awskit-s3-lwt-unix] can use explicit values or load the standard environment

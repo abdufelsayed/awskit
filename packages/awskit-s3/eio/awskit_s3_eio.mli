@@ -14,6 +14,7 @@ module Runtime : Awskit_s3.RUNTIME with type 'a t = 'a and type connection = t
 val create :
   sw:Eio.Switch.t ->
   env:< clock : _ Eio.Time.clock ; net : _ Eio.Net.t ; .. > ->
+  https:'flow Awskit_eio.https ->
   region:Awskit.Region.t ->
   credentials:Awskit.Credentials.t ->
   ?retry_policy:Awskit.Retry.t ->
@@ -25,6 +26,9 @@ val create :
   t
 (** Create an Eio S3 client.
 
+    [https] is forwarded to [Awskit_eio.create]. Use [Awskit_eio.http_only] only
+    for plain HTTP endpoints such as local tests; applications targeting HTTPS
+    should pass a connector compatible with [Cohttp_eio.Client.make ~https].
     [region] and [credentials] are explicit. [endpoint] overrides the generated
     AWS S3 endpoint for local services or custom endpoints. [addressing_style],
     [endpoint_variant], and [scheme] configure S3 endpoint resolution when no

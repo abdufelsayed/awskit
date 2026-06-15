@@ -51,12 +51,12 @@ opam install awskit-s3-lwt-unix
 | `awskit-unix` | Unix helpers for clocks, environment variables, shared AWS credentials, and config files. |
 | `awskit-lwt` | Generic Lwt runtime adapter over a caller-supplied Cohttp Lwt client. |
 | `awskit-lwt-unix` | Ready-to-use Lwt + Unix runtime adapter using Cohttp Lwt Unix. |
-| `awskit-eio` | Ready-to-use direct-style Eio runtime adapter using Cohttp Eio. |
+| `awskit-eio` | Direct-style Eio runtime adapter using Cohttp Eio and a caller-provided HTTPS policy. |
 | `awskit-s3` | Pure AWS S3 core: buckets, objects, multipart upload, presigned URLs, policies, and endpoint resolution. |
 | `awskit-s3-sim` | Deterministic in-memory S3 implementation for tests. |
 | `awskit-s3-lwt` | S3 adapter over the generic Awskit Lwt runtime. |
 | `awskit-s3-lwt-unix` | Ready-to-use S3 client for Lwt + Unix applications. |
-| `awskit-s3-eio` | Ready-to-use S3 client for Eio applications. |
+| `awskit-s3-eio` | Direct-style S3 client for Eio applications using a caller-provided HTTPS policy. |
 
 The `awskit` and `awskit-s3` packages do not depend on Unix, Eio, Lwt, or
 Cohttp runtime packages. `awskit-s3-sim` is intended for test code and does not
@@ -85,20 +85,53 @@ converted into SDK errors.
 Install the Eio S3 adapter:
 
 ```sh
-opam install awskit-s3-eio eio_main
+opam install awskit-s3-eio eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
 ```
 
 Add the libraries to your Dune file:
 
 ```lisp
 ; dune
-(libraries awskit awskit-s3 awskit-s3-eio eio_main fmt)
+(libraries
+ awskit
+ awskit-s3
+ awskit-s3-eio
+ eio_main
+ fmt
+ tls-eio
+ tls
+ ca-certs
+ domain-name
+ mirage-crypto-rng.unix)
 ```
 
 Upload an object:
 
 ```ocaml
 open Eio.Std
+
+module Https = struct
+  let connector () =
+    Mirage_crypto_rng_unix.use_default ();
+    let authenticator =
+      match Ca_certs.authenticator () with
+      | Ok authenticator -> authenticator
+      | Error (`Msg msg) -> invalid_arg ("failed to load CA roots: " ^ msg)
+    in
+    let tls_config =
+      match Tls.Config.client ~authenticator () with
+      | Ok config -> config
+      | Error (`Msg msg) -> invalid_arg ("failed to create TLS config: " ^ msg)
+    in
+    Some
+      (fun uri raw ->
+        let host =
+          Uri.host uri
+          |> Option.map (fun host ->
+                 Domain_name.(host_exn (of_string_exn host)))
+        in
+        Tls_eio.client_of_flow ?host tls_config raw)
+end
 
 let () =
   Eio_main.run @@ fun env ->
@@ -110,7 +143,8 @@ let () =
       ()
   in
   let region = Awskit.Region.of_string_exn "us-east-1" in
-  let s3 = Awskit_s3_eio.create ~sw ~env ~region ~credentials () in
+  let https = Https.connector () in
+  let s3 = Awskit_s3_eio.create ~sw ~env ~https ~region ~credentials () in
   match
     Awskit_s3_eio.Object.put s3
       ~bucket:"my-bucket"

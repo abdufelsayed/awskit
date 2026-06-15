@@ -6,11 +6,18 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 type net = Net : _ Eio.Net.t -> net
 type time_clock = Time_clock : _ Eio.Time.clock -> time_clock
+type http_connection = [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Std.r
+
+type 'flow https = (Uri.t -> http_connection -> 'flow) option
+  constraint 'flow = [> Eio.Resource.close_ty ] Eio.Flow.two_way
+
+let http_only = None
 
 type conn = {
   net : net;
   time_clock : time_clock;
   sw : Eio.Switch.t;
+  https : (Uri.t -> http_connection -> http_connection) option;
   region : Awskit.Region.t;
   credentials : Awskit.Credentials.t;
   clock : unit -> Ptime.t;
@@ -81,34 +88,15 @@ type request_body_bridge = {
 }
 
 let default_max_response_drain_bytes = 64 * 1024 * 1024
-let authenticator = lazy (Ca_certs.authenticator ())
 
-let tls_config =
-  lazy
-    (match Lazy.force authenticator with
-    | Error (`Msg msg) ->
-        invalid_arg
-          (Fmt.str
-             "Awskit_eio.create: failed to create system X509 authenticator: %s"
-             msg)
-    | Ok authenticator -> (
-        match Tls.Config.client ~authenticator () with
-        | Error (`Msg msg) ->
-            invalid_arg
-              (Fmt.str "Awskit_eio.create: failed to create TLS config: %s" msg)
-        | Ok config -> config))
+let now_from_eio_clock (Time_clock clock) =
+  Eio.Time.now clock |> Ptime.of_float_s |> Option.value ~default:Ptime.epoch
 
-let ensure_tls_runtime () = Mirage_crypto_rng_unix.use_default ()
+let close_https (https : 'flow https) =
+  Option.map https ~f:(fun connector uri flow ->
+      (connector uri flow :> http_connection))
 
-let https_connector uri raw =
-  ensure_tls_runtime ();
-  let host =
-    Uri.host uri
-    |> Option.map ~f:(fun x -> Domain_name.(host_exn (of_string_exn x)))
-  in
-  Tls_eio.client_of_flow ?host (Lazy.force tls_config) raw
-
-let create ~env ~sw ~region ~credentials ?(clock = Ptime_clock.now)
+let create ~env ~sw ~https ~region ~credentials ?clock
     ?(retry_policy = Awskit.Retry.default) ?endpoint
     ?(max_response_drain_bytes = default_max_response_drain_bytes) () =
   if max_response_drain_bytes <= 0 then
@@ -117,10 +105,14 @@ let create ~env ~sw ~region ~credentials ?(clock = Ptime_clock.now)
   let time_clock =
     Time_clock (env :> < clock : _ Eio.Time.clock ; .. >)#clock
   in
+  let clock =
+    Option.value clock ~default:(fun () -> now_from_eio_clock time_clock)
+  in
   {
     net;
     time_clock;
     sw;
+    https = close_https https;
     region;
     credentials;
     clock;
@@ -154,6 +146,12 @@ let make_uri (request : Awskit.Request.t) =
   Uri.of_string
     (Fmt.str "%s://%s%s" scheme_str host_port
        (Awskit.Request.Target.path_and_query target))
+
+let missing_https_connector_error =
+  Awskit.Error.transport ~retryable:false
+    "HTTPS endpoint requires an HTTPS connector. Pass ~https with a connector \
+     compatible with Cohttp_eio.Client.make. For local HTTP endpoints, pass \
+     ~https:Awskit_eio.http_only and an explicit http:// endpoint."
 
 let descriptor_for_string body =
   {
@@ -273,73 +271,72 @@ let body_to_cohttp ~sw = function
 let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
     =
   let (Net net) = conn.net in
-  let https =
-    match request.target.scheme with
-    | `Http -> None
-    | `Https -> Some https_connector
-  in
-  let client = Cohttp_eio.Client.make ~https net in
   let headers = Http.Header.of_list request.headers in
   let uri = make_uri request in
-  let meth = to_cohttp_meth request.method_ in
-  let make_response_body body =
-    { body; max_response_drain_bytes = conn.max_response_drain_bytes }
-  in
-  let successful_status status = status >= 200 && status < 300 in
-  let early_result = ref None in
-  let exception Early_response in
-  let exception Callback_raised of exn in
-  let call_f response body =
-    match f response body with
-    | result -> result
-    | exception exn -> raise (Callback_raised exn)
-  in
-  let run_call ~call_sw =
-    let bridge = body_to_cohttp ~sw:call_sw request_body in
-    try
-      let response, body =
-        Cohttp_eio.Client.call client ~sw:call_sw ~headers ?body:bridge.body
-          meth uri
+  match (request.target.scheme, conn.https) with
+  | `Https, None -> Error missing_https_connector_error
+  | `Http, _ | `Https, Some _ -> (
+      let client = Cohttp_eio.Client.make ~https:conn.https net in
+      let meth = to_cohttp_meth request.method_ in
+      let make_response_body body =
+        { body; max_response_drain_bytes = conn.max_response_drain_bytes }
       in
-      let status = Http.Response.status response |> Http.Status.to_int in
-      let request_body_result =
-        if successful_status status then Eio.Promise.await bridge.finished
-        else
-          match Eio.Promise.peek bridge.finished with
-          | Some result -> result
-          | None ->
-              early_result :=
-                Some
-                  (call_f (to_aws_response response) (make_response_body body));
-              raise Early_response
+      let successful_status status = status >= 200 && status < 300 in
+      let early_result = ref None in
+      let exception Early_response in
+      let exception Callback_raised of exn in
+      let call_f response body =
+        match f response body with
+        | result -> result
+        | exception exn -> raise (Callback_raised exn)
       in
-      match request_body_result with
-      | Error _ as error -> error
-      | Ok () ->
-          Log.debug (fun m -> m "HTTP %d" status);
-          call_f (to_aws_response response) (make_response_body body)
-    with
-    | Early_response as exn -> raise exn
-    | Callback_raised exn -> raise exn
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> (
-        match Eio.Promise.peek bridge.finished with
-        | Some (Error error) -> Error error
-        | _ ->
-            let message = Exn.to_string exn in
-            Log.warn (fun m -> m "HTTP call failed: %s" message);
-            Error (Awskit.Error.transport ~retryable:true message))
-  in
-  match request_body with
-  | Source _ -> run_call ~call_sw:conn.sw
-  | Stream _ -> (
-      try
-        Eio.Switch.run ~name:"awskit stream request body attempt"
-          (fun request_body_sw -> run_call ~call_sw:request_body_sw)
-      with Early_response -> (
-        match !early_result with
-        | Some result -> result
-        | None -> Error (body_error "missing early response result")))
+      let run_call ~call_sw =
+        let bridge = body_to_cohttp ~sw:call_sw request_body in
+        try
+          let response, body =
+            Cohttp_eio.Client.call client ~sw:call_sw ~headers ?body:bridge.body
+              meth uri
+          in
+          let status = Http.Response.status response |> Http.Status.to_int in
+          let request_body_result =
+            if successful_status status then Eio.Promise.await bridge.finished
+            else
+              match Eio.Promise.peek bridge.finished with
+              | Some result -> result
+              | None ->
+                  early_result :=
+                    Some
+                      (call_f (to_aws_response response)
+                         (make_response_body body));
+                  raise Early_response
+          in
+          match request_body_result with
+          | Error _ as error -> error
+          | Ok () ->
+              Log.debug (fun m -> m "HTTP %d" status);
+              call_f (to_aws_response response) (make_response_body body)
+        with
+        | Early_response as exn -> raise exn
+        | Callback_raised exn -> raise exn
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> (
+            match Eio.Promise.peek bridge.finished with
+            | Some (Error error) -> Error error
+            | _ ->
+                let message = Exn.to_string exn in
+                Log.warn (fun m -> m "HTTP call failed: %s" message);
+                Error (Awskit.Error.transport ~retryable:true message))
+      in
+      match request_body with
+      | Source _ -> run_call ~call_sw:conn.sw
+      | Stream _ -> (
+          try
+            Eio.Switch.run ~name:"awskit stream request body attempt"
+              (fun request_body_sw -> run_call ~call_sw:request_body_sw)
+          with Early_response -> (
+            match !early_result with
+            | Some result -> result
+            | None -> Error (body_error "missing early response result"))))
 
 type +'a t = 'a
 

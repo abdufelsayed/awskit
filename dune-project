@@ -134,13 +134,6 @@
   (fmt
    (>= 0.11.0))
   logs
-  ca-certs
-  domain-name
-  (tls
-   (>= 2.1.0))
-  (tls-eio
-   (>= 2.1.0))
-  mirage-crypto-rng
   ppx_deriving
   (eio_main
    (and

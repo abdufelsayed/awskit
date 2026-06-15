@@ -31,9 +31,11 @@ module Body_reader = File_transfer.Make_body_reader (Runtime) (S3)
 module Body = Body_reader.Body
 module Reader = Body_reader.Reader
 
-let create ~sw ~env ~region ~credentials ?retry_policy ?endpoint
+let create ~sw ~env ~https ~region ~credentials ?retry_policy ?endpoint
     ?addressing_style ?endpoint_variant ?scheme () =
-  let aws = Awskit_eio.create ~sw ~env ~region ~credentials ?retry_policy () in
+  let aws =
+    Awskit_eio.create ~sw ~env ~https ~region ~credentials ?retry_policy ()
+  in
   let endpoint_config =
     Awskit_s3.endpoint_config ?addressing_style ?endpoint_variant ?scheme
       ?endpoint ()

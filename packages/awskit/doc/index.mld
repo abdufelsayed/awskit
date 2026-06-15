@@ -26,13 +26,15 @@ you need.
   {li [awskit-lwt] — generic Lwt runtime adapter over a caller-supplied
     Cohttp Lwt client}
   {li [awskit-lwt-unix] — ready-to-use Lwt + Unix runtime adapter}
-  {li [awskit-eio] — ready-to-use direct-style Eio runtime adapter}
+  {li [awskit-eio] — direct-style Eio runtime adapter over a caller-provided
+    HTTPS policy}
   {li [awskit-s3] — pure AWS S3 core: buckets, objects, multipart upload,
     presigned URLs, policies, and endpoint resolution}
   {li [awskit-s3-sim] — deterministic in-memory S3 implementation for tests}
   {li [awskit-s3-lwt] — S3 adapter over the generic Awskit Lwt runtime}
   {li [awskit-s3-lwt-unix] — ready-to-use S3 client for Lwt + Unix}
-  {li [awskit-s3-eio] — ready-to-use S3 client for Eio}
+  {li [awskit-s3-eio] — direct-style S3 client for Eio applications over a
+    caller-provided HTTPS policy}
 }
 
 The core [awskit] and [awskit-s3] packages do not depend on Unix, Eio, Lwt, or
@@ -44,7 +46,7 @@ requests. Adapter packages carry runtime dependencies.
 For Eio S3 applications:
 
 {[
-opam install awskit-s3-eio eio_main
+opam install awskit-s3-eio eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
 ]}
 
 For Lwt + Unix S3 applications:
@@ -86,7 +88,8 @@ Core modules:
 
 [Awskit_eio] is the direct-style Eio runtime adapter. Its monad type
 is [type 'a t = 'a]. Response bodies are scoped to [with_response] and
-[Runtime.Response_body.with_reader].
+[Runtime.Response_body.with_reader]. Applications provide the HTTPS policy used
+for TLS-enabled endpoints.
 
 {2 awskit-lwt}
 
@@ -135,12 +138,37 @@ services or low-level tests.
 {1 Minimal Eio Runtime Example}
 
 {[
+module Https = struct
+  let connector () =
+    Mirage_crypto_rng_unix.use_default ();
+    let authenticator =
+      match Ca_certs.authenticator () with
+      | Ok authenticator -> authenticator
+      | Error (`Msg msg) -> invalid_arg ("failed to load CA roots: " ^ msg)
+    in
+    let tls_config =
+      match Tls.Config.client ~authenticator () with
+      | Ok config -> config
+      | Error (`Msg msg) -> invalid_arg ("failed to create TLS config: " ^ msg)
+    in
+    Some
+      (fun uri raw ->
+        let host =
+          Uri.host uri
+          |> Option.map (fun host ->
+                 Domain_name.(host_exn (of_string_exn host)))
+        in
+        Tls_eio.client_of_flow ?host tls_config raw)
+end
+
 Eio.Switch.run @@ fun sw ->
 let region = Awskit.Region.of_string_exn "us-east-1" in
+let https = Https.connector () in
 let conn =
   Awskit_eio.create
     ~env
     ~sw
+    ~https
     ~region
     ~credentials
     ()

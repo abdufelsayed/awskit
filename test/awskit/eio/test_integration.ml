@@ -11,7 +11,8 @@ let test_connection_roundtrip env =
   let endpoint = Awskit.Endpoint.http_exn ~host:"localhost" ~port:9000 () in
   let conn =
     Eio.Switch.run @@ fun sw ->
-    Awskit_eio.create ~env ~sw ~region ~credentials:c ~clock ~endpoint ()
+    Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region
+      ~credentials:c ~clock ~endpoint ()
   in
   Alcotest.(check string)
     "region" "eu-west-1"
@@ -30,7 +31,8 @@ let test_connection_defaults env =
   let region = Awskit.Region.of_string_exn "us-east-1" in
   let conn =
     Eio.Switch.run @@ fun sw ->
-    Awskit_eio.create ~env ~sw ~region ~credentials:c ~clock ()
+    Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region
+      ~credentials:c ~clock ()
   in
   Alcotest.(check (option string))
     "no endpoint" None
@@ -38,13 +40,36 @@ let test_connection_defaults env =
        Awskit_eio.Runtime.(endpoint conn)
        ~f:Awskit.Endpoint.to_url_prefix)
 
+let ptime_of_eio_clock env =
+  Eio.Time.now env#clock |> Ptime.of_float_s |> Option.value_exn
+
+let test_connection_uses_env_clock_by_default env =
+  let c =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let region = Awskit.Region.of_string_exn "us-east-1" in
+  let conn =
+    Eio.Switch.run @@ fun sw ->
+    Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region
+      ~credentials:c ()
+  in
+  let before = ptime_of_eio_clock env in
+  let actual = Awskit_eio.Runtime.now conn in
+  let after = ptime_of_eio_clock env in
+  Alcotest.(check bool)
+    "clock between call bounds" true
+    (Ptime.compare before actual <= 0 && Ptime.compare actual after <= 0)
+
 let test_runtime_bodies env =
   let c =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let region = Awskit.Region.of_string_exn "us-east-1" in
   Eio.Switch.run @@ fun sw ->
-  let conn = Awskit_eio.create ~env ~sw ~region ~credentials:c () in
+  let conn =
+    Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region
+      ~credentials:c ()
+  in
   ignore (Awskit_eio.Runtime.region conn : Awskit.Region.t);
   let body = Awskit_eio.Runtime.Request_body.of_string "hello" in
   Alcotest.(check int64)
@@ -68,12 +93,18 @@ let body_limit error =
   let open Awskit.Error in
   match kind error with Body { limit; _ } -> limit | _ -> None
 
+let is_transport_error_with_message ~substring error =
+  let open Awskit.Error in
+  match kind error with
+  | Transport { message; _ } -> String.is_substring message ~substring
+  | _ -> false
+
 let request_conn env sw =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let region = Awskit.Region.of_string_exn "us-east-1" in
-  Awskit_eio.create ~env ~sw ~region ~credentials
+  Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region ~credentials
     ~clock:(fun () -> Ptime.epoch)
     ()
 
@@ -194,6 +225,25 @@ let request_body_request_for_endpoint endpoint =
       ~path:"/" ()
   in
   Awskit.Request.create_exn ~method_:`PUT ~target ()
+
+let test_https_request_requires_connector env =
+  Eio.Switch.run @@ fun sw ->
+  let conn = request_conn env sw in
+  let target =
+    Awskit.Request.Target.create_exn ~scheme:`Https ~host:"example.com"
+      ~path:"/" ()
+  in
+  let request = Awskit.Request.create_exn ~method_:`GET ~target () in
+  let body = Awskit_eio__Runtime.Request_body.empty in
+  match
+    Awskit_eio__Runtime.with_response conn request body ~f:(fun _ _ -> Ok ())
+  with
+  | Error error
+    when is_transport_error_with_message
+           ~substring:"HTTPS endpoint requires an HTTPS connector" error ->
+      ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+  | Ok () -> Alcotest.fail "expected missing HTTPS connector error"
 
 let read_response_body_to_string body =
   Awskit_eio__Runtime.Response_body.with_reader body ~consume:(fun reader ->
@@ -418,8 +468,12 @@ let suite env =
             test_connection_roundtrip env);
         Alcotest.test_case "defaults" `Quick (fun () ->
             test_connection_defaults env);
+        Alcotest.test_case "uses env clock by default" `Quick (fun () ->
+            test_connection_uses_env_clock_by_default env);
         Alcotest.test_case "runtime bodies" `Quick (fun () ->
             test_runtime_bodies env);
+        Alcotest.test_case "HTTPS request requires connector" `Quick (fun () ->
+            test_https_request_requires_connector env);
         Alcotest.test_case "listener bind sandbox errors are skippable" `Quick
           test_listener_bind_denied_by_sandbox;
         Alcotest.test_case "stream request body emits multiple chunks" `Quick

@@ -242,11 +242,36 @@ consumer error wins.
 Use [awskit-eio] for direct-style OCaml 5 applications:
 
 {[
+module Https = struct
+  let connector () =
+    Mirage_crypto_rng_unix.use_default ();
+    let authenticator =
+      match Ca_certs.authenticator () with
+      | Ok authenticator -> authenticator
+      | Error (`Msg msg) -> invalid_arg ("failed to load CA roots: " ^ msg)
+    in
+    let tls_config =
+      match Tls.Config.client ~authenticator () with
+      | Ok config -> config
+      | Error (`Msg msg) -> invalid_arg ("failed to create TLS config: " ^ msg)
+    in
+    Some
+      (fun uri raw ->
+        let host =
+          Uri.host uri
+          |> Option.map (fun host ->
+                 Domain_name.(host_exn (of_string_exn host)))
+        in
+        Tls_eio.client_of_flow ?host tls_config raw)
+end
+
 Eio.Switch.run @@ fun sw ->
+let https = Https.connector () in
 let conn =
   Awskit_eio.create
     ~env
     ~sw
+    ~https
     ~region
     ~credentials
     ()
