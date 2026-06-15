@@ -51,9 +51,9 @@ let cleanup_temp_download path error =
     | Ok () -> Lwt.return_error error
     | Error cleanup_error ->
         Lwt.return_error
-          (Awskit.Error.body
-             (Fmt.str "%a; additionally %a" Awskit.Error.pp error
-                Awskit.Error.pp cleanup_error)))
+          (Awskit.Error.multiple [ error; cleanup_error ]
+          |> Awskit.Error.with_context
+               "download failed and temporary file cleanup also failed"))
 
 let write_all fd bytes offset length =
   let rec loop offset remaining =
@@ -588,7 +588,13 @@ struct
     let abort_and_return error =
       Lwt.bind
         (S3.Multipart.abort_upload conn ~bucket ~key ~upload_id
-           ~options:options.abort_options ()) (fun _ -> Lwt.return_error error)
+           ~options:options.abort_options ()) (function
+        | Ok _ -> Lwt.return_error error
+        | Error cleanup_error ->
+            Lwt.return_error
+              (Awskit.Error.multiple [ error; cleanup_error ]
+              |> Awskit.Error.with_context
+                   "multipart upload failed and abort also failed"))
     in
     Lwt.bind
       (upload_missing_parts conn ~bucket ~key ~upload_id ~options ~path
