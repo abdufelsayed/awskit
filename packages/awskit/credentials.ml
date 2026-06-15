@@ -39,9 +39,8 @@ let create ~access_key_id ~secret_access_key ?session_token () =
           | Ok () -> Ok { access_key_id; secret_access_key; session_token }))
 
 let create_exn ~access_key_id ~secret_access_key ?session_token () =
-  match create ~access_key_id ~secret_access_key ?session_token () with
-  | Ok value -> value
-  | Error error -> invalid_arg (Aws_error.to_string_hum error)
+  Aws_error.get_ok_exn
+    (create ~access_key_id ~secret_access_key ?session_token ())
 
 let hmac_sha256 ~key data =
   Digestif.SHA256.(hmac_string ~key data |> to_raw_string)

@@ -163,9 +163,7 @@ let sign_request_params ~credentials ~region ~service ~method_ ~path
               signed_headers_str;
             })
 
-let result_exn = function
-  | Ok value -> value
-  | Error error -> invalid_arg (Aws_error.to_string_hum error)
+let result_exn = Aws_error.get_ok_exn
 
 let sign_request_params_exn ~credentials ~region ~service ~method_ ~path
     ~query_params ~headers ~payload_hash ~now =

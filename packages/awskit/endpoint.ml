@@ -53,9 +53,7 @@ let create ~scheme ~host ?port () =
       | Error _ as error -> error
       | Ok () -> Ok { scheme; host; port })
 
-let result_exn = function
-  | Ok value -> value
-  | Error error -> invalid_arg (Aws_error.to_string_hum error)
+let result_exn = Aws_error.get_ok_exn
 
 let create_exn ~scheme ~host ?port () =
   result_exn (create ~scheme ~host ?port ())

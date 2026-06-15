@@ -5,9 +5,7 @@ module Region = Awskit.Region
 let ( let* ) result f =
   match result with Ok value -> f value | Error _ as e -> e
 
-let result_exn = function
-  | Ok value -> value
-  | Error error -> invalid_arg (Awskit.Error.to_string_hum error)
+let result_exn = Awskit.Error.get_ok_exn
 
 let invalid ?field fmt =
   Fmt.kstr (fun message -> Error (Awskit.Error.validation ?field message)) fmt

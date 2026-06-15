@@ -228,6 +228,21 @@ let test_error_multiple_classifiers_recurse () =
   check_retry_class "aggregated retry class" Awskit.Error.Auth
     (Awskit.Error.retry_class combined)
 
+let test_exn_apis_raise_sdk_exception () =
+  let raised =
+    try
+      ignore (Awskit.Region.of_string_exn "" : Awskit.Region.t);
+      false
+    with
+    | Awskit.Error.Awskit_error error ->
+        Awskit.Error.is_validation error
+        && Option.equal String.equal
+             (Awskit.Error.validation_field error)
+             (Some "region")
+    | _ -> false
+  in
+  Alcotest.(check bool) "raises SDK exception" true raised
+
 let suite =
   [
     ( "core:contracts",
@@ -251,5 +266,7 @@ let suite =
           test_error_multiple_retry_policy;
         Alcotest.test_case "error multiple classifiers recurse" `Quick
           test_error_multiple_classifiers_recurse;
+        Alcotest.test_case "exn APIs raise SDK exception" `Quick
+          test_exn_apis_raise_sdk_exception;
       ] );
   ]

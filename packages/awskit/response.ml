@@ -14,10 +14,7 @@ let has_ctl_or_del s =
       code < 0x20 || code = 0x7F)
 
 let invalid ?field message = Error (Aws_error.validation ?field message)
-
-let result_exn = function
-  | Ok value -> value
-  | Error error -> invalid_arg (Aws_error.to_string_hum error)
+let result_exn = Aws_error.get_ok_exn
 
 let validate_status status =
   if status >= 100 && status <= 599 then Ok ()
