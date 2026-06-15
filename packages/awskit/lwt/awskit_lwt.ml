@@ -11,16 +11,18 @@ module Credentials = struct
      fun () ->
       let rec loop errors = function
         | [] ->
-            let message =
-              match List.rev errors with
-              | [] -> "no credential providers configured"
+            let errors = List.rev errors in
+            let error =
+              match errors with
+              | [] ->
+                  Awskit.Error.validation ~field:"credentials"
+                    "no credential providers configured"
               | errors ->
-                  "no credential provider resolved credentials: "
-                  ^ String.concat "; "
-                      (List.map Awskit.Error.to_string_hum errors)
+                  Awskit.Error.multiple errors
+                  |> Awskit.Error.with_context
+                       "no credential provider resolved credentials"
             in
-            Lwt.return_error
-              (Awskit.Error.validation ~field:"credentials" message)
+            Lwt.return_error error
         | provider :: rest ->
             Lwt.bind (provider ()) (function
               | Ok _ as ok -> Lwt.return ok

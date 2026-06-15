@@ -153,9 +153,22 @@ let test_provider_chain_uses_multiple_errors () =
   with
   | Ok _ -> Alcotest.fail "expected provider chain failure"
   | Error error -> (
+      let human = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions provider chain context" true
+        (String.is_substring human
+           ~substring:"no credential provider resolved credentials");
       match Awskit.Error.kind error with
+      | Awskit.Error.Multiple [ env_error; profile_error ] ->
+          Alcotest.(check (option string))
+            "first provider field" (Some "env")
+            (Awskit.Error.validation_field env_error);
+          Alcotest.(check (option string))
+            "second provider field" (Some "profile")
+            (Awskit.Error.validation_field profile_error)
       | Awskit.Error.Multiple errors ->
-          Alcotest.(check int) "two provider errors" 2 (List.length errors)
+          Alcotest.failf "expected two provider errors, got %d"
+            (List.length errors)
       | _ ->
           Alcotest.failf "expected Multiple, got %s"
             (Awskit.Error.to_string_hum error))

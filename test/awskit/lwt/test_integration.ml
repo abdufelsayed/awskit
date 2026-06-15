@@ -218,6 +218,40 @@ let test_runtime_bodies () =
     (Option.value (Aws.Runtime.Request_body.descriptor body).content_length
        ~default:(-1L))
 
+let test_provider_chain_uses_multiple_errors () =
+  let first =
+    Awskit_lwt.Credentials.Provider.create (fun () ->
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"env" "missing env credentials"))
+  in
+  let second =
+    Awskit_lwt.Credentials.Provider.create (fun () ->
+        Lwt.return_error
+          (Awskit.Error.validation ~field:"profile"
+             "missing profile credentials"))
+  in
+  match
+    Lwt_main.run
+      (Awskit_lwt.Credentials.Provider.resolve
+         (Awskit_lwt.Credentials.Provider.chain [ first; second ]))
+  with
+  | Ok _ -> Alcotest.fail "expected provider chain failure"
+  | Error error -> (
+      match Awskit.Error.kind error with
+      | Awskit.Error.Multiple [ env_error; profile_error ] ->
+          Alcotest.(check (option string))
+            "first provider field" (Some "env")
+            (Awskit.Error.validation_field env_error);
+          Alcotest.(check (option string))
+            "second provider field" (Some "profile")
+            (Awskit.Error.validation_field profile_error)
+      | Awskit.Error.Multiple errors ->
+          Alcotest.failf "expected two provider errors, got %d"
+            (List.length errors)
+      | _ ->
+          Alcotest.failf "expected Multiple, got %s"
+            (Awskit.Error.to_string_hum error))
+
 let request_conn () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
@@ -509,6 +543,8 @@ let suite =
         Alcotest.test_case "roundtrip" `Quick test_connection_roundtrip;
         Alcotest.test_case "defaults" `Quick test_connection_defaults;
         Alcotest.test_case "runtime bodies" `Quick test_runtime_bodies;
+        Alcotest.test_case "provider chain uses multiple errors" `Quick
+          test_provider_chain_uses_multiple_errors;
         Alcotest.test_case "stream request body reaches client" `Quick
           test_stream_request_body_reaches_client;
         Alcotest.test_case "stream request body error propagates" `Quick
