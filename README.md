@@ -62,6 +62,25 @@ The `awskit` and `awskit-s3` packages do not depend on Unix, Eio, Lwt, or
 Cohttp runtime packages. `awskit-s3-sim` is intended for test code and does not
 perform HTTP requests. Adapter packages carry runtime dependencies.
 
+## Error Handling
+
+Awskit APIs return explicit results. Runtime-backed operations use the shape
+`('a, Awskit.Error.t) result io`, where `io` is supplied by the selected runtime
+adapter. Pure constructors return `('a, Awskit.Error.t) result`.
+
+`Awskit.Error.t` carries structured AWS context such as operation, resource,
+HTTP status, AWS error code, request id, retry class, and retry attempts. Use
+`Awskit.Error.pp` or `Awskit.Error.to_string_hum` for human logs, and
+`Awskit.Error.sexp_of_t` for structured diagnostics and tests.
+
+Convenience `_exn` APIs raise `Awskit.Error.Awskit_error` carrying the same
+structured error. Cancellation and user callback exceptions are not converted
+into SDK errors.
+
+Functions ending in `_exn` raise `Awskit.Error.Awskit_error` on SDK validation
+or construction failure. Prefer the result-returning form in libraries and
+long-running services.
+
 ## Quick Start
 
 ### Eio
@@ -180,6 +199,23 @@ endpoint.
 Awskit targets AWS S3 semantics. S3-compatible services such as MinIO are useful
 for local contract testing, but provider-specific behavior should stay in tests
 unless it matches AWS S3.
+
+Optional lookup helpers convert object-not-found responses to `Ok None` while
+leaving other failures structured:
+
+```ocaml
+module S3 = Awskit_s3_eio
+
+match S3.Object.find_metadata s3 ~bucket ~key () with
+| Ok (Some info) ->
+    Fmt.pr "content length: %s@."
+      (Option.fold ~none:"unknown" ~some:Int64.to_string info.content_length)
+| Ok None -> Fmt.pr "object is absent@."
+| Error error when Awskit_s3.Error.is_no_such_bucket error ->
+    Fmt.epr "bucket is absent: %a@." Awskit.Error.pp error
+| Error error ->
+    Fmt.epr "S3 request failed: %a@." Awskit.Error.pp error
+```
 
 ## S3 Simulation
 

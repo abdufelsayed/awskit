@@ -117,26 +117,42 @@ Useful low-level helpers:
 
 {1 Structured Errors}
 
-Core errors are structured values:
+Core errors are structured SDK values. Runtime-backed operations return
+[('a, Awskit.Error.t) result io], while pure constructors return
+[('a, Awskit.Error.t) result].
+
+{!type:Awskit.Error.t} is opaque. Use {!val:Awskit.Error.kind} to inspect the
+coarse error kind, and {!val:Awskit.Error.context} to read attached operation,
+resource, retry-attempt, and diagnostic context. Use {!val:Awskit.Error.pp} or
+{!val:Awskit.Error.to_string_hum} for human logs, and
+{!val:Awskit.Error.sexp_of_t} for structured diagnostics and tests.
+
+Functions ending in [_exn] raise {!exception:Awskit.Error.Awskit_error} on SDK
+validation or construction failure. Prefer the result-returning form in
+libraries and long-running services. Cancellation and user callback exceptions
+are not converted into SDK errors.
+
+The public kind and retry classifications are ordinary variants:
 
 {[
-type t =
+type kind =
   | Validation of validation
   | Signing of string
   | Transport of transport
   | Service of service
   | Decode of string
   | Body of body
+  | Multiple of Awskit.Error.t list
 ]}
 
 Use {!val:Awskit.Error.retry_class} for manual retry decisions:
 
 {[
 match Awskit.Error.retry_class err with
-| `Throttled | `Retryable -> retry ()
-| `Auth -> refresh_or_fail ()
-| `Not_found -> handle_missing ()
-| `Conflict | `Fatal | `Unknown -> fail err
+| Awskit.Error.Throttled | Awskit.Error.Retryable -> retry ()
+| Awskit.Error.Auth -> refresh_or_fail ()
+| Awskit.Error.Not_found -> handle_missing ()
+| Awskit.Error.Conflict | Awskit.Error.Fatal | Awskit.Error.Unknown -> fail err
 ]}
 
 Service packages preserve {!type:Awskit.Error.t} and add classifier helpers.
