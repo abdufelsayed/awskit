@@ -130,6 +130,62 @@ let test_error_multiple_preserves_all_failures () =
   Alcotest.(check bool) "mentions primary" true (String.contains human 'd');
   Alcotest.(check bool) "mentions cleanup" true (String.contains human 'c')
 
+let test_error_multiple_classifiers_recurse () =
+  let service_error =
+    Awskit.Error.service
+      {
+        status = 503;
+        code = Some "SlowDown";
+        message = Some "please slow down";
+        request_id = None;
+        host_id = None;
+        headers = [];
+        body = None;
+      }
+  in
+  let auth_error =
+    Awskit.Error.service
+      {
+        status = 403;
+        code = Some "AccessDenied";
+        message = Some "denied";
+        request_id = None;
+        host_id = None;
+        headers = [];
+        body = None;
+      }
+  in
+  let combined =
+    Awskit.Error.multiple
+      [
+        Awskit.Error.body "first error has no classifier data";
+        Awskit.Error.multiple
+          [
+            Awskit.Error.validation "validation without field";
+            service_error;
+            Awskit.Error.validation ~field:"bucket" "bucket is invalid";
+          ];
+        auth_error;
+      ]
+  in
+  Alcotest.(check bool)
+    "nested validation classifier" true
+    (Awskit.Error.is_validation combined);
+  Alcotest.(check (option string))
+    "nested validation field" (Some "bucket")
+    (Awskit.Error.validation_field combined);
+  Alcotest.(check (option string))
+    "nested service code" (Some "SlowDown")
+    (Awskit.Error.service_code combined);
+  Alcotest.(check (option int))
+    "nested service status" (Some 503)
+    (Awskit.Error.service_status combined);
+  Alcotest.(check string)
+    "aggregated retry class" "Auth"
+    (Awskit.Error.retry_class combined
+    |> Awskit.Error.sexp_of_retry_class
+    |> Base.Sexp.to_string_hum)
+
 let suite =
   [
     ( "core:contracts",
@@ -149,5 +205,7 @@ let suite =
           test_error_context_and_sexp;
         Alcotest.test_case "error multiple preserves failures" `Quick
           test_error_multiple_preserves_all_failures;
+        Alcotest.test_case "error multiple classifiers recurse" `Quick
+          test_error_multiple_classifiers_recurse;
       ] );
   ]

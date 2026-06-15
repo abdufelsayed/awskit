@@ -92,6 +92,19 @@ let code_is codes = function
   | None -> false
   | Some code -> List.exists codes ~f:(String.Caseless.equal code)
 
+let retry_class_priority = function
+  | Auth -> 0
+  | Throttled -> 1
+  | Retryable -> 2
+  | Conflict -> 3
+  | Not_found -> 4
+  | Fatal -> 5
+  | Unknown -> 6
+
+let higher_priority_retry_class left right =
+  if retry_class_priority left <= retry_class_priority right then left
+  else right
+
 let rec retry_class t =
   match t.kind with
   | Validation _ -> Fatal
@@ -120,25 +133,36 @@ let rec retry_class t =
   | Service { status; _ } when status >= 400 && status < 500 -> Fatal
   | Service _ -> Unknown
   | Multiple [] -> Unknown
-  | Multiple (error :: _) -> retry_class error
+  | Multiple errors ->
+      List.fold errors ~init:Unknown ~f:(fun best error ->
+          higher_priority_retry_class best (retry_class error))
 
-let is_validation t = match t.kind with Validation _ -> true | _ -> false
+let rec is_validation t =
+  match t.kind with
+  | Validation _ -> true
+  | Multiple errors -> List.exists errors ~f:is_validation
+  | _ -> false
 
-let validation_field t =
-  match t.kind with Validation { field; _ } -> field | _ -> None
+let rec validation_field t =
+  match t.kind with
+  | Validation { field = Some _ as field; _ } -> field
+  | Validation { field = None; _ } -> None
+  | Multiple errors -> List.find_map errors ~f:validation_field
+  | _ -> None
 
 let is_not_found t = equal_retry_class (retry_class t) Not_found
 
 let rec service_code t =
   match t.kind with
-  | Service { code; _ } -> code
-  | Multiple (error :: _) -> service_code error
+  | Service { code = Some _ as code; _ } -> code
+  | Service { code = None; _ } -> None
+  | Multiple errors -> List.find_map errors ~f:service_code
   | _ -> None
 
 let rec service_status t =
   match t.kind with
   | Service { status; _ } -> Some status
-  | Multiple (error :: _) -> service_status error
+  | Multiple errors -> List.find_map errors ~f:service_status
   | _ -> None
 
 let pp_retry_class fmt class_ =
