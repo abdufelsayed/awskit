@@ -1,0 +1,12 @@
+(executables
+ (names put_get list_prefix presign transfer_file object_metadata)
+ (libraries awskit-s3-lwt-unix lwt.unix))
+
+(alias
+ (name examples)
+ (deps
+  put_get.exe
+  list_prefix.exe
+  presign.exe
+  transfer_file.exe
+  object_metadata.exe))
