@@ -86,15 +86,18 @@ module Make (C : Request_context.S) = struct
                     match object_request conn ~bucket ~key with
                     | Error error -> return_error error
                     | Ok request ->
-                        with_response conn ~method_:`PUT ~request ~query:[]
-                          ~headers ~payload_hash:descriptor.payload_hash body
-                          ~f:(fun response body ->
-                            let* discarded = discard_response_body body in
-                            match discarded with
-                            | Error error -> return_error error
-                            | Ok () ->
-                                return_result return_error return_ok
-                                  (put_result response))))))
+                        let* result =
+                          with_response conn ~method_:`PUT ~request ~query:[]
+                            ~headers ~payload_hash:descriptor.payload_hash body
+                            ~f:(fun response body ->
+                              let* discarded = discard_response_body body in
+                              match discarded with
+                              | Error error -> return_error error
+                              | Ok () ->
+                                  return_result return_error return_ok
+                                    (put_result response))
+                        in
+                        return_result return_error return_ok result))))
 
   let get conn ~bucket ~key ?options ~consume () =
     let options = Option.value ~default:Get_object.default_options options in
@@ -120,14 +123,19 @@ module Make (C : Request_context.S) = struct
         match object_request conn ~bucket ~key with
         | Error error -> return_error error
         | Ok request ->
-            with_empty_response conn ~method_:`GET ~request ~query ~headers
-              ~f:(fun response body ->
-                match object_info response with
-                | Error error -> return_error error
-                | Ok info ->
-                    let* consumed = R.Response_body.with_reader body ~consume in
-                    return_result return_error return_ok
-                      (Result.map (fun value -> (info, value)) consumed)))
+            let* result =
+              with_empty_response conn ~method_:`GET ~request ~query ~headers
+                ~f:(fun response body ->
+                  match object_info response with
+                  | Error error -> return_error error
+                  | Ok info ->
+                      let* consumed =
+                        R.Response_body.with_reader body ~consume
+                      in
+                      return_result return_error return_ok
+                        (Result.map (fun value -> (info, value)) consumed))
+            in
+            return_result return_error return_ok result)
 
   let find conn ~bucket ~key ?options ~consume () =
     let options = Option.value ~default:Get_object.default_options options in
@@ -194,14 +202,17 @@ module Make (C : Request_context.S) = struct
         match object_request conn ~bucket ~key with
         | Error error -> return_error error
         | Ok request ->
-            with_empty_response conn ~method_:`HEAD ~request ~query ~headers
-              ~f:(fun response body ->
-                let* discarded = discard_response_body body in
-                match discarded with
-                | Error error -> return_error error
-                | Ok () ->
-                    return_result return_error return_ok (object_info response))
-        )
+            let* result =
+              with_empty_response conn ~method_:`HEAD ~request ~query ~headers
+                ~f:(fun response body ->
+                  let* discarded = discard_response_body body in
+                  match discarded with
+                  | Error error -> return_error error
+                  | Ok () ->
+                      return_result return_error return_ok
+                        (object_info response))
+            in
+            return_result return_error return_ok result)
 
   let is_head_object_missing error =
     Error.is_no_such_key error
@@ -244,14 +255,17 @@ module Make (C : Request_context.S) = struct
         match object_request conn ~bucket ~key with
         | Error error -> return_error error
         | Ok request ->
-            with_empty_response conn ~method_:`DELETE ~request ~query ~headers
-              ~f:(fun response body ->
-                let* discarded = discard_response_body body in
-                match discarded with
-                | Error error -> return_error error
-                | Ok () ->
-                    return_result return_error return_ok
-                      (delete_result response)))
+            let* result =
+              with_empty_response conn ~method_:`DELETE ~request ~query ~headers
+                ~f:(fun response body ->
+                  let* discarded = discard_response_body body in
+                  match discarded with
+                  | Error error -> return_error error
+                  | Ok () ->
+                      return_result return_error return_ok
+                        (delete_result response))
+            in
+            return_result return_error return_ok result)
 
   let delete_objects conn ~bucket ~objects ?options () =
     let options =
@@ -281,20 +295,23 @@ module Make (C : Request_context.S) = struct
             with
             | Error error -> return_error error
             | Ok request ->
-                with_response conn ~method_:`POST ~request
-                  ~query:[ ("delete", []) ]
-                  ~headers
-                  ~payload_hash:(R.Request_body.descriptor upload).payload_hash
-                  upload
-                  ~f:(fun response response_body ->
-                    let* body =
-                      read_response_body response_body ~max_size:1_048_576L
-                    in
-                    match body with
-                    | Error error -> return_error error
-                    | Ok body ->
-                        return_result return_error return_ok
-                          (Object_delete_xml.parse_result ~response body))))
+                let* result =
+                  with_response conn ~method_:`POST ~request
+                    ~query:[ ("delete", []) ]
+                    ~headers
+                    ~payload_hash:
+                      (R.Request_body.descriptor upload).payload_hash upload
+                    ~f:(fun response response_body ->
+                      let* body =
+                        read_response_body response_body ~max_size:1_048_576L
+                      in
+                      match body with
+                      | Error error -> return_error error
+                      | Ok body ->
+                          return_result return_error return_ok
+                            (Object_delete_xml.parse_result ~response body))
+                in
+                return_result return_error return_ok result))
 
   let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
       ?options () =
@@ -363,16 +380,19 @@ module Make (C : Request_context.S) = struct
                 with
                 | Error error -> return_error error
                 | Ok request ->
-                    with_empty_response conn ~method_:`PUT ~request ~query:[]
-                      ~headers ~f:(fun response body ->
-                        let* body =
-                          read_response_body body ~max_size:1_048_576L
-                        in
-                        match body with
-                        | Error error -> return_error error
-                        | Ok body ->
-                            return_result return_error return_ok
-                              (copy_result response body)))))
+                    let* result =
+                      with_empty_response conn ~method_:`PUT ~request ~query:[]
+                        ~headers ~f:(fun response body ->
+                          let* body =
+                            read_response_body body ~max_size:1_048_576L
+                          in
+                          match body with
+                          | Error error -> return_error error
+                          | Ok body ->
+                              return_result return_error return_ok
+                                (copy_result response body))
+                    in
+                    return_result return_error return_ok result)))
 
   let list_versions conn ~bucket ?options () =
     let options =
@@ -405,14 +425,17 @@ module Make (C : Request_context.S) = struct
               |> add_opt_header "x-amz-expected-bucket-owner"
                    options.expected_bucket_owner
             in
-            with_empty_response conn ~method_:`GET ~request ~query ~headers
-              ~f:(fun response body ->
-                let* body = read_response_body body ~max_size:4_194_304L in
-                match body with
-                | Error error -> return_error error
-                | Ok body ->
-                    return_result return_error return_ok
-                      (Object_versions_xml.parse_page ~response body)))
+            let* result =
+              with_empty_response conn ~method_:`GET ~request ~query ~headers
+                ~f:(fun response body ->
+                  let* body = read_response_body body ~max_size:4_194_304L in
+                  match body with
+                  | Error error -> return_error error
+                  | Ok body ->
+                      return_result return_error return_ok
+                        (Object_versions_xml.parse_page ~response body))
+            in
+            return_result return_error return_ok result)
 
   let list conn ~bucket ?options () =
     let options =
@@ -444,14 +467,17 @@ module Make (C : Request_context.S) = struct
               |> add_opt_header "x-amz-expected-bucket-owner"
                    options.expected_bucket_owner
             in
-            with_empty_response conn ~method_:`GET ~request ~query ~headers
-              ~f:(fun response body ->
-                let* body = read_response_body body ~max_size:4_194_304L in
-                match body with
-                | Error error -> return_error error
-                | Ok body ->
-                    return_result return_error return_ok
-                      (Object_list_xml.parse_page ~response body)))
+            let* result =
+              with_empty_response conn ~method_:`GET ~request ~query ~headers
+                ~f:(fun response body ->
+                  let* body = read_response_body body ~max_size:4_194_304L in
+                  match body with
+                  | Error error -> return_error error
+                  | Ok body ->
+                      return_result return_error return_ok
+                        (Object_list_xml.parse_page ~response body))
+            in
+            return_result return_error return_ok result)
 
   let list_keys conn ~bucket ?options () =
     let* page = list conn ~bucket ?options () in

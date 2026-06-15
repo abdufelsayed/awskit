@@ -5,6 +5,10 @@ let is_body_error error =
   let open Awskit.Error in
   match kind error with Body _ -> true | _ -> false
 
+let is_transport_error error =
+  let open Awskit.Error in
+  match kind error with Transport _ -> true | _ -> false
+
 let body_details error =
   let open Awskit.Error in
   match kind error with Body body -> Some body | _ -> None
@@ -15,6 +19,11 @@ let is_validation_field field error =
 
 let check_contains label substring text =
   Alcotest.(check bool) label true (string_contains ~substring text)
+
+let check_operation_context error ~operation ~resource =
+  let text = Awskit.Error.to_string_hum error in
+  check_contains "mentions operation" operation text;
+  check_contains "mentions resource" resource text
 
 let test_retry_slow_down_then_success () =
   let slow_down =
@@ -49,7 +58,9 @@ let test_retry_exhaustion_adds_context () =
       let text = Awskit.Error.to_string_hum error in
       check_contains "mentions exhausted" "retry attempts exhausted" text;
       check_contains "mentions attempt" "attempt=3" text;
-      check_contains "mentions max" "max=3" text
+      check_contains "mentions max" "max=3" text;
+      check_operation_context error ~operation:"PutObject"
+        ~resource:"s3://my-bucket/file"
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected slow down");
   Alcotest.(check int) "attempts" 3 (List.length conn.calls);
@@ -67,7 +78,9 @@ let test_retry_fatal_error_not_retried () =
        ~body:(Recording_s3.Body.of_string "body")
        ()
    with
-  | Error error when Error.service_code error = Some "AccessDenied" -> ()
+  | Error error when Error.service_code error = Some "AccessDenied" ->
+      check_operation_context error ~operation:"PutObject"
+        ~resource:"s3://my-bucket/file"
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected access denied");
   Alcotest.(check int) "attempts" 1 (List.length conn.calls);
@@ -168,9 +181,47 @@ let test_runtime_stream_request_body_error_propagates () =
       check_contains "mentions stream error"
         "runtime stream request body failed" text;
       check_contains "mentions retry policy" "error is not retryable by policy"
-        text
+        text;
+      check_operation_context error ~operation:"PutObject"
+        ~resource:"s3://my-bucket/file"
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream request body error"
+
+let test_runtime_transport_error_adds_operation_context () =
+  let conn = Recording_runtime.connect [] in
+  match
+    Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+      ~body:(Recording_s3.Body.of_string "body")
+      ()
+  with
+  | Error error when is_transport_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      check_contains "mentions transport error" "no canned response" text;
+      check_operation_context error ~operation:"PutObject"
+        ~resource:"s3://my-bucket/file"
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected transport error"
+
+let test_non_success_response_body_read_error_adds_operation_context () =
+  let slow_down =
+    {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
+  in
+  let conn =
+    Recording_runtime.connect [ response 503 ~read_error_after:0 slow_down ]
+  in
+  match
+    Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+      ~body:(Recording_s3.Body.of_string "body")
+      ()
+  with
+  | Error error when is_body_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      check_contains "mentions read failure" "simulated download read failure"
+        text;
+      check_operation_context error ~operation:"PutObject"
+        ~resource:"s3://my-bucket/file"
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected non-success body read error"
 
 let test_retry_jitter_bounds () =
   let policy =
@@ -328,6 +379,11 @@ let suite =
           test_retry_context_on_exhaustion;
         Alcotest.test_case "runtime stream request body error propagates" `Quick
           test_runtime_stream_request_body_error_propagates;
+        Alcotest.test_case "runtime transport error adds operation context"
+          `Quick test_runtime_transport_error_adds_operation_context;
+        Alcotest.test_case "non-success body read error adds operation context"
+          `Quick
+          test_non_success_response_body_read_error_adds_operation_context;
         Alcotest.test_case "retry jitter bounds" `Quick test_retry_jitter_bounds;
         Alcotest.test_case "request body descriptor validation" `Quick
           test_request_body_descriptor_validation;

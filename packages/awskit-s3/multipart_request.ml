@@ -19,6 +19,14 @@ module Make (C : Request_context.S) = struct
 
   let validate_opt f = function None -> Ok () | Some value -> f value
 
+  let return_result return_error return_ok = function
+    | Ok value -> return_ok value
+    | Error error -> return_error error
+
+  let with_operation_result return_error return_ok response =
+    let* result = response in
+    return_result return_error return_ok result
+
   let create_upload conn ~bucket ~key ?options () =
     let options =
       Option.value ~default:Create_multipart_upload.default_options options
@@ -61,39 +69,44 @@ module Make (C : Request_context.S) = struct
                     match object_request conn ~bucket ~key with
                     | Error error -> return_error error
                     | Ok request ->
-                        with_empty_response conn ~method_:`POST ~request
-                          ~query:[ ("uploads", []) ]
-                          ~headers
-                          ~f:(fun response body ->
-                            let* body =
-                              read_response_body body ~max_size:1_048_576L
-                            in
-                            match body with
-                            | Error error -> return_error error
-                            | Ok body -> (
-                                match
-                                  Xml.decode_root body
-                                    ~name:"InitiateMultipartUploadResult"
-                                with
-                                | Error error -> return_error error
-                                | Ok nodes -> (
-                                    match Xml.child_text "UploadId" nodes with
-                                    | None ->
-                                        return_error (decode "missing UploadId")
-                                    | Some upload_id -> (
-                                        match
-                                          Multipart.Upload_id.of_string
-                                            upload_id
-                                        with
-                                        | Error error -> return_error error
-                                        | Ok upload_id ->
-                                            return_ok
-                                              {
-                                                Create_multipart_upload.upload =
-                                                  Multipart.Upload.create_exn
-                                                    ~bucket ~key ~upload_id;
-                                                response;
-                                              }))))))))
+                        with_operation_result return_error return_ok
+                          (with_empty_response conn ~method_:`POST ~request
+                             ~query:[ ("uploads", []) ]
+                             ~headers
+                             ~f:(fun response body ->
+                               let* body =
+                                 read_response_body body ~max_size:1_048_576L
+                               in
+                               match body with
+                               | Error error -> return_error error
+                               | Ok body -> (
+                                   match
+                                     Xml.decode_root body
+                                       ~name:"InitiateMultipartUploadResult"
+                                   with
+                                   | Error error -> return_error error
+                                   | Ok nodes -> (
+                                       match
+                                         Xml.child_text "UploadId" nodes
+                                       with
+                                       | None ->
+                                           return_error
+                                             (decode "missing UploadId")
+                                       | Some upload_id -> (
+                                           match
+                                             Multipart.Upload_id.of_string
+                                               upload_id
+                                           with
+                                           | Error error -> return_error error
+                                           | Ok upload_id ->
+                                               return_ok
+                                                 {
+                                                   Create_multipart_upload
+                                                   .upload =
+                                                     Multipart.Upload.create_exn
+                                                       ~bucket ~key ~upload_id;
+                                                   response;
+                                                 })))))))))
 
   let upload_part conn ~bucket ~key ~upload_id ~part_number ~body ?options () =
     let options = Option.value ~default:Upload_part.default_options options in
@@ -138,32 +151,37 @@ module Make (C : Request_context.S) = struct
                         match object_request conn ~bucket ~key with
                         | Error error -> return_error error
                         | Ok request ->
-                            with_response conn ~method_:`PUT ~request ~query
-                              ~headers ~payload_hash:descriptor.payload_hash
-                              body ~f:(fun response body ->
-                                let* discarded = discard_response_body body in
-                                match discarded with
-                                | Error error -> return_error error
-                                | Ok () -> (
-                                    match response_etag response with
-                                    | Error error -> return_error error
-                                    | Ok None ->
-                                        return_error
-                                          (decode "missing multipart part etag")
-                                    | Ok (Some etag) -> (
-                                        match
-                                          Multipart.Part.create ~part_number
-                                            ~etag ?checksum:options.checksum ()
-                                        with
-                                        | Error error -> return_error error
-                                        | Ok part ->
-                                            return_ok
-                                              {
-                                                Upload_part.part;
-                                                checksum =
-                                                  response_checksum response;
-                                                response;
-                                              }))))))))
+                            with_operation_result return_error return_ok
+                              (with_response conn ~method_:`PUT ~request ~query
+                                 ~headers ~payload_hash:descriptor.payload_hash
+                                 body ~f:(fun response body ->
+                                   let* discarded =
+                                     discard_response_body body
+                                   in
+                                   match discarded with
+                                   | Error error -> return_error error
+                                   | Ok () -> (
+                                       match response_etag response with
+                                       | Error error -> return_error error
+                                       | Ok None ->
+                                           return_error
+                                             (decode
+                                                "missing multipart part etag")
+                                       | Ok (Some etag) -> (
+                                           match
+                                             Multipart.Part.create ~part_number
+                                               ~etag ?checksum:options.checksum
+                                               ()
+                                           with
+                                           | Error error -> return_error error
+                                           | Ok part ->
+                                               return_ok
+                                                 {
+                                                   Upload_part.part;
+                                                   checksum =
+                                                     response_checksum response;
+                                                   response;
+                                                 })))))))))
 
   let complete_upload conn ~bucket ~key ~upload_id ?options parts =
     let options =
@@ -231,33 +249,35 @@ module Make (C : Request_context.S) = struct
                     match object_request conn ~bucket ~key with
                     | Error error -> return_error error
                     | Ok request ->
-                        with_response conn ~method_:`POST ~request
-                          ~query:
-                            [
-                              ( "uploadId",
-                                [ Multipart.Upload_id.to_string upload_id ] );
-                            ]
-                          ~headers:
-                            ([ ("content-type", "application/xml") ]
-                             @ checksum_value_headers options.checksum
-                             @ checksum_type_header options.checksum_type
-                             @ multipart_object_size_header
-                                 options.multipart_object_size
-                            |> add_opt_header "x-amz-expected-bucket-owner"
-                                 options.expected_bucket_owner)
-                          ~payload_hash:
-                            (R.Request_body.descriptor upload).payload_hash
-                          upload
-                          ~f:(fun response body ->
-                            let* body =
-                              read_response_body body ~max_size:1_048_576L
-                            in
-                            match body with
-                            | Error error -> return_error error
-                            | Ok body -> (
-                                match complete_result response body with
-                                | Error error -> return_error error
-                                | Ok result -> return_ok result))))))
+                        with_operation_result return_error return_ok
+                          (with_response conn ~method_:`POST ~request
+                             ~query:
+                               [
+                                 ( "uploadId",
+                                   [ Multipart.Upload_id.to_string upload_id ]
+                                 );
+                               ]
+                             ~headers:
+                               ([ ("content-type", "application/xml") ]
+                                @ checksum_value_headers options.checksum
+                                @ checksum_type_header options.checksum_type
+                                @ multipart_object_size_header
+                                    options.multipart_object_size
+                               |> add_opt_header "x-amz-expected-bucket-owner"
+                                    options.expected_bucket_owner)
+                             ~payload_hash:
+                               (R.Request_body.descriptor upload).payload_hash
+                             upload
+                             ~f:(fun response body ->
+                               let* body =
+                                 read_response_body body ~max_size:1_048_576L
+                               in
+                               match body with
+                               | Error error -> return_error error
+                               | Ok body -> (
+                                   match complete_result response body with
+                                   | Error error -> return_error error
+                                   | Ok result -> return_ok result)))))))
 
   let abort_upload conn ~bucket ~key ~upload_id ?options () =
     let options =
@@ -273,18 +293,19 @@ module Make (C : Request_context.S) = struct
         match object_request conn ~bucket ~key with
         | Error error -> return_error error
         | Ok request ->
-            with_empty_response conn ~method_:`DELETE ~request
-              ~query:
-                [ ("uploadId", [ Multipart.Upload_id.to_string upload_id ]) ]
-              ~headers:
-                ([]
-                |> add_opt_header "x-amz-expected-bucket-owner"
-                     options.expected_bucket_owner)
-              ~f:(fun response body ->
-                let* discarded = discard_response_body body in
-                match discarded with
-                | Error error -> return_error error
-                | Ok () -> return_ok response))
+            with_operation_result return_error return_ok
+              (with_empty_response conn ~method_:`DELETE ~request
+                 ~query:
+                   [ ("uploadId", [ Multipart.Upload_id.to_string upload_id ]) ]
+                 ~headers:
+                   ([]
+                   |> add_opt_header "x-amz-expected-bucket-owner"
+                        options.expected_bucket_owner)
+                 ~f:(fun response body ->
+                   let* discarded = discard_response_body body in
+                   match discarded with
+                   | Error error -> return_error error
+                   | Ok () -> return_ok response)))
 
   let validate_list_parts_options (options : List_parts.options) =
     match options.max_parts with
@@ -320,68 +341,74 @@ module Make (C : Request_context.S) = struct
                   @ add "max-parts" options.max_parts
                   @ add "part-number-marker" options.part_number_marker
                 in
-                with_empty_response conn ~method_:`GET ~request ~query
-                  ~headers:
-                    ([]
-                    |> add_opt_header "x-amz-expected-bucket-owner"
-                         options.expected_bucket_owner)
-                  ~f:(fun response body ->
-                    let* body = read_response_body body ~max_size:1_048_576L in
-                    match body with
-                    | Error error -> return_error error
-                    | Ok body -> (
-                        match Xml.decode_root body ~name:"ListPartsResult" with
-                        | Error error -> return_error error
-                        | Ok nodes ->
-                            let parts =
-                              Xml.children "Part" nodes
-                              |> List.filter_map (fun nodes ->
-                                  match
-                                    Option.bind
-                                      (Xml.child_text "PartNumber" nodes)
-                                      int_of_string_opt
-                                  with
-                                  | None -> None
-                                  | Some part_number ->
-                                      Some
-                                        {
-                                          List_parts.part_number;
-                                          etag =
-                                            Option.bind
-                                              (Xml.child_text "ETag" nodes)
-                                              (fun v ->
-                                                Result.to_option
-                                                  (Object.Etag.of_string v));
-                                          size =
-                                            Option.bind
-                                              (Xml.child_text "Size" nodes)
-                                              int64_of_string_opt;
-                                          last_modified =
-                                            Option.bind
-                                              (Xml.child_text "LastModified"
-                                                 nodes)
-                                              ptime_of_string;
-                                          checksum =
-                                            checksum_response_from_xml nodes;
-                                        })
-                            in
-                            return_ok
-                              {
-                                List_parts.parts;
-                                is_truncated =
-                                  Option.value ~default:false
-                                    (Option.bind
-                                       (Xml.child_text "IsTruncated" nodes)
-                                       parse_bool);
-                                next_part_number_marker =
-                                  Option.bind
-                                    (Xml.child_text "NextPartNumberMarker" nodes)
-                                    int_of_string_opt;
-                                checksum_type =
-                                  Option.map Object.Checksum.Type.of_string
-                                    (Xml.child_text "ChecksumType" nodes);
-                                response;
-                              }))))
+                with_operation_result return_error return_ok
+                  (with_empty_response conn ~method_:`GET ~request ~query
+                     ~headers:
+                       ([]
+                       |> add_opt_header "x-amz-expected-bucket-owner"
+                            options.expected_bucket_owner)
+                     ~f:(fun response body ->
+                       let* body =
+                         read_response_body body ~max_size:1_048_576L
+                       in
+                       match body with
+                       | Error error -> return_error error
+                       | Ok body -> (
+                           match
+                             Xml.decode_root body ~name:"ListPartsResult"
+                           with
+                           | Error error -> return_error error
+                           | Ok nodes ->
+                               let parts =
+                                 Xml.children "Part" nodes
+                                 |> List.filter_map (fun nodes ->
+                                     match
+                                       Option.bind
+                                         (Xml.child_text "PartNumber" nodes)
+                                         int_of_string_opt
+                                     with
+                                     | None -> None
+                                     | Some part_number ->
+                                         Some
+                                           {
+                                             List_parts.part_number;
+                                             etag =
+                                               Option.bind
+                                                 (Xml.child_text "ETag" nodes)
+                                                 (fun v ->
+                                                   Result.to_option
+                                                     (Object.Etag.of_string v));
+                                             size =
+                                               Option.bind
+                                                 (Xml.child_text "Size" nodes)
+                                                 int64_of_string_opt;
+                                             last_modified =
+                                               Option.bind
+                                                 (Xml.child_text "LastModified"
+                                                    nodes)
+                                                 ptime_of_string;
+                                             checksum =
+                                               checksum_response_from_xml nodes;
+                                           })
+                               in
+                               return_ok
+                                 {
+                                   List_parts.parts;
+                                   is_truncated =
+                                     Option.value ~default:false
+                                       (Option.bind
+                                          (Xml.child_text "IsTruncated" nodes)
+                                          parse_bool);
+                                   next_part_number_marker =
+                                     Option.bind
+                                       (Xml.child_text "NextPartNumberMarker"
+                                          nodes)
+                                       int_of_string_opt;
+                                   checksum_type =
+                                     Option.map Object.Checksum.Type.of_string
+                                       (Xml.child_text "ChecksumType" nodes);
+                                   response;
+                                 })))))
 
   module List_parts = struct
     let validate_max_pages = function
