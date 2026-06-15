@@ -246,6 +246,21 @@ let test_presigned_rejects_unknown_checksum () =
       Alcotest.failf "unexpected upload part error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected presigned upload-part checksum validation"
 
+let test_presigned_operation_context_for_validation_error () =
+  let conn = Recording_runtime.connect [] in
+  match
+    Recording_s3.Presigned.get_object conn ~bucket:"ab" ~key:"file.txt" ()
+  with
+  | Ok _ -> Alcotest.fail "expected invalid bucket"
+  | Error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions operation" true
+        (string_contains text ~substring:"GetObject");
+      Alcotest.(check bool)
+        "mentions resource" true
+        (string_contains text ~substring:"s3://ab/file.txt")
+
 let suite =
   [
     ( "presigned",
@@ -261,5 +276,7 @@ let suite =
           test_presigned_rejects_header_newline;
         Alcotest.test_case "presigned rejects unknown checksum" `Quick
           test_presigned_rejects_unknown_checksum;
+        Alcotest.test_case "presigned validation context" `Quick
+          test_presigned_operation_context_for_validation_error;
       ] );
   ]
