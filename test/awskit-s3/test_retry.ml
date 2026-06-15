@@ -13,6 +13,9 @@ let is_validation_field field error =
   Awskit.Error.is_validation error
   && Awskit.Error.validation_field error = Some field
 
+let check_contains label substring text =
+  Alcotest.(check bool) label true (string_contains ~substring text)
+
 let test_retry_slow_down_then_success () =
   let slow_down =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
@@ -28,6 +31,29 @@ let test_retry_slow_down_then_success () =
   ignore (ok_or_fail "retry put" result);
   Alcotest.(check int) "attempts" 2 (List.length conn.calls);
   Alcotest.(check int) "sleeps" 1 (List.length conn.sleeps)
+
+let test_retry_exhaustion_adds_context () =
+  let slow_down =
+    {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
+  in
+  let conn =
+    Recording_runtime.connect
+      [ response 503 slow_down; response 503 slow_down; response 503 slow_down ]
+  in
+  (match
+     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+       ~body:(Recording_s3.Body.of_string "body")
+       ()
+   with
+  | Error error when Error.service_code error = Some "SlowDown" ->
+      let text = Awskit.Error.to_string_hum error in
+      check_contains "mentions exhausted" "retry attempts exhausted" text;
+      check_contains "mentions attempt" "attempt=3" text;
+      check_contains "mentions max" "max=3" text
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected slow down");
+  Alcotest.(check int) "attempts" 3 (List.length conn.calls);
+  Alcotest.(check int) "sleeps" 2 (List.length conn.sleeps)
 
 let test_retry_fatal_error_not_retried () =
   let denied =
@@ -87,11 +113,36 @@ let test_non_replayable_request_body_not_retried () =
   (match
      Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~body ()
    with
-  | Error error when Error.service_code error = Some "SlowDown" -> ()
+  | Error error when Error.service_code error = Some "SlowDown" ->
+      let text = Awskit.Error.to_string_hum error in
+      check_contains "mentions non-replayable"
+        "not retried because request body is not replayable" text;
+      check_contains "mentions attempt" "attempt=1" text;
+      check_contains "mentions max" "max=3" text
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected slow down");
   Alcotest.(check int) "attempts" 1 (List.length conn.calls);
   Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
+
+let test_retry_context_on_exhaustion () =
+  let error =
+    Awskit.Error.service
+      {
+        status = 503;
+        code = Some "SlowDown";
+        message = Some "reduce your request rate";
+        request_id = Some "req-retry";
+        host_id = None;
+        headers = [];
+        body = None;
+      }
+    |> Awskit.Error.with_retry ~attempt:3 ~max_attempts:3
+         ~reason:"retry attempts exhausted"
+  in
+  let text = Awskit.Error.to_string_hum error in
+  check_contains "mentions exhausted" "retry attempts exhausted" text;
+  check_contains "mentions attempt" "attempt=3" text;
+  check_contains "mentions max" "max=3" text
 
 let test_runtime_stream_request_body_error_propagates () =
   let descriptor : Awskit.Body.Request.descriptor =
@@ -112,7 +163,12 @@ let test_runtime_stream_request_body_error_propagates () =
   match
     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~body ()
   with
-  | Error error when Error.equal error stream_error -> ()
+  | Error error when is_body_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      check_contains "mentions stream error"
+        "runtime stream request body failed" text;
+      check_contains "mentions retry policy" "error is not retryable by policy"
+        text
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream request body error"
 
@@ -260,12 +316,16 @@ let suite =
       [
         Alcotest.test_case "retry slow down then success" `Quick
           test_retry_slow_down_then_success;
+        Alcotest.test_case "retry exhaustion adds context" `Quick
+          test_retry_exhaustion_adds_context;
         Alcotest.test_case "retry fatal error not retried" `Quick
           test_retry_fatal_error_not_retried;
         Alcotest.test_case "retry disabled policy" `Quick
           test_retry_disabled_policy;
         Alcotest.test_case "non-replayable request body not retried" `Quick
           test_non_replayable_request_body_not_retried;
+        Alcotest.test_case "retry context formatting on exhaustion" `Quick
+          test_retry_context_on_exhaustion;
         Alcotest.test_case "runtime stream request body error propagates" `Quick
           test_runtime_stream_request_body_error_propagates;
         Alcotest.test_case "retry jitter bounds" `Quick test_retry_jitter_bounds;

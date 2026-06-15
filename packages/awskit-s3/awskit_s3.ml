@@ -175,11 +175,25 @@ module Make (R : RUNTIME) = struct
                   | Ok request -> return_ok request)))
 
     let retry_or_error conn ~attempt ~replayable error retry =
-      match Awskit.Retry.delay (R.retry_policy conn) ~attempt ~error with
+      let policy = R.retry_policy conn in
+      let max_attempts = Awskit.Retry.max_attempts policy in
+      match Awskit.Retry.delay policy ~attempt ~error with
       | Some delay when replayable ->
           let* () = R.sleep conn delay in
           retry (attempt + 1)
-      | _ -> return_error error
+      | Some _delay ->
+          return_error
+            (Awskit.Error.with_retry ~attempt ~max_attempts
+               ~reason:"not retried because request body is not replayable"
+               error)
+      | None when attempt >= max_attempts ->
+          return_error
+            (Awskit.Error.with_retry ~attempt ~max_attempts
+               ~reason:"retry attempts exhausted" error)
+      | None ->
+          return_error
+            (Awskit.Error.with_retry ~attempt ~max_attempts
+               ~reason:"error is not retryable by policy" error)
 
     type 'a response_action =
       | Done of ('a, Awskit.Error.t) result
