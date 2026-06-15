@@ -129,6 +129,13 @@ module Make (C : Request_context.S) = struct
                     return_result return_error return_ok
                       (Result.map (fun value -> (info, value)) consumed)))
 
+  let find conn ~bucket ~key ?options ~consume () =
+    let* result = get conn ~bucket ~key ?options ~consume () in
+    match result with
+    | Ok value -> return_ok (Some value)
+    | Error error when Error.is_not_found error -> return_ok None
+    | Error error -> return_error error
+
   let head conn ~bucket ~key ?options () =
     let options = Option.value ~default:Head_object.default_options options in
     let return_error =
@@ -160,6 +167,13 @@ module Make (C : Request_context.S) = struct
                 | Ok () ->
                     return_result return_error return_ok (object_info response))
         )
+
+  let find_metadata conn ~bucket ~key ?options () =
+    let* result = head conn ~bucket ~key ?options () in
+    match result with
+    | Ok value -> return_ok (Some value)
+    | Error error when Error.is_not_found error -> return_ok None
+    | Error error -> return_error error
 
   let exists conn ~bucket ~key =
     let* result = head conn ~bucket ~key () in

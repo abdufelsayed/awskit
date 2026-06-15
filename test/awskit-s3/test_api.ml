@@ -77,6 +77,23 @@ let test_native_body_api_compiles () =
     S3.Reader.to_bytes ~max_bytes:1_048_576L reader
   in
   ignore (consume : S3.Reader.t -> (bytes, Error.t) result);
+  ignore
+    (S3.Object.find_metadata
+      : S3.connection ->
+        bucket:string ->
+        key:string ->
+        ?options:Head_object.options ->
+        unit ->
+        (Head_object.result option, Error.t) result);
+  ignore
+    (S3.Object.find
+      : S3.connection ->
+        bucket:string ->
+        key:string ->
+        ?options:Get_object.options ->
+        consume:(S3.Reader.t -> ('a, Error.t) result) ->
+        unit ->
+        ((Get_object.result * 'a) option, Error.t) result);
   ()
 
 let service_error ?code ?message status =

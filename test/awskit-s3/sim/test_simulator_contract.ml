@@ -123,6 +123,32 @@ let test_s3_operation_context_for_validation_error () =
         "mentions resource" true
         (string_contains text ~substring:"s3://ab/k")
 
+let test_find_metadata_missing_object_returns_none () =
+  let conn = Simulator_subject.fresh () in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "create bucket");
+  match
+    Simulator.Object.find_metadata conn ~bucket:"test-bucket" ~key:"missing" ()
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "expected None for missing object"
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+
+let test_find_missing_object_returns_none () =
+  let conn = Simulator_subject.fresh () in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    |> ok_or_fail "create bucket");
+  match
+    Simulator.Object.find conn ~bucket:"test-bucket" ~key:"missing"
+      ~consume:(fun _reader -> Ok "unused")
+      ()
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "expected None for missing object"
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+
 let suite =
   [
     ("simulator contract", Simulator_contract.cases);
@@ -133,5 +159,9 @@ let suite =
           test_simulator_response_lost_fault;
         Alcotest.test_case "operation context for validation" `Quick
           test_s3_operation_context_for_validation_error;
+        Alcotest.test_case "find metadata missing object returns none" `Quick
+          test_find_metadata_missing_object_returns_none;
+        Alcotest.test_case "find missing object returns none" `Quick
+          test_find_missing_object_returns_none;
       ] );
   ]
