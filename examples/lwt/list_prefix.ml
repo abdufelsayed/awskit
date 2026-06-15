@@ -4,7 +4,9 @@ module S3 = Awskit_s3_lwt_unix
 let env name =
   match Sys.getenv_opt name with
   | Some value when String.trim value <> "" -> value
-  | _ -> failwith (Printf.sprintf "Set %s" name)
+  | _ ->
+      Awskit.Error.validation ~field:name "environment variable is required"
+      |> Awskit.Error.raise
 
 let env_default name default =
   match Sys.getenv_opt name with
@@ -13,13 +15,11 @@ let env_default name default =
 
 let unwrap label = function
   | Ok value -> value
-  | Error error ->
-      failwith (Format.asprintf "%s: %a" label Awskit_s3.Error.pp error)
-
-let bucket = env "AWSKIT_EXAMPLE_BUCKET"
-let prefix = env_default "AWSKIT_EXAMPLE_PREFIX" "awskit-examples/"
+  | Error error -> Awskit.Error.with_context label error |> Awskit.Error.raise
 
 let run () =
+  let bucket = env "AWSKIT_EXAMPLE_BUCKET" in
+  let prefix = env_default "AWSKIT_EXAMPLE_PREFIX" "awskit-examples/" in
   let s3 = S3.create () |> unwrap "create S3 client" in
   let options =
     {
@@ -42,4 +42,17 @@ let run () =
   if objects = [] then Format.printf "no objects found@.";
   Lwt.return_unit
 
-let () = Lwt_main.run (run ())
+let main () =
+  Lwt.catch
+    (fun () ->
+      let* () = run () in
+      Lwt.return 0)
+    (function
+      | Awskit.Error.Awskit_error error ->
+          let* () =
+            Lwt_io.eprintf "error: %s\n" (Awskit.Error.to_string_hum error)
+          in
+          Lwt.return 1
+      | exn -> Lwt.fail exn)
+
+let () = exit (Lwt_main.run (main ()))
