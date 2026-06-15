@@ -5,6 +5,21 @@ let is_decode_error error =
   let open Awskit.Error in
   match kind error with Decode _ -> true | _ -> false
 
+let service_error ?code ?message status =
+  Awskit.Error.service
+    {
+      status;
+      code;
+      message;
+      request_id = None;
+      host_id = None;
+      headers = [];
+      body = None;
+    }
+
+let no_such_key_body =
+  {|<Error><Code>NoSuchKey</Code><Message>not found</Message></Error>|}
+
 let test_object_checksum_headers_and_response () =
   let conn =
     Recording_runtime.connect
@@ -305,6 +320,60 @@ let test_object_versioning_requests_and_parse () =
         (List.assoc_opt "version-id-marker" versions_call.request.target.query)
   | _ -> Alcotest.fail "expected copy and version listing calls"
 
+let test_find_metadata_missing_object_returns_none () =
+  let conn = Recording_runtime.connect [ response 404 no_such_key_body ] in
+  match
+    Recording_s3.Object.find_metadata conn ~bucket:"my-bucket" ~key:"missing" ()
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "expected None for missing object"
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+
+let test_find_success_returns_some () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:[ ("etag", "\"etag\""); ("content-length", "5") ]
+          "hello";
+      ]
+  in
+  match
+    Recording_s3.Object.find conn ~bucket:"my-bucket" ~key:"file"
+      ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
+      ()
+  with
+  | Ok (Some (info, body)) ->
+      Alcotest.(check string) "body" "hello" body;
+      Alcotest.(check (option string))
+        "etag" (Some "\"etag\"")
+        (Option.map Object.Etag.to_string info.etag)
+  | Ok None -> Alcotest.fail "expected present object"
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+
+let test_find_preserves_consumer_not_found_error () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:[ ("etag", "\"etag\""); ("content-length", "4") ]
+          "body";
+      ]
+  in
+  let consumer_error =
+    service_error ~code:"NoSuchKey" ~message:"consumer-owned missing resource"
+      404
+  in
+  match
+    Recording_s3.Object.find conn ~bucket:"my-bucket" ~key:"file"
+      ~consume:(fun _reader -> Error consumer_error)
+      ()
+  with
+  | Error error when Error.is_not_found error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok None -> Alcotest.fail "expected consumer error, got None"
+  | Ok (Some _) -> Alcotest.fail "expected consumer error"
+
 let test_malformed_xml_responses () =
   let conn =
     Recording_runtime.connect
@@ -521,6 +590,12 @@ let suite =
           test_delete_objects_request_body;
         Alcotest.test_case "object versioning requests and parse" `Quick
           test_object_versioning_requests_and_parse;
+        Alcotest.test_case "find metadata missing object returns none" `Quick
+          test_find_metadata_missing_object_returns_none;
+        Alcotest.test_case "find success returns some" `Quick
+          test_find_success_returns_some;
+        Alcotest.test_case "find preserves consumer not found error" `Quick
+          test_find_preserves_consumer_not_found_error;
         Alcotest.test_case "malformed xml responses" `Quick
           test_malformed_xml_responses;
         Alcotest.test_case "object tagging validation context" `Quick
