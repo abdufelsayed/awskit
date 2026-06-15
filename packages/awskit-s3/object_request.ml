@@ -168,7 +168,7 @@ module Make (C : Request_context.S) = struct
             match result with
             | Ok (Ok value) -> return_ok (Some value)
             | Ok (Error error) -> return_error error
-            | Error error when Error.is_not_found error -> return_ok None
+            | Error error when Error.is_no_such_key error -> return_ok None
             | Error error -> return_error error))
 
   let head conn ~bucket ~key ?options () =
@@ -207,7 +207,7 @@ module Make (C : Request_context.S) = struct
     let* result = head conn ~bucket ~key ?options () in
     match result with
     | Ok value -> return_ok (Some value)
-    | Error error when Error.is_not_found error -> return_ok None
+    | Error error when Error.is_no_such_key error -> return_ok None
     | Error error -> return_error error
 
   let exists conn ~bucket ~key =

@@ -68,7 +68,7 @@ let get conn ~bucket ~key ?options ~consume () =
 let find conn ~bucket ~key ?options ~consume () =
   let options = Option.value ~default:Get_object.default_options options in
   let lookup_error error =
-    if Error.is_not_found error then Ok None else Error error
+    if Error.is_no_such_key error then Ok None else Error error
   in
   match validate_bucket_key bucket key with
   | Error error -> Error error

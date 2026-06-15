@@ -135,6 +135,16 @@ let test_find_metadata_missing_object_returns_none () =
   | Ok (Some _) -> Alcotest.fail "expected None for missing object"
   | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
 
+let test_find_metadata_missing_bucket_returns_error () =
+  let conn = Simulator_subject.fresh () in
+  match
+    Simulator.Object.find_metadata conn ~bucket:"missing-bucket" ~key:"file" ()
+  with
+  | Error error when Error.is_no_such_bucket error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+  | Ok None -> Alcotest.fail "expected missing bucket error, got None"
+  | Ok (Some _) -> Alcotest.fail "expected missing bucket error"
+
 let test_find_missing_object_returns_none () =
   let conn = Simulator_subject.fresh () in
   ignore
@@ -148,6 +158,18 @@ let test_find_missing_object_returns_none () =
   | Ok None -> ()
   | Ok (Some _) -> Alcotest.fail "expected None for missing object"
   | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+
+let test_find_missing_bucket_returns_error () =
+  let conn = Simulator_subject.fresh () in
+  match
+    Simulator.Object.find conn ~bucket:"missing-bucket" ~key:"file"
+      ~consume:(fun _reader -> Ok "unused")
+      ()
+  with
+  | Error error when Error.is_no_such_bucket error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+  | Ok None -> Alcotest.fail "expected missing bucket error, got None"
+  | Ok (Some _) -> Alcotest.fail "expected missing bucket error"
 
 let test_find_preserves_consumer_not_found_error () =
   let conn = Simulator_subject.fresh () in
@@ -193,8 +215,12 @@ let suite =
           test_s3_operation_context_for_validation_error;
         Alcotest.test_case "find metadata missing object returns none" `Quick
           test_find_metadata_missing_object_returns_none;
+        Alcotest.test_case "find metadata missing bucket returns error" `Quick
+          test_find_metadata_missing_bucket_returns_error;
         Alcotest.test_case "find missing object returns none" `Quick
           test_find_missing_object_returns_none;
+        Alcotest.test_case "find missing bucket returns error" `Quick
+          test_find_missing_bucket_returns_error;
         Alcotest.test_case "find preserves consumer not found error" `Quick
           test_find_preserves_consumer_not_found_error;
       ] );

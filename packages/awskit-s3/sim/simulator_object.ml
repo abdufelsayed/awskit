@@ -27,7 +27,7 @@ module Object = struct
   let find_metadata conn ~bucket ~key ?options () =
     match head conn ~bucket ~key ?options () with
     | Ok value -> Ok (Some value)
-    | Error error when Error.is_not_found error -> Ok None
+    | Error error when Error.is_no_such_key error -> Ok None
     | Error error -> Error error
 
   let exists = Simulator_object_read.exists

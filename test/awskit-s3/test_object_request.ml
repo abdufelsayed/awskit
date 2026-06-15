@@ -20,6 +20,9 @@ let service_error ?code ?message status =
 let no_such_key_body =
   {|<Error><Code>NoSuchKey</Code><Message>not found</Message></Error>|}
 
+let no_such_bucket_body =
+  {|<Error><Code>NoSuchBucket</Code><Message>bucket not found</Message></Error>|}
+
 let test_object_checksum_headers_and_response () =
   let conn =
     Recording_runtime.connect
@@ -329,6 +332,17 @@ let test_find_metadata_missing_object_returns_none () =
   | Ok (Some _) -> Alcotest.fail "expected None for missing object"
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
 
+let test_find_metadata_missing_bucket_returns_error () =
+  let conn = Recording_runtime.connect [ response 404 no_such_bucket_body ] in
+  match
+    Recording_s3.Object.find_metadata conn ~bucket:"missing-bucket" ~key:"file"
+      ()
+  with
+  | Error error when Error.is_no_such_bucket error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok None -> Alcotest.fail "expected missing bucket error, got None"
+  | Ok (Some _) -> Alcotest.fail "expected missing bucket error"
+
 let test_find_success_returns_some () =
   let conn =
     Recording_runtime.connect
@@ -350,6 +364,18 @@ let test_find_success_returns_some () =
         (Option.map Object.Etag.to_string info.etag)
   | Ok None -> Alcotest.fail "expected present object"
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+
+let test_find_missing_bucket_returns_error () =
+  let conn = Recording_runtime.connect [ response 404 no_such_bucket_body ] in
+  match
+    Recording_s3.Object.find conn ~bucket:"missing-bucket" ~key:"file"
+      ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
+      ()
+  with
+  | Error error when Error.is_no_such_bucket error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok None -> Alcotest.fail "expected missing bucket error, got None"
+  | Ok (Some _) -> Alcotest.fail "expected missing bucket error"
 
 let test_find_preserves_consumer_not_found_error () =
   let conn =
@@ -592,8 +618,12 @@ let suite =
           test_object_versioning_requests_and_parse;
         Alcotest.test_case "find metadata missing object returns none" `Quick
           test_find_metadata_missing_object_returns_none;
+        Alcotest.test_case "find metadata missing bucket returns error" `Quick
+          test_find_metadata_missing_bucket_returns_error;
         Alcotest.test_case "find success returns some" `Quick
           test_find_success_returns_some;
+        Alcotest.test_case "find missing bucket returns error" `Quick
+          test_find_missing_bucket_returns_error;
         Alcotest.test_case "find preserves consumer not found error" `Quick
           test_find_preserves_consumer_not_found_error;
         Alcotest.test_case "malformed xml responses" `Quick
