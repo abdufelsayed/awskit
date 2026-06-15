@@ -134,7 +134,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     | Body (descriptor, _) -> descriptor
     | Stream (descriptor, _) -> descriptor
 
-  let body_error message = Awskit.Error.body message
+  let body_error message = Awskit.Error.Internal.body message
 
   let writer_for descriptor ~push ~close =
     {
@@ -317,7 +317,8 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           | exn ->
               let message = Exn.to_string exn in
               Log.warn (fun m -> m "HTTP call failed: %s" message);
-              Lwt.return_error (Awskit.Error.transport ~retryable:true message))
+              Lwt.return_error
+                (Awskit.Error.Internal.transport ~retryable:true message))
     in
     response
 
@@ -379,16 +380,18 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
     let read_response_body reader bytes ~off ~len =
       if invalid_read_bounds bytes ~off ~len then
-        Lwt.return_error (Awskit.Error.body "invalid read bounds")
+        Lwt.return_error (Awskit.Error.Internal.body "invalid read bounds")
       else
         Lwt.catch
           (fun () -> read_from_current reader bytes ~off ~len)
           (function
             | Lwt.Canceled -> Lwt.fail Lwt.Canceled
-            | exn -> Lwt.return_error (Awskit.Error.body (Exn.to_string exn)))
+            | exn ->
+                Lwt.return_error
+                  (Awskit.Error.Internal.body (Exn.to_string exn)))
 
     let drain_limit_error max_response_drain_bytes =
-      Awskit.Error.body
+      Awskit.Error.Internal.body
         ~limit:(Int64.of_int max_response_drain_bytes)
         "response body exceeded max_response_drain_bytes"
 

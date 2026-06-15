@@ -1,8 +1,10 @@
 type view = Bytes of int64 * int64 | From of int64 | Suffix of int64
 type t = view
 
-let invalid ?field message = Error (Awskit.Error.validation ?field message)
-let result_exn = Awskit.Error.get_ok_exn
+let invalid ?field message =
+  Error (Awskit.Error.Internal.validation ?field message)
+
+let result_exn = Awskit.Error.Internal.get_ok_exn
 
 let non_negative ~field value =
   if Int64.compare value 0L < 0 then

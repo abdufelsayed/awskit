@@ -7,8 +7,11 @@ let has_ctl_or_del s =
       code < 0x20 || code = 0x7F)
 
 let has_leading_or_trailing_ws s = not (String.equal s (String.strip s))
-let invalid ?field message = Error (Aws_error.validation ?field message)
-let result_exn = Aws_error.get_ok_exn
+
+let invalid ?field message =
+  Error (Aws_error.Internal.validation ?field message)
+
+let result_exn = Aws_error.Internal.get_ok_exn
 
 module Method = struct
   type t = [ `GET | `PUT | `POST | `DELETE | `HEAD | `PATCH ]

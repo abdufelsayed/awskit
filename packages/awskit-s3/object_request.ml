@@ -55,7 +55,7 @@ module Make (C : Request_context.S) = struct
             match descriptor.content_length with
             | None ->
                 return_error
-                  (Awskit.Error.validation ~field:"content_length"
+                  (Awskit.Error.Internal.validation ~field:"content_length"
                      "S3 uploads require a known content length before SigV4 \
                       chunked streaming")
             | Some content_length -> (

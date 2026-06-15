@@ -97,16 +97,7 @@ let test_native_body_api_compiles () =
   ()
 
 let service_error ?code ?message status =
-  Awskit.Error.service
-    {
-      status;
-      code;
-      message;
-      request_id = None;
-      host_id = None;
-      headers = [];
-      body = None;
-    }
+  Awskit.Error.Internal.service ~status ?code ?message ~headers:[] ()
 
 let test_error_classifiers () =
   let precondition = service_error ~code:"PreconditionFailed" 412 in

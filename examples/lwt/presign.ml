@@ -1,12 +1,15 @@
 open Lwt.Syntax
 module S3 = Awskit_s3_lwt_unix
 
+exception Example_error of string
+
+let fail fmt =
+  Format.kasprintf (fun message -> raise (Example_error message)) fmt
+
 let env name =
   match Sys.getenv_opt name with
   | Some value when String.trim value <> "" -> value
-  | _ ->
-      Awskit.Error.validation ~field:name "environment variable is required"
-      |> Awskit.Error.raise
+  | _ -> fail "set %s" name
 
 let env_default name default =
   match Sys.getenv_opt name with
@@ -15,8 +18,9 @@ let env_default name default =
 
 let unwrap label = function
   | Ok value -> value
-  | Error error -> Awskit.Error.with_context label error |> Awskit.Error.raise
+  | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
+let create_s3 () = S3.create () |> unwrap "create S3 client"
 let expires_in = Ptime.Span.of_int_s (15 * 60)
 
 let method_to_string = function
@@ -41,7 +45,7 @@ let print_presigned label (result : Awskit_s3.Presigned.result) =
 let run () =
   let bucket = env "AWSKIT_EXAMPLE_BUCKET" in
   let key = env_default "AWSKIT_EXAMPLE_KEY" "awskit-examples/presigned.txt" in
-  let s3 = S3.create () |> unwrap "create S3 client" in
+  let s3 = create_s3 () in
   let put_options =
     {
       Awskit_s3.Presigned.Put_object.default_options with
@@ -68,10 +72,8 @@ let main () =
       let* () = run () in
       Lwt.return 0)
     (function
-      | Awskit.Error.Awskit_error error ->
-          let* () =
-            Lwt_io.eprintf "error: %s\n" (Awskit.Error.to_string_hum error)
-          in
+      | Example_error message ->
+          let* () = Lwt_io.eprintf "error: %s\n" message in
           Lwt.return 1
       | exn -> Lwt.fail exn)
 

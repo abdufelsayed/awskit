@@ -139,17 +139,9 @@ let test_non_replayable_request_body_not_retried () =
 
 let test_retry_context_on_exhaustion () =
   let error =
-    Awskit.Error.service
-      {
-        status = 503;
-        code = Some "SlowDown";
-        message = Some "reduce your request rate";
-        request_id = Some "req-retry";
-        host_id = None;
-        headers = [];
-        body = None;
-      }
-    |> Awskit.Error.with_retry ~attempt:3 ~max_attempts:3
+    Awskit.Error.Internal.service ~status:503 ~code:"SlowDown"
+      ~message:"reduce your request rate" ~request_id:"req-retry" ~headers:[] ()
+    |> Awskit.Error.Internal.with_retry ~attempt:3 ~max_attempts:3
          ~reason:"retry attempts exhausted"
   in
   let text = Awskit.Error.to_string_hum error in
@@ -165,7 +157,9 @@ let test_runtime_stream_request_body_error_propagates () =
       replayable = false;
     }
   in
-  let stream_error = Awskit.Error.body "runtime stream request body failed" in
+  let stream_error =
+    Awskit.Error.Internal.body "runtime stream request body failed"
+  in
   let conn = Recording_runtime.connect [ response 200 "" ] in
   let body =
     Recording_runtime.stream_request_body descriptor ~write:(fun writer ->
@@ -231,7 +225,8 @@ let test_retry_jitter_bounds () =
       ~jitter:0.5 ()
   in
   let error =
-    Awskit.Error.transport ~retryable:true "temporary transport failure"
+    Awskit.Error.Internal.transport ~retryable:true
+      "temporary transport failure"
   in
   let low =
     Awskit.Retry.delay policy ~attempt:1 ~error ~random_float:(fun () -> 0.0)

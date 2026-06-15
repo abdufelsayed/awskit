@@ -132,10 +132,17 @@ validation or construction failure. Prefer the result-returning form in
 libraries and long-running services. Cancellation and user callback exceptions
 are not converted into SDK errors.
 
-The public kind and retry classifications are ordinary variants:
+Application code should treat {!module:Awskit.Error} as a consumer API:
+inspect, classify, and print errors returned by Awskit operations. Error
+construction is reserved for Awskit package implementations under
+{!module:Awskit.Error.Internal}.
+
+The public kind and retry classifications are matchable variants. Error kind
+constructors are private, so application code can inspect returned errors but
+cannot construct new {!type:Awskit.Error.t} values directly:
 
 {[
-type kind =
+type kind = private
   | Validation of validation
   | Signing of string
   | Transport of transport

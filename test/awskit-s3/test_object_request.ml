@@ -6,16 +6,7 @@ let is_decode_error error =
   match kind error with Decode _ -> true | _ -> false
 
 let service_error ?code ?message status =
-  Awskit.Error.service
-    {
-      status;
-      code;
-      message;
-      request_id = None;
-      host_id = None;
-      headers = [];
-      body = None;
-    }
+  Awskit.Error.Internal.service ~status ?code ?message ~headers:[] ()
 
 let no_such_key_body =
   {|<Error><Code>NoSuchKey</Code><Message>not found</Message></Error>|}

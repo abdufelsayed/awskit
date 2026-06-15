@@ -12,7 +12,8 @@ let has_ctl_or_del s =
       let code = Char.to_int c in
       code < 0x20 || code = 0x7F)
 
-let invalid ~field message = Error (Aws_error.validation ~field message)
+let invalid ~field message =
+  Error (Aws_error.Internal.validation ~field message)
 
 let validate_required ~field value =
   if String.is_empty value then invalid ~field (Fmt.str "%s is empty" field)
@@ -39,7 +40,7 @@ let create ~access_key_id ~secret_access_key ?session_token () =
           | Ok () -> Ok { access_key_id; secret_access_key; session_token }))
 
 let create_exn ~access_key_id ~secret_access_key ?session_token () =
-  Aws_error.get_ok_exn
+  Aws_error.Internal.get_ok_exn
     (create ~access_key_id ~secret_access_key ?session_token ())
 
 let hmac_sha256 ~key data =
@@ -64,11 +65,11 @@ module Provider = struct
           let error =
             match errors with
             | [] ->
-                Aws_error.validation ~field:"credentials"
+                Aws_error.Internal.validation ~field:"credentials"
                   "no credential providers configured"
             | errors ->
-                Aws_error.multiple errors
-                |> Aws_error.with_context
+                Aws_error.Internal.multiple errors
+                |> Aws_error.Internal.with_context
                      "no credential provider resolved credentials"
           in
           Error error

@@ -39,7 +39,7 @@ module Make (R : Awskit_s3_intf.RUNTIME) = struct
     let read = R.Response_body.read
 
     let invalid_chunk_size chunk_size =
-      Awskit.Error.validation ~field:"chunk_size"
+      Awskit.Error.Internal.validation ~field:"chunk_size"
         (Fmt.str "chunk_size must be positive, got %d" chunk_size)
 
     let next ?(chunk_size = default_chunk_size) reader =
@@ -74,7 +74,9 @@ module Make (R : Awskit_s3_intf.RUNTIME) = struct
     let check_limit ?max_bytes total =
       match max_bytes with
       | Some limit when Int64.compare total limit > 0 ->
-          Error (Awskit.Error.body ~limit "response body exceeded max_bytes")
+          Error
+            (Awskit.Error.Internal.body ~limit
+               "response body exceeded max_bytes")
       | _ -> Ok ()
 
     let drain_to_buffer ?chunk_size ?max_bytes reader =

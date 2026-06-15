@@ -51,7 +51,7 @@ module Runtime = struct
     { descriptor = descriptor_for_string value; body = Ok value }
 
   let bytes_request_body value = string_request_body (Bytes.to_string value)
-  let body_error message = Awskit.Error.body message
+  let body_error message = Awskit.Error.Internal.body message
 
   let writer_for descriptor =
     {
@@ -166,6 +166,6 @@ module Runtime = struct
 
   let with_response _ _ _ ~f:_ =
     Error
-      (Awskit.Error.transport ~retryable:false
+      (Awskit.Error.Internal.transport ~retryable:false
          "Simulator.Runtime.with_response is not an HTTP transport")
 end

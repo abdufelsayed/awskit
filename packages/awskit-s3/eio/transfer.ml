@@ -5,12 +5,12 @@ let ( let* ) result f =
   match result with Ok value -> f value | Error _ as error -> error
 
 let body_error action path exn =
-  Awskit.Error.body
+  Awskit.Error.Internal.body
     (Fmt.str "failed to %s path %a: %s" action Eio.Path.pp path
        (Printexc.to_string exn))
 
 let target_error action target exn =
-  Awskit.Error.body
+  Awskit.Error.Internal.body
     (Fmt.str "failed to %s %s: %s" action target (Printexc.to_string exn))
 
 let regular_file_length path =
@@ -20,7 +20,7 @@ let regular_file_length path =
     | `Regular_file -> Ok (Optint.Int63.to_int64 stat.size)
     | kind ->
         Error
-          (Awskit.Error.validation ~field:"path"
+          (Awskit.Error.Internal.validation ~field:"path"
              (Fmt.str "expected regular file, got %a" Eio.File.Stat.pp_kind kind))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -42,7 +42,7 @@ let temp_download_path path attempt =
           dir / Fmt.str ".%s.awskit-download.%08x.%d.tmp" base id attempt)
   | None ->
       Error
-        (Awskit.Error.validation ~field:"path"
+        (Awskit.Error.Internal.validation ~field:"path"
            "could not derive temporary download path")
 
 let remove_temp_download path =
@@ -67,8 +67,8 @@ let cleanup_temp_download path error =
   | Ok () -> Error error
   | Error cleanup_error ->
       Error
-        (Awskit.Error.multiple [ error; cleanup_error ]
-        |> Awskit.Error.with_context
+        (Awskit.Error.Internal.multiple [ error; cleanup_error ]
+        |> Awskit.Error.Internal.with_context
              "download failed and temporary file cleanup also failed")
 
 let cleanup_temp_download_before_raise path exn =
@@ -85,7 +85,7 @@ let reserve_temp_download_file ~sw path =
   let rec loop attempt =
     if attempt >= 100 then
       Error
-        (Awskit.Error.body
+        (Awskit.Error.Internal.body
            (Fmt.str "failed to reserve temporary download path for %a"
               Eio.Path.pp path))
     else
@@ -302,7 +302,7 @@ struct
 
   let multipart_specs ~content_length ~part_size =
     let empty_error =
-      Awskit.Error.validation ~field:"path"
+      Awskit.Error.Internal.validation ~field:"path"
         "multipart file upload requires a non-empty file"
     in
     let* () =
@@ -344,7 +344,7 @@ struct
                     | Ok () -> loop (remaining - n))
                 | exception End_of_file ->
                     Error
-                      (Awskit.Error.body
+                      (Awskit.Error.Internal.body
                          (Fmt.str
                             "unexpected end of file while reading part %d from \
                              %a"
@@ -534,8 +534,8 @@ struct
       | Ok _ -> Error error
       | Error cleanup_error ->
           Error
-            (Awskit.Error.multiple [ error; cleanup_error ]
-            |> Awskit.Error.with_context
+            (Awskit.Error.Internal.multiple [ error; cleanup_error ]
+            |> Awskit.Error.Internal.with_context
                  "multipart upload failed and abort also failed")
     in
     match
@@ -601,7 +601,7 @@ struct
             | Error _ as error -> error
             | Ok 0 ->
                 Error
-                  (Awskit.Error.body
+                  (Awskit.Error.Internal.body
                      (Fmt.str
                         "unexpected end of response while downloading range %d"
                         spec.index))

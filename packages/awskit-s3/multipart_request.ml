@@ -127,7 +127,7 @@ module Make (C : Request_context.S) = struct
                 match descriptor.content_length with
                 | None ->
                     return_error
-                      (Awskit.Error.validation ~field:"content_length"
+                      (Awskit.Error.Internal.validation ~field:"content_length"
                          "S3 multipart uploads require a known content length")
                 | Some content_length -> (
                     match
@@ -217,7 +217,7 @@ module Make (C : Request_context.S) = struct
             match parts with
             | [] ->
                 return_error
-                  (Awskit.Error.validation ~field:"parts"
+                  (Awskit.Error.Internal.validation ~field:"parts"
                      "complete requires at least one part")
             | parts -> (
                 match validate None parts with

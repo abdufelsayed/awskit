@@ -3,16 +3,7 @@ open Simulator_support
 open Simulator_state
 
 let service ?message ?(headers = []) ~status ~code () =
-  Awskit.Error.service
-    {
-      status;
-      code = Some code;
-      message;
-      request_id = None;
-      host_id = None;
-      headers;
-      body = None;
-    }
+  Awskit.Error.Internal.service ~status ~code ?message ~headers ()
 
 let no_such_bucket () = service ~status:404 ~code:"NoSuchBucket" ()
 let no_such_key () = service ~status:404 ~code:"NoSuchKey" ()
@@ -32,8 +23,9 @@ let fault_error = function
   | Slow_down -> service ~status:503 ~code:"SlowDown" ()
   | Internal_error -> service ~status:500 ~code:"InternalError" ()
   | Connection_reset ->
-      Awskit.Error.transport ~retryable:true "simulated connection reset"
-  | Response_lost -> Awskit.Error.body "simulated response body loss"
+      Awskit.Error.Internal.transport ~retryable:true
+        "simulated connection reset"
+  | Response_lost -> Awskit.Error.Internal.body "simulated response body loss"
 
 let take_fault t = Simulator_state.take_fault t
 

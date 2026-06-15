@@ -15,11 +15,11 @@ module Credentials = struct
             let error =
               match errors with
               | [] ->
-                  Awskit.Error.validation ~field:"credentials"
+                  Awskit.Error.Internal.validation ~field:"credentials"
                     "no credential providers configured"
               | errors ->
-                  Awskit.Error.multiple errors
-                  |> Awskit.Error.with_context
+                  Awskit.Error.Internal.multiple errors
+                  |> Awskit.Error.Internal.with_context
                        "no credential provider resolved credentials"
             in
             Lwt.return_error error

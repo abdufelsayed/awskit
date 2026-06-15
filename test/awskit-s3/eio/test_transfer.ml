@@ -115,7 +115,7 @@ module Runtime = struct
     else
       match !read_error_after_bytes with
       | Some limit when reader.offset >= limit ->
-          Error (Awskit.Error.body "simulated response read failure")
+          Error (Awskit.Error.Internal.body "simulated response read failure")
       | _ -> (
           match !read_cancel_after_bytes with
           | Some limit when reader.offset >= limit ->
@@ -148,7 +148,7 @@ module Runtime = struct
   end
 
   let with_response _ _ _ ~f:_ =
-    Error (Awskit.Error.transport ~retryable:false "not implemented")
+    Error (Awskit.Error.Internal.transport ~retryable:false "not implemented")
 end
 
 let connection ?(response_body = "") () =
@@ -327,7 +327,7 @@ module S3 = struct
     let complete_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ _ =
       conn.Runtime.complete_count <- conn.Runtime.complete_count + 1;
       if conn.Runtime.fail_complete_upload then
-        Error (Awskit.Error.body "simulated complete failure")
+        Error (Awskit.Error.Internal.body "simulated complete failure")
       else
         Ok
           {
@@ -340,7 +340,7 @@ module S3 = struct
     let abort_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
       conn.Runtime.abort_count <- conn.Runtime.abort_count + 1;
       if conn.Runtime.fail_abort_upload then
-        Error (Awskit.Error.body "simulated abort failure")
+        Error (Awskit.Error.Internal.body "simulated abort failure")
       else Ok (response 204)
 
     let list_parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () = assert false

@@ -148,7 +148,7 @@ let make_uri (request : Awskit.Request.t) =
        (Awskit.Request.Target.path_and_query target))
 
 let missing_https_connector_error =
-  Awskit.Error.transport ~retryable:false
+  Awskit.Error.Internal.transport ~retryable:false
     "HTTPS endpoint requires an HTTPS connector. Pass ~https with a connector \
      compatible with Cohttp_eio.Client.make. For local HTTP endpoints, pass \
      ~https:Awskit_eio.http_only and an explicit http:// endpoint."
@@ -177,10 +177,10 @@ let request_body_descriptor = function
   | Source (descriptor, _) -> descriptor
   | Stream (descriptor, _) -> descriptor
 
-let body_error message = Awskit.Error.body message
+let body_error message = Awskit.Error.Internal.body message
 
 let drain_limit_error max_response_drain_bytes =
-  Awskit.Error.body
+  Awskit.Error.Internal.body
     ~limit:(Int64.of_int max_response_drain_bytes)
     "response body exceeded max_response_drain_bytes"
 
@@ -325,7 +325,7 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
             | _ ->
                 let message = Exn.to_string exn in
                 Log.warn (fun m -> m "HTTP call failed: %s" message);
-                Error (Awskit.Error.transport ~retryable:true message))
+                Error (Awskit.Error.Internal.transport ~retryable:true message))
       in
       match request_body with
       | Source _ -> run_call ~call_sw:conn.sw
@@ -376,12 +376,12 @@ let rec read_from_current reader bytes ~off ~len =
 
 let read_response_body reader bytes ~off ~len =
   if invalid_read_bounds bytes ~off ~len then
-    Error (Awskit.Error.body "invalid read bounds")
+    Error (Awskit.Error.Internal.body "invalid read bounds")
   else
     try read_from_current reader bytes ~off ~len with
     | End_of_file -> Ok 0
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Awskit.Error.body (Exn.to_string exn))
+    | exn -> Error (Awskit.Error.Internal.body (Exn.to_string exn))
 
 let rec discard_reader reader ~remaining ~max_response_drain_bytes =
   let buffer = Bytes.create 8192 in

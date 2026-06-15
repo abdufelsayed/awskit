@@ -182,16 +182,8 @@ let test_find_preserves_consumer_not_found_error () =
        ()
     |> ok_or_fail "put object");
   let consumer_error =
-    Awskit.Error.service
-      {
-        status = 404;
-        code = Some "NoSuchKey";
-        message = Some "consumer-owned missing resource";
-        request_id = None;
-        host_id = None;
-        headers = [];
-        body = None;
-      }
+    Awskit.Error.Internal.service ~status:404 ~code:"NoSuchKey"
+      ~message:"consumer-owned missing resource" ~headers:[] ()
   in
   match
     Simulator.Object.find conn ~bucket:"test-bucket" ~key:"present"

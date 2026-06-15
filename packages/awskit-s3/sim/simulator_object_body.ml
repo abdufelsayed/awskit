@@ -46,7 +46,7 @@ let request_body_result body =
   match descriptor.content_length with
   | None ->
       Error
-        (Awskit.Error.validation ~field:"content_length"
+        (Awskit.Error.Internal.validation ~field:"content_length"
            "S3 uploads require a known content length before SigV4 chunked \
             streaming")
   | Some _ -> (
@@ -67,7 +67,7 @@ let consume_string ~max_bytes reader =
         let total = Int64.add total (Int64.of_int n) in
         if Int64.compare total max_bytes > 0 then
           Error
-            (Awskit.Error.body ~limit:max_bytes
+            (Awskit.Error.Internal.body ~limit:max_bytes
                "response body exceeded max_bytes")
         else begin
           Buffer.add_subbytes buffer chunk 0 n;

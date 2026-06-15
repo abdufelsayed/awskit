@@ -5,16 +5,18 @@ module Region = Awskit.Region
 let ( let* ) result f =
   match result with Ok value -> f value | Error _ as e -> e
 
-let result_exn = Awskit.Error.get_ok_exn
+let result_exn = Awskit.Error.Internal.get_ok_exn
 
 let invalid ?field fmt =
-  Fmt.kstr (fun message -> Error (Awskit.Error.validation ?field message)) fmt
+  Fmt.kstr
+    (fun message -> Error (Awskit.Error.Internal.validation ?field message))
+    fmt
 
-let decode fmt = Fmt.kstr Awskit.Error.decode fmt
+let decode fmt = Fmt.kstr Awskit.Error.Internal.decode fmt
 
 let decode_with_context ~what message =
-  Awskit.Error.decode message
-  |> Awskit.Error.with_context (Fmt.str "decoding %s" what)
+  Awskit.Error.Internal.decode message
+  |> Awskit.Error.Internal.with_context (Fmt.str "decoding %s" what)
 
 let is_prefix ~prefix value =
   let prefix_len = String.length prefix in
@@ -67,7 +69,8 @@ let with_s3_operation ~operation ?bucket ?key error =
   in
   if already_present then error
   else
-    Awskit.Error.with_operation ~service:"S3" ~name:operation ?resource () error
+    Awskit.Error.Internal.with_operation ~service:"S3" ~name:operation ?resource
+      () error
 
 let return_s3_error return_error ~operation ?bucket ?key error =
   return_error (with_s3_operation ~operation ?bucket ?key error)

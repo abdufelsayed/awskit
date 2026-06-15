@@ -73,6 +73,10 @@ HTTP status, AWS error code, request id, retry class, and retry attempts. Use
 `Awskit.Error.pp` or `Awskit.Error.to_string_hum` for human logs, and
 `Awskit.Error.sexp_of_t` for structured diagnostics and tests.
 
+Application code should treat `Awskit.Error` as a consumer API: inspect,
+classify, and print errors returned by Awskit operations. Error construction
+is reserved for Awskit package implementations under `Awskit.Error.Internal`.
+
 Functions ending in `_exn` raise `Awskit.Error.Awskit_error` on SDK validation
 or construction failure. Prefer the result-returning form in libraries and
 long-running services. Cancellation and user callback exceptions are not

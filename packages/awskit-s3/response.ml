@@ -71,8 +71,9 @@ let storage_class response =
       match Storage_class.of_string value with
       | Some value -> Ok (Some value)
       | None ->
-          Error (Awskit.Error.decode (Fmt.str "invalid storage class %s" value))
-      )
+          Error
+            (Awskit.Error.Internal.decode
+               (Fmt.str "invalid storage class %s" value)))
 
 let object_info response =
   let* etag = response_etag response in
@@ -120,16 +121,13 @@ let delete_result response =
     }
 
 let embedded_service_error response body =
-  Awskit.Error.service
-    {
-      status = Awskit.Response.status response;
-      code = Xml.service_code body;
-      message = Xml.service_message body;
-      request_id = Awskit.Response.request_id response;
-      host_id = Awskit.Response.host_id response;
-      headers = Awskit.Response.headers response;
-      body = Some body;
-    }
+  Awskit.Error.Internal.service
+    ~status:(Awskit.Response.status response)
+    ?code:(Xml.service_code body) ?message:(Xml.service_message body)
+    ?request_id:(Awskit.Response.request_id response)
+    ?host_id:(Awskit.Response.host_id response)
+    ~headers:(Awskit.Response.headers response)
+    ~body ()
 
 let copy_result response body =
   match Xml.root body with
@@ -156,5 +154,5 @@ let copy_result response body =
         }
   | Ok (actual, _) ->
       Error
-        (Awskit.Error.decode
+        (Awskit.Error.Internal.decode
            (Fmt.str "expected CopyObjectResult XML, got %s" actual))

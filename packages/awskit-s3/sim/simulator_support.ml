@@ -4,9 +4,11 @@ let ( let* ) result f =
   match result with Ok value -> f value | Error _ as error -> error
 
 let invalid ?field fmt =
-  Fmt.kstr (fun message -> Error (Awskit.Error.validation ?field message)) fmt
+  Fmt.kstr
+    (fun message -> Error (Awskit.Error.Internal.validation ?field message))
+    fmt
 
-let decode fmt = Fmt.kstr Awskit.Error.decode fmt
+let decode fmt = Fmt.kstr Awskit.Error.Internal.decode fmt
 
 let is_prefix ~prefix value =
   let prefix_len = String.length prefix in

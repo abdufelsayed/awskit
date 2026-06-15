@@ -27,7 +27,10 @@ module Credentials = struct
   let eks_pod_identity_host = "169.254.170.23"
   let imds_host = "169.254.169.254"
   let refresh_before = Ptime.Span.of_int_s (5 * 60)
-  let validation ~field message = Awskit.Error.validation ~field message
+
+  let validation ~field message =
+    Awskit.Error.Internal.validation ~field message
+
   let trim value = String.trim value
 
   let http_call ~meth ~headers uri =
@@ -51,11 +54,12 @@ module Credentials = struct
       (function
         | Lwt_unix.Timeout ->
             Lwt.return_error
-              (Awskit.Error.transport ~retryable:true
+              (Awskit.Error.Internal.transport ~retryable:true
                  "credential metadata request timed out")
         | exn ->
             Lwt.return_error
-              (Awskit.Error.transport ~retryable:true (Printexc.to_string exn)))
+              (Awskit.Error.Internal.transport ~retryable:true
+                 (Printexc.to_string exn)))
 
   let expect_success ~field response =
     if response.status >= 200 && response.status < 300 then Ok response

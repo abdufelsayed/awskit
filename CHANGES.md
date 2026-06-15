@@ -14,6 +14,11 @@ The README examples have been updated for the streaming API.
 Awskit now provides structured `Awskit.Error` handling for SDK failures, and
 the package API documentation has been expanded.
 
+Breaking change: `Awskit.Error` constructors and exception bridge helpers now
+live under `Awskit.Error.Internal`. Application code should inspect, classify,
+and print returned SDK errors through the top-level `Awskit.Error` consumer API;
+Awskit package implementations use `Internal` when constructing errors.
+
 # 0.1.0
 
 Initial public release of Awskit.

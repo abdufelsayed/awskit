@@ -15,16 +15,22 @@ module Env = struct
   let required ?(getenv = getenv_opt) name =
     match getenv name with
     | None ->
-        Error (Awskit.Error.validation ~field:name (Fmt.str "%s not set" name))
+        Error
+          (Awskit.Error.Internal.validation ~field:name
+             (Fmt.str "%s not set" name))
     | Some value when String.is_empty value ->
-        Error (Awskit.Error.validation ~field:name (Fmt.str "%s is empty" name))
+        Error
+          (Awskit.Error.Internal.validation ~field:name
+             (Fmt.str "%s is empty" name))
     | Some value -> Ok value
 
   let optional ?(getenv = getenv_opt) name =
     match getenv name with
     | None -> Ok None
     | Some value when String.is_empty value ->
-        Error (Awskit.Error.validation ~field:name (Fmt.str "%s is empty" name))
+        Error
+          (Awskit.Error.Internal.validation ~field:name
+             (Fmt.str "%s is empty" name))
     | Some value -> Ok (Some value)
 end
 
@@ -109,14 +115,15 @@ let read_file path =
             Ok (Some (Stdlib.really_input_string channel length)))
       with exn ->
         Error
-          (Awskit.Error.validation ~field:path
+          (Awskit.Error.Internal.validation ~field:path
              (Fmt.str "failed to read AWS credentials file: %s"
                 (Stdlib.Printexc.to_string exn))))
 
 let default_home ?getenv () =
   match Env.optional ?getenv "HOME" with
   | Ok (Some home) -> Ok home
-  | Ok None -> Error (Awskit.Error.validation ~field:"HOME" "HOME not set")
+  | Ok None ->
+      Error (Awskit.Error.Internal.validation ~field:"HOME" "HOME not set")
   | Error _ as error -> error
 
 let default_credentials_file ?getenv ?home () =
@@ -188,13 +195,13 @@ let from_profile ?getenv ?home ?credentials_file ?config_file ?profile () =
   match profile_section ~profile ~credentials_ini ~config_ini with
   | None ->
       Error
-        (Awskit.Error.validation ~field:"AWS_PROFILE"
+        (Awskit.Error.Internal.validation ~field:"AWS_PROFILE"
            (Fmt.str "AWS profile %S not found" profile))
   | Some section -> (
       match (Ini.get section "role_arn", Ini.get section "source_profile") with
       | Some _, _ | _, Some _ ->
           Error
-            (Awskit.Error.validation ~field:"AWS_PROFILE"
+            (Awskit.Error.Internal.validation ~field:"AWS_PROFILE"
                (Fmt.str
                   "AWS profile %S requires assume-role support, which is not \
                    implemented yet"
@@ -210,7 +217,7 @@ let from_profile ?getenv ?home ?credentials_file ?config_file ?profile () =
                 ?session_token ()
           | _ ->
               Error
-                (Awskit.Error.validation ~field:"AWS_PROFILE"
+                (Awskit.Error.Internal.validation ~field:"AWS_PROFILE"
                    (Fmt.str "AWS profile %S does not contain static credentials"
                       profile))))
 

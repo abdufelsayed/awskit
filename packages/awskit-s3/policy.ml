@@ -7,6 +7,7 @@ let of_json body =
     match Yojson.Safe.from_string body with
     | `Assoc _ -> Ok body
     | _ -> invalid ~field:"policy" "policy must be a JSON object"
-  with Yojson.Json_error message -> Error (Awskit.Error.decode message)
+  with Yojson.Json_error message ->
+    Error (Awskit.Error.Internal.decode message)
 
 let to_json policy = policy

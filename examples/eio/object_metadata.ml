@@ -1,11 +1,14 @@
 module S3 = Awskit_s3_eio
 
+exception Example_error of string
+
+let fail fmt =
+  Format.kasprintf (fun message -> raise (Example_error message)) fmt
+
 let env name =
   match Sys.getenv_opt name with
   | Some value when String.trim value <> "" -> value
-  | _ ->
-      Awskit.Error.validation ~field:name "environment variable is required"
-      |> Awskit.Error.raise
+  | _ -> fail "set %s" name
 
 let env_default name default =
   match Sys.getenv_opt name with
@@ -14,31 +17,26 @@ let env_default name default =
 
 let unwrap label = function
   | Ok value -> value
-  | Error error -> Awskit.Error.with_context label error |> Awskit.Error.raise
+  | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
-let or_raise_msg label = function
+let or_fail_msg label = function
   | Ok value -> value
-  | Error (`Msg message) ->
-      Awskit.Error.transport ~retryable:false message
-      |> Awskit.Error.with_context label
-      |> Awskit.Error.raise
+  | Error (`Msg message) -> fail "%s: %s" label message
 
 let https_connector () =
   Mirage_crypto_rng_unix.use_default ();
   let authenticator =
-    Ca_certs.authenticator () |> or_raise_msg "load CA certificates"
+    Ca_certs.authenticator () |> or_fail_msg "load CA certificates"
   in
   let tls_config =
-    Tls.Config.client ~authenticator () |> or_raise_msg "create TLS config"
+    Tls.Config.client ~authenticator () |> or_fail_msg "create TLS config"
   in
   Some
     (fun uri raw ->
       let host =
         match Uri.host uri with
         | Some host -> Domain_name.host_exn (Domain_name.of_string_exn host)
-        | None ->
-            Awskit.Error.validation ~field:"uri" "HTTPS URI is missing a host"
-            |> Awskit.Error.raise
+        | None -> fail "HTTPS URI is missing a host"
       in
       (Tls_eio.client_of_flow tls_config ~host raw
         :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Flow.two_way))
@@ -93,8 +91,8 @@ let main stdenv =
   try
     run stdenv;
     0
-  with Awskit.Error.Awskit_error error ->
-    Format.eprintf "error: %s@." (Awskit.Error.to_string_hum error);
+  with Example_error message ->
+    Format.eprintf "error: %s@." message;
     1
 
 let () = exit (Eio_main.run main)

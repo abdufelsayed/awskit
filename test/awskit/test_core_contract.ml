@@ -102,10 +102,11 @@ let test_request_response_contracts () =
 
 let test_error_context_and_sexp () =
   let error =
-    Awskit.Error.validation ~field:"bucket" "bucket must be 3-63 characters"
-    |> Awskit.Error.with_operation ~service:"s3" ~name:"CreateBucket"
+    Awskit.Error.Internal.validation ~field:"bucket"
+      "bucket must be 3-63 characters"
+    |> Awskit.Error.Internal.with_operation ~service:"s3" ~name:"CreateBucket"
          ~resource:"s3://ab" ()
-    |> Awskit.Error.with_context "validating caller input"
+    |> Awskit.Error.Internal.with_context "validating caller input"
   in
   Alcotest.(check bool)
     "validation classifier" true
@@ -125,9 +126,9 @@ let test_error_context_and_sexp () =
     && String.is_substring human ~substring:"s3://ab")
 
 let test_error_multiple_preserves_all_failures () =
-  let primary = Awskit.Error.body "download failed" in
-  let cleanup = Awskit.Error.body "cleanup failed" in
-  let combined = Awskit.Error.multiple [ primary; cleanup ] in
+  let primary = Awskit.Error.Internal.body "download failed" in
+  let cleanup = Awskit.Error.Internal.body "cleanup failed" in
+  let combined = Awskit.Error.Internal.multiple [ primary; cleanup ] in
   let human = Awskit.Error.to_string_hum combined in
   Alcotest.(check bool)
     "mentions primary" true
@@ -139,12 +140,14 @@ let test_error_multiple_preserves_all_failures () =
 let test_provider_chain_uses_multiple_errors () =
   let first =
     Awskit.Credentials.Provider.create (fun () ->
-        Error (Awskit.Error.validation ~field:"env" "missing env credentials"))
+        Error
+          (Awskit.Error.Internal.validation ~field:"env"
+             "missing env credentials"))
   in
   let second =
     Awskit.Credentials.Provider.create (fun () ->
         Error
-          (Awskit.Error.validation ~field:"profile"
+          (Awskit.Error.Internal.validation ~field:"profile"
              "missing profile credentials"))
   in
   match
@@ -174,16 +177,7 @@ let test_provider_chain_uses_multiple_errors () =
             (Awskit.Error.to_string_hum error))
 
 let make_service_error ~status ~code =
-  Awskit.Error.service
-    {
-      status;
-      code;
-      message = None;
-      request_id = None;
-      host_id = None;
-      headers = [];
-      body = None;
-    }
+  Awskit.Error.Internal.service ~status ?code ~headers:[] ()
 
 let retry_class_to_string = function
   | Awskit.Error.Retryable -> "Retryable"
@@ -213,12 +207,12 @@ let check_retry_class name expected actual =
       (retry_class_to_string actual)
 
 let test_error_multiple_retry_policy () =
-  let validation_error = Awskit.Error.validation "bad caller input" in
+  let validation_error = Awskit.Error.Internal.validation "bad caller input" in
   let retryable_transport =
-    Awskit.Error.transport ~retryable:true "connection reset"
+    Awskit.Error.Internal.transport ~retryable:true "connection reset"
   in
   let retryable_over_fatal =
-    Awskit.Error.multiple [ validation_error; retryable_transport ]
+    Awskit.Error.Internal.multiple [ validation_error; retryable_transport ]
   in
   check_retry_class "retryable outranks fatal" Awskit.Error.Retryable
     (Awskit.Error.retry_class retryable_over_fatal);
@@ -229,7 +223,7 @@ let test_error_multiple_retry_policy () =
     make_service_error ~status:403 ~code:(Some "AccessDenied")
   in
   let auth_over_not_found =
-    Awskit.Error.multiple [ not_found_service; auth_service ]
+    Awskit.Error.Internal.multiple [ not_found_service; auth_service ]
   in
   check_retry_class "auth outranks not found" Awskit.Error.Auth
     (Awskit.Error.retry_class auth_over_not_found)
@@ -238,14 +232,14 @@ let test_error_multiple_classifiers_recurse () =
   let service_error = make_service_error ~status:503 ~code:(Some "SlowDown") in
   let auth_error = make_service_error ~status:403 ~code:(Some "AccessDenied") in
   let combined =
-    Awskit.Error.multiple
+    Awskit.Error.Internal.multiple
       [
-        Awskit.Error.body "first error has no classifier data";
-        Awskit.Error.multiple
+        Awskit.Error.Internal.body "first error has no classifier data";
+        Awskit.Error.Internal.multiple
           [
-            Awskit.Error.validation "validation without field";
+            Awskit.Error.Internal.validation "validation without field";
             service_error;
-            Awskit.Error.validation ~field:"bucket" "bucket is invalid";
+            Awskit.Error.Internal.validation ~field:"bucket" "bucket is invalid";
           ];
         auth_error;
       ]

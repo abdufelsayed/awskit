@@ -115,9 +115,10 @@ module Make (R : RUNTIME) = struct
             let total = Int64.add total (Int64.of_int n) in
             if Int64.compare total max_size > 0 then
               return_error
-                (Awskit.Error.body ~limit:max_size
+                (Awskit.Error.Internal.body ~limit:max_size
                    "response body exceeded max_bytes"
-                |> Awskit.Error.with_context "reading bounded response body")
+                |> Awskit.Error.Internal.with_context
+                     "reading bounded response body")
             else begin
               Buffer.add_subbytes buffer chunk 0 n;
               loop total
@@ -131,16 +132,14 @@ module Make (R : RUNTIME) = struct
     let discard_response_body = R.Response_body.discard
 
     let service_error response body =
-      Awskit.Error.service
-        {
-          status = Awskit.Response.status response;
-          code = Option.bind body Common.Xml.service_code;
-          message = Option.bind body Common.Xml.service_message;
-          request_id = Awskit.Response.request_id response;
-          host_id = Awskit.Response.host_id response;
-          headers = Awskit.Response.headers response;
-          body;
-        }
+      Awskit.Error.Internal.service
+        ~status:(Awskit.Response.status response)
+        ?code:(Option.bind body Common.Xml.service_code)
+        ?message:(Option.bind body Common.Xml.service_message)
+        ?request_id:(Awskit.Response.request_id response)
+        ?host_id:(Awskit.Response.host_id response)
+        ~headers:(Awskit.Response.headers response)
+        ?body ()
 
     let signed_request conn ~method_ ~(request : Endpoint_resolver.Request.t)
         ~query ~headers ~payload_hash =
@@ -184,16 +183,16 @@ module Make (R : RUNTIME) = struct
           retry (attempt + 1)
       | Some _delay ->
           return_error
-            (Awskit.Error.with_retry ~attempt ~max_attempts
+            (Awskit.Error.Internal.with_retry ~attempt ~max_attempts
                ~reason:"not retried because request body is not replayable"
                error)
       | None when attempt >= max_attempts ->
           return_error
-            (Awskit.Error.with_retry ~attempt ~max_attempts
+            (Awskit.Error.Internal.with_retry ~attempt ~max_attempts
                ~reason:"retry attempts exhausted" error)
       | None ->
           return_error
-            (Awskit.Error.with_retry ~attempt ~max_attempts
+            (Awskit.Error.Internal.with_retry ~attempt ~max_attempts
                ~reason:"error is not retryable by policy" error)
 
     type 'a response_action =

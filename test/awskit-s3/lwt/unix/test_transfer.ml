@@ -119,7 +119,8 @@ module Runtime = struct
     let length = String.length value in
     match writer.fail_after_bytes with
     | Some limit when writer.written + length > limit ->
-        Lwt.return_error (Awskit.Error.body "simulated upload write failure")
+        Lwt.return_error
+          (Awskit.Error.Internal.body "simulated upload write failure")
     | _ ->
         Buffer.add_string writer.buffer value;
         writer.written <- writer.written + length;
@@ -130,7 +131,8 @@ module Runtime = struct
     else
       match !read_error_after_bytes with
       | Some limit when reader.offset >= limit ->
-          Lwt.return_error (Awskit.Error.body "simulated response read failure")
+          Lwt.return_error
+            (Awskit.Error.Internal.body "simulated response read failure")
       | _ ->
           let remaining = String.length reader.body - reader.offset in
           if remaining <= 0 then Lwt.return_ok 0
@@ -159,11 +161,13 @@ module Runtime = struct
   end
 
   let with_response _ _ _ ~f:_ =
-    Lwt.return_error (Awskit.Error.transport ~retryable:false "not implemented")
+    Lwt.return_error
+      (Awskit.Error.Internal.transport ~retryable:false "not implemented")
 end
 
 let unsupported () =
-  Lwt.return_error (Awskit.Error.validation ~field:"test" "not implemented")
+  Lwt.return_error
+    (Awskit.Error.Internal.validation ~field:"test" "not implemented")
 
 let connection ?(response_body = "") () =
   {
@@ -252,7 +256,9 @@ module S3 = struct
       if
         conn.Runtime.fail_ranged_get
         && Option.is_some (Option.bind options (fun options -> options.range))
-      then Lwt.return_error (Awskit.Error.body "simulated ranged get failure")
+      then
+        Lwt.return_error
+          (Awskit.Error.Internal.body "simulated ranged get failure")
       else
         Lwt.bind
           (consume { Runtime.body; offset = 0 })
@@ -359,7 +365,8 @@ module S3 = struct
     let complete_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ _ =
       conn.Runtime.complete_count <- conn.Runtime.complete_count + 1;
       if conn.Runtime.fail_complete_upload then
-        Lwt.return_error (Awskit.Error.body "simulated complete failure")
+        Lwt.return_error
+          (Awskit.Error.Internal.body "simulated complete failure")
       else
         Lwt.return_ok
           {
@@ -372,7 +379,7 @@ module S3 = struct
     let abort_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
       conn.Runtime.abort_count <- conn.Runtime.abort_count + 1;
       if conn.Runtime.fail_abort_upload then
-        Lwt.return_error (Awskit.Error.body "simulated abort failure")
+        Lwt.return_error (Awskit.Error.Internal.body "simulated abort failure")
       else Lwt.return_ok (response 204)
 
     let list_parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =

@@ -1,3 +1,5 @@
+module Aws_error = Error
+
 type t = {
   max_attempts : int;
   base_delay : Ptime.Span.t;
@@ -17,27 +19,29 @@ let create ?(max_attempts = 3) ?(base_delay = default_base_delay)
     ?(max_delay = default_max_delay) ?(jitter = 0.0) () =
   if max_attempts < 1 then
     Error
-      (Error.validation ~field:"max_attempts"
+      (Aws_error.Internal.validation ~field:"max_attempts"
          "retry max_attempts must be at least 1")
   else if Ptime.Span.compare base_delay Ptime.Span.zero < 0 then
     Error
-      (Error.validation ~field:"base_delay"
+      (Aws_error.Internal.validation ~field:"base_delay"
          "retry base_delay must be non-negative")
   else if Ptime.Span.compare max_delay Ptime.Span.zero < 0 then
     Error
-      (Error.validation ~field:"max_delay"
+      (Aws_error.Internal.validation ~field:"max_delay"
          "retry max_delay must be non-negative")
   else if Ptime.Span.compare base_delay max_delay > 0 then
     Error
-      (Error.validation ~field:"base_delay"
+      (Aws_error.Internal.validation ~field:"base_delay"
          "retry base_delay must be less than or equal to max_delay")
   else if Float.is_nan jitter || jitter < 0.0 || jitter > 1.0 then
     Error
-      (Error.validation ~field:"jitter" "retry jitter must be between 0 and 1")
+      (Aws_error.Internal.validation ~field:"jitter"
+         "retry jitter must be between 0 and 1")
   else Ok { max_attempts; base_delay; max_delay; jitter }
 
 let create_exn ?max_attempts ?base_delay ?max_delay ?jitter () =
-  Error.get_ok_exn (create ?max_attempts ?base_delay ?max_delay ?jitter ())
+  Aws_error.Internal.get_ok_exn
+    (create ?max_attempts ?base_delay ?max_delay ?jitter ())
 
 let default = create_exn ()
 let disabled = create_exn ~max_attempts:1 ()

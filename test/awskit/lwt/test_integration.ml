@@ -222,12 +222,13 @@ let test_provider_chain_uses_multiple_errors () =
   let first =
     Awskit_lwt.Credentials.Provider.create (fun () ->
         Lwt.return_error
-          (Awskit.Error.validation ~field:"env" "missing env credentials"))
+          (Awskit.Error.Internal.validation ~field:"env"
+             "missing env credentials"))
   in
   let second =
     Awskit_lwt.Credentials.Provider.create (fun () ->
         Lwt.return_error
-          (Awskit.Error.validation ~field:"profile"
+          (Awskit.Error.Internal.validation ~field:"profile"
              "missing profile credentials"))
   in
   match
@@ -319,7 +320,7 @@ let test_stream_request_body_reaches_client () =
 
 let test_stream_request_body_error_propagates () =
   Request_body_client.request_body := None;
-  let stream_error = Awskit.Error.body "stream request body failed" in
+  let stream_error = Awskit.Error.Internal.body "stream request body failed" in
   let body =
     RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
       ~write:(fun writer ->
@@ -588,7 +589,7 @@ let test_with_response_body_drain_enforces_limit () =
   |> expect_body_limit "scoped drain limit" 3L
 
 let test_with_response_body_preserves_consumer_error () =
-  let consumer_error = Awskit.Error.body "consumer failed" in
+  let consumer_error = Awskit.Error.Internal.body "consumer failed" in
   with_limited_response ~max_response_drain_bytes:3 "abcdef" ~f:(fun body ->
       LimitedAws.Runtime.Response_body.with_reader body ~consume:(fun _ ->
           Lwt.return_error consumer_error))

@@ -232,5 +232,22 @@ and pp fmt t =
 let pp_sexp fmt t = Sexp.pp_hum fmt (sexp_of_t t)
 let to_string_hum t = Format.asprintf "%a" pp t
 let to_sexp_string_hum t = Sexp.to_string_hum (sexp_of_t t)
-let raise t = Stdlib.raise (Awskit_error t)
-let get_ok_exn = function Ok value -> value | Error error -> raise error
+
+module Internal = struct
+  let validation = validation
+  let signing = signing
+  let transport = transport
+
+  let service ~status ?code ?message ?request_id ?host_id ~headers ?body () =
+    service { status; code; message; request_id; host_id; headers; body }
+
+  let decode = decode
+  let body = body
+  let multiple = multiple
+  let with_context = with_context
+  let with_sexp_context = with_sexp_context
+  let with_operation = with_operation
+  let with_retry = with_retry
+  let raise t = Stdlib.raise (Awskit_error t)
+  let get_ok_exn = function Ok value -> value | Error error -> raise error
+end
