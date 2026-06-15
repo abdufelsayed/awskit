@@ -315,18 +315,35 @@ let test_malformed_xml_responses () =
         response 200 "<ListPartsResult><Part>";
       ]
   in
+  let check_context label error ~operation ?resource () =
+    let text = Awskit.Error.to_string_hum error in
+    Alcotest.(check bool)
+      (label ^ " operation") true
+      (string_contains text ~substring:operation);
+    match resource with
+    | None -> ()
+    | Some resource ->
+        Alcotest.(check bool)
+          (label ^ " resource") true
+          (string_contains text ~substring:resource)
+  in
   (match Recording_s3.Bucket.list conn with
-  | Error error when is_decode_error error -> ()
+  | Error error when is_decode_error error ->
+      check_context "bucket list" error ~operation:"ListBuckets" ()
   | Error error ->
       Alcotest.failf "unexpected bucket decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected bucket list decode error");
   (match Recording_s3.Object.list conn ~bucket:"my-bucket" () with
-  | Error error when is_decode_error error -> ()
+  | Error error when is_decode_error error ->
+      check_context "object list" error ~operation:"ListObjectsV2"
+        ~resource:"s3://my-bucket" ()
   | Error error ->
       Alcotest.failf "unexpected object decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected object list decode error");
   (match Recording_s3.Object.list_versions conn ~bucket:"my-bucket" () with
-  | Error error when is_decode_error error -> ()
+  | Error error when is_decode_error error ->
+      check_context "version list" error ~operation:"ListObjectVersions"
+        ~resource:"s3://my-bucket" ()
   | Error error ->
       Alcotest.failf "unexpected version decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected version list decode error");
@@ -335,10 +352,25 @@ let test_malformed_xml_responses () =
     Recording_s3.Multipart.list_parts conn ~bucket:"my-bucket" ~key:"large.bin"
       ~upload_id ()
   with
-  | Error error when is_decode_error error -> ()
+  | Error error when is_decode_error error ->
+      check_context "multipart list" error ~operation:"ListParts"
+        ~resource:"s3://my-bucket/large.bin" ()
   | Error error ->
       Alcotest.failf "unexpected multipart decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected list parts decode error"
+
+let test_object_tagging_validation_error_has_operation_context () =
+  let conn = Recording_runtime.connect [] in
+  match Recording_s3.Object.Tagging.get conn ~bucket:"ab" ~key:"file" () with
+  | Ok _ -> Alcotest.fail "expected invalid bucket"
+  | Error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions operation" true
+        (string_contains text ~substring:"GetObjectTagging");
+      Alcotest.(check bool)
+        "mentions resource" true
+        (string_contains text ~substring:"s3://ab/file")
 
 let test_copy_object_embedded_error () =
   let body =
@@ -491,6 +523,8 @@ let suite =
           test_object_versioning_requests_and_parse;
         Alcotest.test_case "malformed xml responses" `Quick
           test_malformed_xml_responses;
+        Alcotest.test_case "object tagging validation context" `Quick
+          test_object_tagging_validation_error_has_operation_context;
         Alcotest.test_case "copy object embedded error" `Quick
           test_copy_object_embedded_error;
         Alcotest.test_case "object checksum mode and expected owner headers"

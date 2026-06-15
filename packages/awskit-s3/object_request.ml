@@ -21,6 +21,10 @@ module Make (C : Request_context.S) = struct
   type nonrec request_body = request_body
   type nonrec response_body_reader = response_body_reader
 
+  let return_result return_error return_ok = function
+    | Ok value -> return_ok value
+    | Error error -> return_error error
+
   let validate_put_options (options : Put_object.options) =
     match validate_metadata options.metadata with
     | Error _ as error -> error
@@ -88,7 +92,9 @@ module Make (C : Request_context.S) = struct
                             let* discarded = discard_response_body body in
                             match discarded with
                             | Error error -> return_error error
-                            | Ok () -> return (put_result response))))))
+                            | Ok () ->
+                                return_result return_error return_ok
+                                  (put_result response))))))
 
   let get conn ~bucket ~key ?options ~consume () =
     let options = Option.value ~default:Get_object.default_options options in
@@ -120,7 +126,8 @@ module Make (C : Request_context.S) = struct
                 | Error error -> return_error error
                 | Ok info ->
                     let* consumed = R.Response_body.with_reader body ~consume in
-                    return (Result.map (fun value -> (info, value)) consumed)))
+                    return_result return_error return_ok
+                      (Result.map (fun value -> (info, value)) consumed)))
 
   let head conn ~bucket ~key ?options () =
     let options = Option.value ~default:Head_object.default_options options in
@@ -150,7 +157,9 @@ module Make (C : Request_context.S) = struct
                 let* discarded = discard_response_body body in
                 match discarded with
                 | Error error -> return_error error
-                | Ok () -> return (object_info response)))
+                | Ok () ->
+                    return_result return_error return_ok (object_info response))
+        )
 
   let exists conn ~bucket ~key =
     let* result = head conn ~bucket ~key () in
@@ -186,7 +195,9 @@ module Make (C : Request_context.S) = struct
                 let* discarded = discard_response_body body in
                 match discarded with
                 | Error error -> return_error error
-                | Ok () -> return (delete_result response)))
+                | Ok () ->
+                    return_result return_error return_ok
+                      (delete_result response)))
 
   let delete_objects conn ~bucket ~objects ?options () =
     let options =
@@ -228,8 +239,8 @@ module Make (C : Request_context.S) = struct
                     match body with
                     | Error error -> return_error error
                     | Ok body ->
-                        return (Object_delete_xml.parse_result ~response body)))
-        )
+                        return_result return_error return_ok
+                          (Object_delete_xml.parse_result ~response body))))
 
   let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
       ?options () =
@@ -305,7 +316,9 @@ module Make (C : Request_context.S) = struct
                         in
                         match body with
                         | Error error -> return_error error
-                        | Ok body -> return (copy_result response body)))))
+                        | Ok body ->
+                            return_result return_error return_ok
+                              (copy_result response body)))))
 
   let list_versions conn ~bucket ?options () =
     let options =
@@ -344,7 +357,8 @@ module Make (C : Request_context.S) = struct
                 match body with
                 | Error error -> return_error error
                 | Ok body ->
-                    return (Object_versions_xml.parse_page ~response body)))
+                    return_result return_error return_ok
+                      (Object_versions_xml.parse_page ~response body)))
 
   let list conn ~bucket ?options () =
     let options =
@@ -381,8 +395,9 @@ module Make (C : Request_context.S) = struct
                 let* body = read_response_body body ~max_size:4_194_304L in
                 match body with
                 | Error error -> return_error error
-                | Ok body -> return (Object_list_xml.parse_page ~response body))
-        )
+                | Ok body ->
+                    return_result return_error return_ok
+                      (Object_list_xml.parse_page ~response body)))
 
   let list_keys conn ~bucket ?options () =
     let* page = list conn ~bucket ?options () in

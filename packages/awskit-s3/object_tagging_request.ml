@@ -7,6 +7,10 @@ module Make (C : Request_context.S) = struct
 
   let ( let* ) = bind
 
+  let return_result return_error return_ok = function
+    | Ok value -> return_ok value
+    | Error error -> return_error error
+
   let owner_headers options =
     []
     |> add_opt_header "x-amz-expected-bucket-owner"
@@ -15,6 +19,9 @@ module Make (C : Request_context.S) = struct
   let get conn ~bucket ~key ?options () =
     let options =
       Option.value ~default:Object.Tagging.default_options options
+    in
+    let return_error =
+      return_s3_error return_error ~operation:"GetObjectTagging" ~bucket ~key
     in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -30,7 +37,7 @@ module Make (C : Request_context.S) = struct
                 match body with
                 | Error error -> return_error error
                 | Ok body ->
-                    return
+                    return_result return_error return_ok
                       (Result.map
                          (fun tags -> { Object.Tagging.tags; response })
                          (parse_tags body))))
@@ -38,6 +45,9 @@ module Make (C : Request_context.S) = struct
   let put conn ~bucket ~key ?options tags =
     let options =
       Option.value ~default:Object.Tagging.default_options options
+    in
+    let return_error =
+      return_s3_error return_error ~operation:"PutObjectTagging" ~bucket ~key
     in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -71,6 +81,9 @@ module Make (C : Request_context.S) = struct
   let delete conn ~bucket ~key ?options () =
     let options =
       Option.value ~default:Object.Tagging.default_options options
+    in
+    let return_error =
+      return_s3_error return_error ~operation:"DeleteObjectTagging" ~bucket ~key
     in
     match validate_bucket_key bucket key with
     | Error error -> return_error error

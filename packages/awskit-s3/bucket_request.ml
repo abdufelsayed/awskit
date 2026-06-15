@@ -16,6 +16,10 @@ module Make (C : Request_context.S) = struct
   type nonrec connection = connection
   type 'a io = 'a R.t
 
+  let return_result return_error return_ok = function
+    | Ok value -> return_ok value
+    | Error error -> return_error error
+
   let bucket_root_request conn bucket =
     bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/"
 
@@ -40,7 +44,8 @@ module Make (C : Request_context.S) = struct
                 let* body = read_response_body body ~max_size in
                 match body with
                 | Error error -> return_error error
-                | Ok body -> return (parse body response)))
+                | Ok body ->
+                    return_result return_error return_ok (parse body response)))
 
   let put_xml ?expected_bucket_owner conn ~bucket ~operation ~subresource ~body
       =
@@ -176,7 +181,7 @@ module Make (C : Request_context.S) = struct
             match body with
             | Error error -> return_error error
             | Ok body ->
-                return
+                return_result return_error return_ok
                   (Result.map
                      (fun buckets -> { List_buckets.buckets; response })
                      (Bucket_result_xml.parse_list body)))
@@ -199,7 +204,7 @@ module Make (C : Request_context.S) = struct
                 match body with
                 | Error error -> return_error error
                 | Ok body ->
-                    return
+                    return_result return_error return_ok
                       (Result.map
                          (fun region ->
                            { Get_bucket_location.region; response })
@@ -223,7 +228,9 @@ module Make (C : Request_context.S) = struct
                   let* body = read_response_body body ~max_size:1_048_576L in
                   match body with
                   | Error error -> return_error error
-                  | Ok body -> return (Policy.of_json body)))
+                  | Ok body ->
+                      return_result return_error return_ok (Policy.of_json body))
+          )
 
     let put conn ~bucket ?expected_bucket_owner policy =
       let return_error =
