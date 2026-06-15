@@ -148,6 +148,33 @@ let make_service_error ~status ~code =
       body = None;
     }
 
+let retry_class_to_string = function
+  | Awskit.Error.Retryable -> "Retryable"
+  | Awskit.Error.Throttled -> "Throttled"
+  | Awskit.Error.Auth -> "Auth"
+  | Awskit.Error.Conflict -> "Conflict"
+  | Awskit.Error.Not_found -> "Not_found"
+  | Awskit.Error.Fatal -> "Fatal"
+  | Awskit.Error.Unknown -> "Unknown"
+
+let check_retry_class name expected actual =
+  let matches =
+    match (expected, actual) with
+    | Awskit.Error.Retryable, Awskit.Error.Retryable
+    | Awskit.Error.Throttled, Awskit.Error.Throttled
+    | Awskit.Error.Auth, Awskit.Error.Auth
+    | Awskit.Error.Conflict, Awskit.Error.Conflict
+    | Awskit.Error.Not_found, Awskit.Error.Not_found
+    | Awskit.Error.Fatal, Awskit.Error.Fatal
+    | Awskit.Error.Unknown, Awskit.Error.Unknown ->
+        true
+    | _ -> false
+  in
+  if not matches then
+    Alcotest.failf "%s: expected %s, got %s" name
+      (retry_class_to_string expected)
+      (retry_class_to_string actual)
+
 let test_error_multiple_retry_policy () =
   let validation_error = Awskit.Error.validation "bad caller input" in
   let retryable_transport =
@@ -156,11 +183,8 @@ let test_error_multiple_retry_policy () =
   let retryable_over_fatal =
     Awskit.Error.multiple [ validation_error; retryable_transport ]
   in
-  Alcotest.(check string)
-    "retryable outranks fatal" "Retryable"
-    (Awskit.Error.retry_class retryable_over_fatal
-    |> Awskit.Error.sexp_of_retry_class
-    |> Base.Sexp.to_string_hum);
+  check_retry_class "retryable outranks fatal" Awskit.Error.Retryable
+    (Awskit.Error.retry_class retryable_over_fatal);
   let not_found_service =
     make_service_error ~status:404 ~code:(Some "NoSuchKey")
   in
@@ -170,11 +194,8 @@ let test_error_multiple_retry_policy () =
   let auth_over_not_found =
     Awskit.Error.multiple [ not_found_service; auth_service ]
   in
-  Alcotest.(check string)
-    "auth outranks not found" "Auth"
-    (Awskit.Error.retry_class auth_over_not_found
-    |> Awskit.Error.sexp_of_retry_class
-    |> Base.Sexp.to_string_hum)
+  check_retry_class "auth outranks not found" Awskit.Error.Auth
+    (Awskit.Error.retry_class auth_over_not_found)
 
 let test_error_multiple_classifiers_recurse () =
   let service_error = make_service_error ~status:503 ~code:(Some "SlowDown") in
@@ -204,11 +225,8 @@ let test_error_multiple_classifiers_recurse () =
   Alcotest.(check (option int))
     "nested service status" (Some 503)
     (Awskit.Error.service_status combined);
-  Alcotest.(check string)
-    "aggregated retry class" "Auth"
-    (Awskit.Error.retry_class combined
-    |> Awskit.Error.sexp_of_retry_class
-    |> Base.Sexp.to_string_hum)
+  check_retry_class "aggregated retry class" Awskit.Error.Auth
+    (Awskit.Error.retry_class combined)
 
 let suite =
   [
