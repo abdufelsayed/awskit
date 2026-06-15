@@ -13,8 +13,8 @@ module Payload_hash : sig
   (** Validate and wrap a lowercase or uppercase SHA-256 hex digest. *)
 
   val of_sha256_hex_exn : string -> t
-  (** Like {!val:of_sha256_hex}, but raises [Invalid_argument] on invalid input.
-  *)
+  (** Like {!val:of_sha256_hex}, but raises [Error.Awskit_error] carrying the
+      structured validation error on invalid input. *)
 
   val sha256_of_string : string -> t
   (** Compute the SHA-256 payload hash for an in-memory string. *)

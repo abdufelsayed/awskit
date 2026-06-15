@@ -27,7 +27,8 @@ val create_exn :
   ?jitter:float ->
   unit ->
   t
-(** Like {!val:create}, but raises [Invalid_argument] on validation failure. *)
+(** Like {!val:create}, but raises [Error.Awskit_error] carrying the structured
+    validation error on validation failure. *)
 
 val default : t
 (** Conservative default policy for AWS SDK calls. *)

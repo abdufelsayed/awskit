@@ -23,7 +23,8 @@ val create_exn :
   ?session_token:string ->
   unit ->
   t
-(** Like {!val:create}, but raises [Invalid_argument] on validation failure. *)
+(** Like {!val:create}, but raises [Error.Awskit_error] carrying the structured
+    validation error on validation failure. *)
 
 val access_key_id : t -> string
 (** Return the non-secret access key id. *)

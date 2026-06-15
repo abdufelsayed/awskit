@@ -8,8 +8,8 @@ module Upload_id : sig
   (** Validate and wrap a multipart upload id. *)
 
   val of_string_exn : string -> t
-  (** Like {!val:of_string}, but raises [Invalid_argument] on validation
-      failure. *)
+  (** Like {!val:of_string}, but raises [Awskit.Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
 
   val to_string : t -> string
   (** Return the upload id string. *)
@@ -27,8 +27,8 @@ module Upload : sig
   (** Create an upload handle after validating bucket, key, and upload id. *)
 
   val create_exn : bucket:string -> key:string -> upload_id:Upload_id.t -> t
-  (** Like {!val:create}, but raises [Invalid_argument] on validation failure.
-  *)
+  (** Like {!val:create}, but raises [Awskit.Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
 end
 
 module Part : sig

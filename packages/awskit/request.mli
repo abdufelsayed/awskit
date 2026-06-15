@@ -14,8 +14,8 @@ module Method : sig
   (** Parse a supported HTTP method name case-insensitively. *)
 
   val of_string_exn : string -> t
-  (** Like {!val:of_string}, but raises [Invalid_argument] on validation
-      failure. *)
+  (** Like {!val:of_string}, but raises [Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
 end
 
 module Target : sig
@@ -49,8 +49,8 @@ module Target : sig
     ?query:(string * string list) list ->
     unit ->
     t
-  (** Like {!val:create}, but raises [Invalid_argument] on validation failure.
-  *)
+  (** Like {!val:create}, but raises [Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
 
   val authority : t -> string
   (** Host plus optional port. *)
@@ -85,7 +85,8 @@ val create_exn :
   ?headers:(string * string) list ->
   unit ->
   t
-(** Like {!val:create}, but raises [Invalid_argument] on validation failure. *)
+(** Like {!val:create}, but raises [Error.Awskit_error] carrying the structured
+    validation error on validation failure. *)
 
 val with_headers : t -> (string * string) list -> (t, Error.t) result
 (** Replace all headers after validating them. *)
