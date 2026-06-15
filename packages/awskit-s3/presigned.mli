@@ -110,7 +110,7 @@ val endpoint_config :
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
   ?scheme:Awskit.Endpoint.Scheme.t ->
-  ?endpoint:Awskit.Endpoint.t ->
+  ?endpoint:string ->
   unit ->
   endpoint_config
 (** Build endpoint configuration for presigning.
@@ -120,10 +120,10 @@ val endpoint_config :
 *)
 
 val get_object :
-  region:Awskit.Region.t ->
+  region:string ->
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
-  ?endpoint:Awskit.Endpoint.t ->
+  ?endpoint:string ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
   ?scheme:Awskit.Endpoint.Scheme.t ->
@@ -135,10 +135,10 @@ val get_object :
 (** Generate a presigned [GET Object] URL. *)
 
 val put_object :
-  region:Awskit.Region.t ->
+  region:string ->
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
-  ?endpoint:Awskit.Endpoint.t ->
+  ?endpoint:string ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
   ?scheme:Awskit.Endpoint.Scheme.t ->
@@ -151,10 +151,10 @@ val put_object :
     such as content type or checksum, must be sent by the eventual uploader. *)
 
 val head_object :
-  region:Awskit.Region.t ->
+  region:string ->
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
-  ?endpoint:Awskit.Endpoint.t ->
+  ?endpoint:string ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
   ?scheme:Awskit.Endpoint.Scheme.t ->
@@ -166,10 +166,10 @@ val head_object :
 (** Generate a presigned [HEAD Object] URL. *)
 
 val delete_object :
-  region:Awskit.Region.t ->
+  region:string ->
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
-  ?endpoint:Awskit.Endpoint.t ->
+  ?endpoint:string ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
   ?scheme:Awskit.Endpoint.Scheme.t ->
@@ -181,10 +181,10 @@ val delete_object :
 (** Generate a presigned [DELETE Object] URL. *)
 
 val upload_part :
-  region:Awskit.Region.t ->
+  region:string ->
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
-  ?endpoint:Awskit.Endpoint.t ->
+  ?endpoint:string ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
   ?scheme:Awskit.Endpoint.Scheme.t ->

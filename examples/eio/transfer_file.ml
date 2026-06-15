@@ -43,12 +43,17 @@ let https_connector () =
       (Tls_eio.client_of_flow tls_config ~host raw
         :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Flow.two_way))
 
-let create_s3 env sw =
-  let region = Awskit_unix.Region.from_env () |> unwrap "load AWS region" in
+let create_s3 stdenv sw =
+  let region =
+    match Sys.getenv_opt "AWS_REGION" with
+    | Some value when String.trim value <> "" -> value
+    | _ -> env "AWS_DEFAULT_REGION"
+  in
   let credentials =
     Awskit_unix.Credentials.default_chain () |> unwrap "load AWS credentials"
   in
-  S3.create ~sw ~env ~https:(https_connector ()) ~region ~credentials ()
+  S3.create ~sw ~env:stdenv ~https:(https_connector ()) ~region ~credentials ()
+  |> unwrap "create S3 client"
 
 let path_of_string env path =
   if Filename.is_relative path then Eio.Stdenv.cwd env / path

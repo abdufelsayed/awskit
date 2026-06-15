@@ -36,19 +36,19 @@ let test_bucket_config_parse () =
       ]
   in
   let versioning =
-    Recording_s3.Bucket.Versioning.get conn ~bucket:"my-bucket"
+    Recording_s3.Bucket.Versioning.get conn ~bucket:"my-bucket" ()
     |> ok_or_fail "versioning"
   in
   Alcotest.(check bool)
     "versioning enabled" true
     (versioning.status = Some Bucket.Versioning.Status.Enabled);
   let tagging =
-    Recording_s3.Bucket.Tagging.get conn ~bucket:"my-bucket"
+    Recording_s3.Bucket.Tagging.get conn ~bucket:"my-bucket" ()
     |> ok_or_fail "tagging"
   in
   Alcotest.(check int) "tag count" 1 (List.length tagging.tags);
   let encryption =
-    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket"
+    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket" ()
     |> ok_or_fail "encryption"
   in
   (match encryption.config.rules with
@@ -64,17 +64,18 @@ let test_bucket_config_parse () =
         (List.length rule.blocked_encryption_types)
   | _ -> Alcotest.fail "expected one encryption rule");
   let cors =
-    Recording_s3.Bucket.Cors.get conn ~bucket:"my-bucket" |> ok_or_fail "cors"
+    Recording_s3.Bucket.Cors.get conn ~bucket:"my-bucket" ()
+    |> ok_or_fail "cors"
   in
   Alcotest.(check int) "cors rule count" 1 (List.length cors.config.rules);
   let public_access_block =
-    Recording_s3.Bucket.Public_access_block.get conn ~bucket:"my-bucket"
+    Recording_s3.Bucket.Public_access_block.get conn ~bucket:"my-bucket" ()
     |> ok_or_fail "public access block"
   in
   Alcotest.(check bool)
     "block public policy" true public_access_block.config.block_public_policy;
   let ownership =
-    Recording_s3.Bucket.Ownership_controls.get conn ~bucket:"my-bucket"
+    Recording_s3.Bucket.Ownership_controls.get conn ~bucket:"my-bucket" ()
     |> ok_or_fail "ownership"
   in
   Alcotest.(check string)
@@ -88,7 +89,7 @@ let test_bucket_encryption_extended_xml () =
   in
   let conn = Recording_runtime.connect [ response 200 body; response 200 "" ] in
   let parsed =
-    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket"
+    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket" ()
     |> ok_or_fail "extended encryption parse"
   in
   let config = parsed.config in
@@ -126,7 +127,7 @@ let test_bucket_encryption_unknown_read_values () =
   in
   let conn = Recording_runtime.connect [ response 200 body ] in
   let result =
-    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket"
+    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket" ()
     |> ok_or_fail "unknown encryption parse"
   in
   match result.config.rules with

@@ -38,7 +38,7 @@ val create :
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
   ?scheme:Awskit.Endpoint.Scheme.t ->
-  ?endpoint:Awskit.Endpoint.t ->
+  ?endpoint:string ->
   unit ->
   t
 (** Create S3 endpoint configuration. [endpoint] overrides AWS regional endpoint

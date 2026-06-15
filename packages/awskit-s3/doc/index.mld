@@ -137,18 +137,21 @@ let run env =
       ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
       ()
   in
-  let region = Awskit.Region.of_string_exn "us-east-1" in
   let https = Https.connector () in
-  let s3 = Awskit_s3_eio.create ~sw ~env ~https ~region ~credentials () in
   match
-    Awskit_s3_eio.Object.put s3
-      ~bucket:"my-bucket"
-      ~key:"hello.txt"
-      ~body:(Awskit_s3_eio.Body.of_string "Hello, S3!")
-      ()
+    Awskit_s3_eio.create ~sw ~env ~https ~region:"us-east-1" ~credentials ()
   with
-  | Ok _ -> ()
   | Error err -> Fmt.epr "%a@." Awskit_s3.Error.pp err
+  | Ok s3 -> (
+      match
+        Awskit_s3_eio.Object.put s3
+          ~bucket:"my-bucket"
+          ~key:"hello.txt"
+          ~body:(Awskit_s3_eio.Body.of_string "Hello, S3!")
+          ()
+      with
+      | Ok _ -> ()
+      | Error err -> Fmt.epr "%a@." Awskit_s3.Error.pp err)
 ]}
 
 {1 Minimal Lwt Unix Example}

@@ -44,27 +44,27 @@ module Make (Client : SUBJECT) = struct
     let conn = Client.fresh () in
     Alcotest.(check bool)
       "missing bucket" false
-      (Client.Bucket.exists conn ~bucket |> ok_or_fail "exists missing");
+      (Client.Bucket.exists conn ~bucket () |> ok_or_fail "exists missing");
     create_bucket conn;
-    let head = Client.Bucket.head conn ~bucket |> ok_or_fail "head bucket" in
+    let head = Client.Bucket.head conn ~bucket () |> ok_or_fail "head bucket" in
     Alcotest.(check string) "bucket name" bucket head.name;
     Alcotest.(check bool)
       "created bucket" true
-      (Client.Bucket.exists conn ~bucket |> ok_or_fail "exists present");
+      (Client.Bucket.exists conn ~bucket () |> ok_or_fail "exists present");
     let list_result = Client.Bucket.list conn |> ok_or_fail "list buckets" in
     Alcotest.(check (list string))
       "bucket list" [ bucket ]
       (List.map (fun (info : Bucket.info) -> info.name) list_result.buckets);
     let location =
-      Client.Bucket.get_location conn ~bucket |> ok_or_fail "location"
+      Client.Bucket.get_location conn ~bucket () |> ok_or_fail "location"
     in
     Alcotest.(check (option string))
       "location" (Some "us-east-1")
       (Option.map Region.to_string location.region);
-    ignore (Client.Bucket.delete conn ~bucket |> ok_or_fail "delete bucket");
+    ignore (Client.Bucket.delete conn ~bucket () |> ok_or_fail "delete bucket");
     Alcotest.(check bool)
       "deleted bucket" false
-      (Client.Bucket.exists conn ~bucket |> ok_or_fail "exists deleted")
+      (Client.Bucket.exists conn ~bucket () |> ok_or_fail "exists deleted")
 
   let test_object_buffer_lifecycle () =
     let conn = Client.fresh () in
@@ -670,17 +670,20 @@ module Make (Client : SUBJECT) = struct
     ignore
       (Client.Bucket.Policy.put conn ~bucket sample_policy
       |> ok_or_fail "put policy");
-    let policy = Client.Bucket.Policy.get conn ~bucket |> ok_or_fail "policy" in
+    let policy =
+      Client.Bucket.Policy.get conn ~bucket () |> ok_or_fail "policy"
+    in
     Alcotest.(check string) "policy" sample_policy_json (Policy.to_json policy);
     ignore
-      (Client.Bucket.Policy.delete conn ~bucket |> ok_or_fail "delete policy");
-    expect_not_found "deleted policy" (Client.Bucket.Policy.get conn ~bucket);
+      (Client.Bucket.Policy.delete conn ~bucket () |> ok_or_fail "delete policy");
+    expect_not_found "deleted policy" (Client.Bucket.Policy.get conn ~bucket ());
     ignore
       (Client.Bucket.Versioning.put conn ~bucket
          Bucket.Versioning.Status.Enabled
       |> ok_or_fail "put versioning");
     let versioning =
-      Client.Bucket.Versioning.get conn ~bucket |> ok_or_fail "get versioning"
+      Client.Bucket.Versioning.get conn ~bucket ()
+      |> ok_or_fail "get versioning"
     in
     Alcotest.(check bool)
       "versioning enabled" true
@@ -690,14 +693,14 @@ module Make (Client : SUBJECT) = struct
       (Client.Bucket.Tagging.put conn ~bucket bucket_tags
       |> ok_or_fail "put bucket tags");
     let result =
-      Client.Bucket.Tagging.get conn ~bucket |> ok_or_fail "get bucket tags"
+      Client.Bucket.Tagging.get conn ~bucket () |> ok_or_fail "get bucket tags"
     in
     Alcotest.(check int) "bucket tag count" 1 (List.length result.tags);
     ignore
-      (Client.Bucket.Tagging.delete conn ~bucket
+      (Client.Bucket.Tagging.delete conn ~bucket ()
       |> ok_or_fail "delete bucket tags");
     let result =
-      Client.Bucket.Tagging.get conn ~bucket |> ok_or_fail "get deleted tags"
+      Client.Bucket.Tagging.get conn ~bucket () |> ok_or_fail "get deleted tags"
     in
     Alcotest.(check int) "deleted bucket tag count" 0 (List.length result.tags);
     let encryption =
@@ -718,16 +721,17 @@ module Make (Client : SUBJECT) = struct
       (Client.Bucket.Encryption.put conn ~bucket encryption
       |> ok_or_fail "put encryption");
     let result =
-      Client.Bucket.Encryption.get conn ~bucket |> ok_or_fail "get encryption"
+      Client.Bucket.Encryption.get conn ~bucket ()
+      |> ok_or_fail "get encryption"
     in
     Alcotest.(check int)
       "encryption rule count" 1
       (List.length result.config.rules);
     ignore
-      (Client.Bucket.Encryption.delete conn ~bucket
+      (Client.Bucket.Encryption.delete conn ~bucket ()
       |> ok_or_fail "delete encryption");
     expect_not_found "deleted encryption"
-      (Client.Bucket.Encryption.get conn ~bucket);
+      (Client.Bucket.Encryption.get conn ~bucket ());
     let cors =
       {
         Bucket.Cors.rules =
@@ -744,10 +748,13 @@ module Make (Client : SUBJECT) = struct
       }
     in
     ignore (Client.Bucket.Cors.put conn ~bucket cors |> ok_or_fail "put cors");
-    let result = Client.Bucket.Cors.get conn ~bucket |> ok_or_fail "get cors" in
+    let result =
+      Client.Bucket.Cors.get conn ~bucket () |> ok_or_fail "get cors"
+    in
     Alcotest.(check int) "cors rule count" 1 (List.length result.config.rules);
-    ignore (Client.Bucket.Cors.delete conn ~bucket |> ok_or_fail "delete cors");
-    expect_not_found "deleted cors" (Client.Bucket.Cors.get conn ~bucket);
+    ignore
+      (Client.Bucket.Cors.delete conn ~bucket () |> ok_or_fail "delete cors");
+    expect_not_found "deleted cors" (Client.Bucket.Cors.get conn ~bucket ());
     let public_access_block =
       {
         Bucket.Public_access_block.block_public_acls = true;
@@ -760,16 +767,16 @@ module Make (Client : SUBJECT) = struct
       (Client.Bucket.Public_access_block.put conn ~bucket public_access_block
       |> ok_or_fail "put public access block");
     let result =
-      Client.Bucket.Public_access_block.get conn ~bucket
+      Client.Bucket.Public_access_block.get conn ~bucket ()
       |> ok_or_fail "get public access block"
     in
     Alcotest.(check bool)
       "block public acls" true result.config.block_public_acls;
     ignore
-      (Client.Bucket.Public_access_block.delete conn ~bucket
+      (Client.Bucket.Public_access_block.delete conn ~bucket ()
       |> ok_or_fail "delete public access block");
     expect_not_found "deleted public access block"
-      (Client.Bucket.Public_access_block.get conn ~bucket);
+      (Client.Bucket.Public_access_block.get conn ~bucket ());
     let ownership =
       {
         Bucket.Ownership_controls.object_ownership =
@@ -780,7 +787,7 @@ module Make (Client : SUBJECT) = struct
       (Client.Bucket.Ownership_controls.put conn ~bucket ownership
       |> ok_or_fail "put ownership");
     let result =
-      Client.Bucket.Ownership_controls.get conn ~bucket
+      Client.Bucket.Ownership_controls.get conn ~bucket ()
       |> ok_or_fail "get ownership"
     in
     Alcotest.(check string)
@@ -788,10 +795,10 @@ module Make (Client : SUBJECT) = struct
       (Bucket.Ownership_controls.Object_ownership.to_string
          result.config.object_ownership);
     ignore
-      (Client.Bucket.Ownership_controls.delete conn ~bucket
+      (Client.Bucket.Ownership_controls.delete conn ~bucket ()
       |> ok_or_fail "delete ownership");
     expect_not_found "deleted ownership"
-      (Client.Bucket.Ownership_controls.get conn ~bucket)
+      (Client.Bucket.Ownership_controls.get conn ~bucket ())
 
   let test_buffer_limit () =
     let conn = Client.fresh () in

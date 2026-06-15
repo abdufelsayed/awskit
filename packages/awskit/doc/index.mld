@@ -162,16 +162,16 @@ module Https = struct
 end
 
 Eio.Switch.run @@ fun sw ->
-let region = Awskit.Region.of_string_exn "us-east-1" in
 let https = Https.connector () in
 let conn =
   Awskit_eio.create
     ~env
     ~sw
     ~https
-    ~region
+    ~region:"us-east-1"
     ~credentials
     ()
+  |> Result.get_ok
 in
 ignore conn
 ]}

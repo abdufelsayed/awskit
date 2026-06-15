@@ -15,15 +15,15 @@ val create :
   sw:Eio.Switch.t ->
   env:< clock : _ Eio.Time.clock ; net : _ Eio.Net.t ; .. > ->
   https:'flow Awskit_eio.https ->
-  region:Awskit.Region.t ->
+  region:string ->
   credentials:Awskit.Credentials.t ->
   ?retry_policy:Awskit.Retry.t ->
-  ?endpoint:Awskit.Endpoint.t ->
+  ?endpoint:string ->
   ?addressing_style:Awskit_s3.addressing_style ->
   ?endpoint_variant:Awskit_s3.endpoint_variant ->
   ?scheme:Awskit.Endpoint.Scheme.t ->
   unit ->
-  t
+  (t, Awskit_s3.Error.t) result
 (** Create an Eio S3 client.
 
     [https] is forwarded to [Awskit_eio.create]. Use [Awskit_eio.http_only] only
@@ -32,7 +32,9 @@ val create :
     [region] and [credentials] are explicit. [endpoint] overrides the generated
     AWS S3 endpoint for local services or custom endpoints. [addressing_style],
     [endpoint_variant], and [scheme] configure S3 endpoint resolution when no
-    explicit endpoint is supplied. [retry_policy] defaults to
+    explicit endpoint is supplied. [region] and [endpoint] are parsed and
+    validated when the client is created; validation failures are returned as
+    structured [Awskit.Error.t] values. [retry_policy] defaults to
     [Awskit.Retry.default]. *)
 
 module Body : sig

@@ -146,21 +146,24 @@ let () =
       ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
       ()
   in
-  let region = Awskit.Region.of_string_exn "us-east-1" in
   let https = Https.connector () in
-  let s3 = Awskit_s3_eio.create ~sw ~env ~https ~region ~credentials () in
   match
-    Awskit_s3_eio.Object.put s3
-      ~bucket:"my-bucket"
-      ~key:"hello.txt"
-      ~body:(Awskit_s3_eio.Body.of_string "Hello, S3!")
-      ()
+    Awskit_s3_eio.create ~sw ~env ~https ~region:"us-east-1" ~credentials ()
   with
-  | Ok uploaded ->
-      Fmt.pr "Uploaded. ETag: %a@."
-        (Fmt.option Awskit_s3.Object.Etag.pp)
-        uploaded.etag
   | Error error -> Fmt.epr "S3 error: %a@." Awskit_s3.Error.pp error
+  | Ok s3 -> (
+      match
+        Awskit_s3_eio.Object.put s3
+          ~bucket:"my-bucket"
+          ~key:"hello.txt"
+          ~body:(Awskit_s3_eio.Body.of_string "Hello, S3!")
+          ()
+      with
+      | Ok uploaded ->
+          Fmt.pr "Uploaded. ETag: %a@."
+            (Fmt.option Awskit_s3.Object.Etag.pp)
+            uploaded.etag
+      | Error error -> Fmt.epr "S3 error: %a@." Awskit_s3.Error.pp error)
 ```
 
 ### Lwt + Unix

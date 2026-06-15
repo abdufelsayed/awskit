@@ -2,11 +2,10 @@
 
     {[
     Eio.Switch.run @@ fun sw ->
-    let region = Awskit.Region.of_string_exn "us-east-1" in
-    let endpoint = Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 () in
     let conn =
-      Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region
-        ~credentials ~endpoint ()
+      Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region:"us-east-1"
+        ~credentials ~endpoint:"http://127.0.0.1:9000" ()
+      |> Result.get_ok
     in
     conn
     ]} *)
@@ -40,21 +39,23 @@ val create :
   env:< clock : _ Eio.Time.clock ; net : _ Eio.Net.t ; .. > ->
   sw:Eio.Switch.t ->
   https:'flow https ->
-  region:Awskit.Region.t ->
+  region:string ->
   credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
   ?retry_policy:Awskit.Retry.t ->
-  ?endpoint:Awskit.Endpoint.t ->
+  ?endpoint:string ->
   ?max_response_drain_bytes:int ->
   unit ->
-  t
+  (t, Awskit.Error.t) result
 (** Create an Eio connection.
 
     [https] is forwarded to [Cohttp_eio.Client.make]. Use {!val:http_only} only
     with plain HTTP endpoints, such as local tests; HTTPS endpoints require a
     connector supplied by the application. [clock] defaults to [env#clock].
     Defaults to AWS HTTPS endpoints. Pass an explicit [endpoint] for local test
-    services or custom service endpoints. [retry_policy] defaults to
+    services or custom service endpoints. [region] and [endpoint] are parsed and
+    validated when the connection is created; validation failures are returned
+    as structured [Awskit.Error.t] values. [retry_policy] defaults to
     [Awskit.Retry.default]. [max_response_drain_bytes] defaults to 64 MiB. If a
     response consumer succeeds but the remaining body exceeds this drain limit,
     the operation fails with a body-limit error. If the consumer fails, the

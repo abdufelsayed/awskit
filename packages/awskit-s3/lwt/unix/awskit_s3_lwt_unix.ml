@@ -34,20 +34,42 @@ module Body_reader = File_transfer.Make_body_reader (Runtime) (S3)
 module Body = Body_reader.Body
 module Reader = Body_reader.Reader
 
+let parse_optional parse = function
+  | None -> Ok None
+  | Some value -> (
+      match parse value with
+      | Ok value -> Ok (Some value)
+      | Error _ as error -> error)
+
 let create ?ctx ?endpoint ?addressing_style ?endpoint_variant ?scheme ?region
     ?credentials ?clock ?retry_policy ?imdsv1_fallback () =
-  let region = Option.map Awskit.Region.to_string region in
   match
-    Awskit_lwt_unix.create ?ctx ?region ?credentials ?clock ?retry_policy
-      ?imdsv1_fallback ()
+    ( parse_optional Awskit.Region.of_string region,
+      parse_optional Awskit.Endpoint.of_string endpoint )
   with
-  | Error _ as error -> error
-  | Ok aws ->
-      let endpoint_config =
-        Awskit_s3.endpoint_config ?addressing_style ?endpoint_variant ?scheme
-          ?endpoint ()
+  | Error error, _ | _, Error error -> Error error
+  | Ok region, Ok endpoint -> (
+      let region =
+        match region with
+        | None -> None
+        | Some region -> Some (Awskit.Region.to_string region)
       in
-      Ok { aws; endpoint_config }
+      let endpoint =
+        match endpoint with
+        | None -> None
+        | Some endpoint -> Some (Awskit.Endpoint.to_url_prefix endpoint)
+      in
+      match
+        Awskit_lwt_unix.create ?ctx ?region ?credentials ?clock ?retry_policy
+          ?imdsv1_fallback ()
+      with
+      | Error _ as error -> error
+      | Ok aws ->
+          let endpoint_config =
+            Awskit_s3.endpoint_config ?addressing_style ?endpoint_variant
+              ?scheme ?endpoint ()
+          in
+          Ok { aws; endpoint_config })
 
 module Object = struct
   include S3.Object

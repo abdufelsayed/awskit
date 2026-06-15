@@ -7,9 +7,8 @@ let is_validation_field field error =
 
 let test_presigned_result () =
   let result =
-    Presigned.get_object
-      ~region:(Region.of_string_exn "us-east-1")
-      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt" ()
+    Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:"bucket" ~key:"file.txt" ()
     |> ok_or_fail "presigned get"
   in
   Alcotest.(check string)
@@ -37,10 +36,8 @@ let test_presigned_put_checksum_headers () =
     { Presigned.Put_object.default_options with checksum = Some checksum }
   in
   let result =
-    Presigned.put_object
-      ~region:(Region.of_string_exn "us-east-1")
-      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
-      ~options ()
+    Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:"bucket" ~key:"file.txt" ~options ()
     |> ok_or_fail "presigned put"
   in
   Alcotest.(check (option string))
@@ -63,10 +60,8 @@ let test_presigned_expected_bucket_owner_headers () =
     }
   in
   let get =
-    Presigned.get_object
-      ~region:(Region.of_string_exn "us-east-1")
-      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
-      ~options:get_options ()
+    Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:"bucket" ~key:"file.txt" ~options:get_options ()
     |> ok_or_fail "presigned get expected owner"
   in
   Alcotest.(check (option string))
@@ -76,10 +71,8 @@ let test_presigned_expected_bucket_owner_headers () =
     "get signed expected owner" true
     (List.mem "x-amz-expected-bucket-owner" (signed_headers_or_fail get.url));
   let head =
-    Presigned.head_object
-      ~region:(Region.of_string_exn "us-east-1")
-      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
-      ~options:get_options ()
+    Presigned.head_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:"bucket" ~key:"file.txt" ~options:get_options ()
     |> ok_or_fail "presigned head expected owner"
   in
   Alcotest.(check (option string))
@@ -95,10 +88,8 @@ let test_presigned_expected_bucket_owner_headers () =
     }
   in
   let put =
-    Presigned.put_object
-      ~region:(Region.of_string_exn "us-east-1")
-      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
-      ~options:put_options ()
+    Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:"bucket" ~key:"file.txt" ~options:put_options ()
     |> ok_or_fail "presigned put expected owner"
   in
   Alcotest.(check (option string))
@@ -115,10 +106,9 @@ let test_presigned_expected_bucket_owner_headers () =
     }
   in
   let upload_part =
-    Presigned.upload_part
-      ~region:(Region.of_string_exn "us-east-1")
-      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"large.bin"
-      ~upload_id ~part_number:1 ~options:upload_part_options ()
+    Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:"bucket" ~key:"large.bin" ~upload_id ~part_number:1
+      ~options:upload_part_options ()
     |> ok_or_fail "presigned upload-part expected owner"
   in
   Alcotest.(check (option string))
@@ -135,10 +125,8 @@ let test_presigned_expected_bucket_owner_headers () =
     }
   in
   let delete =
-    Presigned.delete_object
-      ~region:(Region.of_string_exn "us-east-1")
-      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
-      ~options:delete_options ()
+    Presigned.delete_object ~region:"us-east-1" ~credentials:creds
+      ~now:test_time ~bucket:"bucket" ~key:"file.txt" ~options:delete_options ()
     |> ok_or_fail "presigned delete expected owner"
   in
   Alcotest.(check (option string))
@@ -160,10 +148,8 @@ let test_presigned_upload_part () =
     { Presigned.Upload_part.default_options with checksum = Some checksum }
   in
   let result =
-    Presigned.upload_part
-      ~region:(Region.of_string_exn "us-east-1")
-      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"large.bin"
-      ~upload_id ~part_number:7 ~options ()
+    Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:"bucket" ~key:"large.bin" ~upload_id ~part_number:7 ~options ()
     |> ok_or_fail "presigned upload part"
   in
   Alcotest.(check string)
@@ -187,10 +173,8 @@ let test_presigned_upload_part () =
     "signed checksum value" true
     (List.mem "x-amz-checksum-sha256" signed_headers);
   match
-    Presigned.upload_part
-      ~region:(Region.of_string_exn "us-east-1")
-      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"large.bin"
-      ~upload_id ~part_number:0 ()
+    Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:"bucket" ~key:"large.bin" ~upload_id ~part_number:0 ()
   with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "expected invalid part number"
@@ -203,10 +187,8 @@ let test_presigned_rejects_header_newline () =
     }
   in
   match
-    Presigned.put_object
-      ~region:(Region.of_string_exn "us-east-1")
-      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
-      ~options ()
+    Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:"bucket" ~key:"file.txt" ~options ()
   with
   | Error error when Awskit.Error.is_validation error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
@@ -223,10 +205,8 @@ let test_presigned_rejects_unknown_checksum () =
     { Presigned.Put_object.default_options with checksum = Some checksum }
   in
   (match
-     Presigned.put_object
-       ~region:(Region.of_string_exn "us-east-1")
-       ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"file.txt"
-       ~options:put_options ()
+     Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+       ~bucket:"bucket" ~key:"file.txt" ~options:put_options ()
    with
   | Error error when is_validation_field "checksum_algorithm" error -> ()
   | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
@@ -236,10 +216,9 @@ let test_presigned_rejects_unknown_checksum () =
     { Presigned.Upload_part.default_options with checksum = Some checksum }
   in
   match
-    Presigned.upload_part
-      ~region:(Region.of_string_exn "us-east-1")
-      ~credentials:creds ~now:test_time ~bucket:"bucket" ~key:"large.bin"
-      ~upload_id ~part_number:1 ~options:upload_part_options ()
+    Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:"bucket" ~key:"large.bin" ~upload_id ~part_number:1
+      ~options:upload_part_options ()
   with
   | Error error when is_validation_field "checksum_algorithm" error -> ()
   | Error error ->
@@ -261,6 +240,51 @@ let test_presigned_operation_context_for_validation_error () =
         "mentions resource" true
         (string_contains text ~substring:"s3://ab/file.txt")
 
+let test_presigned_accepts_string_region_and_endpoint () =
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let check_url label result =
+    let result : Presigned.result = result |> ok_or_fail label in
+    Alcotest.(check bool)
+      label true
+      (String.starts_with ~prefix:"http://localhost:9000/bucket/" result.url)
+  in
+  check_url "get string region endpoint"
+    (Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+       ~endpoint:"http://localhost:9000" ~addressing_style:`Path
+       ~bucket:"bucket" ~key:"file.txt" ());
+  check_url "head string region endpoint"
+    (Presigned.head_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+       ~endpoint:"http://localhost:9000" ~addressing_style:`Path
+       ~bucket:"bucket" ~key:"file.txt" ());
+  check_url "put string region endpoint"
+    (Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+       ~endpoint:"http://localhost:9000" ~addressing_style:`Path
+       ~bucket:"bucket" ~key:"file.txt" ());
+  check_url "delete string region endpoint"
+    (Presigned.delete_object ~region:"us-east-1" ~credentials:creds
+       ~now:test_time ~endpoint:"http://localhost:9000" ~addressing_style:`Path
+       ~bucket:"bucket" ~key:"file.txt" ());
+  check_url "upload part string region endpoint"
+    (Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
+       ~endpoint:"http://localhost:9000" ~addressing_style:`Path
+       ~bucket:"bucket" ~key:"large.bin" ~upload_id ~part_number:1 ())
+
+let test_presigned_string_validation_errors () =
+  (match
+     Presigned.get_object ~region:" us-east-1" ~credentials:creds ~now:test_time
+       ~bucket:"bucket" ~key:"file.txt" ()
+   with
+  | Error error when is_validation_field "region" error -> ()
+  | Error error -> Alcotest.failf "unexpected region error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected invalid region");
+  match
+    Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~endpoint:"http://localhost:9000/path" ~bucket:"bucket" ~key:"file.txt" ()
+  with
+  | Error error when is_validation_field "endpoint" error -> ()
+  | Error error -> Alcotest.failf "unexpected endpoint error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected invalid endpoint"
+
 let suite =
   [
     ( "presigned",
@@ -278,5 +302,9 @@ let suite =
           test_presigned_rejects_unknown_checksum;
         Alcotest.test_case "presigned validation context" `Quick
           test_presigned_operation_context_for_validation_error;
+        Alcotest.test_case "presigned accepts string region endpoint" `Quick
+          test_presigned_accepts_string_region_and_endpoint;
+        Alcotest.test_case "presigned string validation errors" `Quick
+          test_presigned_string_validation_errors;
       ] );
   ]

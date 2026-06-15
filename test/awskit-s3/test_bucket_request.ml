@@ -7,7 +7,7 @@ let test_bucket_head_request () =
       [ response 200 ~headers:[ ("x-amz-bucket-region", "us-west-2") ] "" ]
   in
   let info =
-    Recording_s3.Bucket.head conn ~bucket:"my-bucket"
+    Recording_s3.Bucket.head conn ~bucket:"my-bucket" ()
     |> ok_or_fail "bucket head"
   in
   Alcotest.(check (option string))
@@ -31,6 +31,22 @@ let test_bucket_list_parse () =
   Alcotest.(check string)
     "root host" "s3.us-east-1.amazonaws.com" call.request.target.host
 
+let test_bucket_create_accepts_string_region () =
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  let options = { Create_bucket.region = Some "eu-west-1" } in
+  ignore
+    (Recording_s3.Bucket.create conn ~bucket:"new-bucket" ~options ()
+    |> ok_or_fail "create bucket string region");
+  let call = Recording_runtime.last_call conn in
+  Alcotest.(check bool)
+    "location constraint" true
+    (string_contains call.body
+       ~substring:"<LocationConstraint>eu-west-1</LocationConstraint>");
+  let invalid_options = { Create_bucket.region = Some " eu-west-1" } in
+  expect_validation "create bucket invalid string region"
+    (Recording_s3.Bucket.create conn ~bucket:"new-bucket"
+       ~options:invalid_options ())
+
 let expected_owner = "123456789012"
 
 let check_expected_owner_header label (call : Recording_runtime.call) =
@@ -50,7 +66,7 @@ let test_bucket_expected_owner_headers () =
   in
   ignore
     (Recording_s3.Bucket.head conn ~bucket:"my-bucket"
-       ~expected_bucket_owner:expected_owner
+       ~expected_bucket_owner:expected_owner ()
     |> ok_or_fail "head expected owner");
   check_expected_owner_header "head expected owner"
     (Recording_runtime.last_call conn);
@@ -60,7 +76,7 @@ let test_bucket_expected_owner_headers () =
   in
   ignore
     (Recording_s3.Bucket.get_location conn ~bucket:"my-bucket"
-       ~expected_bucket_owner:expected_owner
+       ~expected_bucket_owner:expected_owner ()
     |> ok_or_fail "location expected owner");
   check_expected_owner_header "location expected owner"
     (Recording_runtime.last_call conn);
@@ -73,7 +89,7 @@ let test_bucket_expected_owner_headers () =
   in
   ignore
     (Recording_s3.Bucket.Versioning.get conn ~bucket:"my-bucket"
-       ~expected_bucket_owner:expected_owner
+       ~expected_bucket_owner:expected_owner ()
     |> ok_or_fail "xml get expected owner");
   check_expected_owner_header "xml get expected owner"
     (Recording_runtime.last_call conn);
@@ -87,7 +103,7 @@ let test_bucket_expected_owner_headers () =
   let conn = Recording_runtime.connect [ response 204 "" ] in
   ignore
     (Recording_s3.Bucket.Tagging.delete conn ~bucket:"my-bucket"
-       ~expected_bucket_owner:expected_owner
+       ~expected_bucket_owner:expected_owner ()
     |> ok_or_fail "xml delete expected owner");
   check_expected_owner_header "xml delete expected owner"
     (Recording_runtime.last_call conn);
@@ -114,6 +130,8 @@ let suite =
       [
         Alcotest.test_case "bucket head request" `Quick test_bucket_head_request;
         Alcotest.test_case "bucket list parse" `Quick test_bucket_list_parse;
+        Alcotest.test_case "bucket create accepts string region" `Quick
+          test_bucket_create_accepts_string_region;
         Alcotest.test_case "bucket expected owner headers" `Quick
           test_bucket_expected_owner_headers;
       ] );

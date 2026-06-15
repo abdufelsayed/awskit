@@ -2,17 +2,28 @@
 
 open Base
 
+let conn_or_fail = function
+  | Ok conn -> conn
+  | Error error -> Alcotest.failf "%a" Awskit.Error.pp error
+
+let expect_validation label = function
+  | Error error when Awskit.Error.is_validation error -> ()
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected validation error" label
+
 let test_connection_roundtrip env =
   let c =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let clock () = Ptime.epoch in
-  let region = Awskit.Region.of_string_exn "eu-west-1" in
-  let endpoint = Awskit.Endpoint.http_exn ~host:"localhost" ~port:9000 () in
+  let region = "eu-west-1" in
+  let endpoint = "http://localhost:9000" in
   let conn =
     Eio.Switch.run @@ fun sw ->
     Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region
       ~credentials:c ~clock ~endpoint ()
+    |> conn_or_fail
   in
   Alcotest.(check string)
     "region" "eu-west-1"
@@ -28,11 +39,12 @@ let test_connection_defaults env =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let clock () = Ptime.epoch in
-  let region = Awskit.Region.of_string_exn "us-east-1" in
+  let region = "us-east-1" in
   let conn =
     Eio.Switch.run @@ fun sw ->
     Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region
       ~credentials:c ~clock ()
+    |> conn_or_fail
   in
   Alcotest.(check (option string))
     "no endpoint" None
@@ -47,11 +59,12 @@ let test_connection_uses_env_clock_by_default env =
   let c =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
-  let region = Awskit.Region.of_string_exn "us-east-1" in
+  let region = "us-east-1" in
   let conn =
     Eio.Switch.run @@ fun sw ->
     Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region
       ~credentials:c ()
+    |> conn_or_fail
   in
   let before = ptime_of_eio_clock env in
   let actual = Awskit_eio.Runtime.now conn in
@@ -64,11 +77,12 @@ let test_runtime_bodies env =
   let c =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
-  let region = Awskit.Region.of_string_exn "us-east-1" in
+  let region = "us-east-1" in
   Eio.Switch.run @@ fun sw ->
   let conn =
     Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region
       ~credentials:c ()
+    |> conn_or_fail
   in
   ignore (Awskit_eio.Runtime.region conn : Awskit.Region.t);
   let body = Awskit_eio.Runtime.Request_body.of_string "hello" in
@@ -103,10 +117,29 @@ let request_conn env sw =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
-  let region = Awskit.Region.of_string_exn "us-east-1" in
+  let region = "us-east-1" in
   Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region ~credentials
     ~clock:(fun () -> Ptime.epoch)
     ()
+  |> conn_or_fail
+
+let test_create_rejects_invalid_region_string env =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  Eio.Switch.run @@ fun sw ->
+  Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region:"" ~credentials
+    ()
+  |> expect_validation "invalid region"
+
+let test_create_rejects_invalid_endpoint_string env =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  Eio.Switch.run @@ fun sw ->
+  Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region:"us-east-1"
+    ~endpoint:"http://localhost:9000/path" ~credentials ()
+  |> expect_validation "invalid endpoint"
 
 let body_to_cohttp_exn conn body =
   let bridge =
@@ -468,6 +501,10 @@ let suite env =
             test_connection_roundtrip env);
         Alcotest.test_case "defaults" `Quick (fun () ->
             test_connection_defaults env);
+        Alcotest.test_case "rejects invalid region string" `Quick (fun () ->
+            test_create_rejects_invalid_region_string env);
+        Alcotest.test_case "rejects invalid endpoint string" `Quick (fun () ->
+            test_create_rejects_invalid_endpoint_string env);
         Alcotest.test_case "uses env clock by default" `Quick (fun () ->
             test_connection_uses_env_clock_by_default env);
         Alcotest.test_case "runtime bodies" `Quick (fun () ->

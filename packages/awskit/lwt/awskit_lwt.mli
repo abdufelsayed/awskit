@@ -39,17 +39,19 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
 
   val create :
     ?ctx:Client.ctx ->
-    ?endpoint:Awskit.Endpoint.t ->
-    region:Awskit.Region.t ->
+    ?endpoint:string ->
+    region:string ->
     credentials:Awskit.Credentials.t ->
     clock:(unit -> Ptime.t) ->
     ?retry_policy:Awskit.Retry.t ->
     ?sleep:(Ptime.Span.t -> unit Lwt.t) ->
     ?max_response_drain_bytes:int ->
     unit ->
-    t
+    (t, Awskit.Error.t) result
   (** [endpoint] overrides the default AWS HTTPS endpoint for local test
-      services or custom service endpoints. [retry_policy] defaults to
+      services or custom service endpoints. [region] and [endpoint] are parsed
+      and validated when the connection is created; validation failures are
+      returned as structured [Awskit.Error.t] values. [retry_policy] defaults to
       [Awskit.Retry.default]. [sleep] is used between retries and defaults to no
       delay for custom Lwt backends. [max_response_drain_bytes] defaults to 64
       MiB. If a response consumer succeeds but the remaining body exceeds this
@@ -58,15 +60,15 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
 
   val create_with_credentials_provider :
     ?ctx:Client.ctx ->
-    ?endpoint:Awskit.Endpoint.t ->
-    region:Awskit.Region.t ->
+    ?endpoint:string ->
+    region:string ->
     credentials_provider:Credentials.Provider.t ->
     clock:(unit -> Ptime.t) ->
     ?retry_policy:Awskit.Retry.t ->
     ?sleep:(Ptime.Span.t -> unit Lwt.t) ->
     ?max_response_drain_bytes:int ->
     unit ->
-    t
+    (t, Awskit.Error.t) result
   (** Like {!val:create}, but resolves credentials through a provider for each
       signed request. Use this for refreshable credential sources. *)
 end

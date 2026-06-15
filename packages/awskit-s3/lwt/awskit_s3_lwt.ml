@@ -49,16 +49,26 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
   module Reader = S3.Reader
 
+  let parse_endpoint = function
+    | None -> Ok None
+    | Some endpoint -> (
+        match Awskit.Endpoint.of_string endpoint with
+        | Ok endpoint -> Ok (Some (Awskit.Endpoint.to_url_prefix endpoint))
+        | Error _ as error -> error)
+
   let create ?ctx ?endpoint ?addressing_style ?endpoint_variant ?scheme ~region
       ~credentials ~clock ?retry_policy ?sleep () =
-    let aws =
-      Aws.create ?ctx ~region ~credentials ~clock ?retry_policy ?sleep ()
-    in
-    let endpoint_config =
-      Awskit_s3.endpoint_config ?addressing_style ?endpoint_variant ?scheme
-        ?endpoint ()
-    in
-    { aws; endpoint_config }
+    match
+      ( Aws.create ?ctx ~region ~credentials ~clock ?retry_policy ?sleep (),
+        parse_endpoint endpoint )
+    with
+    | Error error, _ | _, Error error -> Error error
+    | Ok aws, Ok endpoint ->
+        let endpoint_config =
+          Awskit_s3.endpoint_config ?addressing_style ?endpoint_variant ?scheme
+            ?endpoint ()
+        in
+        Ok { aws; endpoint_config }
 
   module Object = S3.Object
   module Bucket = S3.Bucket

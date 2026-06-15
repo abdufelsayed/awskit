@@ -96,30 +96,39 @@ let close_https (https : 'flow https) =
   Option.map https ~f:(fun connector uri flow ->
       (connector uri flow :> http_connection))
 
+let parse_endpoint = function
+  | None -> Ok None
+  | Some endpoint ->
+      Result.map (Awskit.Endpoint.of_string endpoint) ~f:Option.some
+
 let create ~env ~sw ~https ~region ~credentials ?clock
     ?(retry_policy = Awskit.Retry.default) ?endpoint
     ?(max_response_drain_bytes = default_max_response_drain_bytes) () =
   if max_response_drain_bytes <= 0 then
     invalid_arg "Awskit_eio.create: max_response_drain_bytes must be positive";
-  let net = Net (env :> < net : _ Eio.Net.t ; .. >)#net in
-  let time_clock =
-    Time_clock (env :> < clock : _ Eio.Time.clock ; .. >)#clock
-  in
-  let clock =
-    Option.value clock ~default:(fun () -> now_from_eio_clock time_clock)
-  in
-  {
-    net;
-    time_clock;
-    sw;
-    https = close_https https;
-    region;
-    credentials;
-    clock;
-    retry_policy;
-    endpoint;
-    max_response_drain_bytes;
-  }
+  match (Awskit.Region.of_string region, parse_endpoint endpoint) with
+  | Error error, _ | _, Error error -> Error error
+  | Ok region, Ok endpoint ->
+      let net = Net (env :> < net : _ Eio.Net.t ; .. >)#net in
+      let time_clock =
+        Time_clock (env :> < clock : _ Eio.Time.clock ; .. >)#clock
+      in
+      let clock =
+        Option.value clock ~default:(fun () -> now_from_eio_clock time_clock)
+      in
+      Ok
+        {
+          net;
+          time_clock;
+          sw;
+          https = close_https https;
+          region;
+          credentials;
+          clock;
+          retry_policy;
+          endpoint;
+          max_response_drain_bytes;
+        }
 
 let to_cohttp_meth = function
   | `GET -> `GET

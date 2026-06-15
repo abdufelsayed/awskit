@@ -354,23 +354,26 @@ module type BUCKET = sig
   (** Create a bucket. *)
 
   val delete :
-    ?expected_bucket_owner:string ->
     connection ->
     bucket:string ->
+    ?expected_bucket_owner:string ->
+    unit ->
     (Bucket.Delete.result, Awskit.Error.t) result io
   (** Delete an empty bucket. *)
 
   val head :
-    ?expected_bucket_owner:string ->
     connection ->
     bucket:string ->
+    ?expected_bucket_owner:string ->
+    unit ->
     (Bucket.Head.result, Awskit.Error.t) result io
   (** Check bucket existence and return metadata such as the region hint. *)
 
   val exists :
-    ?expected_bucket_owner:string ->
     connection ->
     bucket:string ->
+    ?expected_bucket_owner:string ->
+    unit ->
     (bool, Awskit.Error.t) result io
   (** Return [false] for S3 not-found responses and [true] for success. *)
 
@@ -379,9 +382,10 @@ module type BUCKET = sig
   (** List buckets visible to the credentials. *)
 
   val get_location :
-    ?expected_bucket_owner:string ->
     connection ->
     bucket:string ->
+    ?expected_bucket_owner:string ->
+    unit ->
     (Bucket.Get_location.result, Awskit.Error.t) result io
   (** Fetch the bucket location constraint/region. *)
 
@@ -389,9 +393,10 @@ module type BUCKET = sig
     (** Bucket policy operations. Policy documents are opaque validated JSON. *)
 
     val get :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Policy.t, Awskit.Error.t) result io
     (** Fetch a bucket policy document. *)
 
@@ -404,9 +409,10 @@ module type BUCKET = sig
     (** Replace the bucket policy document. *)
 
     val delete :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Delete the bucket policy. *)
   end
@@ -415,9 +421,10 @@ module type BUCKET = sig
     (** Bucket versioning operations. *)
 
     val get :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Bucket.Versioning.result, Awskit.Error.t) result io
     (** Fetch bucket versioning state. *)
 
@@ -434,9 +441,10 @@ module type BUCKET = sig
     (** Bucket tagging operations. *)
 
     val get :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Bucket.Tagging.result, Awskit.Error.t) result io
     (** Fetch the bucket tag set. *)
 
@@ -449,9 +457,10 @@ module type BUCKET = sig
     (** Replace the bucket tag set. *)
 
     val delete :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Remove all bucket tags. *)
   end
@@ -460,9 +469,10 @@ module type BUCKET = sig
     (** Bucket default-encryption operations. *)
 
     val get :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Bucket.Encryption.result, Awskit.Error.t) result io
     (** Fetch bucket default-encryption configuration. *)
 
@@ -475,9 +485,10 @@ module type BUCKET = sig
     (** Replace bucket default-encryption configuration. *)
 
     val delete :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Delete bucket default-encryption configuration. *)
   end
@@ -486,9 +497,10 @@ module type BUCKET = sig
     (** Bucket CORS operations. *)
 
     val get :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Bucket.Cors.result, Awskit.Error.t) result io
     (** Fetch bucket CORS configuration. *)
 
@@ -501,9 +513,10 @@ module type BUCKET = sig
     (** Replace bucket CORS configuration. *)
 
     val delete :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Delete bucket CORS configuration. *)
   end
@@ -512,9 +525,10 @@ module type BUCKET = sig
     (** Bucket public-access-block operations. *)
 
     val get :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Bucket.Public_access_block.result, Awskit.Error.t) result io
     (** Fetch public-access-block configuration. *)
 
@@ -527,9 +541,10 @@ module type BUCKET = sig
     (** Replace public-access-block configuration. *)
 
     val delete :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Delete public-access-block configuration. *)
   end
@@ -538,9 +553,10 @@ module type BUCKET = sig
     (** Bucket ownership-controls operations. *)
 
     val get :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Bucket.Ownership_controls.result, Awskit.Error.t) result io
     (** Fetch ownership-controls configuration. *)
 
@@ -553,9 +569,10 @@ module type BUCKET = sig
     (** Replace ownership-controls configuration. *)
 
     val delete :
-      ?expected_bucket_owner:string ->
       connection ->
       bucket:string ->
+      ?expected_bucket_owner:string ->
+      unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Delete ownership-controls configuration. *)
   end
@@ -817,7 +834,7 @@ module type Sigs = sig
     ?addressing_style:addressing_style ->
     ?endpoint_variant:endpoint_variant ->
     ?scheme:Endpoint.Scheme.t ->
-    ?endpoint:Endpoint.t ->
+    ?endpoint:string ->
     unit ->
     endpoint_config
 

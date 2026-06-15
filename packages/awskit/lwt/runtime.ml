@@ -56,21 +56,30 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     Option.iter endpoint ~f:(fun endpoint ->
         ignore (Awskit.Endpoint.to_url_prefix endpoint))
 
+  let parse_endpoint = function
+    | None -> Ok None
+    | Some endpoint ->
+        Result.map (Awskit.Endpoint.of_string endpoint) ~f:Option.some
+
   let create_with_credentials_provider ?ctx ?endpoint ~region
       ~credentials_provider ~clock ?(retry_policy = Awskit.Retry.default)
       ?(sleep = fun _ -> Lwt.return_unit)
       ?(max_response_drain_bytes = default_max_response_drain_bytes) () =
-    validate_create_args ?endpoint ~max_response_drain_bytes ();
-    {
-      ctx;
-      endpoint;
-      region;
-      credentials_provider;
-      clock;
-      retry_policy;
-      sleep;
-      max_response_drain_bytes;
-    }
+    match (Awskit.Region.of_string region, parse_endpoint endpoint) with
+    | Error error, _ | _, Error error -> Error error
+    | Ok region, Ok endpoint ->
+        validate_create_args ?endpoint ~max_response_drain_bytes ();
+        Ok
+          {
+            ctx;
+            endpoint;
+            region;
+            credentials_provider;
+            clock;
+            retry_policy;
+            sleep;
+            max_response_drain_bytes;
+          }
 
   let create ?ctx ?endpoint ~region ~credentials ~clock ?retry_policy ?sleep
       ?max_response_drain_bytes () =

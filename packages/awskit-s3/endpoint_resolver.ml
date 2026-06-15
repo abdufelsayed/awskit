@@ -25,7 +25,7 @@ type t = {
   addressing_style : addressing_style;
   endpoint_variant : endpoint_variant;
   scheme : Endpoint.Scheme.t;
-  endpoint_override : Endpoint.t option;
+  endpoint_override : string option;
 }
 
 let create ?(addressing_style = `Auto) ?(endpoint_variant = `Regional)
@@ -38,7 +38,10 @@ let endpoint_variant t = t.endpoint_variant
 
 let scheme t =
   match t.endpoint_override with
-  | Some endpoint -> Endpoint.scheme endpoint
+  | Some endpoint -> (
+      match Endpoint.of_string endpoint with
+      | Ok endpoint -> Endpoint.scheme endpoint
+      | Error _ -> t.scheme)
   | None -> t.scheme
 
 let endpoint_host t ~region =
@@ -53,7 +56,7 @@ let endpoint_host t ~region =
 
 let endpoint t ~region =
   match t.endpoint_override with
-  | Some endpoint -> Ok endpoint
+  | Some endpoint -> Endpoint.of_string endpoint
   | None -> Endpoint.create ~scheme:t.scheme ~host:(endpoint_host t ~region) ()
 
 let bucket_has_dot bucket = String.contains bucket '.'

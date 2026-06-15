@@ -84,7 +84,7 @@ end
 
 val create :
   ?ctx:Cohttp_lwt_unix.Client.ctx ->
-  ?endpoint:Awskit.Endpoint.t ->
+  ?endpoint:string ->
   ?region:string ->
   ?credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
@@ -98,7 +98,7 @@ val create :
     @param ctx Optional Cohttp client context (e.g., for custom TLS config)
     @param endpoint
       Explicit endpoint override for local test services or custom service
-      endpoints.
+      endpoints. Parsed as [http://] or [https://] endpoint URL.
     @param region
       AWS region (e.g., ["us-east-1"]). If omitted, reads [AWS_REGION] and then
       [AWS_DEFAULT_REGION].

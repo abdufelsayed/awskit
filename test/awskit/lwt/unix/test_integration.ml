@@ -29,12 +29,10 @@ let test_connection_roundtrip () =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let clock () = Ptime.epoch in
-  let endpoint = Awskit.Endpoint.http_exn ~host:"localhost" ~port:9000 () in
+  let endpoint = "http://localhost:9000" in
+  let region = "eu-west-1" in
   let conn =
-    match
-      Awskit_lwt_unix.create ~region:"eu-west-1" ~credentials:c ~clock ~endpoint
-        ()
-    with
+    match Awskit_lwt_unix.create ~region ~credentials:c ~clock ~endpoint () with
     | Ok conn -> conn
     | Error e -> Fmt.failwith "%a" Awskit.Error.pp e
   in
@@ -52,10 +50,9 @@ let test_connection_defaults () =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let clock () = Ptime.epoch in
+  let region = "us-east-1" in
   let conn =
-    match
-      Awskit_lwt_unix.create ~region:"us-east-1" ~credentials:c ~clock ()
-    with
+    match Awskit_lwt_unix.create ~region ~credentials:c ~clock () with
     | Ok conn -> conn
     | Error e -> Fmt.failwith "%a" Awskit.Error.pp e
   in
@@ -279,6 +276,25 @@ let expect_validation label = function
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected validation error" label
 
+let test_create_rejects_invalid_region_string () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  expect_validation "invalid region"
+    (Awskit_lwt_unix.create ~region:"" ~credentials
+       ~clock:(fun () -> Ptime.epoch)
+       ())
+
+let test_create_rejects_invalid_endpoint_string () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  expect_validation "invalid endpoint"
+    (Awskit_lwt_unix.create ~region:"us-east-1"
+       ~endpoint:"http://localhost:9000/path" ~credentials
+       ~clock:(fun () -> Ptime.epoch)
+       ())
+
 let expect_transport label = function
   | Error error -> (
       let open Awskit.Error in
@@ -484,6 +500,10 @@ let suite () =
       [
         Alcotest.test_case "roundtrip" `Quick test_connection_roundtrip;
         Alcotest.test_case "defaults" `Quick test_connection_defaults;
+        Alcotest.test_case "rejects invalid region string" `Quick
+          test_create_rejects_invalid_region_string;
+        Alcotest.test_case "rejects invalid endpoint string" `Quick
+          test_create_rejects_invalid_endpoint_string;
         Alcotest.test_case "credentials from env" `Quick
           test_credentials_from_env;
         Alcotest.test_case "credentials from shared profile" `Quick

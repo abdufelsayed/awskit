@@ -3,7 +3,7 @@ open Common
 type info = { name : string; creation_date : Ptime.t option }
 
 module Create = struct
-  type options = { region : Awskit.Region.t option }
+  type options = { region : string option }
   type result = { response : Awskit.Response.t }
 
   let default_options = { region = None }

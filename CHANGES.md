@@ -19,6 +19,11 @@ live under `Awskit.Error.Internal`. Application code should inspect, classify,
 and print returned SDK errors through the top-level `Awskit.Error` consumer API;
 Awskit package implementations use `Internal` when constructing errors.
 
+Breaking change: high-level runtime and S3 constructors now accept plain string
+`~region` and `~endpoint` arguments, parsing them inside the SDK. Bucket
+read/delete-style operations now take the client first and end in `unit`,
+matching object operation ergonomics.
+
 # 0.1.0
 
 Initial public release of Awskit.

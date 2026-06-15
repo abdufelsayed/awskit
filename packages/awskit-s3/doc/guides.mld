@@ -315,30 +315,29 @@ let s3 =
     ~sw
     ~env
     ~https
-    ~region
+    ~region:"us-east-1"
     ~credentials
     ~endpoint_variant:`Dualstack
     ~addressing_style:`Auto
     ()
+  |> Result.get_ok
 ]}
 
 Pass [endpoint] for S3 endpoints that are not the default AWS regional host,
 including local test services:
 
 {[
-let endpoint =
-  Awskit.Endpoint.of_string_exn "http://127.0.0.1:9000"
-in
 let s3 =
   Awskit_s3_eio.create
     ~sw
     ~env
     ~https:Awskit_eio.http_only
-    ~region
+    ~region:"us-east-1"
     ~credentials
-    ~endpoint
+    ~endpoint:"http://127.0.0.1:9000"
     ~addressing_style:`Path
     ()
+  |> Result.get_ok
 ]}
 
 Endpoint variants:
@@ -467,10 +466,10 @@ Awskit_s3_eio.Presigned.get_object s3
 
 {[
 Awskit_s3.Presigned.put_object
-  ~region
+  ~region:"us-east-1"
   ~credentials
   ~now
-  ~endpoint
+  ~endpoint:"http://127.0.0.1:9000"
   ~addressing_style:`Path
   ~bucket:"my-bucket"
   ~key:"upload.txt"
@@ -482,7 +481,7 @@ after [Multipart.create_upload] has produced an upload ID:
 
 {[
 Awskit_s3.Presigned.upload_part
-  ~region
+  ~region:"us-east-1"
   ~credentials
   ~now
   ~bucket:"my-bucket"
@@ -521,10 +520,9 @@ let credentials =
     ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
     ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
     ()
-in
-let region = Awskit.Region.of_string_exn "us-east-1" in
 let https = Https.connector () in
-Awskit_s3_eio.create ~sw ~env ~https ~region ~credentials ()
+Awskit_s3_eio.create ~sw ~env ~https ~region:"us-east-1" ~credentials ()
+|> Result.get_ok
 ]}
 
 [awskit-s3-lwt-unix] can use explicit values or load the standard environment

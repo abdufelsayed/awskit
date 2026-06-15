@@ -279,9 +279,10 @@ let conn =
     ~env
     ~sw
     ~https
-    ~region
+    ~region:"us-east-1"
     ~credentials
     ()
+  |> Result.get_ok
 in
 ignore conn
 ]}

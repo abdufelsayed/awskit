@@ -16,16 +16,10 @@ let getenv_default name default =
   | Some value when value <> "" -> value
   | _ -> default
 
-let endpoint =
-  getenv_default "AWSKIT_S3_MINIO_ENDPOINT" "http://127.0.0.1:9000"
-  |> Awskit.Endpoint.of_string_exn
-
+let endpoint = getenv_default "AWSKIT_S3_MINIO_ENDPOINT" "http://127.0.0.1:9000"
 let access_key = getenv_default "AWSKIT_S3_MINIO_ACCESS_KEY_ID" "minioadmin"
 let secret_key = getenv_default "AWSKIT_S3_MINIO_SECRET_ACCESS_KEY" "minioadmin"
-
-let region =
-  getenv_default "AWSKIT_S3_MINIO_REGION" "us-east-1"
-  |> Awskit.Region.of_string_exn
+let region = getenv_default "AWSKIT_S3_MINIO_REGION" "us-east-1"
 
 let credentials =
   Awskit.Credentials.create_exn ~access_key_id:access_key
@@ -98,7 +92,7 @@ let cleanup_bucket conn ~bucket =
         | Error _ -> Lwt.return_unit))
   |> fun deleted ->
   let* () = deleted in
-  let* _ = S3.Bucket.delete conn ~bucket in
+  let* _ = S3.Bucket.delete conn ~bucket () in
   Lwt.return_unit
 
 let write_file path body =
@@ -340,7 +334,7 @@ let test_bucket_config_roundtrip () =
            (S3.Bucket.Versioning.put conn ~bucket
               Bucket.Versioning.Status.Enabled));
       let versioning =
-        await "get versioning" (S3.Bucket.Versioning.get conn ~bucket)
+        await "get versioning" (S3.Bucket.Versioning.get conn ~bucket ())
       in
       Alcotest.(check bool)
         "versioning enabled" true
@@ -353,7 +347,7 @@ let test_bucket_config_roundtrip () =
       in
       ignore (await "put bucket tags" (S3.Bucket.Tagging.put conn ~bucket tags));
       let tagging =
-        await "get bucket tags" (S3.Bucket.Tagging.get conn ~bucket)
+        await "get bucket tags" (S3.Bucket.Tagging.get conn ~bucket ())
       in
       Alcotest.(check (list (pair string string)))
         "bucket tags"
@@ -362,7 +356,7 @@ let test_bucket_config_roundtrip () =
         |> List.map (fun (tag : Awskit_s3.Tag.t) -> (tag.key, tag.value))
         |> List.sort compare);
       ignore
-        (await "delete bucket tags" (S3.Bucket.Tagging.delete conn ~bucket)))
+        (await "delete bucket tags" (S3.Bucket.Tagging.delete conn ~bucket ())))
 
 let test_multipart_edges () =
   with_bucket "multipart" (fun conn ~bucket ->

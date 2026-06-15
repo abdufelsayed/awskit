@@ -7,7 +7,7 @@ type info = { name : string; creation_date : Ptime.t option }
 
 module Create : sig
   (** [CreateBucket] options and result metadata. *)
-  type options = { region : Awskit.Region.t option }
+  type options = { region : string option }
   (** Optional location constraint. Some regions, notably [us-east-1], have
       special AWS behavior and may omit an explicit constraint. *)
 

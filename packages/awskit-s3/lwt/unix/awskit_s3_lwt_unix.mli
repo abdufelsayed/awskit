@@ -13,11 +13,11 @@ module Runtime :
 
 val create :
   ?ctx:Cohttp_lwt_unix.Client.ctx ->
-  ?endpoint:Awskit.Endpoint.t ->
+  ?endpoint:string ->
   ?addressing_style:Awskit_s3.addressing_style ->
   ?endpoint_variant:Awskit_s3.endpoint_variant ->
   ?scheme:Awskit.Endpoint.Scheme.t ->
-  ?region:Awskit.Region.t ->
+  ?region:string ->
   ?credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
   ?retry_policy:Awskit.Retry.t ->
@@ -30,7 +30,8 @@ val create :
     runtime resolves them from standard AWS environment and profile sources.
     [endpoint] is for local S3-compatible services or custom endpoints.
     [addressing_style], [endpoint_variant], and [scheme] configure S3 endpoint
-    resolution when no explicit endpoint is supplied. *)
+    resolution when no explicit endpoint is supplied. [region] and [endpoint]
+    are parsed and validated when the client is created. *)
 
 module Body : sig
   include

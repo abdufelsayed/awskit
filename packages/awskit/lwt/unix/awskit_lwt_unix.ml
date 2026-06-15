@@ -356,15 +356,26 @@ let create ?ctx ?endpoint ?region ?credentials ?(clock = Ptime_clock.now)
     ( (match region with
       | Some region -> Awskit.Region.of_string region
       | None -> Awskit_unix.Region.from_env ()),
+      (match endpoint with
+      | Some endpoint -> (
+          match Awskit.Endpoint.of_string endpoint with
+          | Ok endpoint -> Ok (Some endpoint)
+          | Error _ as error -> error)
+      | None -> Ok None),
       match credentials with
       | Some credentials ->
           Ok (Awskit_lwt.Credentials.Provider.static credentials)
       | None -> Ok (Credentials.default_provider ~clock ?imdsv1_fallback ()) )
   with
-  | Ok region, Ok credentials_provider ->
+  | Ok region, Ok endpoint, Ok credentials_provider ->
       let sleep span = Lwt_unix.sleep (Ptime.Span.to_float_s span) in
-      Ok
-        (Strict.create_with_credentials_provider ?ctx ?endpoint ~region
-           ~credentials_provider ~clock ?retry_policy ~sleep
-           ?max_response_drain_bytes ())
-  | Error error, _ | _, Error error -> Error error
+      let region = Awskit.Region.to_string region in
+      let endpoint =
+        match endpoint with
+        | None -> None
+        | Some endpoint -> Some (Awskit.Endpoint.to_url_prefix endpoint)
+      in
+      Strict.create_with_credentials_provider ?ctx ?endpoint ~region
+        ~credentials_provider ~clock ?retry_policy ~sleep
+        ?max_response_drain_bytes ()
+  | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error

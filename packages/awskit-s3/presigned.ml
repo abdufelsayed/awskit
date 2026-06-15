@@ -145,6 +145,8 @@ let validate_part_number part_number =
     invalid ~field:"part_number" "part number must be <= 10000"
   else Ok ()
 
+let parse_region region = Awskit.Region.of_string region
+
 let endpoint_config ?addressing_style ?endpoint_variant ?scheme ?endpoint () =
   Endpoint_resolver.create ?addressing_style ?endpoint_variant ?scheme ?endpoint
     ()
@@ -228,6 +230,7 @@ let generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
 let generate ~region ~credentials ~now ?endpoint ?addressing_style
     ?endpoint_variant ?scheme ~bucket ~key ~method_ ~signed_headers ~query
     ?expires_in () =
+  let* region = parse_region region in
   let endpoint_config =
     endpoint_config ?addressing_style ?endpoint_variant ?scheme ?endpoint ()
   in

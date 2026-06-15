@@ -185,14 +185,26 @@ end
 
 module BackpressureAws = Awskit_lwt.Make (Backpressure_client)
 
+let conn_or_fail = function
+  | Ok conn -> conn
+  | Error error -> Alcotest.failf "%a" Awskit.Error.pp error
+
+let expect_validation label = function
+  | Error error when Awskit.Error.is_validation error -> ()
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected validation error" label
+
 let test_connection_roundtrip () =
   let c =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let clock () = Ptime.epoch in
-  let region = Awskit.Region.of_string_exn "eu-west-1" in
-  let endpoint = Awskit.Endpoint.http_exn ~host:"localhost" ~port:9000 () in
-  let conn = Aws.create ~region ~credentials:c ~clock ~endpoint () in
+  let region = "eu-west-1" in
+  let endpoint = "http://localhost:9000" in
+  let conn =
+    Aws.create ~region ~credentials:c ~clock ~endpoint () |> conn_or_fail
+  in
   Alcotest.(check string)
     "region" "eu-west-1"
     (Aws.Runtime.region conn |> Awskit.Region.to_string);
@@ -205,8 +217,8 @@ let test_connection_defaults () =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let clock () = Ptime.epoch in
-  let region = Awskit.Region.of_string_exn "us-east-1" in
-  let conn = Aws.create ~region ~credentials:c ~clock () in
+  let region = "us-east-1" in
+  let conn = Aws.create ~region ~credentials:c ~clock () |> conn_or_fail in
   Alcotest.(check (option string))
     "no endpoint" None
     (Option.map Aws.Runtime.(endpoint conn) ~f:Awskit.Endpoint.to_url_prefix)
@@ -257,22 +269,25 @@ let request_conn () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
-  let region = Awskit.Region.of_string_exn "us-east-1" in
+  let region = "us-east-1" in
   RequestAws.create ~region ~credentials ~clock:(fun () -> Ptime.epoch) ()
+  |> conn_or_fail
 
 let early_response_conn () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
-  let region = Awskit.Region.of_string_exn "us-east-1" in
+  let region = "us-east-1" in
   EarlyResponseAws.create ~region ~credentials ~clock:(fun () -> Ptime.epoch) ()
+  |> conn_or_fail
 
 let backpressure_conn () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
-  let region = Awskit.Region.of_string_exn "us-east-1" in
+  let region = "us-east-1" in
   BackpressureAws.create ~region ~credentials ~clock:(fun () -> Ptime.epoch) ()
+  |> conn_or_fail
 
 let request_body_request =
   let target =
@@ -549,10 +564,41 @@ let limited_conn ~max_response_drain_bytes =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
-  let region = Awskit.Region.of_string_exn "us-east-1" in
+  let region = "us-east-1" in
   LimitedAws.create ~region ~credentials
     ~clock:(fun () -> Ptime.epoch)
     ~max_response_drain_bytes ()
+  |> conn_or_fail
+
+let test_create_rejects_invalid_region_string () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  Aws.create ~region:"" ~credentials ~clock:(fun () -> Ptime.epoch) ()
+  |> expect_validation "invalid region"
+
+let test_create_rejects_invalid_endpoint_string () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  Aws.create ~region:"us-east-1" ~endpoint:"http://localhost:9000/path"
+    ~credentials
+    ~clock:(fun () -> Ptime.epoch)
+    ()
+  |> expect_validation "invalid endpoint"
+
+let test_create_with_credentials_provider_rejects_invalid_endpoint_string () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let credentials_provider =
+    Awskit_lwt.Credentials.Provider.static credentials
+  in
+  Aws.create_with_credentials_provider ~region:"us-east-1"
+    ~endpoint:"http://localhost:9000/path" ~credentials_provider
+    ~clock:(fun () -> Ptime.epoch)
+    ()
+  |> expect_validation "invalid provider endpoint"
 
 let limited_request =
   let target =
@@ -605,6 +651,13 @@ let suite =
       [
         Alcotest.test_case "roundtrip" `Quick test_connection_roundtrip;
         Alcotest.test_case "defaults" `Quick test_connection_defaults;
+        Alcotest.test_case "rejects invalid region string" `Quick
+          test_create_rejects_invalid_region_string;
+        Alcotest.test_case "rejects invalid endpoint string" `Quick
+          test_create_rejects_invalid_endpoint_string;
+        Alcotest.test_case
+          "credentials provider rejects invalid endpoint string" `Quick
+          test_create_with_credentials_provider_rejects_invalid_endpoint_string;
         Alcotest.test_case "runtime bodies" `Quick test_runtime_bodies;
         Alcotest.test_case "provider chain uses multiple errors" `Quick
           test_provider_chain_uses_multiple_errors;
