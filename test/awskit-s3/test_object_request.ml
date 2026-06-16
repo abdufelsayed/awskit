@@ -318,6 +318,27 @@ let test_object_versioning_requests_and_parse () =
         (List.assoc_opt "version-id-marker" versions_call.request.target.query)
   | _ -> Alcotest.fail "expected copy and version listing calls"
 
+let test_object_versioning_empty_markers_are_absent () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          {|<ListVersionsResult><Name>my-bucket</Name><KeyMarker></KeyMarker><VersionIdMarker></VersionIdMarker><NextKeyMarker></NextKeyMarker><NextVersionIdMarker></NextVersionIdMarker><IsTruncated>false</IsTruncated></ListVersionsResult>|};
+      ]
+  in
+  let page =
+    Recording_s3.Object.list_versions conn ~bucket:"my-bucket" ()
+    |> ok_or_fail "list versions"
+  in
+  Alcotest.(check (option string)) "key marker" None page.key_marker;
+  Alcotest.(check (option string))
+    "version marker" None
+    (version_string page.version_id_marker);
+  Alcotest.(check (option string)) "next key marker" None page.next_key_marker;
+  Alcotest.(check (option string))
+    "next version marker" None
+    (version_string page.next_version_id_marker)
+
 let test_find_metadata_missing_object_returns_none () =
   let conn = Recording_runtime.connect [ response 404 no_such_key_body ] in
   match
@@ -708,6 +729,8 @@ let suite =
           test_delete_objects_request_body;
         Alcotest.test_case "object versioning requests and parse" `Quick
           test_object_versioning_requests_and_parse;
+        Alcotest.test_case "object versioning empty markers are absent" `Quick
+          test_object_versioning_empty_markers_are_absent;
         Alcotest.test_case "find metadata missing object returns none" `Quick
           test_find_metadata_missing_object_returns_none;
         Alcotest.test_case "find metadata bare head 404 returns none" `Quick

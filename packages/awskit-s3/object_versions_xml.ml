@@ -4,6 +4,20 @@ module List_object_versions = Object.Versions
 let parse_version_id value =
   Result.to_option (Object.Version_id.of_string value)
 
+let optional_marker_text name nodes =
+  match Xml.child_text name nodes with
+  | None | Some "" -> None
+  | Some value -> Some value
+
+let optional_version_marker ~path name nodes =
+  match optional_marker_text name nodes with
+  | None -> Ok None
+  | Some value -> (
+      match parse_version_id value with
+      | Some marker -> Ok (Some marker)
+      | None ->
+          Xml.decode_field_error ~path "<%s> has invalid value %S" name value)
+
 let parse_owner nodes =
   match Xml.child "Owner" nodes with
   | None -> None
@@ -85,12 +99,11 @@ let parse_page ~response body =
       Response.parse_bool nodes
   in
   let* version_id_marker =
-    Xml.optional_child_parse ~path:"ListVersionsResult" "VersionIdMarker"
-      parse_version_id nodes
+    optional_version_marker ~path:"ListVersionsResult" "VersionIdMarker" nodes
   in
   let* next_version_id_marker =
-    Xml.optional_child_parse ~path:"ListVersionsResult" "NextVersionIdMarker"
-      parse_version_id nodes
+    optional_version_marker ~path:"ListVersionsResult" "NextVersionIdMarker"
+      nodes
   in
   Ok
     {
@@ -103,9 +116,9 @@ let parse_page ~response body =
         Xml.children "CommonPrefixes" nodes
         |> List.filter_map (Xml.child_text "Prefix");
       is_truncated = Option.value ~default:false is_truncated;
-      key_marker = Xml.child_text "KeyMarker" nodes;
+      key_marker = optional_marker_text "KeyMarker" nodes;
       version_id_marker;
-      next_key_marker = Xml.child_text "NextKeyMarker" nodes;
+      next_key_marker = optional_marker_text "NextKeyMarker" nodes;
       next_version_id_marker;
       response;
     }
