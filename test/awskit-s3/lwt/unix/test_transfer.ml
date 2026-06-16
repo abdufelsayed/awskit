@@ -403,15 +403,10 @@ module S3 = struct
 end
 
 module Core = Awskit_s3.Make (Runtime)
-
-module Body_reader =
-  Awskit_s3_lwt_unix__Transfer.Make_body_reader (Runtime) (Core)
-
+module Body_reader = Transfer_under_test.Make_body_reader (Runtime) (Core)
 module Body = Body_reader.Body
 module Reader = Body_reader.Reader
-
-module Transfer =
-  Awskit_s3_lwt_unix__Transfer.Make (Runtime) (S3) (Body) (Reader)
+module Transfer = Transfer_under_test.Make (Runtime) (S3) (Body) (Reader)
 
 let remove_file path = try Sys.remove path with Sys_error _ -> ()
 

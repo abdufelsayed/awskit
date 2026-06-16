@@ -163,7 +163,8 @@ let test_bucket_encryption_unknown_write_rejected () =
   | Ok _ -> Alcotest.fail "expected unknown encryption write rejection"
 
 let test_decode_error_mentions_xml_document () =
-  match Awskit_s3__Bucket_result_xml.parse_location "<not xml" with
+  let conn = Recording_runtime.connect [ response 200 "<not xml" ] in
+  match Recording_s3.Bucket.get_location conn ~bucket:"my-bucket" () with
   | Ok _ -> Alcotest.fail "expected decode error"
   | Error error ->
       let text = Awskit.Error.to_string_hum error in
@@ -172,10 +173,13 @@ let test_decode_error_mentions_xml_document () =
         (string_contains ~substring:"decoding XML document" text)
 
 let test_decode_root_rejects_wrong_root () =
-  match
-    Awskit_s3__Bucket_result_xml.parse_location
-      "<NotLocationConstraint>us-east-1</NotLocationConstraint>"
-  with
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 "<NotLocationConstraint>us-east-1</NotLocationConstraint>";
+      ]
+  in
+  match Recording_s3.Bucket.get_location conn ~bucket:"my-bucket" () with
   | Error error when is_decode_error error ->
       let text = Awskit.Error.to_string_hum error in
       Alcotest.(check bool)

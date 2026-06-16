@@ -1,7 +1,11 @@
 (test
  (name test_awskit_s3_lwt_unix)
  (package awskit-s3-lwt-unix)
- (modules test_awskit_s3_lwt_unix test_integration test_transfer)
+ (modules
+  test_awskit_s3_lwt_unix
+  test_integration
+  test_transfer
+  transfer_under_test)
  (libraries
   awskit
   awskit-lwt-unix
@@ -12,6 +16,12 @@
   lwt.unix
   fmt
   alcotest))
+
+(rule
+ (target transfer_under_test.ml)
+ (deps ../../../../packages/awskit-s3/lwt/unix/transfer.ml)
+ (action
+  (copy %{deps} %{target})))
 
 (executable
  (name test_minio_contract)

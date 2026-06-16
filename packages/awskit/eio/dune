@@ -1,6 +1,7 @@
 (library
  (name awskit_eio)
  (public_name awskit-eio)
+ (private_modules runtime)
  (libraries base awskit eio cohttp cohttp-eio uri ptime fmt logs)
  (preprocess
   (pps ppx_deriving.show ppx_deriving.eq)))

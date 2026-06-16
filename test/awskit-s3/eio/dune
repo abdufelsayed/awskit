@@ -1,6 +1,11 @@
 (test
  (name test_awskit_s3_eio)
  (package awskit-s3-eio)
+ (modules
+  test_awskit_s3_eio
+  test_integration
+  test_transfer
+  transfer_under_test)
  (libraries
   awskit
   awskit-eio
@@ -13,3 +18,9 @@
   eio_main
   ptime
   digestif))
+
+(rule
+ (target transfer_under_test.ml)
+ (deps ../../../packages/awskit-s3/eio/transfer.ml)
+ (action
+  (copy %{deps} %{target})))

@@ -1,4 +1,5 @@
 (library
  (name awskit_s3_eio)
  (public_name awskit-s3-eio)
+ (private_modules transfer)
  (libraries awskit-s3 awskit-eio eio fmt ptime))

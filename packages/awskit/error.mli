@@ -6,8 +6,11 @@
     structured debugging.
 
     Application code should treat this module as a consumer API: inspect,
-    classify, and print errors returned by Awskit operations. Error construction
-    lives under {!module:Internal} for Awskit package implementations. *)
+    classify, and print errors returned by Awskit operations.
+
+    The {!module:Internal} submodule is an implementor API used by awskit core,
+    runtime adapters, service packages, simulators, and their tests. It is not
+    part of the application-facing contract. *)
 
 type t
 
@@ -108,11 +111,13 @@ val to_sexp_string_hum : t -> string
 val equal : t -> t -> bool
 
 module Internal : sig
-  (** Error constructors for Awskit package implementations.
+  (** Implementor-only error constructors.
 
-      Application code should not construct {!type:t} values directly. Use this
-      module only when implementing Awskit core, runtime adapters, service
-      packages, simulators, or tests for those packages. *)
+      This submodule remains exposed because awskit service packages are
+      separate libraries that need to construct the shared opaque error type.
+      Application code should not construct {!type:t} values directly; inspect,
+      classify, and display returned errors instead. A future package split can
+      move these constructors into an implementation-only support library. *)
 
   val validation : ?field:string -> string -> t
   val signing : string -> t

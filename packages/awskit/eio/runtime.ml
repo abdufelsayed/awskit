@@ -242,7 +242,7 @@ module Request_body = struct
   let write_string = write_request_body_string
 end
 
-let body_to_cohttp ~sw = function
+let body_to_cohttp ?(on_error = fun _ -> ()) ~sw = function
   | Source (_, body) ->
       { body = Some body; finished = Eio.Promise.create_resolved (Ok ()) }
   | Stream (descriptor, write) ->
@@ -265,6 +265,7 @@ let body_to_cohttp ~sw = function
               Log.warn (fun m ->
                   m "request body stream failed: %s"
                     (Awskit.Error.to_string_hum error));
+              on_error error;
               finish (Error error);
               Eio.Stream.add stream (Failed (Awskit.Error.to_string_hum error))
           | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -273,6 +274,7 @@ let body_to_cohttp ~sw = function
               Log.warn (fun m ->
                   m "request body stream raised: %s"
                     (Awskit.Error.to_string_hum error));
+              on_error error;
               finish (Error error);
               Eio.Stream.add stream (Failed (Awskit.Error.to_string_hum error)));
       { body = Some (stream_source stream); finished = request_body_finished }
@@ -292,6 +294,7 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
       in
       let successful_status status = status >= 200 && status < 300 in
       let early_result = ref None in
+      let request_body_stream_error = ref None in
       let exception Early_response in
       let exception Callback_raised of exn in
       let call_f response body =
@@ -300,7 +303,11 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
         | exception exn -> raise (Callback_raised exn)
       in
       let run_call ~call_sw =
-        let bridge = body_to_cohttp ~sw:call_sw request_body in
+        let bridge =
+          body_to_cohttp ~sw:call_sw
+            ~on_error:(fun error -> request_body_stream_error := Some error)
+            request_body
+        in
         try
           let response, body =
             Cohttp_eio.Client.call client ~sw:call_sw ~headers ?body:bridge.body
@@ -342,10 +349,17 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
           try
             Eio.Switch.run ~name:"awskit stream request body attempt"
               (fun request_body_sw -> run_call ~call_sw:request_body_sw)
-          with Early_response -> (
-            match !early_result with
-            | Some result -> result
-            | None -> Error (body_error "missing early response result"))))
+          with
+          | Early_response -> (
+              match !early_result with
+              | Some result -> result
+              | None -> Error (body_error "missing early response result"))
+          | Callback_raised exn -> raise exn
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> (
+              match !request_body_stream_error with
+              | Some error -> Error error
+              | None -> raise exn)))
 
 type +'a t = 'a
 

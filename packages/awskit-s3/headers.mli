@@ -2,9 +2,9 @@
 
     Most applications should use {!module:Awskit_s3.Object},
     {!module:Awskit_s3.Bucket}, {!module:Awskit_s3.Multipart}, or
-    {!module:Awskit_s3.Presigned}. This module is exposed for tests and custom
-    integrations that need the same header encoding rules as the built-in
-    request builders. *)
+    {!module:Awskit_s3.Presigned}. This internal helper is used by awskit's
+    built-in request builders to apply the same header encoding rules
+    consistently. *)
 
 val add_opt_header :
   string -> string option -> (string * string) list -> (string * string) list

@@ -1,6 +1,28 @@
 (library
  (name awskit_s3)
  (public_name awskit-s3)
+ (private_modules
+  bucket_access_xml
+  bucket_cors_xml
+  bucket_encryption_xml
+  bucket_request
+  bucket_result_xml
+  bucket_versioning_xml
+  bucket_xml_support
+  common
+  headers
+  multipart_request
+  multipart_xml
+  object_delete_xml
+  object_list_xml
+  object_request
+  object_tagging_request
+  object_versions_xml
+  presigned_request
+  request_context
+  response
+  streaming
+  tagging_xml)
  (libraries
   awskit
   digestif
