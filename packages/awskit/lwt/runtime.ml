@@ -423,19 +423,32 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       drain_reader reader ~remaining:body.max_response_drain_bytes
         ~max_response_drain_bytes:body.max_response_drain_bytes
 
+    let drain_response_body_after_exception reader body exn =
+      let drain =
+        Lwt.catch
+          (fun () ->
+            Lwt.bind (drain_response_body_reader reader body) (fun _ ->
+                Lwt.return_unit))
+          (fun _ -> Lwt.return_unit)
+      in
+      Lwt.bind (Lwt.protected drain) (fun () -> Lwt.fail exn)
+
     let with_response_body body ~consume =
       let reader =
         { stream = Cohttp_lwt.Body.to_stream body.body; chunk = ""; offset = 0 }
       in
-      Lwt.bind (consume reader) (fun result ->
-          match result with
-          | Ok _ ->
-              Lwt.bind (drain_response_body_reader reader body) (function
-                | Ok () -> Lwt.return result
-                | Error error -> Lwt.return_error error)
-          | Error _ ->
-              Lwt.bind (drain_response_body_reader reader body) (fun _ ->
-                  Lwt.return result))
+      Lwt.catch
+        (fun () ->
+          Lwt.bind (consume reader) (fun result ->
+              match result with
+              | Ok _ ->
+                  Lwt.bind (drain_response_body_reader reader body) (function
+                    | Ok () -> Lwt.return result
+                    | Error error -> Lwt.return_error error)
+              | Error _ ->
+                  Lwt.bind (drain_response_body_reader reader body) (fun _ ->
+                      Lwt.return result)))
+        (drain_response_body_after_exception reader body)
 
     let discard_response_body body =
       let reader =

@@ -409,9 +409,17 @@ let discard_response_body_reader (reader : response_body_reader)
   discard_reader reader ~remaining:body.max_response_drain_bytes
     ~max_response_drain_bytes:body.max_response_drain_bytes
 
+let discard_response_body_after_exception reader body exn =
+  Eio.Cancel.protect (fun () ->
+      match discard_response_body_reader reader body with
+      | Ok () | Error _ -> ()
+      | exception _ -> ());
+  raise exn
+
 let with_response_body (body : response_body) ~consume =
   let reader = { body = body.body; chunk = ""; offset = 0 } in
   match consume reader with
+  | exception exn -> discard_response_body_after_exception reader body exn
   | Ok _ as result -> (
       match discard_response_body_reader reader body with
       | Ok () -> result

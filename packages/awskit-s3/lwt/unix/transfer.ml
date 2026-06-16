@@ -622,16 +622,32 @@ struct
               |> Awskit.Error.Internal.with_context
                    "multipart upload failed and abort also failed"))
     in
-    Lwt.bind
-      (upload_missing_parts conn ~bucket ~key ~upload_id ~options ~path
-         ?on_progress ~initial_completed:0L specs) (function
-      | Error error -> abort_and_return error
-      | Ok parts ->
+    let abort_cleanup_ignore_errors () =
+      Lwt.catch
+        (fun () ->
           Lwt.bind
-            (complete_multipart conn ~bucket ~key ~upload_id ~options
-               created.upload parts) (function
-            | Ok _ as result -> Lwt.return result
-            | Error error -> abort_and_return error))
+            (Lwt.protected
+               (S3.Multipart.abort_upload conn ~bucket ~key ~upload_id
+                  ~options:options.abort_options ()))
+            (fun _ -> Lwt.return_unit))
+        (fun _exn -> Lwt.return_unit)
+    in
+    let abort_then_fail exn =
+      Lwt.bind (abort_cleanup_ignore_errors ()) (fun () -> Lwt.fail exn)
+    in
+    let upload_and_complete () =
+      Lwt.bind
+        (upload_missing_parts conn ~bucket ~key ~upload_id ~options ~path
+           ?on_progress ~initial_completed:0L specs) (function
+        | Error error -> abort_and_return error
+        | Ok parts ->
+            Lwt.bind
+              (complete_multipart conn ~bucket ~key ~upload_id ~options
+                 created.upload parts) (function
+              | Ok _ as result -> Lwt.return result
+              | Error error -> abort_and_return error))
+    in
+    Lwt.catch upload_and_complete abort_then_fail
 
   let upload_file conn ~bucket ~key ?options ?on_progress ~path () =
     let options =

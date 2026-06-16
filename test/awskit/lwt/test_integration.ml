@@ -13,8 +13,22 @@ module Limited_body_client = struct
   type body = Cohttp_lwt.Body.t
 
   let response_body = ref ""
+  let drained_chunks = ref []
   let response () = Cohttp.Response.make ~status:`OK ()
-  let body () = Cohttp_lwt.Body.of_string !response_body
+
+  let body () =
+    let chunks = ref [ !response_body ] in
+    let stream =
+      Lwt_stream.from (fun () ->
+          match !chunks with
+          | [] -> Lwt.return_none
+          | chunk :: rest ->
+              chunks := rest;
+              drained_chunks := chunk :: !drained_chunks;
+              Lwt.return_some chunk)
+    in
+    Cohttp_lwt.Body.of_stream stream
+
   let map_context f g ?ctx = g (f ?ctx)
 
   let call ?ctx:_ ?headers:_ ?body:_ ?chunked:_ _meth _uri =
@@ -609,10 +623,14 @@ let limited_request =
 
 let with_limited_response ~max_response_drain_bytes body ~f =
   Limited_body_client.response_body := body;
+  Limited_body_client.drained_chunks := [];
   let conn = limited_conn ~max_response_drain_bytes in
   Lwt_main.run
     (LimitedAws.Runtime.with_response conn limited_request
        LimitedAws.Runtime.Request_body.empty ~f:(fun _ body -> f body))
+
+let drained_limited_body () =
+  List.rev !Limited_body_client.drained_chunks |> String.concat ~sep:""
 
 let expect_body_limit label expected = function
   | Error error when Option.equal Int64.equal (body_limit error) (Some expected)
@@ -644,6 +662,25 @@ let test_with_response_body_preserves_consumer_error () =
   | Error error ->
       Alcotest.failf "expected consumer error, got: %a" Awskit.Error.pp error
   | Ok _ -> Alcotest.fail "expected consumer error"
+
+let test_with_response_body_drains_after_consumer_exception () =
+  let exception Consumer_failed in
+  let observed =
+    try
+      ignore
+        (with_limited_response ~max_response_drain_bytes:64 "abcdef"
+           ~f:(fun body ->
+             LimitedAws.Runtime.Response_body.with_reader body
+               ~consume:(fun _reader -> Lwt.fail Consumer_failed))
+          : (unit, Awskit.Error.t) Result.t);
+      `Returned
+    with exn -> `Raised exn
+  in
+  match observed with
+  | `Raised exn when Stdlib.( == ) exn Consumer_failed ->
+      Alcotest.(check string) "drained body" "abcdef" (drained_limited_body ())
+  | `Raised exn -> Alcotest.failf "unexpected exception: %s" (Exn.to_string exn)
+  | `Returned -> Alcotest.fail "expected consumer exception"
 
 let suite =
   [
@@ -683,5 +720,7 @@ let suite =
           test_with_response_body_drain_enforces_limit;
         Alcotest.test_case "consumer error wins over drain error" `Quick
           test_with_response_body_preserves_consumer_error;
+        Alcotest.test_case "consumer exception still drains body" `Quick
+          test_with_response_body_drains_after_consumer_exception;
       ] );
   ]

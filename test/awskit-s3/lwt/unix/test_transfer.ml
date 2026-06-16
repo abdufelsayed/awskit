@@ -1037,6 +1037,73 @@ let test_multipart_upload_reports_abort_failure () =
           check_multiple_error_text "abort error" error
             [ "simulated complete failure"; "simulated abort failure" ])
 
+let test_multipart_upload_aborts_on_progress_exception () =
+  Runtime.reset_write_fault ();
+  let exception Progress_failed in
+  let path = Filename.temp_file "awskit-upload-multipart-progress-exn" ".bin" in
+  write_file path (String.make Awskit_s3.Transfer.min_part_size 'p');
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          part_size = Awskit_s3.Transfer.min_part_size;
+        }
+      in
+      match
+        Lwt_main.run
+          (observe_lwt
+             (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+                ~options
+                ~on_progress:(fun _transferred -> raise Progress_failed)
+                ~path ()))
+      with
+      | Raised exn ->
+          Alcotest.(check bool)
+            "raised callback exception" true (exn == Progress_failed);
+          Alcotest.(check int) "abort count" 1 conn.Runtime.abort_count;
+          Alcotest.(check int) "complete count" 0 conn.Runtime.complete_count
+      | Returned (Error error) ->
+          Alcotest.failf "callback returned error: %a" Awskit_s3.Error.pp error
+      | Returned (Ok _) ->
+          Alcotest.fail "multipart upload succeeded despite callback exception")
+
+let test_multipart_upload_aborts_on_progress_cancellation () =
+  Runtime.reset_write_fault ();
+  let path =
+    Filename.temp_file "awskit-upload-multipart-progress-cancel" ".bin"
+  in
+  write_file path (String.make Awskit_s3.Transfer.min_part_size 'c');
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          part_size = Awskit_s3.Transfer.min_part_size;
+        }
+      in
+      match
+        Lwt_main.run
+          (observe_lwt
+             (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+                ~options
+                ~on_progress:(fun _transferred -> raise Lwt.Canceled)
+                ~path ()))
+      with
+      | Raised exn ->
+          Alcotest.(check bool) "raised cancellation" true (exn == Lwt.Canceled);
+          Alcotest.(check int) "abort count" 1 conn.Runtime.abort_count;
+          Alcotest.(check int) "complete count" 0 conn.Runtime.complete_count
+      | Returned (Error error) ->
+          Alcotest.failf "cancellation returned error: %a" Awskit_s3.Error.pp
+            error
+      | Returned (Ok _) ->
+          Alcotest.fail "multipart upload succeeded despite cancellation")
+
 let test_download_file_uses_get_below_threshold () =
   let path = Filename.temp_file "awskit-download-get" ".bin" in
   remove_file path;
@@ -1326,6 +1393,10 @@ let suite () =
           test_resume_multipart_upload_file_uses_list_parts_options;
         Alcotest.test_case "multipart upload reports abort failure" `Quick
           test_multipart_upload_reports_abort_failure;
+        Alcotest.test_case "multipart upload aborts on progress exception"
+          `Quick test_multipart_upload_aborts_on_progress_exception;
+        Alcotest.test_case "multipart upload aborts on progress cancellation"
+          `Quick test_multipart_upload_aborts_on_progress_cancellation;
         Alcotest.test_case "download uses get below threshold" `Quick
           test_download_file_uses_get_below_threshold;
         Alcotest.test_case "download progress exception propagates" `Quick

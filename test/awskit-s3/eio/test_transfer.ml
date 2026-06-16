@@ -675,6 +675,69 @@ let test_multipart_upload_reports_abort_failure env () =
           check_multiple_error_text "abort error" error
             [ "simulated complete failure"; "simulated abort failure" ])
 
+let test_multipart_upload_aborts_on_progress_exception env () =
+  let exception Progress_failed in
+  let native_path =
+    Filename.temp_file "awskit-eio-upload-multipart-progress-exn" ".bin"
+  in
+  write_file native_path (String.make Awskit_s3.Transfer.min_part_size 'p');
+  Fun.protect
+    ~finally:(fun () -> remove_file native_path)
+    (fun () ->
+      let conn = connection () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          part_size = Awskit_s3.Transfer.min_part_size;
+        }
+      in
+      match
+        Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key" ~options
+          ~on_progress:(fun _transferred -> raise Progress_failed)
+          ~path:(path_of_native env native_path)
+          ()
+      with
+      | exception exn when exn == Progress_failed ->
+          Alcotest.(check int) "abort count" 1 conn.Runtime.abort_count;
+          Alcotest.(check int) "complete count" 0 conn.Runtime.complete_count
+      | exception exn ->
+          Alcotest.failf "unexpected exception: %s" (Printexc.to_string exn)
+      | Error error ->
+          Alcotest.failf "callback returned error: %a" Awskit_s3.Error.pp error
+      | Ok _ ->
+          Alcotest.fail "multipart upload succeeded despite callback exception")
+
+let test_multipart_upload_aborts_on_progress_cancellation env () =
+  let native_path =
+    Filename.temp_file "awskit-eio-upload-multipart-progress-cancel" ".bin"
+  in
+  write_file native_path (String.make Awskit_s3.Transfer.min_part_size 'c');
+  Fun.protect
+    ~finally:(fun () -> remove_file native_path)
+    (fun () ->
+      let conn = connection () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          part_size = Awskit_s3.Transfer.min_part_size;
+        }
+      in
+      match
+        Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key" ~options
+          ~on_progress:(fun _transferred -> raise (Eio.Cancel.Cancelled Exit))
+          ~path:(path_of_native env native_path)
+          ()
+      with
+      | exception Eio.Cancel.Cancelled _ ->
+          Alcotest.(check int) "abort count" 1 conn.Runtime.abort_count;
+          Alcotest.(check int) "complete count" 0 conn.Runtime.complete_count
+      | exception exn ->
+          Alcotest.failf "unexpected exception: %s" (Printexc.to_string exn)
+      | Error error ->
+          Alcotest.failf "cancellation returned error: %a" Awskit_s3.Error.pp
+            error
+      | Ok _ -> Alcotest.fail "multipart upload succeeded despite cancellation")
+
 let test_resume_multipart_upload_file env () =
   let native_path = Filename.temp_file "awskit-eio-resume-multipart" ".bin" in
   write_file native_path (String.make Awskit_s3.Transfer.min_part_size 'r');
@@ -793,6 +856,12 @@ let suite env =
           (test_multipart_upload_file env);
         Alcotest.test_case "multipart upload reports abort failure" `Quick
           (test_multipart_upload_reports_abort_failure env);
+        Alcotest.test_case "multipart upload aborts on progress exception"
+          `Quick
+          (test_multipart_upload_aborts_on_progress_exception env);
+        Alcotest.test_case "multipart upload aborts on progress cancellation"
+          `Quick
+          (test_multipart_upload_aborts_on_progress_cancellation env);
         Alcotest.test_case "resume multipart upload" `Quick
           (test_resume_multipart_upload_file env);
         Alcotest.test_case "download uses get below threshold" `Quick

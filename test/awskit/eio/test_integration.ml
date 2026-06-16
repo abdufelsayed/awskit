@@ -493,6 +493,31 @@ let test_with_response_body_preserves_consumer_error _env =
       Alcotest.failf "expected consumer error, got: %a" Awskit.Error.pp error
   | Ok _ -> Alcotest.fail "expected consumer error"
 
+let test_with_response_body_drains_after_consumer_exception _env =
+  let exception Consumer_failed in
+  let body = eio_response_body ~max_response_drain_bytes:64 "abcdef" in
+  let observed =
+    try
+      ignore
+        (Awskit_eio__Runtime.Response_body.with_reader body
+           ~consume:(fun _reader -> raise Consumer_failed)
+          : (unit, Awskit.Error.t) Result.t);
+      `Returned
+    with exn -> `Raised exn
+  in
+  match observed with
+  | `Raised exn when Stdlib.( == ) exn Consumer_failed -> (
+      match
+        Awskit_eio__Runtime.Response_body.with_reader body
+          ~consume:(fun reader -> Ok (read_all reader (Buffer.create 16)))
+      with
+      | Ok remaining -> Alcotest.(check string) "remaining body" "" remaining
+      | Error error ->
+          Alcotest.failf "unexpected drain read error: %a" Awskit.Error.pp error
+      )
+  | `Raised exn -> Alcotest.failf "unexpected exception: %s" (Exn.to_string exn)
+  | `Returned -> Alcotest.fail "expected consumer exception"
+
 let suite env =
   [
     ( "integration:connection",
@@ -538,5 +563,8 @@ let suite env =
             test_with_response_body_drain_enforces_limit env);
         Alcotest.test_case "consumer error wins over drain error" `Quick
           (fun () -> test_with_response_body_preserves_consumer_error env);
+        Alcotest.test_case "consumer exception still drains body" `Quick
+          (fun () ->
+            test_with_response_body_drains_after_consumer_exception env);
       ] );
   ]

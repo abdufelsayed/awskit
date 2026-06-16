@@ -538,18 +538,37 @@ struct
             |> Awskit.Error.Internal.with_context
                  "multipart upload failed and abort also failed")
     in
-    match
-      upload_missing_parts conn ~bucket ~key ~upload_id ~options ~path
-        ?on_progress ~initial_completed:0L specs
-    with
+    let abort_cleanup_ignore_errors () =
+      Eio.Cancel.protect (fun () ->
+          match
+            S3.Multipart.abort_upload conn ~bucket ~key ~upload_id
+              ~options:options.abort_options ()
+          with
+          | Ok _ | Error _ -> ()
+          | exception _ -> ())
+    in
+    let abort_then_raise exn =
+      abort_cleanup_ignore_errors ();
+      raise exn
+    in
+    let upload_and_complete () =
+      match
+        upload_missing_parts conn ~bucket ~key ~upload_id ~options ~path
+          ?on_progress ~initial_completed:0L specs
+      with
+      | Error error -> Error error
+      | Ok parts -> (
+          match
+            complete_multipart conn ~bucket ~key ~upload_id ~options
+              created.upload parts
+          with
+          | Ok _ as result -> result
+          | Error _ as error -> error)
+    in
+    match upload_and_complete () with
+    | exception exn -> abort_then_raise exn
+    | Ok _ as result -> result
     | Error error -> abort_and_return error
-    | Ok parts -> (
-        match
-          complete_multipart conn ~bucket ~key ~upload_id ~options
-            created.upload parts
-        with
-        | Ok _ as result -> result
-        | Error error -> abort_and_return error)
 
   let upload_file conn ~bucket ~key ?options ?on_progress ~path () =
     let options =
