@@ -5,6 +5,10 @@ let is_decode_error error =
   let open Awskit.Error in
   match kind error with Decode _ -> true | _ -> false
 
+let is_validation_field field error =
+  Awskit.Error.is_validation error
+  && Awskit.Error.validation_field error = Some field
+
 let service_error ?code ?message status =
   Awskit.Error.Internal.service ~status ?code ?message ~headers:[] ()
 
@@ -544,6 +548,30 @@ let test_copy_object_embedded_error () =
   | Error error -> Alcotest.failf "unexpected copy error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected embedded copy error"
 
+let test_copy_object_replace_metadata_validates_metadata () =
+  let options =
+    {
+      Copy_object.default_options with
+      metadata_directive =
+        Some (`Replace [ ("x-amz-meta-origin", "bad-prefix") ]);
+    }
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          {|<CopyObjectResult><ETag>"copy"</ETag></CopyObjectResult>|};
+      ]
+  in
+  match
+    Recording_s3.Object.copy conn ~source_bucket:"my-bucket" ~source_key:"file"
+      ~destination_bucket:"my-bucket" ~destination_key:"copy" ~options ()
+  with
+  | Error error when is_validation_field "metadata" error ->
+      Alcotest.(check int) "no request sent" 0 (List.length conn.calls)
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected metadata validation error"
+
 let test_object_checksum_mode_and_expected_owner_headers () =
   let expected_owner = "123456789012" in
   let copy_body =
@@ -708,6 +736,8 @@ let suite =
           test_object_tagging_rejects_incomplete_tag_xml;
         Alcotest.test_case "copy object embedded error" `Quick
           test_copy_object_embedded_error;
+        Alcotest.test_case "copy replace metadata validates metadata" `Quick
+          test_copy_object_replace_metadata_validates_metadata;
         Alcotest.test_case "object checksum mode and expected owner headers"
           `Quick test_object_checksum_mode_and_expected_owner_headers;
       ] );

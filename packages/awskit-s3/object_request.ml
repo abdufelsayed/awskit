@@ -40,6 +40,16 @@ module Make (C : Request_context.S) = struct
                   ?content_encoding:options.content_encoding
                   ?content_disposition:options.content_disposition ()))
 
+  let validate_copy_options (options : Copy_object.options) =
+    match
+      validate_opt validate_checksum_algorithm options.checksum_algorithm
+    with
+    | Error _ as error -> error
+    | Ok () -> (
+        match options.metadata_directive with
+        | Some (`Replace metadata) -> validate_metadata metadata
+        | Some `Copy | None -> Ok ())
+
   let put conn ~bucket ~key ?options ~body () =
     let options = Option.value ~default:Put_object.default_options options in
     let return_error =
@@ -342,10 +352,7 @@ module Make (C : Request_context.S) = struct
                     (Awskit.Signing.uri_encode ~encode_slash:true
                        (Object.Version_id.to_string version_id))
             in
-            match
-              validate_opt validate_checksum_algorithm
-                options.checksum_algorithm
-            with
+            match validate_copy_options options with
             | Error error -> return_error error
             | Ok () -> (
                 let headers =

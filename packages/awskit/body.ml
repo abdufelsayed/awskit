@@ -4,19 +4,21 @@ open Base
 module Payload_hash = struct
   type t = Sha256_hex of string | Unsigned_payload [@@deriving eq]
 
-  let is_lower_hex c =
-    Char.is_digit c || (Char.( >= ) c 'a' && Char.( <= ) c 'f')
+  let is_hex c =
+    Char.is_digit c
+    || (Char.( >= ) c 'a' && Char.( <= ) c 'f')
+    || (Char.( >= ) c 'A' && Char.( <= ) c 'F')
 
   let of_sha256_hex value =
     if String.length value <> 64 then
       Error
         (Aws_error.Internal.validation ~field:"payload_hash"
-           "SHA256 payload hash must be 64 lowercase hex characters")
-    else if not (String.for_all value ~f:is_lower_hex) then
+           "SHA256 payload hash must be 64 hex characters")
+    else if not (String.for_all value ~f:is_hex) then
       Error
         (Aws_error.Internal.validation ~field:"payload_hash"
-           "SHA256 payload hash must be lowercase hex")
-    else Ok (Sha256_hex value)
+           "SHA256 payload hash must be hex")
+    else Ok (Sha256_hex (String.lowercase value))
 
   let of_sha256_hex_exn value =
     Aws_error.Internal.get_ok_exn (of_sha256_hex value)

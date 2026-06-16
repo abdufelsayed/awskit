@@ -16,6 +16,7 @@ let has_ctl_or_del s =
 let invalid ?field message =
   Error (Aws_error.Internal.validation ?field message)
 
+let decode message = Error (Aws_error.Internal.decode message)
 let result_exn = Aws_error.Internal.get_ok_exn
 
 let validate_status status =
@@ -77,14 +78,8 @@ let header t name = header_in t.headers name
 let required_header t name =
   match header t name with
   | Some value when not (String.is_empty value) -> Ok value
-  | Some value ->
-      Error
-        (Aws_error.Internal.validation ~field:name
-           (Fmt.str "required response header is empty: %s" value))
-  | None ->
-      Error
-        (Aws_error.Internal.validation ~field:name
-           "required response header is missing")
+  | Some _ -> decode (Fmt.str "required response header is empty: %s" name)
+  | None -> decode (Fmt.str "required response header is missing: %s" name)
 
 let header_int t name =
   match header t name with
@@ -93,9 +88,9 @@ let header_int t name =
       match Int.of_string_opt value with
       | Some parsed when parsed >= 0 -> Ok (Some parsed)
       | _ ->
-          Error
-            (Aws_error.Internal.validation ~field:name
-               (Fmt.str "expected non-negative integer header, got %s" value)))
+          decode
+            (Fmt.str "expected non-negative integer response header %s, got %s"
+               name value))
 
 let is_success t = t.status >= 200 && t.status < 300
 let request_id t = t.request_id

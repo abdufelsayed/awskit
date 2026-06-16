@@ -8,6 +8,9 @@ let check_validation_error name result =
       Alcotest.failf "%s returned unexpected error: %s" name
         (Awskit.Error.to_string_hum error)
 
+let is_decode_error error =
+  match Awskit.Error.kind error with Decode _ -> true | _ -> false
+
 let test_credentials_result_and_exn () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
@@ -21,6 +24,10 @@ let test_credentials_result_and_exn () =
 let test_region_result_and_exn () =
   let region = Awskit.Region.of_string_exn "us-east-1" in
   Alcotest.(check string) "region" "us-east-1" (Awskit.Region.to_string region);
+  let custom_region = Awskit.Region.of_string_exn "local:test/one" in
+  Alcotest.(check string)
+    "custom region" "local:test/one"
+    (Awskit.Region.to_string custom_region);
   check_validation_error "blank region" (Awskit.Region.of_string "")
 
 let test_endpoint_result_and_exn () =
@@ -40,8 +47,16 @@ let test_payload_hash_result_and_exn () =
   ignore
     (Awskit.Body.Payload_hash.of_sha256_hex_exn hash
       : Awskit.Body.Payload_hash.t);
+  let uppercase_hash = String.uppercase hash in
+  let parsed = Awskit.Body.Payload_hash.of_sha256_hex_exn uppercase_hash in
+  Alcotest.(check string)
+    "uppercase hash normalizes to lowercase" hash
+    (Awskit.Body.Payload_hash.to_header_value parsed);
   check_validation_error "bad payload hash"
-    (Awskit.Body.Payload_hash.of_sha256_hex "not-hex")
+    (Awskit.Body.Payload_hash.of_sha256_hex "not-hex");
+  let non_hex_hash = String.make 64 'g' in
+  check_validation_error "non-hex payload hash"
+    (Awskit.Body.Payload_hash.of_sha256_hex non_hex_hash)
 
 let test_runtime_request_response_body_names () =
   let request_descriptor =
@@ -98,7 +113,53 @@ let test_request_response_contracts () =
     (Awskit.Response.request_id response);
   Alcotest.(check (result (option int) reject))
     "content length" (Ok (Some 42))
-    (Awskit.Response.header_int response "content-length")
+    (Awskit.Response.header_int response "content-length");
+  check_validation_error "bad response status"
+    (Awskit.Response.create ~status:99 ());
+  check_validation_error "bad response header"
+    (Awskit.Response.create ~status:200
+       ~headers:[ ("content-type", "text/plain\nbad") ]
+       ())
+
+let test_response_header_parse_failures_are_decode_errors () =
+  let missing = Awskit.Response.create_exn ~status:200 () in
+  (match Awskit.Response.required_header missing "etag" with
+  | Error error when is_decode_error error -> ()
+  | Error error ->
+      Alcotest.failf "missing header returned unexpected error: %a"
+        Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "expected missing header decode error");
+  let empty =
+    Awskit.Response.create_exn ~status:200 ~headers:[ ("etag", "") ] ()
+  in
+  (match Awskit.Response.required_header empty "etag" with
+  | Error error when is_decode_error error -> ()
+  | Error error ->
+      Alcotest.failf "empty header returned unexpected error: %a"
+        Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "expected empty header decode error");
+  let malformed =
+    Awskit.Response.create_exn ~status:200
+      ~headers:[ ("content-length", "not-an-int") ]
+      ()
+  in
+  (match Awskit.Response.header_int malformed "content-length" with
+  | Error error when is_decode_error error -> ()
+  | Error error ->
+      Alcotest.failf "bad int header returned unexpected error: %a"
+        Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "expected malformed header decode error");
+  let negative =
+    Awskit.Response.create_exn ~status:200
+      ~headers:[ ("content-length", "-1") ]
+      ()
+  in
+  match Awskit.Response.header_int negative "content-length" with
+  | Error error when is_decode_error error -> ()
+  | Error error ->
+      Alcotest.failf "negative int header returned unexpected error: %a"
+        Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "expected negative header decode error"
 
 let test_error_context_and_sexp () =
   let error =
@@ -289,6 +350,8 @@ let suite =
           test_runtime_request_response_body_names;
         Alcotest.test_case "request/response metadata" `Quick
           test_request_response_contracts;
+        Alcotest.test_case "response header parse failures are decode errors"
+          `Quick test_response_header_parse_failures_are_decode_errors;
         Alcotest.test_case "error context and sexp" `Quick
           test_error_context_and_sexp;
         Alcotest.test_case "error multiple preserves failures" `Quick
