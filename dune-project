@@ -7,7 +7,7 @@
 (source
  (github abdufelsayed/awskit))
 
-(documentation "https://awskit.abdufelsayed.dev/")
+(documentation "https://abdufelsayed.github.io/awskit/")
 
 (authors "Abdullah Elsayed <hey@abdufelsayed.dev>")
 
