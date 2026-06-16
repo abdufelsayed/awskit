@@ -22,63 +22,75 @@ let parse_checksum_summary nodes =
 
 let parse_page ~response body =
   let* nodes = Xml.decode_root body ~name:"ListVersionsResult" in
-  let versions =
-    Xml.children "Version" nodes
-    |> List.filter_map (fun nodes ->
-        match Xml.child_text "Key" nodes with
-        | None -> None
-        | Some key ->
-            Some
-              {
-                List_object_versions.key;
-                version_id =
-                  Option.bind
-                    (Xml.child_text "VersionId" nodes)
-                    parse_version_id;
-                is_latest =
-                  Option.bind
-                    (Xml.child_text "IsLatest" nodes)
-                    Response.parse_bool;
-                last_modified =
-                  Option.bind
-                    (Xml.child_text "LastModified" nodes)
-                    ptime_of_string;
-                etag =
-                  Option.bind (Xml.child_text "ETag" nodes) (fun v ->
-                      Result.to_option (Object.Etag.of_string v));
-                size =
-                  Option.bind (Xml.child_text "Size" nodes) int64_of_string_opt;
-                storage_class =
-                  Option.bind
-                    (Xml.child_text "StorageClass" nodes)
-                    Storage_class.of_string;
-                owner = parse_owner nodes;
-                checksum = parse_checksum_summary nodes;
-              })
+  let* versions =
+    Xml.children_result "Version" nodes ~f:(fun index nodes ->
+        let path = Fmt.str "ListVersionsResult.Version[%d]" index in
+        let* key = Xml.required_child_text ~path "Key" nodes in
+        let* version_id =
+          Xml.optional_child_parse ~path "VersionId" parse_version_id nodes
+        in
+        let* is_latest =
+          Xml.optional_child_parse ~path "IsLatest" Response.parse_bool nodes
+        in
+        let* last_modified =
+          Xml.optional_child_parse ~path "LastModified" ptime_of_string nodes
+        in
+        let* etag =
+          Xml.optional_child_result ~path "ETag" Object.Etag.of_string nodes
+        in
+        let* size =
+          Xml.optional_child_parse ~path "Size" int64_of_string_opt nodes
+        in
+        let* storage_class =
+          Xml.optional_child_parse ~path "StorageClass" Storage_class.of_string
+            nodes
+        in
+        Ok
+          {
+            List_object_versions.key;
+            version_id;
+            is_latest;
+            last_modified;
+            etag;
+            size;
+            storage_class;
+            owner = parse_owner nodes;
+            checksum = parse_checksum_summary nodes;
+          })
   in
-  let delete_markers =
-    Xml.children "DeleteMarker" nodes
-    |> List.filter_map (fun nodes ->
-        match Xml.child_text "Key" nodes with
-        | None -> None
-        | Some key ->
-            Some
-              {
-                List_object_versions.key;
-                version_id =
-                  Option.bind
-                    (Xml.child_text "VersionId" nodes)
-                    parse_version_id;
-                is_latest =
-                  Option.bind
-                    (Xml.child_text "IsLatest" nodes)
-                    Response.parse_bool;
-                last_modified =
-                  Option.bind
-                    (Xml.child_text "LastModified" nodes)
-                    ptime_of_string;
-                owner = parse_owner nodes;
-              })
+  let* delete_markers =
+    Xml.children_result "DeleteMarker" nodes ~f:(fun index nodes ->
+        let path = Fmt.str "ListVersionsResult.DeleteMarker[%d]" index in
+        let* key = Xml.required_child_text ~path "Key" nodes in
+        let* version_id =
+          Xml.optional_child_parse ~path "VersionId" parse_version_id nodes
+        in
+        let* is_latest =
+          Xml.optional_child_parse ~path "IsLatest" Response.parse_bool nodes
+        in
+        let* last_modified =
+          Xml.optional_child_parse ~path "LastModified" ptime_of_string nodes
+        in
+        Ok
+          {
+            List_object_versions.key;
+            version_id;
+            is_latest;
+            last_modified;
+            owner = parse_owner nodes;
+          })
+  in
+  let* is_truncated =
+    Xml.optional_child_parse ~path:"ListVersionsResult" "IsTruncated"
+      Response.parse_bool nodes
+  in
+  let* version_id_marker =
+    Xml.optional_child_parse ~path:"ListVersionsResult" "VersionIdMarker"
+      parse_version_id nodes
+  in
+  let* next_version_id_marker =
+    Xml.optional_child_parse ~path:"ListVersionsResult" "NextVersionIdMarker"
+      parse_version_id nodes
   in
   Ok
     {
@@ -90,16 +102,10 @@ let parse_page ~response body =
       common_prefixes =
         Xml.children "CommonPrefixes" nodes
         |> List.filter_map (Xml.child_text "Prefix");
-      is_truncated =
-        Option.value ~default:false
-          (Option.bind (Xml.child_text "IsTruncated" nodes) Response.parse_bool);
+      is_truncated = Option.value ~default:false is_truncated;
       key_marker = Xml.child_text "KeyMarker" nodes;
-      version_id_marker =
-        Option.bind (Xml.child_text "VersionIdMarker" nodes) parse_version_id;
+      version_id_marker;
       next_key_marker = Xml.child_text "NextKeyMarker" nodes;
-      next_version_id_marker =
-        Option.bind
-          (Xml.child_text "NextVersionIdMarker" nodes)
-          parse_version_id;
+      next_version_id_marker;
       response;
     }

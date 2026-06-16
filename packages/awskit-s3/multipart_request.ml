@@ -358,57 +358,87 @@ module Make (C : Request_context.S) = struct
                              Xml.decode_root body ~name:"ListPartsResult"
                            with
                            | Error error -> return_error error
-                           | Ok nodes ->
-                               let parts =
-                                 Xml.children "Part" nodes
-                                 |> List.filter_map (fun nodes ->
+                           | Ok nodes -> (
+                               match
+                                 Xml.children_result "Part" nodes
+                                   ~f:(fun index nodes ->
+                                     let path =
+                                       Fmt.str "ListPartsResult.Part[%d]" index
+                                     in
                                      match
-                                       Option.bind
-                                         (Xml.child_text "PartNumber" nodes)
-                                         int_of_string_opt
+                                       Xml.optional_child_parse ~path
+                                         "PartNumber" int_of_string_opt nodes
                                      with
-                                     | None -> None
-                                     | Some part_number ->
-                                         Some
-                                           {
-                                             List_parts.part_number;
-                                             etag =
-                                               Option.bind
-                                                 (Xml.child_text "ETag" nodes)
-                                                 (fun v ->
-                                                   Result.to_option
-                                                     (Object.Etag.of_string v));
-                                             size =
-                                               Option.bind
-                                                 (Xml.child_text "Size" nodes)
-                                                 int64_of_string_opt;
-                                             last_modified =
-                                               Option.bind
-                                                 (Xml.child_text "LastModified"
-                                                    nodes)
-                                                 ptime_of_string;
-                                             checksum =
-                                               checksum_response_from_xml nodes;
-                                           })
-                               in
-                               return_ok
-                                 {
-                                   List_parts.parts;
-                                   is_truncated =
-                                     Option.value ~default:false
-                                       (Option.bind
-                                          (Xml.child_text "IsTruncated" nodes)
-                                          parse_bool);
-                                   next_part_number_marker =
-                                     Option.bind
-                                       (Xml.child_text "NextPartNumberMarker"
-                                          nodes)
-                                       int_of_string_opt;
-                                   checksum_type =
-                                     Option.map Object.Checksum.Type.of_string
-                                       (Xml.child_text "ChecksumType" nodes);
-                                   response;
-                                 })))))
+                                     | Error _ as error -> error
+                                     | Ok part_number -> (
+                                         match
+                                           Xml.optional_child_result ~path
+                                             "ETag" Object.Etag.of_string nodes
+                                         with
+                                         | Error _ as error -> error
+                                         | Ok etag -> (
+                                             match
+                                               Xml.optional_child_parse ~path
+                                                 "Size" int64_of_string_opt
+                                                 nodes
+                                             with
+                                             | Error _ as error -> error
+                                             | Ok size -> (
+                                                 match
+                                                   Xml.optional_child_parse
+                                                     ~path "LastModified"
+                                                     ptime_of_string nodes
+                                                 with
+                                                 | Error _ as error -> error
+                                                 | Ok last_modified -> (
+                                                     match part_number with
+                                                     | None ->
+                                                         Xml.decode_field_error
+                                                           ~path
+                                                           "missing required \
+                                                            <PartNumber>"
+                                                     | Some part_number ->
+                                                         Ok
+                                                           {
+                                                             List_parts
+                                                             .part_number;
+                                                             etag;
+                                                             size;
+                                                             last_modified;
+                                                             checksum =
+                                                               checksum_response_from_xml
+                                                                 nodes;
+                                                           })))))
+                               with
+                               | Error error -> return_error error
+                               | Ok parts -> (
+                                   match
+                                     ( Xml.optional_child_parse
+                                         ~path:"ListPartsResult" "IsTruncated"
+                                         parse_bool nodes,
+                                       Xml.optional_child_parse
+                                         ~path:"ListPartsResult"
+                                         "NextPartNumberMarker"
+                                         int_of_string_opt nodes )
+                                   with
+                                   | Error error, _ | _, Error error ->
+                                       return_error error
+                                   | Ok is_truncated, Ok next_part_number_marker
+                                     ->
+                                       return_ok
+                                         {
+                                           List_parts.parts;
+                                           is_truncated =
+                                             Option.value ~default:false
+                                               is_truncated;
+                                           next_part_number_marker;
+                                           checksum_type =
+                                             Option.map
+                                               Object.Checksum.Type.of_string
+                                               (Xml.child_text "ChecksumType"
+                                                  nodes);
+                                           response;
+                                         })))))))
 
   module List_parts = struct
     let validate_max_pages = function

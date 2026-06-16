@@ -14,30 +14,40 @@ let parse_checksum_summary nodes =
 
 let parse_page ~response body =
   let* nodes = Xml.decode_root body ~name:"ListBucketResult" in
-  let objects =
-    Xml.children "Contents" nodes
-    |> List.filter_map (fun nodes ->
-        match Xml.child_text "Key" nodes with
-        | None -> None
-        | Some key ->
-            Some
-              {
-                List_objects_v2.key;
-                size =
-                  Option.bind (Xml.child_text "Size" nodes) int64_of_string_opt;
-                etag =
-                  Option.bind (Xml.child_text "ETag" nodes) (fun v ->
-                      Result.to_option (Object.Etag.of_string v));
-                last_modified =
-                  Option.bind
-                    (Xml.child_text "LastModified" nodes)
-                    ptime_of_string;
-                storage_class =
-                  Option.bind
-                    (Xml.child_text "StorageClass" nodes)
-                    Storage_class.of_string;
-                checksum = parse_checksum_summary nodes;
-              })
+  let* objects =
+    Xml.children_result "Contents" nodes ~f:(fun index nodes ->
+        let path = Fmt.str "ListBucketResult.Contents[%d]" index in
+        let* key = Xml.required_child_text ~path "Key" nodes in
+        let* size =
+          Xml.optional_child_parse ~path "Size" int64_of_string_opt nodes
+        in
+        let* etag =
+          Xml.optional_child_result ~path "ETag" Object.Etag.of_string nodes
+        in
+        let* last_modified =
+          Xml.optional_child_parse ~path "LastModified" ptime_of_string nodes
+        in
+        let* storage_class =
+          Xml.optional_child_parse ~path "StorageClass" Storage_class.of_string
+            nodes
+        in
+        Ok
+          {
+            List_objects_v2.key;
+            size;
+            etag;
+            last_modified;
+            storage_class;
+            checksum = parse_checksum_summary nodes;
+          })
+  in
+  let* key_count =
+    Xml.optional_child_parse ~path:"ListBucketResult" "KeyCount"
+      int_of_string_opt nodes
+  in
+  let* is_truncated =
+    Xml.optional_child_parse ~path:"ListBucketResult" "IsTruncated"
+      Response.parse_bool nodes
   in
   Ok
     {
@@ -48,11 +58,8 @@ let parse_page ~response body =
       common_prefixes =
         Xml.children "CommonPrefixes" nodes
         |> List.filter_map (Xml.child_text "Prefix");
-      key_count =
-        Option.bind (Xml.child_text "KeyCount" nodes) int_of_string_opt;
-      is_truncated =
-        Option.value ~default:false
-          (Option.bind (Xml.child_text "IsTruncated" nodes) Response.parse_bool);
+      key_count;
+      is_truncated = Option.value ~default:false is_truncated;
       continuation_token = Xml.child_text "ContinuationToken" nodes;
       next_continuation_token = Xml.child_text "NextContinuationToken" nodes;
       response;

@@ -27,7 +27,7 @@ let parse_list body =
   Ok buckets
 
 let parse_location body =
-  let* _, nodes = Xml.root body in
+  let* nodes = Xml.decode_root body ~name:"LocationConstraint" in
   let value = String.trim (Xml.text_content nodes) in
   let value = if value = "" then "us-east-1" else value in
   let value = if value = "EU" then "eu-west-1" else value in

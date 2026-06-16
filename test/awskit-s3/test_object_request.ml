@@ -465,6 +465,45 @@ let test_malformed_xml_responses () =
       Alcotest.failf "unexpected multipart decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected list parts decode error"
 
+let test_object_list_rejects_malformed_known_fields () =
+  let bad_size =
+    "<ListBucketResult><Contents><Key>a.txt</Key><Size>not-int</Size></Contents></ListBucketResult>"
+  in
+  let conn = Recording_runtime.connect [ response 200 bad_size ] in
+  match Recording_s3.Object.list conn ~bucket:"my-bucket" () with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions size" true
+        (string_contains text ~substring:"Size")
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected malformed Size decode error"
+
+let test_object_versions_rejects_malformed_known_fields () =
+  let body =
+    "<ListVersionsResult><Version><Key>a.txt</Key><IsLatest>maybe</IsLatest></Version></ListVersionsResult>"
+  in
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  match Recording_s3.Object.list_versions conn ~bucket:"my-bucket" () with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions IsLatest" true
+        (string_contains text ~substring:"IsLatest")
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected malformed IsLatest decode error"
+
+let test_object_list_allows_unknown_extra_elements () =
+  let body =
+    "<ListBucketResult><FutureField>ok</FutureField><Contents><Key>a.txt</Key><Size>1</Size><FutureObjectField>ok</FutureObjectField></Contents></ListBucketResult>"
+  in
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  let result =
+    Recording_s3.Object.list conn ~bucket:"my-bucket" ()
+    |> ok_or_fail "list with unknown fields"
+  in
+  Alcotest.(check int) "object count" 1 (List.length result.objects)
+
 let test_object_tagging_validation_error_has_operation_context () =
   let conn = Recording_runtime.connect [] in
   match Recording_s3.Object.Tagging.get conn ~bucket:"ab" ~key:"file" () with
@@ -477,6 +516,20 @@ let test_object_tagging_validation_error_has_operation_context () =
       Alcotest.(check bool)
         "mentions resource" true
         (string_contains text ~substring:"s3://ab/file")
+
+let test_object_tagging_rejects_incomplete_tag_xml () =
+  let body = "<Tagging><TagSet><Tag><Key>env</Key></Tag></TagSet></Tagging>" in
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  match
+    Recording_s3.Object.Tagging.get conn ~bucket:"my-bucket" ~key:"file" ()
+  with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions Value" true
+        (string_contains text ~substring:"Value")
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected incomplete tag decode error"
 
 let test_copy_object_embedded_error () =
   let body =
@@ -643,8 +696,16 @@ let suite =
           test_find_preserves_consumer_not_found_error;
         Alcotest.test_case "malformed xml responses" `Quick
           test_malformed_xml_responses;
+        Alcotest.test_case "object list rejects malformed known fields" `Quick
+          test_object_list_rejects_malformed_known_fields;
+        Alcotest.test_case "object versions rejects malformed known fields"
+          `Quick test_object_versions_rejects_malformed_known_fields;
+        Alcotest.test_case "object list allows unknown extra elements" `Quick
+          test_object_list_allows_unknown_extra_elements;
         Alcotest.test_case "object tagging validation context" `Quick
           test_object_tagging_validation_error_has_operation_context;
+        Alcotest.test_case "object tagging rejects incomplete tag xml" `Quick
+          test_object_tagging_rejects_incomplete_tag_xml;
         Alcotest.test_case "copy object embedded error" `Quick
           test_copy_object_embedded_error;
         Alcotest.test_case "object checksum mode and expected owner headers"

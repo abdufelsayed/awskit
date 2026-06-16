@@ -5,6 +5,9 @@ let is_validation_field field error =
   Awskit.Error.is_validation error
   && Awskit.Error.validation_field error = Some field
 
+let is_decode_error error =
+  match Awskit.Error.kind error with Decode _ -> true | _ -> false
+
 let test_bucket_config_parse () =
   let versioning =
     {|<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>|}
@@ -168,6 +171,19 @@ let test_decode_error_mentions_xml_document () =
         "mentions XML document" true
         (string_contains ~substring:"decoding XML document" text)
 
+let test_decode_root_rejects_wrong_root () =
+  match
+    Awskit_s3__Bucket_result_xml.parse_location
+      "<NotLocationConstraint>us-east-1</NotLocationConstraint>"
+  with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions expected root" true
+        (string_contains ~substring:"expected LocationConstraint" text)
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected wrong-root decode error"
+
 let suite =
   [
     ( "bucket xml",
@@ -181,5 +197,7 @@ let suite =
           test_bucket_encryption_unknown_write_rejected;
         Alcotest.test_case "decode error mentions XML document" `Quick
           test_decode_error_mentions_xml_document;
+        Alcotest.test_case "decode root rejects wrong root" `Quick
+          test_decode_root_rejects_wrong_root;
       ] );
   ]

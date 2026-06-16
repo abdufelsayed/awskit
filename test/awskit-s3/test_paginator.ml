@@ -1,6 +1,9 @@
 open Awskit_s3
 open Awskit_s3_test
 
+let is_decode_error error =
+  match Awskit.Error.kind error with Decode _ -> true | _ -> false
+
 let test_object_paginator_follows_tokens () =
   let conn =
     Recording_runtime.connect
@@ -73,6 +76,27 @@ let test_multipart_paginator_follows_markers () =
         (List.assoc_opt "part-number-marker" second.request.target.query)
   | _ -> Alcotest.fail "expected two calls"
 
+let test_multipart_list_parts_rejects_malformed_known_fields () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          "<ListPartsResult><Part><PartNumber>not-int</PartNumber></Part></ListPartsResult>";
+      ]
+  in
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  match
+    Recording_s3.Multipart.List_parts.parts conn ~bucket:"my-bucket"
+      ~key:"large.bin" ~upload_id ()
+  with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions PartNumber" true
+        (string_contains text ~substring:"PartNumber")
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected malformed PartNumber decode error"
+
 let suite =
   [
     ( "paginator",
@@ -83,5 +107,7 @@ let suite =
           test_object_paginator_max_pages;
         Alcotest.test_case "multipart paginator follows markers" `Quick
           test_multipart_paginator_follows_markers;
+        Alcotest.test_case "multipart list parts rejects malformed fields"
+          `Quick test_multipart_list_parts_rejects_malformed_known_fields;
       ] );
   ]

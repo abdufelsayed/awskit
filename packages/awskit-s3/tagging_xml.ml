@@ -14,11 +14,8 @@ let xml_tags tags =
 let parse_tags body =
   let* nodes = Xml.decode_root body ~name:"Tagging" in
   let tag_set = Option.value ~default:[] (Xml.child "TagSet" nodes) in
-  let tags =
-    Xml.children "Tag" tag_set
-    |> List.filter_map (fun nodes ->
-        match (Xml.child_text "Key" nodes, Xml.child_text "Value" nodes) with
-        | Some key, Some value -> Some { Tag.key; value }
-        | _ -> None)
-  in
-  Ok tags
+  Xml.children_result "Tag" tag_set ~f:(fun index nodes ->
+      let path = Fmt.str "Tagging.TagSet.Tag[%d]" index in
+      let* key = Xml.required_child_text ~path "Key" nodes in
+      let* value = Xml.required_child_text ~path "Value" nodes in
+      Ok { Tag.key; value })
