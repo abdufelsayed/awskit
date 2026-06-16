@@ -33,6 +33,8 @@ let check_multiple_error_text label error snippets =
 module Runtime = struct
   type connection = {
     response_body : string;
+    head_etag : Awskit_s3.Object.Etag.t option;
+    head_version_id : Awskit_s3.Object.Version_id.t option;
     mutable uploaded_body : string option;
     mutable put_count : int;
     mutable get_count : int;
@@ -42,6 +44,8 @@ module Runtime = struct
     mutable complete_count : int;
     mutable abort_count : int;
     mutable get_ranges : string list;
+    mutable ranged_get_version_ids : string option list;
+    mutable ranged_get_if_matches : string option list;
     mutable fail_ranged_get : bool;
     mutable fail_complete_upload : bool;
     mutable fail_abort_upload : bool;
@@ -169,9 +173,11 @@ let unsupported () =
   Lwt.return_error
     (Awskit.Error.Internal.validation ~field:"test" "not implemented")
 
-let connection ?(response_body = "") () =
+let connection ?(response_body = "") ?head_etag ?head_version_id () =
   {
     Runtime.response_body;
+    head_etag;
+    head_version_id;
     uploaded_body = None;
     put_count = 0;
     get_count = 0;
@@ -181,6 +187,8 @@ let connection ?(response_body = "") () =
     complete_count = 0;
     abort_count = 0;
     get_ranges = [];
+    ranged_get_version_ids = [];
+    ranged_get_if_matches = [];
     fail_ranged_get = false;
     fail_complete_upload = false;
     fail_abort_upload = false;
@@ -200,19 +208,24 @@ let put_result () : Awskit_s3.Put_object.result =
     response = response 200;
   }
 
-let get_result content_length : Awskit_s3.Get_object.result =
+let get_result ?etag ?version_id content_length : Awskit_s3.Get_object.result =
   {
-    etag = None;
+    etag;
     content_type = None;
     content_length;
     last_modified = None;
     metadata = [];
     storage_class = None;
-    version_id = None;
+    version_id;
     checksum = empty_checksum;
     server_side_encryption = None;
     response = response 200;
   }
+
+let etag_condition_to_string = function
+  | Awskit_s3.Object.Etag_condition.Any -> "*"
+  | Awskit_s3.Object.Etag_condition.Etag etag ->
+      Awskit_s3.Object.Etag.to_string etag
 
 let parse_range_header header body =
   match String.split_on_char '-' header with
@@ -251,6 +264,22 @@ module S3 = struct
         | Some range ->
             let header = Awskit_s3.Range.to_header range in
             conn.Runtime.get_ranges <- conn.Runtime.get_ranges @ [ header ];
+            conn.Runtime.ranged_get_version_ids <-
+              conn.Runtime.ranged_get_version_ids
+              @ [
+                  Option.bind options
+                    (fun (options : Awskit_s3.Get_object.options) ->
+                      Option.map Awskit_s3.Object.Version_id.to_string
+                        options.version_id);
+                ];
+            conn.Runtime.ranged_get_if_matches <-
+              conn.Runtime.ranged_get_if_matches
+              @ [
+                  Option.bind options
+                    (fun (options : Awskit_s3.Get_object.options) ->
+                      Option.map etag_condition_to_string
+                        options.preconditions.if_match);
+                ];
             parse_range_header header conn.Runtime.response_body
       in
       if
@@ -275,7 +304,8 @@ module S3 = struct
     let head conn ~bucket:_ ~key:_ ?options:_ () =
       conn.Runtime.head_count <- conn.Runtime.head_count + 1;
       Lwt.return_ok
-        (get_result
+        (get_result ?etag:conn.Runtime.head_etag
+           ?version_id:conn.Runtime.head_version_id
            (Some (Int64.of_int (String.length conn.Runtime.response_body))))
 
     let exists _ ~bucket:_ ~key:_ = unsupported ()
@@ -1260,6 +1290,76 @@ let test_download_file_uses_ranges_at_threshold () =
                  Int64.equal transferred (Int64.of_int (String.length body)))
                !progress))
 
+let test_download_file_ranges_use_head_version_id () =
+  let path = Filename.temp_file "awskit-download-ranged-version" ".bin" in
+  remove_file path;
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let part_size = Awskit_s3.Transfer.min_part_size in
+      let body = String.make part_size 'a' ^ "tail" in
+      let version_id = Awskit_s3.Object.Version_id.of_string_exn "version-1" in
+      let conn =
+        connection ~response_body:body ~head_version_id:version_id ()
+      in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = Int64.of_int part_size;
+          part_size;
+          concurrency = 2;
+        }
+      in
+      match
+        Lwt_main.run
+          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+             ~path ())
+      with
+      | Error error ->
+          Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
+      | Ok result ->
+          Alcotest.(check bool)
+            "strategy" true
+            (Awskit_s3.Transfer.download_strategy result = `Ranged);
+          Alcotest.(check (list (option string)))
+            "ranged version ids"
+            [ Some "version-1"; Some "version-1" ]
+            conn.Runtime.ranged_get_version_ids)
+
+let test_download_file_ranges_use_head_etag () =
+  let path = Filename.temp_file "awskit-download-ranged-etag" ".bin" in
+  remove_file path;
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let part_size = Awskit_s3.Transfer.min_part_size in
+      let body = String.make part_size 'a' ^ "tail" in
+      let etag = Awskit_s3.Object.Etag.of_string_exn "\"head-etag\"" in
+      let conn = connection ~response_body:body ~head_etag:etag () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = Int64.of_int part_size;
+          part_size;
+          concurrency = 2;
+        }
+      in
+      match
+        Lwt_main.run
+          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+             ~path ())
+      with
+      | Error error ->
+          Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
+      | Ok result ->
+          Alcotest.(check bool)
+            "strategy" true
+            (Awskit_s3.Transfer.download_strategy result = `Ranged);
+          Alcotest.(check (list (option string)))
+            "ranged if-matches"
+            [ Some "\"head-etag\""; Some "\"head-etag\"" ]
+            conn.Runtime.ranged_get_if_matches)
+
 let test_download_file_allows_small_range_parts () =
   let path = Filename.temp_file "awskit-download-small-ranges" ".bin" in
   remove_file path;
@@ -1400,6 +1500,10 @@ let suite () =
           `Quick test_download_file_ranged_progress_exception_propagates;
         Alcotest.test_case "download uses ranges at threshold" `Quick
           test_download_file_uses_ranges_at_threshold;
+        Alcotest.test_case "download ranges use head version id" `Quick
+          test_download_file_ranges_use_head_version_id;
+        Alcotest.test_case "download ranges use head etag" `Quick
+          test_download_file_ranges_use_head_etag;
         Alcotest.test_case "download allows small range parts" `Quick
           test_download_file_allows_small_range_parts;
         Alcotest.test_case "download rejects range option" `Quick

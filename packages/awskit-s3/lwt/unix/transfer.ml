@@ -689,6 +689,23 @@ struct
       expected_bucket_owner = options.expected_bucket_owner;
     }
 
+  let ranged_get_options_of_head (info : Awskit_s3.Head_object.result)
+      (get_options : Awskit_s3.Get_object.options) :
+      Awskit_s3.Get_object.options =
+    match info.version_id with
+    | Some version_id -> { get_options with version_id = Some version_id }
+    | None -> (
+        match info.etag with
+        | None -> get_options
+        | Some etag ->
+            let preconditions =
+              {
+                get_options.preconditions with
+                if_match = Some (Awskit_s3.Object.Etag_condition.Etag etag);
+              }
+            in
+            { get_options with preconditions })
+
   let download_range_to_fd conn ~bucket ~key ~options ~path ~fd ~write_mutex
       ~completed ?on_progress spec =
     let finish =
@@ -788,6 +805,8 @@ struct
         let* ranges =
           Lwt.return (range_specs ~content_length ~part_size:options.part_size)
         in
+        let get_options = ranged_get_options_of_head info options.get_options in
+        let options = { options with get_options } in
         with_temp_download path (fun temp_path fd ->
             let* () =
               ranged_download_to_fd conn ~bucket ~key ~options ?on_progress

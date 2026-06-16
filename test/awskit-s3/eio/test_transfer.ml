@@ -36,6 +36,8 @@ let check_multiple_error_text label error snippets =
 module Runtime = struct
   type connection = {
     response_body : string;
+    head_etag : Awskit_s3.Object.Etag.t option;
+    head_version_id : Awskit_s3.Object.Version_id.t option;
     mutable uploaded_body : string option;
     mutable put_count : int;
     mutable get_count : int;
@@ -47,6 +49,8 @@ module Runtime = struct
     mutable fail_complete_upload : bool;
     mutable fail_abort_upload : bool;
     mutable get_ranges : string list;
+    mutable ranged_get_version_ids : string option list;
+    mutable ranged_get_if_matches : string option list;
   }
 
   type 'a t = 'a
@@ -151,9 +155,11 @@ module Runtime = struct
     Error (Awskit.Error.Internal.transport ~retryable:false "not implemented")
 end
 
-let connection ?(response_body = "") () =
+let connection ?(response_body = "") ?head_etag ?head_version_id () =
   {
     Runtime.response_body;
+    head_etag;
+    head_version_id;
     uploaded_body = None;
     put_count = 0;
     get_count = 0;
@@ -165,6 +171,8 @@ let connection ?(response_body = "") () =
     fail_complete_upload = false;
     fail_abort_upload = false;
     get_ranges = [];
+    ranged_get_version_ids = [];
+    ranged_get_if_matches = [];
   }
 
 let response status = Awskit.Response.create_exn ~status ()
@@ -180,19 +188,24 @@ let put_result () : Awskit_s3.Put_object.result =
     response = response 200;
   }
 
-let get_result content_length : Awskit_s3.Get_object.result =
+let get_result ?etag ?version_id content_length : Awskit_s3.Get_object.result =
   {
-    etag = None;
+    etag;
     content_type = None;
     content_length;
     last_modified = None;
     metadata = [];
     storage_class = None;
-    version_id = None;
+    version_id;
     checksum = empty_checksum;
     server_side_encryption = None;
     response = response 200;
   }
+
+let etag_condition_to_string = function
+  | Awskit_s3.Object.Etag_condition.Any -> "*"
+  | Awskit_s3.Object.Etag_condition.Etag etag ->
+      Awskit_s3.Object.Etag.to_string etag
 
 let parse_range_header header body =
   match String.split_on_char '-' header with
@@ -232,6 +245,22 @@ module S3 = struct
         | Some range ->
             let header = Awskit_s3.Range.to_header range in
             conn.Runtime.get_ranges <- conn.Runtime.get_ranges @ [ header ];
+            conn.Runtime.ranged_get_version_ids <-
+              conn.Runtime.ranged_get_version_ids
+              @ [
+                  Option.bind options
+                    (fun (options : Awskit_s3.Get_object.options) ->
+                      Option.map Awskit_s3.Object.Version_id.to_string
+                        options.version_id);
+                ];
+            conn.Runtime.ranged_get_if_matches <-
+              conn.Runtime.ranged_get_if_matches
+              @ [
+                  Option.bind options
+                    (fun (options : Awskit_s3.Get_object.options) ->
+                      Option.map etag_condition_to_string
+                        options.preconditions.if_match);
+                ];
             parse_range_header header conn.Runtime.response_body
       in
       let consumed = consume { Runtime.body; offset = 0 } in
@@ -245,7 +274,8 @@ module S3 = struct
     let head conn ~bucket:_ ~key:_ ?options:_ () =
       conn.Runtime.head_count <- conn.Runtime.head_count + 1;
       Ok
-        (get_result
+        (get_result ?etag:conn.Runtime.head_etag
+           ?version_id:conn.Runtime.head_version_id
            (Some (Int64.of_int (String.length conn.Runtime.response_body))))
 
     let exists _ ~bucket:_ ~key:_ = assert false
@@ -832,6 +862,72 @@ let test_download_file_ranges env () =
         ]
         conn.Runtime.get_ranges)
 
+let test_download_file_ranges_use_head_version_id env () =
+  let native_path = Filename.temp_file "awskit-eio-download-version" ".bin" in
+  remove_file native_path;
+  Fun.protect
+    ~finally:(fun () -> remove_file native_path)
+    (fun () ->
+      let part_size = Awskit_s3.Transfer.min_part_size in
+      let body = String.make part_size 'a' ^ "tail" in
+      let version_id = Awskit_s3.Object.Version_id.of_string_exn "version-1" in
+      let conn =
+        connection ~response_body:body ~head_version_id:version_id ()
+      in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = Int64.of_int part_size;
+          part_size;
+          concurrency = 2;
+        }
+      in
+      let result =
+        Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+          ~path:(path_of_native env native_path)
+          ()
+        |> Result.get_ok
+      in
+      Alcotest.(check bool)
+        "strategy" true
+        (Awskit_s3.Transfer.download_strategy result = `Ranged);
+      Alcotest.(check (list (option string)))
+        "ranged version ids"
+        [ Some "version-1"; Some "version-1" ]
+        conn.Runtime.ranged_get_version_ids)
+
+let test_download_file_ranges_use_head_etag env () =
+  let native_path = Filename.temp_file "awskit-eio-download-etag" ".bin" in
+  remove_file native_path;
+  Fun.protect
+    ~finally:(fun () -> remove_file native_path)
+    (fun () ->
+      let part_size = Awskit_s3.Transfer.min_part_size in
+      let body = String.make part_size 'a' ^ "tail" in
+      let etag = Awskit_s3.Object.Etag.of_string_exn "\"head-etag\"" in
+      let conn = connection ~response_body:body ~head_etag:etag () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = Int64.of_int part_size;
+          part_size;
+          concurrency = 2;
+        }
+      in
+      let result =
+        Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+          ~path:(path_of_native env native_path)
+          ()
+        |> Result.get_ok
+      in
+      Alcotest.(check bool)
+        "strategy" true
+        (Awskit_s3.Transfer.download_strategy result = `Ranged);
+      Alcotest.(check (list (option string)))
+        "ranged if-matches"
+        [ Some "\"head-etag\""; Some "\"head-etag\"" ]
+        conn.Runtime.ranged_get_if_matches)
+
 let suite env =
   [
     ( "transfer",
@@ -868,5 +964,9 @@ let suite env =
           (test_download_file_uses_get_below_threshold env);
         Alcotest.test_case "download ranges" `Quick
           (test_download_file_ranges env);
+        Alcotest.test_case "download ranges use head version id" `Quick
+          (test_download_file_ranges_use_head_version_id env);
+        Alcotest.test_case "download ranges use head etag" `Quick
+          (test_download_file_ranges_use_head_etag env);
       ] );
   ]
