@@ -43,6 +43,8 @@ release packaging.
 - Validate CopyObject replacement metadata before request construction, treat
   malformed response headers as decode failures, and accept uppercase SHA-256
   payload hashes by normalizing them before validation. (fa14e23)
+- Treat empty `ListObjectVersions` pagination marker elements as absent while
+  keeping strict validation for malformed non-empty version IDs. (e83d337)
 
 ## Documentation, CI, and Release
 
