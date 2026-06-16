@@ -45,6 +45,12 @@ release packaging.
   payload hashes by normalizing them before validation. (fa14e23)
 - Treat empty `ListObjectVersions` pagination marker elements as absent while
   keeping strict validation for malformed non-empty version IDs. (e83d337)
+- Pin high-level ranged downloads to the object observed by `HeadObject` by
+  reusing the returned version ID or adding an ETag `If-Match` precondition for
+  ranged `GetObject` requests. (b251b54)
+- Reject negative S3 XML sizes, key counts, multipart list markers, and enforce
+  the valid multipart part number range when decoding list-parts responses.
+  (3732f9a)
 
 ## Documentation, CI, and Release
 
@@ -66,6 +72,9 @@ release packaging.
 - Added agent-facing maintenance workflow docs and PR templates for default,
   release, bugfix, documentation, CI, and breaking-change review flows.
   (ba1f090)
+- Added agent-facing OCaml development guidance for interface design, runtime
+  adapters, error handling, resource cleanup, wire parsing, tests, and package
+  boundaries. (d694da9)
 
 # 0.1.0
 
