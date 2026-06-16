@@ -1,25 +1,26 @@
 Prepare `vX.Y.Z`.
 
 This PR is the release vehicle. `CHANGES.md` is the canonical changelog; the
-preview below mirrors it with PR and commit references.
+release notes preview includes curated entries with material PR and commit
+references.
 
 ## Release Notes Preview
 
 ### Breaking
 
-- List breaking changes with PR and commit references.
+<!-- Add breaking changes with all material PR and commit references. -->
 
 ### Added
 
-- List additions with PR and commit references.
+<!-- Add additions with all material PR and commit references. -->
 
 ### Fixed
 
-- List fixes with PR and commit references.
+<!-- Add fixes with all material PR and commit references. -->
 
 ### Documentation, CI, and Release
 
-- List documentation, CI, and release changes with PR and commit references.
+<!-- Add documentation, CI, and release changes with all material PR and commit references. -->
 
 ## Release Files
 

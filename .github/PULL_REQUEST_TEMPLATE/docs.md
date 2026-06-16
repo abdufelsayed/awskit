@@ -1,17 +1,17 @@
-Update documentation.
+<!-- Update documentation. -->
 
 ## Summary
 
-- Describe the documentation change.
+<!-- Describe the documentation change. -->
 
 ## Audience
 
-- Describe who this helps: users, maintainers, release managers, or agents.
+<!-- Describe who this helps. -->
 
 ## Validation
 
-- List link checks, doc builds, spelling checks, or review performed.
+<!-- List link checks, doc builds, spelling checks, or review performed. -->
 
 ## Release Notes
 
-- Add the changelog-ready entry when this should appear in a release.
+<!-- Add the changelog-ready entry when this should appear in a release. -->

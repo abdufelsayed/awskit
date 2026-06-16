@@ -6,10 +6,16 @@ the person who requested the change.
 
 ## Start Here
 
-1. Read `AGENTS.md`.
-2. Read `docs/maintenance/ocaml-development.md` before changing OCaml source,
-   public interfaces, runtime adapters, parsers, tests, examples, or package
-   metadata.
+1. If this document was opened directly, read `AGENTS.md` first.
+2. Read the maintenance document that matches the change:
+
+   - `docs/maintenance/architecture.md` for repository architecture and
+     package-boundary rules.
+   - `docs/maintenance/ocaml-development.md` for OCaml implementation style.
+   - `docs/maintenance/testing.md` for test and validation rules.
+   - `docs/maintenance/changelog.md` for changelog entries.
+   - `docs/maintenance/release.md` for release work.
+
 3. Check the working tree:
 
    ```sh
@@ -52,35 +58,6 @@ Added GitHub Pages publishing for generated package documentation.
 In changelogs, prefer the second pattern only when it describes a shipped change.
 Do not add policy explanations as release entries.
 
-## Test Current Behavior
-
-Tests should protect the current supported contract. When removing old behavior,
-do not add tests that only prove the old symbol, option, or module is gone.
-
-Use these replacements instead:
-
-- Test the new API that replaces the old one.
-- Test the migration-sensitive behavior users rely on now.
-- Test the regression symptom that motivated the change.
-- Test public boundaries through exposed modules.
-- Let `dune build` prove removed symbols are no longer available.
-
-Good:
-
-```ocaml
-let test_object_get_uses_scoped_reader () =
-  (* Verify the supported reader workflow. *)
-  ()
-```
-
-Bad:
-
-```ocaml
-let test_object_get_string_no_longer_exists () =
-  (* Tombstone tests for removed symbols do not belong in the suite. *)
-  ()
-```
-
 ## Write Descriptions For Future Readers
 
 Commit messages, PR bodies, docs, and changelogs should be factual and durable.
@@ -114,31 +91,5 @@ content. Do not leave instructions in the final PR body.
 
 ## Verification
 
-Before claiming a change is finished, run a command that proves the claim.
-
-Common commands:
-
-```sh
-opam exec -- dune fmt
-opam exec -- dune build
-opam exec -- dune test
-opam exec -- dune build @doc
-git diff --check
-```
-
-For S3 contract work:
-
-```sh
-docker compose up -d
-opam exec -- dune build --force @minio-contract
-docker compose down -v
-```
-
-For releases:
-
-```sh
-scripts/release-check.sh
-```
-
-If a broad command is too expensive for the current change, run the focused
-command that proves the touched behavior and clearly state what was not run.
+Before claiming a change is finished, run a command that proves the claim. See
+`docs/maintenance/testing.md` for check-selection and regression-test rules.

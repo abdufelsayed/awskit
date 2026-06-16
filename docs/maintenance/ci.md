@@ -78,13 +78,5 @@ only.
 
 ## Regression Fix Standard
 
-For real bugs:
-
-1. Reproduce the failure.
-2. Add a focused regression test for the supported behavior.
-3. Verify the test fails before the fix when practical.
-4. Implement the narrow fix.
-5. Run the focused test and the failing CI-equivalent command.
-6. Update `CHANGES.md` if the fix belongs in the release notes.
-
+Follow `docs/maintenance/testing.md` for regression-test and validation rules.
 Do not add tests that only assert removed APIs or old behavior are absent.

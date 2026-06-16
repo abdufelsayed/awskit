@@ -29,6 +29,8 @@ Update `CHANGES.md` with the entries for the release. Follow
 
 - Include PR numbers when available.
 - Include commit hashes on every entry.
+- Include every PR and commit that materially contributed to a release entry.
+- Use the timeline as source material, not as one public entry per commit.
 - Order entries by release-branch timeline inside each section.
 - Describe shipped changes, not process commentary.
 
@@ -56,11 +58,15 @@ gh pr create \
 ```
 
 Then replace the template placeholders with the actual release notes preview.
+The preview should use the same curated entries as `CHANGES.md`: one bullet per
+meaningful released item, with all material PR and commit references attached
+to that bullet.
 
 The release PR body must include:
 
 - A short statement that this is the release vehicle.
 - A release notes preview with PR and commit references visible in the bullets.
+  Do not expand the preview into one bullet per commit.
 - Release files touched.
 - CI and local validation status.
 - Release gates before merge.
@@ -127,7 +133,8 @@ We discussed that the changelog should mention PRs.
 They should say:
 
 ```md
-The release notes preview mirrors `CHANGES.md` with PR and commit references.
+The release notes preview mirrors `CHANGES.md` with curated entries and all
+material PR and commit references.
 ```
 
 Release PRs can describe release mechanics because reviewers need that context.

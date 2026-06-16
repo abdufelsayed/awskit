@@ -3,8 +3,11 @@
 This directory documents maintainer and agent workflows for Awskit.
 
 - `agent-workflow.md` explains how agents should work in this repository.
-- `ocaml-development.md` defines Awskit-specific OCaml implementation,
-  interface, error-handling, parser, test, and package-boundary rules.
+- `architecture.md` defines Awskit's repository-specific engineering
+  constraints, including package boundaries, runtime adapters, error handling,
+  resource ownership, wire formats, streaming, and compatibility.
+- `ocaml-development.md` defines OCaml implementation and API style guidance.
+- `testing.md` defines test and validation rules.
 - `changelog.md` defines release-note and changelog rules.
 - `release.md` is the release branch, release PR, tagging, and publication
   playbook.
