@@ -34,47 +34,30 @@ release packaging.
 
 ## Fixed
 
-- Clean up scoped response bodies after consumer exceptions while preserving the
-  original exception, and abort fresh multipart uploads when post-create work
-  raises or is canceled. (391b216)
-- Reject malformed S3 XML response roots and malformed known fields for object
-  lists, object versions, multipart parts, and tagging entries while preserving
-  tolerance for unknown XML elements. (6213acd)
-- Validate CopyObject replacement metadata before request construction, treat
-  malformed response headers as decode failures, and accept uppercase SHA-256
-  payload hashes by normalizing them before validation. (fa14e23)
-- Treat empty `ListObjectVersions` pagination marker elements as absent while
-  keeping strict validation for malformed non-empty version IDs. (e83d337)
-- Pin high-level ranged downloads to the object observed by `HeadObject` by
-  reusing the returned version ID or adding an ETag `If-Match` precondition for
-  ranged `GetObject` requests. (b251b54)
-- Reject negative S3 XML sizes, key counts, multipart list markers, and enforce
-  the valid multipart part number range when decoding list-parts responses.
-  (3732f9a)
+- Hardened scoped body cleanup and transfer helpers so consumer exceptions,
+  canceled multipart uploads, and ranged downloads preserve resource ownership
+  and object identity. (391b216, b251b54)
+- Hardened S3 wire-format and request validation, rejecting malformed modeled
+  XML, invalid numeric fields, bad response headers, and invalid CopyObject
+  replacement metadata while preserving supported S3-compatible marker and
+  payload-hash forms. (6213acd, fa14e23, e83d337, 3732f9a)
 
 ## Documentation, CI, and Release
 
 - Expanded public API documentation across core Awskit modules, S3 operations,
   adapter entrypoints, simulator APIs, and guide examples. (#3, 0e2021c)
-- Updated README examples for the v0.2.0 S3 streaming API. (4a46fb0)
-- Added CI coverage for release branch pushes and OCaml 4.14 non-Eio package
-  builds. (058c0db)
-- Added local release validation for distribution artifacts and MinIO contract
-  tests. (7c08cb7)
-- Prepared package documentation publishing and release archive documentation
-  validation. (bc860a0)
-- Clarified how to choose the right package, configure S3 clients, use object
-  and transfer workflows, and handle structured errors. (0fe12dc)
-- Ensured workflow jobs run for push, schedule, and manual events while still
-  skipping draft pull request runs. (8631060)
+- Updated README and guide coverage for the v0.2.0 S3 streaming API, package
+  selection, client configuration, object and transfer workflows, and structured
+  error handling. (4a46fb0, 0fe12dc)
+- Added CI coverage for release branch pushes, non-PR workflow events, and
+  OCaml 4.14 non-Eio package builds. (058c0db, 8631060)
+- Added local release validation for distribution artifacts, generated package
+  documentation, and MinIO contract tests. (7c08cb7, bc860a0)
 - Added GitHub Pages publishing for package documentation on main pushes and
   updated package documentation URLs to the Pages site. (d5abfa6)
-- Added agent-facing maintenance workflow docs and PR templates for default,
-  release, bugfix, documentation, CI, and breaking-change review flows.
-  (ba1f090)
-- Added agent-facing OCaml development guidance for interface design, runtime
-  adapters, error handling, resource cleanup, wire parsing, tests, and package
-  boundaries. (d694da9)
+- Added maintainer workflow docs and PR templates for release, changelog, CI,
+  documentation, bugfix, breaking-change, and OCaml development work.
+  (ba1f090, d694da9, 17e5fff)
 
 # 0.1.0
 
