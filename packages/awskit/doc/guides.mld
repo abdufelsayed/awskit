@@ -1,8 +1,9 @@
 {0 AWS Core Guides}
 
-The core package is a pure foundation plus explicit runtime adapters at the
-edge. Service packages use this foundation for signing, request construction,
-response metadata, and structured errors.
+The core package gives service clients a runtime-agnostic foundation for
+signing, request construction, response metadata, retries, and structured
+errors. Runtime adapters sit at the edge of the application, where IO,
+concurrency, clocks, environment variables, and filesystem access belong.
 
 {1 Credentials}
 
@@ -28,7 +29,8 @@ let credentials =
     ()
 ]}
 
-Credentials are opaque. Use {!val:Awskit.Credentials.access_key_id} and
+Credentials are opaque so secret access keys are harder to log accidentally.
+Use {!val:Awskit.Credentials.access_key_id} and
 {!val:Awskit.Credentials.session_token} to read non-secret fields. The secret
 access key is accepted at construction time but not exposed afterward.
 
@@ -59,8 +61,8 @@ profile files when present.
 [awskit-lwt-unix] extends the local static sources with refreshable ECS
 container credentials and EC2 instance profile credentials. The EC2 provider
 uses IMDSv2 when available and refreshes metadata credentials before
-expiration. Process providers, web identity, and STS assume-role profiles
-remain future work.
+expiration. Process providers, web identity, and STS assume-role profiles are
+not currently implemented.
 
 {1 Regions And Endpoints}
 
@@ -79,8 +81,8 @@ let endpoint =
     ()
 ]}
 
-Runtime adapters can take endpoint overrides, but service-specific packages
-usually expose their own endpoint configuration because addressing rules are
+Runtime adapters can take endpoint overrides, but service packages usually
+expose richer endpoint configuration because addressing rules are
 service-specific. For S3, pass endpoint and addressing options directly to the
 [awskit-s3] adapter [create] functions.
 
@@ -124,7 +126,7 @@ Core errors are structured SDK values. Runtime-backed operations return
 {!type:Awskit.Error.t} is opaque. Use {!val:Awskit.Error.kind} to inspect the
 coarse error kind, and {!val:Awskit.Error.context} to read attached operation,
 resource, retry-attempt, and diagnostic context. Use {!val:Awskit.Error.pp} or
-{!val:Awskit.Error.to_string_hum} for human logs, and
+{!val:Awskit.Error.to_string_hum} for human-readable logs, and
 {!val:Awskit.Error.sexp_of_t} for structured diagnostics and tests.
 
 Functions ending in [_exn] raise {!exception:Awskit.Error.Awskit_error} on SDK
@@ -132,10 +134,9 @@ validation or construction failure. Prefer the result-returning form in
 libraries and long-running services. Cancellation and user callback exceptions
 are not converted into SDK errors.
 
-Application code should treat {!module:Awskit.Error} as a consumer API:
-inspect, classify, and print errors returned by Awskit operations. Error
-construction is reserved for Awskit package implementations under
-{!module:Awskit.Error.Internal}.
+Application code should inspect, classify, and print errors returned by Awskit
+operations. Constructing shared error values is reserved for Awskit package
+implementations under {!module:Awskit.Error.Internal}.
 
 The public kind and retry classifications are matchable variants. Error kind
 constructors are private, so application code can inspect returned errors but
@@ -209,8 +210,8 @@ Request bodies carry a descriptor:
 }
 ]}
 
-The descriptor records the declared request body length, the payload hash used for
-signing, and whether the body can be replayed. Service packages may reject
+The descriptor records the declared request body length, the payload hash used
+for signing, and whether the body can be replayed. Service packages may reject
 unknown lengths. For example, S3 [PutObject] and [UploadPart] currently require
 a known [content_length]; Awskit does not implement SigV4 aws-chunked streaming
 for unknown-length request bodies.
@@ -218,9 +219,10 @@ for unknown-length request bodies.
 For custom [Runtime.Request_body.of_stream] values, the producer callback is
 part of the request operation. Errors returned by that callback are request body
 failures. When a known length is declared, the producer must emit exactly that
-number of bytes; prefer [Runtime.Request_body.of_string] or
+number of bytes. Prefer [Runtime.Request_body.of_string] or
 [Runtime.Request_body.of_bytes] when data is already buffered. Mark a custom
-stream [replayable] only if a retry can recreate the same body.
+stream [replayable] only if a retry can recreate the same bytes from the
+beginning.
 
 Response bodies must be consumed inside the [with_response] callback, normally
 through [Runtime.Response_body.with_reader]:
@@ -292,7 +294,8 @@ service operations.
 
 {2 Lwt Unix}
 
-Use [awskit-lwt-unix] for ordinary Lwt applications on Unix:
+Use [awskit-lwt-unix] for Lwt applications on Unix that should read the
+standard AWS environment and profile configuration:
 
 {[
 let conn =
@@ -316,7 +319,7 @@ module Runtime = Awskit_lwt.Make (Cohttp_lwt_unix.Client)
 {1 Custom Runtime Adapters}
 
 Implement {!module-type:Awskit.Runtime.S} when integrating another concurrency
-or HTTP stack. The service package functors need:
+or HTTP stack. Service package functors need:
 
 {ul
   {li a monad type and bind/return}
@@ -327,4 +330,5 @@ or HTTP stack. The service package functors need:
 }
 
 S3 adapters extend the core runtime with [s3_endpoint_config] so S3 endpoint
-resolution can stay AWS-aware without putting S3 concepts into the pure core.
+resolution can stay AWS-aware without putting S3 concepts into the core AWS
+runtime abstraction.

@@ -1,37 +1,41 @@
 # Awskit
 
-Awskit is AWS infrastructure for OCaml.
+Awskit is a runtime-agnostic AWS toolkit for OCaml.
 
-It provides the pieces needed to build AWS clients in OCaml: credentials,
-regions, endpoints, SigV4 signing, retry handling, request and response types,
-runtime adapters, and S3 support. The core packages are pure OCaml; concrete
-HTTP execution lives in runtime-specific adapter packages for Eio and Lwt.
+It gives OCaml applications the building blocks needed to talk to AWS:
+credentials, regions, endpoints, SigV4 signing, retry handling, request and
+response metadata, runtime adapters, and an S3 client. The core packages stay
+independent of Unix, Eio, Lwt, and Cohttp; HTTP execution lives in adapter
+packages that match the runtime used by your application.
 
 Awskit currently focuses on AWS S3.
 
-## Features
+## What You Get
 
-- Pure AWS core types, signing, endpoints, credentials, errors, and retries.
-- Runtime adapters for Eio and Lwt applications.
-- S3 bucket, object, multipart upload, policy, tagging, versioning, and
-  presigned URL support.
-- Deterministic in-memory S3 simulation for tests.
-- Streaming request and response bodies with explicit replayability metadata.
-- Unix helpers for standard AWS environment variables, shared credentials, and
+- Runtime-agnostic AWS core types for credentials, regions, endpoints, signing,
+  errors, retries, and HTTP metadata.
+- Ready-to-use adapters for Eio and Lwt applications.
+- S3 bucket, object, multipart upload, policy, tagging, versioning, endpoint,
+  and presigned URL support.
+- A deterministic in-memory S3 simulator for fast tests.
+- Streaming request and response bodies with explicit size, hash, and
+  replayability metadata.
+- Unix helpers for AWS environment variables, shared credentials, and shared
   config files.
 
 ## Installation
 
-Awskit is split into small packages. From a source checkout, install
-dependencies and build with Dune:
+Awskit is split into small packages so applications only depend on the runtime
+they actually use. From a source checkout, install dependencies and build with
+Dune:
 
 ```sh
 opam install . --deps-only --with-test
 opam exec -- dune build
 ```
 
-When installing released packages from opam, install the adapter that matches
-your runtime:
+When installing released packages from opam, choose the S3 adapter that matches
+your runtime.
 
 ```sh
 opam install awskit-s3-eio
@@ -43,44 +47,48 @@ or:
 opam install awskit-s3-lwt-unix
 ```
 
+Use `awskit-s3-eio` when your application already runs on Eio and can provide
+an HTTPS connector. Use `awskit-s3-lwt-unix` when you want a ready-to-use Lwt
+client that can read the standard AWS environment and profile configuration.
+
 ## Packages
 
 | Package | Description |
 | --- | --- |
-| `awskit` | Pure AWS core: credentials, regions, endpoints, SigV4 signing, retries, request/response types, errors, and the runtime module type. |
+| `awskit` | Runtime-agnostic AWS core: credentials, regions, endpoints, SigV4 signing, retries, request/response types, errors, and the runtime module type. |
 | `awskit-unix` | Unix helpers for clocks, environment variables, shared AWS credentials, and config files. |
 | `awskit-lwt` | Generic Lwt runtime adapter over a caller-supplied Cohttp Lwt client. |
 | `awskit-lwt-unix` | Ready-to-use Lwt + Unix runtime adapter using Cohttp Lwt Unix. |
 | `awskit-eio` | Direct-style Eio runtime adapter using Cohttp Eio and a caller-provided HTTPS policy. |
-| `awskit-s3` | Pure AWS S3 core: buckets, objects, multipart upload, presigned URLs, policies, and endpoint resolution. |
+| `awskit-s3` | Runtime-agnostic AWS S3 core: buckets, objects, multipart upload, presigned URLs, policies, and endpoint resolution. |
 | `awskit-s3-sim` | Deterministic in-memory S3 implementation for tests. |
 | `awskit-s3-lwt` | S3 adapter over the generic Awskit Lwt runtime. |
 | `awskit-s3-lwt-unix` | Ready-to-use S3 client for Lwt + Unix applications. |
 | `awskit-s3-eio` | Direct-style S3 client for Eio applications using a caller-provided HTTPS policy. |
 
 The `awskit` and `awskit-s3` packages do not depend on Unix, Eio, Lwt, or
-Cohttp runtime packages. `awskit-s3-sim` is intended for test code and does not
-perform HTTP requests. Adapter packages carry runtime dependencies.
+Cohttp runtime packages. Use `awskit-s3-sim` in tests when you want deterministic
+S3 behavior without HTTP requests. Adapter packages carry runtime dependencies.
 
 ## Error Handling
 
-Awskit APIs return explicit results. Runtime-backed operations use the shape
+Awskit APIs return errors as values. Runtime-backed operations use the shape
 `('a, Awskit.Error.t) result io`, where `io` is supplied by the selected runtime
 adapter. Pure constructors return `('a, Awskit.Error.t) result`.
 
-`Awskit.Error.t` carries structured AWS context such as operation, resource,
+`Awskit.Error.t` carries structured AWS context such as the operation, resource,
 HTTP status, AWS error code, request id, retry class, and retry attempts. Use
-`Awskit.Error.pp` or `Awskit.Error.to_string_hum` for human logs, and
+`Awskit.Error.pp` or `Awskit.Error.to_string_hum` for human-readable logs, and
 `Awskit.Error.sexp_of_t` for structured diagnostics and tests.
 
-Application code should treat `Awskit.Error` as a consumer API: inspect,
-classify, and print errors returned by Awskit operations. Error construction
-is reserved for Awskit package implementations under `Awskit.Error.Internal`.
+Application code should inspect, classify, and print errors returned by Awskit
+operations. Constructing `Awskit.Error.t` values is reserved for Awskit
+implementations under `Awskit.Error.Internal`.
 
 Functions ending in `_exn` raise `Awskit.Error.Awskit_error` on SDK validation
-or construction failure. Prefer the result-returning form in libraries and
-long-running services. Cancellation and user callback exceptions are not
-converted into SDK errors.
+or construction failure. Prefer the result-returning form in libraries,
+services, and other long-running code. Cancellation and user callback
+exceptions are not converted into SDK errors.
 
 ## Quick Start
 
@@ -202,8 +210,8 @@ let run () =
       | Error error -> Lwt_io.eprintf "S3 error: %a\n" Awskit_s3.Error.pp error
 ```
 
-When arguments are omitted, the Unix adapter reads standard AWS configuration
-sources:
+When arguments are omitted, the Unix adapter reads the standard AWS
+configuration sources:
 
 ```text
 AWS_ACCESS_KEY_ID
@@ -220,8 +228,8 @@ AWS_CONTAINER_AUTHORIZATION_TOKEN
 AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
 ```
 
-Pass an explicit `endpoint` when testing against a local service or custom AWS
-endpoint.
+Pass an explicit `endpoint` when testing against a local service or another
+S3-compatible endpoint.
 
 ## S3
 
@@ -236,8 +244,8 @@ endpoint.
 - structured S3 error classifiers.
 
 Awskit targets AWS S3 semantics. S3-compatible services such as MinIO are useful
-for local contract testing, but provider-specific behavior should stay in tests
-unless it matches AWS S3.
+for local contract testing, but application behavior should be written against
+AWS S3 semantics unless a provider-specific difference is intentional.
 
 Optional lookup helpers convert object-not-found responses to `Ok None` while
 leaving other failures structured. S3 can return status-only `HeadObject` 404
@@ -305,7 +313,7 @@ unknown-length SigV4 aws-chunked streaming.
 For already-buffered data, prefer string or bytes body helpers. Custom stream
 bodies must emit exactly the declared number of bytes, and producer callback
 errors are reported as request body failures. Mark custom streams replayable
-only when the stream can actually be replayed for a retry.
+only when the stream can actually be recreated from the beginning for a retry.
 
 Response bodies are streaming and scoped to the runtime response callback.
 Runtime adapters expose `with_response`; inside that callback, consume bodies

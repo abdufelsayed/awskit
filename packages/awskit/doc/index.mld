@@ -1,26 +1,28 @@
 {0 awskit}
 
-Pure AWS infrastructure for credentials, regions, endpoints, structured
-errors, HTTP metadata, body metadata, request signing, and runtime adapters.
+Runtime-agnostic AWS infrastructure for OCaml applications.
 
-The core {!module:Awskit} library has no IO dependencies. Concurrency,
-networking, filesystem access, clocks, and environment variables live in
-adapter libraries that you choose at the application edge.
+The core {!module:Awskit} library contains credentials, regions, endpoints,
+structured errors, HTTP metadata, body metadata, request signing, and the
+runtime abstraction used by service clients. It has no IO dependencies:
+concurrency, networking, filesystem access, clocks, and environment variables
+live in adapter libraries selected at the application edge.
 
 Service packages such as {{:../awskit-s3/index.html}[awskit-s3]} build on the
 runtime abstraction defined here instead of depending directly on Eio, Lwt, or
 Unix.
 
-The current service surface is AWS S3.
+The first supported service surface is AWS S3.
 
 {1 Package Split}
 
-Awskit follows a Cohttp-style package split. Install only the runtime adapter
-you need.
+Awskit follows a Cohttp-style package split. Install the runtime adapter that
+matches your application, and leave the rest out of your dependency graph.
 
 {ul
-  {li [awskit] — pure AWS core: credentials, regions, endpoints, signing,
-    retries, request/response types, errors, and the runtime module type}
+  {li [awskit] — runtime-agnostic AWS core: credentials, regions, endpoints,
+    signing, retries, request/response types, errors, and the runtime module
+    type}
   {li [awskit-unix] — Unix helpers for clocks, environment variables, shared
     AWS credentials, and config files}
   {li [awskit-lwt] — generic Lwt runtime adapter over a caller-supplied
@@ -28,8 +30,8 @@ you need.
   {li [awskit-lwt-unix] — ready-to-use Lwt + Unix runtime adapter}
   {li [awskit-eio] — direct-style Eio runtime adapter over a caller-provided
     HTTPS policy}
-  {li [awskit-s3] — pure AWS S3 core: buckets, objects, multipart upload,
-    presigned URLs, policies, and endpoint resolution}
+  {li [awskit-s3] — runtime-agnostic AWS S3 core: buckets, objects, multipart
+    upload, presigned URLs, policies, and endpoint resolution}
   {li [awskit-s3-sim] — deterministic in-memory S3 implementation for tests}
   {li [awskit-s3-lwt] — S3 adapter over the generic Awskit Lwt runtime}
   {li [awskit-s3-lwt-unix] — ready-to-use S3 client for Lwt + Unix}
@@ -38,25 +40,28 @@ you need.
 }
 
 The core [awskit] and [awskit-s3] packages do not depend on Unix, Eio, Lwt, or
-Cohttp runtime packages. [awskit-s3-sim] is for tests and does not perform HTTP
-requests. Adapter packages carry runtime dependencies.
+Cohttp runtime packages. Use [awskit-s3-sim] in tests when you want
+deterministic S3 behavior without HTTP requests. Adapter packages carry runtime
+dependencies.
 
 {1 Quick Start}
 
-For Eio S3 applications:
+For Eio S3 applications, install the Eio adapter and pass an HTTPS policy when
+creating the client:
 
 {[
 opam install awskit-s3-eio eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
 ]}
 
-For Lwt + Unix S3 applications:
+For Lwt + Unix S3 applications, install the ready-to-use Unix adapter:
 
 {[
 opam install awskit-s3-lwt-unix
 ]}
 
-See {{:../awskit-s3/index.html}[awskit-s3]} for object-storage examples and
-S3-specific endpoint configuration.
+See {{:../awskit-s3/index.html}[awskit-s3]} for object-storage examples,
+endpoint configuration, transfer helpers, presigning, and S3-specific error
+handling.
 
 {1 Libraries}
 
@@ -72,7 +77,7 @@ Core modules:
     constructors}
   {li {!module:Awskit.Endpoint} — scheme, host, port, authority, and URL
     helpers}
-  {li {!module:Awskit.Body} — runtime-neutral upload and payload-hash
+  {li {!module:Awskit.Body} — runtime-agnostic upload and payload-hash
     metadata}
   {li {!module:Awskit.Request} — body-free HTTP request metadata}
   {li {!module:Awskit.Response} — body-free HTTP response metadata and header
@@ -98,10 +103,10 @@ for TLS-enabled endpoints.
 
 {2 awskit-lwt-unix}
 
-[Awskit_lwt_unix] is the ready-to-use Lwt + Unix runtime adapter. It
-can load credentials from standard AWS environment variables, shared AWS
-profile files, ECS/container metadata, or EC2 instance metadata, and region from
-standard AWS environment variables when arguments are omitted.
+[Awskit_lwt_unix] is the ready-to-use Lwt + Unix runtime adapter. When
+arguments are omitted, it can load credentials from standard AWS environment
+variables, shared AWS profile files, ECS/container metadata, or EC2 instance
+metadata, and it can load the region from standard AWS environment variables.
 
 {2 awskit-unix}
 
@@ -132,8 +137,8 @@ Awskit.Signing.sign_request
 ]}
 
 Signing is pure and testable without network access. Service packages sign
-requests automatically; use {!module:Awskit.Signing} directly for custom AWS
-services or low-level tests.
+requests automatically; use {!module:Awskit.Signing} directly when building a
+custom AWS service client or low-level signing tests.
 
 {1 Minimal Eio Runtime Example}
 

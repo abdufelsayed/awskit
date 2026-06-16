@@ -1,19 +1,19 @@
 {0 awskit-s3}
 
-AWS S3 client surface for bucket/object storage operations, multipart uploads,
-S3 presigned URLs, and opaque bucket policy documents.
+AWS S3 client for bucket and object storage, multipart uploads, presigned URLs,
+and bucket configuration.
 
 See {{:../awskit/index.html}[awskit]} for the pure core and runtime adapter
 overview.
 
 The main entrypoint is {!module:Awskit_s3}. The package also exposes lower-level
 request builders, XML codecs, and response parsers for advanced integrations and
-tests; application code should normally use the facade modules documented below.
+tests. Most application code should start with the client modules documented
+below.
 
 {1 Client Surface}
 
-[awskit-s3] provides an AWS S3 client surface for bucket and object storage
-applications:
+[awskit-s3] provides S3 operations for bucket and object storage applications:
 
 {ul
   {li object [put], [get], [head], [delete], [copy], [list], metadata, tags,
@@ -28,23 +28,23 @@ applications:
     contracts, and structured error classifiers}
 }
 
-Bucket policy operations use opaque JSON policy documents, which lets
-applications provision bucket-level access rules while keeping policy document
-construction in application code.
+Bucket policy operations accept validated JSON policy documents. This lets
+applications use their own policy model while Awskit handles S3 request
+construction and response handling.
 
 {1 API Shape}
 
 Object APIs are split into explicit layers:
 
 {ul
-  {li primitive object operations under [Object]}
+  {li core object operations under [Object]}
   {li upload body constructors under adapter [Body] modules}
   {li download consumers under adapter [Reader] modules}
   {li managed local-file transfer helpers under [Object.Transfer] in
     Unix-capable adapter packages}
 }
 
-Normal uploads pass [Body] values to [Object.put]. Normal downloads pass
+Typical uploads pass [Body] values to [Object.put]. Typical downloads pass
 [Reader] consumers to [Object.get]. Direct [Runtime] access remains available
 for advanced integrations that need the raw runtime body layer.
 
@@ -52,8 +52,8 @@ for advanced integrations that need the raw runtime body layer.
 
 {2 awskit-s3}
 
-{!module:Awskit_s3} contains pure types, S3 endpoint configuration, standalone
-presigned URL helpers, and the runtime functor.
+{!module:Awskit_s3} contains runtime-agnostic S3 types, endpoint configuration,
+standalone presigned URL helpers, and the runtime functor.
 
 Main modules:
 
@@ -67,9 +67,8 @@ Main modules:
     options, and result records}
   {li {!module:Awskit_s3.Transfer} — high-level upload/download options,
     limits, strategy results, and multipart transfer result records}
-  {li {!module:Awskit_s3.Presigned} — pure presigned URL generation}
-  {li {!module:Awskit_s3.Policy} — validated opaque bucket policy JSON
-    payloads}
+  {li {!module:Awskit_s3.Presigned} — runtime-agnostic presigned URL generation}
+  {li {!module:Awskit_s3.Policy} — validated bucket policy JSON payloads}
   {li {!module:Awskit_s3.Make} — functor for wiring S3 operations to a custom
     [Awskit.Runtime.S] implementation}
 }

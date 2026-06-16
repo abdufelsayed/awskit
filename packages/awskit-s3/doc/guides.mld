@@ -1,12 +1,16 @@
 {0 S3 Guides}
 
 Guides for using [awskit-s3] with AWS S3 object and bucket workflows. The
-client surface is streaming-first, endpoint-configurable, and result-returning.
+client is streaming-first, endpoint-configurable, and result-returning, so
+applications can make memory use, retries, and error handling explicit.
 
 {1 Object Operations}
 
 Object operations live under [Object]. Upload data is supplied by the adapter
 [Body] module, and download data is consumed by the adapter [Reader] module.
+Start with [Body.of_string] or [Body.of_bytes] for buffered uploads, and
+[Reader.to_string ~max_bytes] or [Reader.to_bytes ~max_bytes] for bounded
+buffered downloads.
 
 {2 Upload}
 
@@ -78,11 +82,10 @@ S3.Object.get s3 ~bucket ~key
 
 Use [Object.head] when only metadata is needed. Use [Object.exists] for boolean
 existence checks. Use [Object.find_metadata] and [Object.find] when a missing
-object should be an optional result. Missing-object and missing-bucket behavior
-is reported as structured service errors by primitive operations. S3 can return
-status-only [HeadObject] 404 responses, so [Object.find_metadata] treats a
-code-less 404 as an absent object; coded [NoSuchBucket] responses remain
-[Error].
+object should be an optional result. Core operations report missing objects and
+missing buckets as structured service errors. S3 can return status-only
+[HeadObject] 404 responses, so [Object.find_metadata] treats a code-less 404 as
+an absent object; coded [NoSuchBucket] responses remain [Error].
 
 {[
 module S3 = Awskit_s3_eio
@@ -115,9 +118,9 @@ The object surface also includes:
   {li [Object.Tagging.get], [put], and [delete]}
 }
 
-Operation pagination helpers preserve the regular [List_objects_v2.options]
-record and update only the continuation token between requests. Use [max_pages]
-to cap traversal:
+Pagination helpers preserve the regular [List_objects_v2.options] record and
+update only the continuation token between requests. Use [max_pages] to cap
+traversal:
 
 {[
 let keys =
@@ -185,14 +188,15 @@ other SDK errors.
 {2 One-Request File Operations}
 
 Unix-capable adapters expose local-path helpers under [Body] and [Reader].
-These still use one [PutObject] or [GetObject] request; they are useful when
-the application wants direct control instead of a managed transfer strategy.
+These still use one [PutObject] or [GetObject] request. Use them when the
+application wants direct control instead of a managed transfer strategy.
 
 {[
 module S3 = Awskit_s3_eio
 
-let* body = S3.Body.of_path path in
-S3.Object.put s3 ~bucket ~key ~body ()
+match S3.Body.of_path path with
+| Error error -> Error error
+| Ok body -> S3.Object.put s3 ~bucket ~key ~body ()
 ]}
 
 {[
@@ -206,15 +210,15 @@ S3.Object.get s3 ~bucket ~key
 {1 Managed File Transfers}
 
 Unix-capable adapters expose managed local-file helpers under [Object.Transfer].
-Keeping filesystem helpers at the adapter layer lets the pure [awskit-s3] core
-stay independent of filesystem APIs.
+Filesystem helpers live at the adapter layer so the runtime-agnostic
+[awskit-s3] core stays independent of filesystem APIs.
 
-[upload_file] and [download_file] choose an optimized strategy using
+[upload_file] and [download_file] choose a transfer strategy from
 {!module:Awskit_s3.Transfer} options: small transfers use one request, while
 larger transfers use multipart upload or ranged [GetObject] requests.
 [multipart_upload_file] and [resume_multipart_upload_file] are explicit
 multipart upload helpers. Filesystem transfer helpers live only in the Eio and
-Lwt Unix adapters; they are not part of the pure [awskit-s3] core.
+Lwt Unix adapters; they are not part of the runtime-agnostic [awskit-s3] core.
 
 {2 Eio}
 
@@ -365,7 +369,7 @@ must be enabled on the bucket in AWS.
 
 {1 Bucket Operations}
 
-[Bucket] covers general-purpose bucket basics and the first configuration
+[Bucket] covers general-purpose bucket basics and common configuration
 subresources:
 
 {ul
@@ -410,7 +414,7 @@ Awskit_s3_eio.Bucket.Encryption.put s3
 
 {1 Multipart Uploads}
 
-[Multipart] exposes the primitive AWS multipart flow:
+[Multipart] exposes the AWS multipart flow:
 
 {ol
   {li [Multipart.create_upload] starts an upload and returns an upload ID.}
@@ -448,12 +452,12 @@ the reader is in scope:
 S3.Runtime.Response_body.read reader bytes ~off ~len
 ]}
 
-For ordinary custom S3 callers, prefer [Body.of_stream] and [Reader.read] so
-code stays within the S3 adapter surface.
+For custom S3 callers, prefer [Body.of_stream] and [Reader.read] so code stays
+within the S3 adapter API.
 
 {1 Presigned URLs}
 
-Use adapter-level [Presigned] modules when a connection already exists, or use
+Use adapter-level [Presigned] modules when a connection already exists. Use
 standalone {!module:Awskit_s3.Presigned} helpers when generating URLs without
 an adapter connection.
 
@@ -492,11 +496,11 @@ Awskit_s3.Presigned.upload_part
 ]}
 
 Presigned URLs use [UNSIGNED-PAYLOAD] and the same endpoint/addressing options
-as normal operations. Returned [result.signed_headers] are the non-host headers
-that the caller must send with the URL. Use [extra_signed_headers] only for
-additional headers that must be included in the signature. Presigned [PUT] and
-[UploadPart] helpers sign explicit checksum value headers when configured, and
-object presigning options support [expected_bucket_owner] guard rails.
+as regular operations. Returned [result.signed_headers] are the non-host
+headers that the caller must send with the URL. Use [extra_signed_headers] only
+for additional headers that must be included in the signature. Presigned [PUT]
+and [UploadPart] helpers sign explicit checksum value headers when configured,
+and object presigning options support [expected_bucket_owner] guard rails.
 
 A typical direct-upload multipart flow is:
 
@@ -520,6 +524,7 @@ let credentials =
     ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
     ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
     ()
+in
 let https = Https.connector () in
 Awskit_s3_eio.create ~sw ~env ~https ~region:"us-east-1" ~credentials ()
 |> Result.get_ok
@@ -560,7 +565,8 @@ the selected runtime monad.
 [Awskit_s3.Error.t] is [Awskit.Error.t]. It is opaque and preserves validation,
 signing, transport, service, decode, and body-consumption failures with
 structured context. Use [Awskit.Error.pp] or [Awskit.Error.to_string_hum] for
-human logs, and [Awskit.Error.sexp_of_t] for structured diagnostics and tests.
+human-readable logs, and [Awskit.Error.sexp_of_t] for structured diagnostics
+and tests.
 
 Functions ending in [_exn] raise [Awskit.Error.Awskit_error] on SDK validation
 or construction failure. Prefer the result-returning form in libraries and
@@ -579,7 +585,7 @@ match result with
 For service failures, [Awskit_s3.Error.service_code] exposes the AWS error
 code when present.
 
-Optional lookup helpers keep common not-found handling out of exception paths.
+Optional lookup helpers keep common not-found handling out of error branches.
 [Object.find] and [Object.find_metadata] return [Ok None] for absent objects
 and preserve missing buckets, authorization failures, transport errors, decode
 errors, and body errors as structured [Awskit.Error.t] values. S3 can return
@@ -629,7 +635,7 @@ Values greater than zero spread retry waits below the capped exponential delay.
 
 {1 Local MinIO Contract Testing}
 
-Normal tests do not require a network service. For local wire-level checks
+Most tests do not require a network service. For local wire-level checks
 against MinIO, start the included Compose stack and run the opt-in alias:
 
 {[

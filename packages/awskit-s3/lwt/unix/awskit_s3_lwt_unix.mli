@@ -1,8 +1,8 @@
 (** Ready-to-use Lwt + Unix S3 adapter.
 
-    Primitive operations stream through {!Awskit_lwt_unix.Runtime}. Local-path
-    body and reader helpers live under {!Body} and {!Reader}; managed
-    upload/download helpers live under {!Object.Transfer}. *)
+    Operations stream through {!Awskit_lwt_unix.Runtime}. Local-path body and
+    reader helpers live under {!Body} and {!Reader}; managed upload/download
+    helpers live under {!Object.Transfer}. *)
 
 type t
 (** Ready-to-use Lwt + Unix S3 client connection. Create with {!val:create}. *)

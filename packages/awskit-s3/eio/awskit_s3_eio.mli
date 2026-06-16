@@ -1,9 +1,8 @@
 (** Eio S3 adapter.
 
-    Primitive operations are direct-style and stream through
-    {!Awskit_eio.Runtime}. Local-path body and reader helpers live under {!Body}
-    and {!Reader}; managed upload/download helpers live under
-    {!Object.Transfer}. *)
+    Operations are direct-style and stream through {!Awskit_eio.Runtime}.
+    Local-path body and reader helpers live under {!Body} and {!Reader}; managed
+    upload/download helpers live under {!Object.Transfer}. *)
 
 type t
 (** Eio S3 client connection. Create with {!val:create}. *)
