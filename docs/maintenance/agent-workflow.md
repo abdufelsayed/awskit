@@ -7,15 +7,18 @@ the person who requested the change.
 ## Start Here
 
 1. Read `AGENTS.md`.
-2. Check the working tree:
+2. Read `docs/maintenance/ocaml-development.md` before changing OCaml source,
+   public interfaces, runtime adapters, parsers, tests, examples, or package
+   metadata.
+3. Check the working tree:
 
    ```sh
    git status --short --branch
    ```
 
-3. Inspect the files relevant to the request before editing.
-4. Prefer the repository's existing patterns over new abstractions.
-5. Make the smallest change that correctly handles the request.
+4. Inspect the files relevant to the request before editing.
+5. Prefer the repository's existing patterns over new abstractions.
+6. Make the smallest change that correctly handles the request.
 
 ## Do Not Write Chat Transcripts Into The Repo
 

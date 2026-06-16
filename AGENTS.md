@@ -10,6 +10,7 @@ changes, writing descriptions, updating release notes, or opening pull requests.
   ledger.
 - Public package documentation lives in `packages/*/doc`.
 - Maintainer workflows live in `docs/maintenance`.
+- OCaml development rules live in `docs/maintenance/ocaml-development.md`.
 - CI and documentation publishing live in `.github/workflows/main.yml`.
 - Release validation lives in `scripts/release-check.sh`.
 
@@ -37,6 +38,29 @@ change affects shared behavior, packaging, CI, or releases.
 - Let the compiler and build check prove deleted symbols are gone.
 - When fixing a bug, add or update a regression test that fails for the original
   bug and passes for the correct behavior.
+
+## OCaml Development Rules
+
+Follow `docs/maintenance/ocaml-development.md` when changing OCaml code,
+public interfaces, runtime adapters, parsers, tests, examples, or package
+metadata.
+
+- Design public `.mli` files around the call site before committing to an
+  implementation shape.
+- Keep invariant-bearing types opaque or private, and expose concrete types only
+  when pattern matching is part of the intended API.
+- Use `('a, Awskit.Error.t) result` for expected failures and `option` for
+  normal absence; reserve exceptions for `_exn` bridges and exceptional
+  conditions.
+- Avoid catch-all variant matches where the compiler should help future
+  refactors.
+- Scope resource ownership clearly, and clean up response bodies, files, and
+  multipart uploads on failure paths.
+- Keep runtime-neutral logic out of Lwt and Eio adapters, and keep adapter
+  effects out of core packages.
+- Use structured parsers and typed serializers for AWS wire formats.
+- Prefer public-surface tests, deterministic fixtures, and symptom-focused
+  regressions.
 
 ## Writing Rules
 
