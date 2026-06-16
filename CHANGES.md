@@ -63,6 +63,9 @@ release packaging.
   skipping draft pull request runs. (8631060)
 - Added GitHub Pages publishing for package documentation on main pushes and
   updated package documentation URLs to the Pages site. (d5abfa6)
+- Added agent-facing maintenance workflow docs and PR templates for default,
+  release, bugfix, documentation, CI, and breaking-change review flows.
+  (ba1f090)
 
 # 0.1.0
 
