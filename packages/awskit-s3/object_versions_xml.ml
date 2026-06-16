@@ -53,7 +53,8 @@ let parse_page ~response body =
           Xml.optional_child_result ~path "ETag" Object.Etag.of_string nodes
         in
         let* size =
-          Xml.optional_child_parse ~path "Size" int64_of_string_opt nodes
+          Xml.optional_child_parse ~path "Size" non_negative_int64_of_string_opt
+            nodes
         in
         let* storage_class =
           Xml.optional_child_parse ~path "StorageClass" Storage_class.of_string

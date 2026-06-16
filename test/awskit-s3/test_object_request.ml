@@ -504,6 +504,29 @@ let test_object_list_rejects_malformed_known_fields () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected malformed Size decode error"
 
+let test_object_list_rejects_negative_numeric_fields () =
+  let cases =
+    [
+      ( "Size",
+        "<ListBucketResult><Contents><Key>a.txt</Key><Size>-1</Size></Contents></ListBucketResult>"
+      );
+      ( "KeyCount",
+        "<ListBucketResult><KeyCount>-1</KeyCount></ListBucketResult>" );
+    ]
+  in
+  List.iter
+    (fun (field, body) ->
+      let conn = Recording_runtime.connect [ response 200 body ] in
+      match Recording_s3.Object.list conn ~bucket:"my-bucket" () with
+      | Error error when is_decode_error error ->
+          let text = Awskit.Error.to_string_hum error in
+          Alcotest.(check bool)
+            ("mentions " ^ field) true
+            (string_contains text ~substring:field)
+      | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+      | Ok _ -> Alcotest.failf "expected negative %s decode error" field)
+    cases
+
 let test_object_versions_rejects_malformed_known_fields () =
   let body =
     "<ListVersionsResult><Version><Key>a.txt</Key><IsLatest>maybe</IsLatest></Version></ListVersionsResult>"
@@ -749,6 +772,8 @@ let suite =
           test_malformed_xml_responses;
         Alcotest.test_case "object list rejects malformed known fields" `Quick
           test_object_list_rejects_malformed_known_fields;
+        Alcotest.test_case "object list rejects negative numeric fields" `Quick
+          test_object_list_rejects_negative_numeric_fields;
         Alcotest.test_case "object versions rejects malformed known fields"
           `Quick test_object_versions_rejects_malformed_known_fields;
         Alcotest.test_case "object list allows unknown extra elements" `Quick

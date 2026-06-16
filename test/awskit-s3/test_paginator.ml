@@ -97,6 +97,37 @@ let test_multipart_list_parts_rejects_malformed_known_fields () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected malformed PartNumber decode error"
 
+let test_multipart_list_parts_rejects_invalid_numeric_fields () =
+  let cases =
+    [
+      ( "PartNumber",
+        "<ListPartsResult><Part><PartNumber>-1</PartNumber></Part></ListPartsResult>"
+      );
+      ( "PartNumber",
+        "<ListPartsResult><Part><PartNumber>10001</PartNumber></Part></ListPartsResult>"
+      );
+      ( "Size",
+        "<ListPartsResult><Part><PartNumber>1</PartNumber><Size>-1</Size></Part></ListPartsResult>"
+      );
+    ]
+  in
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  List.iter
+    (fun (field, body) ->
+      let conn = Recording_runtime.connect [ response 200 body ] in
+      match
+        Recording_s3.Multipart.List_parts.parts conn ~bucket:"my-bucket"
+          ~key:"large.bin" ~upload_id ()
+      with
+      | Error error when is_decode_error error ->
+          let text = Awskit.Error.to_string_hum error in
+          Alcotest.(check bool)
+            ("mentions " ^ field) true
+            (string_contains text ~substring:field)
+      | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+      | Ok _ -> Alcotest.failf "expected invalid %s decode error" field)
+    cases
+
 let suite =
   [
     ( "paginator",
@@ -109,5 +140,7 @@ let suite =
           test_multipart_paginator_follows_markers;
         Alcotest.test_case "multipart list parts rejects malformed fields"
           `Quick test_multipart_list_parts_rejects_malformed_known_fields;
+        Alcotest.test_case "multipart list parts rejects invalid numbers" `Quick
+          test_multipart_list_parts_rejects_invalid_numeric_fields;
       ] );
   ]

@@ -17,6 +17,11 @@ module Make (C : Request_context.S) = struct
   type 'a io = 'a R.t
   type nonrec request_body = request_body
 
+  let part_number_of_string_opt value =
+    match int_of_string_opt value with
+    | Some value when value > 0 && value <= 10_000 -> Some value
+    | _ -> None
+
   let validate_opt f = function None -> Ok () | Some value -> f value
 
   let return_result return_error return_ok = function
@@ -367,7 +372,8 @@ module Make (C : Request_context.S) = struct
                                      in
                                      match
                                        Xml.optional_child_parse ~path
-                                         "PartNumber" int_of_string_opt nodes
+                                         "PartNumber" part_number_of_string_opt
+                                         nodes
                                      with
                                      | Error _ as error -> error
                                      | Ok part_number -> (
@@ -379,7 +385,8 @@ module Make (C : Request_context.S) = struct
                                          | Ok etag -> (
                                              match
                                                Xml.optional_child_parse ~path
-                                                 "Size" int64_of_string_opt
+                                                 "Size"
+                                                 non_negative_int64_of_string_opt
                                                  nodes
                                              with
                                              | Error _ as error -> error
@@ -419,7 +426,7 @@ module Make (C : Request_context.S) = struct
                                        Xml.optional_child_parse
                                          ~path:"ListPartsResult"
                                          "NextPartNumberMarker"
-                                         int_of_string_opt nodes )
+                                         non_negative_int_of_string_opt nodes )
                                    with
                                    | Error error, _ | _, Error error ->
                                        return_error error

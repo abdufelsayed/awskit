@@ -19,7 +19,8 @@ let parse_page ~response body =
         let path = Fmt.str "ListBucketResult.Contents[%d]" index in
         let* key = Xml.required_child_text ~path "Key" nodes in
         let* size =
-          Xml.optional_child_parse ~path "Size" int64_of_string_opt nodes
+          Xml.optional_child_parse ~path "Size" non_negative_int64_of_string_opt
+            nodes
         in
         let* etag =
           Xml.optional_child_result ~path "ETag" Object.Etag.of_string nodes
@@ -43,7 +44,7 @@ let parse_page ~response body =
   in
   let* key_count =
     Xml.optional_child_parse ~path:"ListBucketResult" "KeyCount"
-      int_of_string_opt nodes
+      non_negative_int_of_string_opt nodes
   in
   let* is_truncated =
     Xml.optional_child_parse ~path:"ListBucketResult" "IsTruncated"
