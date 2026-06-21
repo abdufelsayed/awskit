@@ -37,3 +37,9 @@ setup.log
 
 # Local OPAM switch
 _opam/
+
+# Agent plans
+.plans
+
+# DS_Store
+.DS_Store

@@ -10,7 +10,7 @@ users naturally look for them, such as `Object`, `Bucket`, `Multipart`,
 `Presigned`, `Transfer`, or the adapter entrypoint modules.
 
 Keep implementation modules private unless callers need a stable public
-contract. Follow `docs/maintenance/ocaml-development.md` for `.mli` shape and
+contract. Follow `docs/ocaml-development.md` for `.mli` shape and
 OCaml API style.
 
 When a change touches public APIs, update examples, package documentation,

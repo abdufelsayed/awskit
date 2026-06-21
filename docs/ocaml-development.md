@@ -1,8 +1,8 @@
 # OCaml Development Guide
 
 This guide defines OCaml implementation and API style for Awskit. Repository
-architecture rules live in `docs/maintenance/architecture.md`; test and
-validation rules live in `docs/maintenance/testing.md`.
+architecture rules live in `docs/architecture.md`; test and
+validation rules live in `docs/testing.md`.
 
 ## Public Interfaces First
 
@@ -109,4 +109,4 @@ hot path or resource bound.
 
 ## Dune Files
 
-Use Dune and package metadata according to `docs/maintenance/architecture.md`.
+Use Dune and package metadata according to `docs/architecture.md`.

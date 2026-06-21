@@ -25,7 +25,7 @@ git log --reverse --oneline main..HEAD
 ```
 
 Update `CHANGES.md` with the entries for the release. Follow
-`docs/maintenance/changelog.md`:
+`docs/changelog.md`:
 
 - Include PR numbers when available.
 - Include commit hashes on every entry.

@@ -78,5 +78,5 @@ only.
 
 ## Regression Fix Standard
 
-Follow `docs/maintenance/testing.md` for regression-test and validation rules.
+Follow `docs/testing.md` for regression-test and validation rules.
 Do not add tests that only assert removed APIs or old behavior are absent.

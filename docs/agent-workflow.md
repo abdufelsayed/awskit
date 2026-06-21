@@ -9,12 +9,12 @@ the person who requested the change.
 1. If this document was opened directly, read `AGENTS.md` first.
 2. Read the maintenance document that matches the change:
 
-   - `docs/maintenance/architecture.md` for repository architecture and
+   - `docs/architecture.md` for repository architecture and
      package-boundary rules.
-   - `docs/maintenance/ocaml-development.md` for OCaml implementation style.
-   - `docs/maintenance/testing.md` for test and validation rules.
-   - `docs/maintenance/changelog.md` for changelog entries.
-   - `docs/maintenance/release.md` for release work.
+   - `docs/ocaml-development.md` for OCaml implementation style.
+   - `docs/testing.md` for test and validation rules.
+   - `docs/changelog.md` for changelog entries.
+   - `docs/release.md` for release work.
 
 3. Check the working tree:
 
@@ -92,4 +92,4 @@ content. Do not leave instructions in the final PR body.
 ## Verification
 
 Before claiming a change is finished, run a command that proves the claim. See
-`docs/maintenance/testing.md` for check-selection and regression-test rules.
+`docs/testing.md` for check-selection and regression-test rules.
