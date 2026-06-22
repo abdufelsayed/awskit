@@ -16,7 +16,7 @@ Awskit currently focuses on AWS S3.
   errors, retries, and HTTP metadata.
 - Ready-to-use adapters for Eio and Lwt applications.
 - S3 bucket, object, multipart upload, policy, tagging, versioning, endpoint,
-  and presigned URL support.
+  and presigned request artifact support.
 - A deterministic in-memory S3 simulator for fast tests.
 - Streaming request and response bodies with explicit size, hash, and
   replayability metadata.
@@ -60,7 +60,7 @@ client that can read the standard AWS environment and profile configuration.
 | `awskit-lwt` | Generic Lwt runtime adapter over a caller-supplied Cohttp Lwt client. |
 | `awskit-lwt-unix` | Ready-to-use Lwt + Unix runtime adapter using Cohttp Lwt Unix. |
 | `awskit-eio` | Direct-style Eio runtime adapter using Cohttp Eio and a caller-provided HTTPS policy. |
-| `awskit-s3` | Runtime-agnostic AWS S3 core: buckets, objects, multipart upload, presigned URLs, policies, and endpoint resolution. |
+| `awskit-s3` | Runtime-agnostic AWS S3 core: buckets, objects, multipart upload, presigned request artifacts, policies, and endpoint resolution. |
 | `awskit-s3-sim` | Deterministic in-memory S3 implementation for tests. |
 | `awskit-s3-lwt` | S3 adapter over the generic Awskit Lwt runtime. |
 | `awskit-s3-lwt-unix` | Ready-to-use S3 client for Lwt + Unix applications. |
@@ -228,8 +228,9 @@ AWS_CONTAINER_AUTHORIZATION_TOKEN
 AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
 ```
 
-Pass an explicit `endpoint` when testing against a local service or another
-S3-compatible endpoint.
+Use `Awskit_s3.Endpoint_config` when testing against a local service or another
+S3-compatible endpoint. Plain HTTP is explicit: loopback endpoints use
+`local_plaintext`, and non-local HTTP requires `unsafe_plaintext`.
 
 ## S3
 
@@ -238,7 +239,7 @@ S3-compatible endpoint.
 - bucket creation, deletion, listing, and configuration;
 - object put, get, head, delete, copy, ranges, metadata, tags, and versions;
 - multipart upload and local-file transfer helpers;
-- presigned URLs;
+- presigned request artifacts;
 - bucket policies and related XML/JSON wire types;
 - S3 endpoint and addressing configuration;
 - structured S3 error classifiers.
@@ -300,8 +301,18 @@ type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
 ```
 
 `Auto` uses virtual-hosted addressing when the bucket and endpoint support it,
-and falls back to path-style otherwise. Local test services commonly need
-`~addressing_style:`Path`.
+and falls back to path-style otherwise. Local test services commonly need an
+explicit endpoint policy:
+
+```ocaml
+let endpoint_config =
+  Awskit_s3.Endpoint_config.local_plaintext
+    ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
+    ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
+    ~addressing_style:`Path
+    ()
+  |> Result.get_ok
+```
 
 ## Streaming
 
@@ -345,6 +356,7 @@ AWSKIT_S3_MINIO_ENDPOINT
 AWSKIT_S3_MINIO_ACCESS_KEY_ID
 AWSKIT_S3_MINIO_SECRET_ACCESS_KEY
 AWSKIT_S3_MINIO_REGION
+AWSKIT_S3_MINIO_UNSAFE_HTTP
 ```
 
 ## Contributing

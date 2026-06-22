@@ -17,6 +17,7 @@ let getenv_default name default =
   | _ -> default
 
 let endpoint = getenv_default "AWSKIT_S3_MINIO_ENDPOINT" "http://127.0.0.1:9000"
+let unsafe_http = getenv_default "AWSKIT_S3_MINIO_UNSAFE_HTTP" ""
 let access_key = getenv_default "AWSKIT_S3_MINIO_ACCESS_KEY_ID" "minioadmin"
 let secret_key = getenv_default "AWSKIT_S3_MINIO_SECRET_ACCESS_KEY" "minioadmin"
 let region = getenv_default "AWSKIT_S3_MINIO_REGION" "us-east-1"
@@ -25,9 +26,42 @@ let credentials =
   Awskit.Credentials.create_exn ~access_key_id:access_key
     ~secret_access_key:secret_key ()
 
+let endpoint_config () =
+  let endpoint =
+    Awskit.Endpoint.of_string endpoint |> function
+    | Ok endpoint -> endpoint
+    | Error error ->
+        Alcotest.failf "minio endpoint: %a" Awskit_s3.Error.pp error
+  in
+  let ok_config = function
+    | Ok config -> config
+    | Error error ->
+        Alcotest.failf "minio endpoint policy: %a" Awskit_s3.Error.pp error
+  in
+  let signing_region = Awskit.Region.of_string_exn region in
+  match Awskit.Endpoint.scheme endpoint with
+  | `Https ->
+      Awskit_s3.Endpoint_config.s3_compatible ~endpoint ~signing_region
+        ~addressing_style:`Path ~tls_policy:`Https_required
+        ~feature_policy:`S3_compatible ()
+      |> ok_config
+  | `Http when unsafe_http = "1" ->
+      Awskit_s3.Endpoint_config.unsafe_plaintext ~endpoint ~signing_region
+        ~addressing_style:`Path ()
+  | `Http -> (
+      match
+        Awskit_s3.Endpoint_config.local_plaintext ~endpoint ~signing_region
+          ~addressing_style:`Path ()
+      with
+      | Ok config -> config
+      | Error _ ->
+          Alcotest.fail
+            "non-local HTTP MinIO endpoint requires \
+             AWSKIT_S3_MINIO_UNSAFE_HTTP=1")
+
 let connect () =
   match
-    S3.create ~endpoint ~addressing_style:`Path ~region ~credentials
+    S3.create ~endpoint_config:(endpoint_config ()) ~region ~credentials
       ~clock:Ptime_clock.now ()
   with
   | Ok conn -> conn

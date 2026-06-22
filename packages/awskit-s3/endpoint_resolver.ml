@@ -1,15 +1,7 @@
 open Common
 
-type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
-
-type endpoint_variant =
-  [ `Regional
-  | `Dualstack
-  | `Fips
-  | `Fips_dualstack
-  | `Accelerate
-  | `Accelerate_dualstack ]
-
+type addressing_style = Endpoint_config.addressing_style
+type endpoint_variant = Endpoint_config.endpoint_variant
 type resolved_style = [ `Path | `Virtual_hosted ]
 
 module Request = struct
@@ -17,53 +9,26 @@ module Request = struct
     endpoint : Endpoint.t;
     path : string;
     signing_path : string;
+    signing_region : Region.t;
     style : resolved_style;
   }
 end
 
-type t = {
-  addressing_style : addressing_style;
-  endpoint_variant : endpoint_variant;
-  scheme : Endpoint.Scheme.t;
-  endpoint_override : string option;
-}
+type t = Endpoint_config.t
 
-let create ?(addressing_style = `Auto) ?(endpoint_variant = `Regional)
-    ?(scheme = `Https) ?endpoint () =
-  { addressing_style; endpoint_variant; scheme; endpoint_override = endpoint }
-
-let default = create ()
-let addressing_style t = t.addressing_style
-let endpoint_variant t = t.endpoint_variant
-
-let scheme t =
-  match t.endpoint_override with
-  | Some endpoint -> (
-      match Endpoint.of_string endpoint with
-      | Ok endpoint -> Endpoint.scheme endpoint
-      | Error _ -> t.scheme)
-  | None -> t.scheme
-
-let endpoint_host t ~region =
-  let region = Region.to_string region in
-  match t.endpoint_variant with
-  | `Regional -> Fmt.str "s3.%s.amazonaws.com" region
-  | `Dualstack -> Fmt.str "s3.dualstack.%s.amazonaws.com" region
-  | `Fips -> Fmt.str "s3-fips.%s.amazonaws.com" region
-  | `Fips_dualstack -> Fmt.str "s3-fips.dualstack.%s.amazonaws.com" region
-  | `Accelerate -> "s3-accelerate.amazonaws.com"
-  | `Accelerate_dualstack -> "s3-accelerate.dualstack.amazonaws.com"
-
-let endpoint t ~region =
-  match t.endpoint_override with
-  | Some endpoint -> Endpoint.of_string endpoint
-  | None -> Endpoint.create ~scheme:t.scheme ~host:(endpoint_host t ~region) ()
-
+let default = Endpoint_config.default
+let addressing_style = Endpoint_config.addressing_style
+let endpoint_variant = Endpoint_config.endpoint_variant
+let endpoint = Endpoint_config.endpoint
 let bucket_has_dot bucket = String.contains bucket '.'
 
 let resolved_style t endpoint bucket =
-  match t.addressing_style with
+  match Endpoint_config.addressing_style t with
   | `Path -> Ok `Path
+  | `Virtual_hosted
+    when Endpoint.scheme endpoint = `Https && bucket_has_dot bucket ->
+      invalid ~field:"addressing_style"
+        "virtual-hosted HTTPS endpoints cannot be used with dotted bucket names"
   | `Virtual_hosted -> Ok `Virtual_hosted
   | `Auto ->
       if Endpoint.scheme endpoint = `Https && bucket_has_dot bucket then
@@ -81,6 +46,7 @@ let resolve_bucket_request t ~region ~bucket ~suffix ~signing_suffix =
   let* () = validate_bucket bucket in
   let* endpoint = endpoint t ~region in
   let* style = resolved_style t endpoint bucket in
+  let signing_region = Endpoint_config.signing_region t ~client_region:region in
   match style with
   | `Path ->
       Ok
@@ -88,6 +54,7 @@ let resolve_bucket_request t ~region ~bucket ~suffix ~signing_suffix =
           Request.endpoint;
           path = path_style_path bucket suffix;
           signing_path = path_style_path bucket signing_suffix;
+          signing_region;
           style;
         }
   | `Virtual_hosted ->
@@ -97,6 +64,7 @@ let resolve_bucket_request t ~region ~bucket ~suffix ~signing_suffix =
           Request.endpoint;
           path = suffix;
           signing_path = signing_suffix;
+          signing_region;
           style;
         }
 

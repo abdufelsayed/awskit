@@ -687,7 +687,7 @@ module type MULTIPART = sig
 end
 
 module type PRESIGNED = sig
-  (** Presigned URL helpers bound to a client connection. *)
+  (** Presigned request artifact helpers bound to a client connection. *)
 
   type connection
   (** Client connection handle. *)
@@ -702,7 +702,7 @@ module type PRESIGNED = sig
     ?options:Presigned.Get_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
-  (** Generate a presigned [GET Object] URL. *)
+  (** Generate a presigned [GET Object] request artifact. *)
 
   val put_object :
     connection ->
@@ -711,8 +711,8 @@ module type PRESIGNED = sig
     ?options:Presigned.Put_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
-  (** Generate a presigned [PUT Object] URL. Headers returned in the result must
-      be sent by the eventual uploader. *)
+  (** Generate a presigned [PUT Object] request artifact. Headers returned in
+      the result must be sent by the eventual uploader. *)
 
   val head_object :
     connection ->
@@ -721,7 +721,7 @@ module type PRESIGNED = sig
     ?options:Presigned.Get_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
-  (** Generate a presigned [HEAD Object] URL. *)
+  (** Generate a presigned [HEAD Object] request artifact. *)
 
   val delete_object :
     connection ->
@@ -730,7 +730,7 @@ module type PRESIGNED = sig
     ?options:Presigned.Delete_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
-  (** Generate a presigned [DELETE Object] URL. *)
+  (** Generate a presigned [DELETE Object] request artifact. *)
 
   val upload_part :
     connection ->
@@ -741,7 +741,8 @@ module type PRESIGNED = sig
     ?options:Presigned.Upload_part.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
-  (** Generate a presigned [UploadPart] URL for one multipart part. *)
+  (** Generate a presigned [UploadPart] request artifact for one multipart part.
+  *)
 end
 
 module type S = sig
@@ -815,26 +816,16 @@ module type Sigs = sig
   module Storage_class = Storage_class
   module Tag = Tag
   module Range = Range
-
-  type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
-
-  type endpoint_variant =
-    [ `Regional
-    | `Dualstack
-    | `Fips
-    | `Fips_dualstack
-    | `Accelerate
-    | `Accelerate_dualstack ]
-
+  module Endpoint_config = Endpoint_config
   module Endpoint_resolver = Endpoint_resolver
 
+  type addressing_style = Endpoint_config.addressing_style
+  type endpoint_variant = Endpoint_config.endpoint_variant
   type endpoint_config = Endpoint_resolver.t
 
   val endpoint_config :
     ?addressing_style:addressing_style ->
     ?endpoint_variant:endpoint_variant ->
-    ?scheme:Endpoint.Scheme.t ->
-    ?endpoint:string ->
     unit ->
     endpoint_config
 

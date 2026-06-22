@@ -100,6 +100,13 @@ val source_label : t -> string option
 val expires_at : t -> Ptime.t option
 (** Return the credential expiration timestamp, if the provider supplied one. *)
 
+val validate_fresh : t -> now:Ptime.t -> (unit, Error.t) result
+(** Return [Ok ()] when credentials are still usable at [now].
+
+    Credentials without expiration metadata are treated as fresh. Expired
+    credentials return a credentials error with source metadata when available.
+*)
+
 val signing_key :
   t -> datestamp:string -> region:Region.t -> service:string -> string
 (** Derive a SigV4 signing key without exposing the raw secret access key. This

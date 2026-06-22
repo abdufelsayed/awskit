@@ -196,6 +196,25 @@ let test_runtime_transport_error_adds_operation_context () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected transport error"
 
+let test_expired_credentials_fail_before_transport () =
+  let expires_at = Ptime.add_span test_time (Ptime.Span.of_int_s (-1)) in
+  let credentials =
+    Credentials.create_exn ~access_key_id:"AKID" ~secret_access_key:"SECRET"
+      ?expires_at ()
+  in
+  let conn = Recording_runtime.connect ~credentials [ response 200 "" ] in
+  match
+    Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+      ~body:(Recording_s3.Body.of_string "body")
+      ()
+  with
+  | Error error when Awskit.Error.is_credentials error ->
+      check_operation_context error ~operation:"PutObject"
+        ~resource:"s3://my-bucket/file";
+      Alcotest.(check int) "transport not called" 0 (List.length conn.calls)
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected expired credentials error"
+
 let test_non_success_response_body_read_error_adds_operation_context () =
   let slow_down =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
@@ -376,6 +395,8 @@ let suite =
           test_runtime_stream_request_body_error_propagates;
         Alcotest.test_case "runtime transport error adds operation context"
           `Quick test_runtime_transport_error_adds_operation_context;
+        Alcotest.test_case "expired credentials fail before transport" `Quick
+          test_expired_credentials_fail_before_transport;
         Alcotest.test_case "non-success body read error adds operation context"
           `Quick
           test_non_success_response_body_read_error_adds_operation_context;

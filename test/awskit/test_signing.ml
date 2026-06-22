@@ -230,12 +230,31 @@ let expect_validation label = function
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected validation error" label
 
+let expect_credentials label = function
+  | Error error when Awskit.Error.is_credentials error -> ()
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected credentials error" label
+
 let test_sign_rejects_header_newline () =
   expect_validation "sign header newline"
     (Signing.sign_request ~credentials:creds ~region ~service:"s3" ~method_:`GET
        ~path:"/bucket/key" ~query:""
        ~headers:
          [ ("host", "s3.amazonaws.com"); ("x-test", "ok\r\nInjected: yes") ]
+       ~payload_hash:(Payload_hash.sha256_of_string "")
+       ~now:fixed_time)
+
+let test_sign_rejects_expired_credentials () =
+  let expires_at = Ptime.add_span fixed_time (Ptime.Span.of_int_s (-1)) in
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ?expires_at ()
+  in
+  expect_credentials "sign expired credentials"
+    (Signing.sign_request ~credentials ~region ~service:"s3" ~method_:`GET
+       ~path:"/bucket/key" ~query:""
+       ~headers:[ ("host", "s3.amazonaws.com") ]
        ~payload_hash:(Payload_hash.sha256_of_string "")
        ~now:fixed_time)
 
@@ -299,6 +318,8 @@ let suite =
       [
         Alcotest.test_case "rejects header newline" `Quick
           test_sign_rejects_header_newline;
+        Alcotest.test_case "rejects expired credentials" `Quick
+          test_sign_rejects_expired_credentials;
       ] );
     ( "pbt:signing:ptime",
       List.map QCheck_alcotest.to_alcotest

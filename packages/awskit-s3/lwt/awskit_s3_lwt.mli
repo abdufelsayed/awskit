@@ -14,10 +14,7 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
 
   val create :
     ?ctx:Client.ctx ->
-    ?endpoint:string ->
-    ?addressing_style:Awskit_s3.addressing_style ->
-    ?endpoint_variant:Awskit_s3.endpoint_variant ->
-    ?scheme:Awskit.Endpoint.Scheme.t ->
+    ?endpoint_config:Awskit_s3.Endpoint_config.t ->
     region:string ->
     credentials:Awskit.Credentials.t ->
     clock:(unit -> Ptime.t) ->
@@ -30,9 +27,8 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
       Use this when the application owns the Cohttp client module/context. The
       ready-to-use Unix variant is [awskit-s3-lwt-unix]. [sleep] defaults to a
       no-op unless supplied, so production callers that want retry backoff
-      should pass a real sleep function. [region] and [endpoint] are parsed and
-      validated when the client is created; validation failures are returned as
-      structured [Awskit.Error.t] values. *)
+      should pass a real sleep function. Use [endpoint_config] for AWS endpoint
+      variants, local S3-compatible tests, or custom S3-compatible endpoints. *)
 
   module Body : sig
     include
@@ -67,7 +63,7 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
        and type 'a io := 'a Lwt.t
        and type request_body := Body.t
 
-  (** Presigned URL helpers returning [Lwt.t]. *)
+  (** Presigned request artifact helpers returning [Lwt.t]. *)
   module Presigned :
     Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a Lwt.t
 end

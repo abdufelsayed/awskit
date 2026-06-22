@@ -27,8 +27,22 @@ let test_public_operation_aliases () =
   ignore (List_object_versions.default_options : List_object_versions.options);
   ignore (Create_bucket.default_options : Create_bucket.options);
   ignore ({ Create_bucket.region = Some "us-west-2" } : Create_bucket.options);
-  ignore
-    (endpoint_config ~endpoint:"http://localhost:9000" () : endpoint_config);
+  ignore (Endpoint_config.aws () : endpoint_config);
+  let local_endpoint =
+    Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ()
+  in
+  let signing_region = Awskit.Region.of_string_exn "us-east-1" in
+  let local =
+    Endpoint_config.local_plaintext ~endpoint:local_endpoint ~signing_region
+      ~addressing_style:`Path ()
+    |> ok_or_fail "local endpoint config"
+  in
+  let unsafe =
+    Endpoint_config.unsafe_plaintext ~endpoint:local_endpoint ~signing_region
+      ~addressing_style:`Path ()
+  in
+  ignore (local : endpoint_config);
+  ignore (unsafe : endpoint_config);
   ignore (None : Delete_bucket.result option);
   ignore (None : Head_bucket.result option);
   ignore (None : List_buckets.result option);

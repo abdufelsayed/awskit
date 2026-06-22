@@ -5,18 +5,11 @@
     runtimes can use the same endpoint configuration type as {!Awskit_s3.Make}.
 *)
 
-type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
-(** Requested bucket addressing style. [`Auto] uses virtual-hosted addressing
-    when the bucket and endpoint support it, otherwise path-style. *)
+type addressing_style = Endpoint_config.addressing_style
+(** Requested bucket addressing style. *)
 
-type endpoint_variant =
-  [ `Regional
-  | `Dualstack
-  | `Fips
-  | `Fips_dualstack
-  | `Accelerate
-  | `Accelerate_dualstack ]
-(** AWS S3 endpoint variant used when no explicit endpoint is supplied. *)
+type endpoint_variant = Endpoint_config.endpoint_variant
+(** AWS S3 endpoint variant. *)
 
 type resolved_style = [ `Path | `Virtual_hosted ]
 (** Concrete addressing style selected for one request. *)
@@ -26,23 +19,14 @@ module Request : sig
     endpoint : Awskit.Endpoint.t;
     path : string;
     signing_path : string;
+    signing_region : Awskit.Region.t;
     style : resolved_style;
   }
   (** Resolved endpoint and paths for one S3 request. *)
 end
 
-type t
+type t = Endpoint_config.t
 (** S3 endpoint configuration. *)
-
-val create :
-  ?addressing_style:addressing_style ->
-  ?endpoint_variant:endpoint_variant ->
-  ?scheme:Awskit.Endpoint.Scheme.t ->
-  ?endpoint:string ->
-  unit ->
-  t
-(** Create S3 endpoint configuration. [endpoint] overrides AWS regional endpoint
-    construction; addressing still applies to bucket/object paths. *)
 
 val default : t
 (** Default AWS S3 regional HTTPS endpoint configuration. *)
@@ -50,11 +34,9 @@ val default : t
 val addressing_style : t -> addressing_style
 (** Return the configured addressing-style preference. *)
 
-val endpoint_variant : t -> endpoint_variant
-(** Return the configured AWS endpoint variant. *)
-
-val scheme : t -> Awskit.Endpoint.Scheme.t
-(** Return the scheme used for generated AWS endpoints. *)
+val endpoint_variant : t -> endpoint_variant option
+(** Return the configured AWS endpoint variant, if this is an AWS endpoint
+    policy. *)
 
 val endpoint :
   t -> region:Awskit.Region.t -> (Awskit.Endpoint.t, Awskit.Error.t) result

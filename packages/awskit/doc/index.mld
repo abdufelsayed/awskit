@@ -31,7 +31,7 @@ matches your application, and leave the rest out of your dependency graph.
   {li [awskit-eio] — direct-style Eio runtime adapter over a caller-provided
     HTTPS policy}
   {li [awskit-s3] — runtime-agnostic AWS S3 core: buckets, objects, multipart
-    upload, presigned URLs, policies, and endpoint resolution}
+    upload, presigned request artifacts, policies, and endpoint resolution}
   {li [awskit-s3-sim] — deterministic in-memory S3 implementation for tests}
   {li [awskit-s3-lwt] — S3 adapter over the generic Awskit Lwt runtime}
   {li [awskit-s3-lwt-unix] — ready-to-use S3 client for Lwt + Unix}

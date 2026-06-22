@@ -29,17 +29,32 @@ let method_to_string = function
   | `HEAD -> "HEAD"
   | `DELETE -> "DELETE"
 
+let span_to_string span =
+  match Ptime.Span.to_int_s span with
+  | Some seconds -> Format.sprintf "%ds" seconds
+  | None -> Format.asprintf "%a" Ptime.Span.pp span
+
 let print_presigned label (result : Awskit_s3.Presigned.result) =
   Format.printf "%s@." label;
-  Format.printf "method: %s@." (method_to_string result.method_);
-  Format.printf "url: %s@." result.url;
-  (match result.signed_headers with
+  Format.printf "method: %s@."
+    (method_to_string (Awskit_s3.Presigned.method_ result));
+  Format.printf "safe uri: %a@." Uri.pp (Awskit_s3.Presigned.safe_uri result);
+  Format.printf "requested expiry: %s@."
+    (span_to_string (Awskit_s3.Presigned.requested_expires_in result));
+  Format.printf "effective expiry: %s@."
+    (span_to_string (Awskit_s3.Presigned.effective_expires_in result));
+  (match Awskit_s3.Presigned.expires_at result with
+  | None -> ()
+  | Some expires_at ->
+      Format.printf "expires at: %s@." (Ptime.to_rfc3339 expires_at));
+  (match Awskit_s3.Presigned.signed_headers result with
   | [] -> ()
   | headers ->
       Format.printf "signed headers:@.";
-      List.iter
-        (fun (name, value) -> Format.printf "  %s: %s@." name value)
-        headers);
+      List.iter (fun (name, _) -> Format.printf "  %s@." name) headers);
+  Format.printf
+    "bearer URL: call Awskit_s3.Presigned.reveal_url only when handing off to \
+     the HTTP client@.";
   Format.printf "@."
 
 let run () =

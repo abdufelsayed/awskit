@@ -13,6 +13,13 @@ let expect_validation label = function
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected validation error" label
 
+let local_endpoint_config =
+  Awskit_s3.Endpoint_config.local_plaintext
+    ~endpoint:(Awskit.Endpoint.http_exn ~host:"localhost" ~port:9000 ())
+    ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
+    ~addressing_style:`Path ()
+  |> conn_or_fail
+
 let check_endpoint_config conn =
   match
     Awskit_s3.Endpoint_resolver.endpoint
@@ -29,7 +36,7 @@ let test_connection env () =
   Eio.Switch.run @@ fun sw ->
   let conn =
     Awskit_s3_eio.create ~sw ~env ~https:Awskit_eio.http_only ~region
-      ~credentials ~endpoint:"http://localhost:9000" ()
+      ~credentials ~endpoint_config:local_endpoint_config ()
     |> conn_or_fail
   in
   Alcotest.(check string)
@@ -43,12 +50,6 @@ let test_create_rejects_invalid_region_string env () =
     ~credentials ()
   |> expect_validation "invalid region"
 
-let test_create_rejects_invalid_endpoint_string env () =
-  Eio.Switch.run @@ fun sw ->
-  Awskit_s3_eio.create ~sw ~env ~https:Awskit_eio.http_only ~region ~credentials
-    ~endpoint:"http://localhost:9000/path" ()
-  |> expect_validation "invalid endpoint"
-
 let suite env =
   [
     ( "connection",
@@ -56,7 +57,5 @@ let suite env =
         Alcotest.test_case "create" `Quick (test_connection env);
         Alcotest.test_case "rejects invalid region string" `Quick
           (test_create_rejects_invalid_region_string env);
-        Alcotest.test_case "rejects invalid endpoint string" `Quick
-          (test_create_rejects_invalid_endpoint_string env);
       ] );
   ]

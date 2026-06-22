@@ -130,6 +130,16 @@ let source t = t.source
 let source_label t = Option.map t.source ~f:source_label_of_source
 let expires_at t = t.expires_at
 
+let validate_fresh t ~now =
+  match t.expires_at with
+  | None -> Ok ()
+  | Some expires_at when Ptime.compare expires_at now > 0 -> Ok ()
+  | Some _ ->
+      Error
+        (Aws_error.Internal.credentials
+           ?source:(Option.map t.source ~f:source_label_of_source)
+           "credentials expired before signing")
+
 let signing_key t ~datestamp ~region ~service =
   hmac_sha256 ~key:("AWS4" ^ t.secret_access_key) datestamp |> fun key ->
   hmac_sha256 ~key (Region.to_string region) |> fun key ->

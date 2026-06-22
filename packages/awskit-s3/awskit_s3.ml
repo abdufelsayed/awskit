@@ -7,6 +7,7 @@ module Metadata = Metadata
 module Storage_class = Storage_class
 module Tag = Tag
 module Range = Range
+module Endpoint_config = Endpoint_config
 module Endpoint_resolver = Endpoint_resolver
 module Object = Object
 module Bucket = Bucket
@@ -33,21 +34,12 @@ module Complete_multipart_upload = Multipart.Complete
 module Abort_multipart_upload = Multipart.Abort
 module List_parts = Multipart.List_parts
 
-type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
-
-type endpoint_variant =
-  [ `Regional
-  | `Dualstack
-  | `Fips
-  | `Fips_dualstack
-  | `Accelerate
-  | `Accelerate_dualstack ]
-
+type addressing_style = Endpoint_config.addressing_style
+type endpoint_variant = Endpoint_config.endpoint_variant
 type endpoint_config = Endpoint_resolver.t
 
-let endpoint_config ?addressing_style ?endpoint_variant ?scheme ?endpoint () =
-  Endpoint_resolver.create ?addressing_style ?endpoint_variant ?scheme ?endpoint
-    ()
+let endpoint_config ?addressing_style ?endpoint_variant () =
+  Endpoint_config.aws ?addressing_style ?endpoint_variant ()
 
 let default_endpoint_config = Endpoint_resolver.default
 
@@ -98,6 +90,9 @@ module Make (R : RUNTIME) = struct
               Endpoint_resolver.Request.endpoint;
               path = "/";
               signing_path = "/";
+              signing_region =
+                Endpoint_config.signing_region (endpoint_config conn)
+                  ~client_region:(R.region conn);
               style = `Path;
             }
 
@@ -152,7 +147,7 @@ module Make (R : RUNTIME) = struct
       | Ok credentials -> (
           match
             Awskit.Signing.sign_request_params ~credentials
-              ~region:(R.region conn) ~service:"s3" ~method_
+              ~region:request.signing_region ~service:"s3" ~method_
               ~path:request.signing_path ~query_params:query ~headers
               ~payload_hash ~now:(R.now conn)
           with

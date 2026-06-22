@@ -94,11 +94,11 @@ module Recording_runtime = struct
   }
 
   let connect ?(endpoint_config = Awskit_s3.default_endpoint_config)
-      ?(region = Region.of_string_exn "us-east-1")
+      ?(region = Region.of_string_exn "us-east-1") ?(credentials = creds)
       ?(retry_policy = Awskit.Retry.default) responses =
     {
       region;
-      credentials = creds;
+      credentials;
       endpoint_config;
       retry_policy;
       calls = [];

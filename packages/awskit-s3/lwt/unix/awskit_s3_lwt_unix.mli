@@ -13,10 +13,7 @@ module Runtime :
 
 val create :
   ?ctx:Cohttp_lwt_unix.Client.ctx ->
-  ?endpoint:string ->
-  ?addressing_style:Awskit_s3.addressing_style ->
-  ?endpoint_variant:Awskit_s3.endpoint_variant ->
-  ?scheme:Awskit.Endpoint.Scheme.t ->
+  ?endpoint_config:Awskit_s3.Endpoint_config.t ->
   ?region:string ->
   ?credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
@@ -27,11 +24,9 @@ val create :
 (** Create a ready-to-use Lwt + Unix S3 client.
 
     If [region] or [credentials] are omitted, the underlying [Awskit_lwt_unix]
-    runtime resolves them from standard AWS environment and profile sources.
-    [endpoint] is for local S3-compatible services or custom endpoints.
-    [addressing_style], [endpoint_variant], and [scheme] configure S3 endpoint
-    resolution when no explicit endpoint is supplied. [region] and [endpoint]
-    are parsed and validated when the client is created. *)
+    runtime resolves them from standard AWS environment and profile sources. Use
+    [endpoint_config] for AWS endpoint variants, local S3-compatible tests, or
+    custom S3-compatible endpoints. *)
 
 module Body : sig
   include
@@ -154,7 +149,7 @@ module Multipart :
      and type 'a io := 'a Lwt.t
      and type request_body := Body.t
 
-(** Presigned URL helpers using the client's resolved region, credentials,
-    clock, and endpoint configuration. *)
+(** Presigned request artifact helpers using the client's resolved region,
+    credentials, clock, and endpoint configuration. *)
 module Presigned :
   Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a Lwt.t

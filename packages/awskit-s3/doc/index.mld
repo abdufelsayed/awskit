@@ -1,7 +1,7 @@
 {0 awskit-s3}
 
-AWS S3 client for bucket and object storage, multipart uploads, presigned URLs,
-and bucket configuration.
+AWS S3 client for bucket and object storage, multipart uploads, presigned
+request artifacts, and bucket configuration.
 
 See {{:../awskit/index.html}[awskit]} for the pure core and runtime adapter
 overview.
@@ -20,7 +20,8 @@ below.
     ranges, checksums, conditional requests, version IDs, and version listings}
   {li multipart upload, multipart part listing, and
     local-file transfer helpers in Unix-capable adapters}
-  {li S3 presigned URLs for object and multipart upload-part workflows}
+  {li S3 presigned request artifacts for object and multipart upload-part
+    workflows}
   {li bucket lifecycle needed to create, locate, inspect, and remove buckets}
   {li bucket configuration helpers for policy, CORS, encryption, tagging, and
     versioning}
@@ -53,7 +54,7 @@ for advanced integrations that need the raw runtime body layer.
 {2 awskit-s3}
 
 {!module:Awskit_s3} contains runtime-agnostic S3 types, endpoint configuration,
-standalone presigned URL helpers, and the runtime functor.
+standalone presigned request artifact helpers, and the runtime functor.
 
 Main modules:
 
@@ -67,7 +68,8 @@ Main modules:
     options, and result records}
   {li {!module:Awskit_s3.Transfer} — high-level upload/download options,
     limits, strategy results, and multipart transfer result records}
-  {li {!module:Awskit_s3.Presigned} — runtime-agnostic presigned URL generation}
+  {li {!module:Awskit_s3.Presigned} — runtime-agnostic presigned request
+    artifact generation}
   {li {!module:Awskit_s3.Policy} — validated bucket policy JSON payloads}
   {li {!module:Awskit_s3.Make} — functor for wiring S3 operations to a custom
     [Awskit.Runtime.S] implementation}

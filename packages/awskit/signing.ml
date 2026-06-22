@@ -92,76 +92,83 @@ let validate_host_header headers =
 
 let sign_request_params ~credentials ~region ~service ~method_ ~path
     ~query_params ~headers ~payload_hash ~now =
-  let datestamp, amz_date = ptime_to_date_time now in
-  let payload_hash_header = Body.Payload_hash.to_header_value payload_hash in
-  let base_headers =
-    ("x-amz-date", amz_date)
-    :: ("x-amz-content-sha256", payload_hash_header)
-    :: headers
-  in
-  let base_headers =
-    match Credentials.session_token credentials with
-    | Some token -> ("x-amz-security-token", token) :: base_headers
-    | None -> base_headers
-  in
-  match Request.validate_headers base_headers with
+  match Credentials.validate_fresh credentials ~now with
   | Error _ as error -> error
   | Ok () -> (
-      match validate_host_header base_headers with
+      let datestamp, amz_date = ptime_to_date_time now in
+      let payload_hash_header =
+        Body.Payload_hash.to_header_value payload_hash
+      in
+      let base_headers =
+        ("x-amz-date", amz_date)
+        :: ("x-amz-content-sha256", payload_hash_header)
+        :: headers
+      in
+      let base_headers =
+        match Credentials.session_token credentials with
+        | Some token -> ("x-amz-security-token", token) :: base_headers
+        | None -> base_headers
+      in
+      match Request.validate_headers base_headers with
       | Error _ as error -> error
-      | Ok () ->
-          let sorted_headers = canonicalize_headers base_headers in
-          let signed_headers_str =
-            String.concat ~sep:";" (List.map sorted_headers ~f:fst)
-          in
-          let canonical_headers =
-            String.concat
-              (List.map sorted_headers ~f:(fun (key, value) ->
-                   key ^ ":" ^ value ^ "\n"))
-          in
-          let canonical_request =
-            String.concat ~sep:"\n"
-              [
-                Request.Method.to_string method_;
-                uri_encode ~encode_slash:false path;
-                canonical_query_params query_params;
-                canonical_headers;
-                signed_headers_str;
-                payload_hash_header;
-              ]
-          in
-          let scope =
-            String.concat ~sep:"/"
-              [ datestamp; Region.to_string region; service; "aws4_request" ]
-          in
-          let string_to_sign =
-            String.concat ~sep:"\n"
-              [
-                "AWS4-HMAC-SHA256";
-                amz_date;
-                scope;
-                sha256_hex canonical_request;
-              ]
-          in
-          let signing_key =
-            Credentials.signing_key credentials ~datestamp ~region ~service
-          in
-          let signature =
-            Digestif.SHA256.(
-              hmac_string ~key:signing_key string_to_sign |> to_hex)
-          in
-          let authorization =
-            Fmt.str
-              "AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, \
-               Signature=%s"
-              (Credentials.access_key_id credentials)
-              scope signed_headers_str signature
-          in
-          Ok
-            {
-              headers = ("authorization", authorization) :: base_headers;
-              signed_headers_str;
-            })
+      | Ok () -> (
+          match validate_host_header base_headers with
+          | Error _ as error -> error
+          | Ok () ->
+              let sorted_headers = canonicalize_headers base_headers in
+              let signed_headers_str =
+                String.concat ~sep:";" (List.map sorted_headers ~f:fst)
+              in
+              let canonical_headers =
+                String.concat
+                  (List.map sorted_headers ~f:(fun (key, value) ->
+                       key ^ ":" ^ value ^ "\n"))
+              in
+              let canonical_request =
+                String.concat ~sep:"\n"
+                  [
+                    Request.Method.to_string method_;
+                    uri_encode ~encode_slash:false path;
+                    canonical_query_params query_params;
+                    canonical_headers;
+                    signed_headers_str;
+                    payload_hash_header;
+                  ]
+              in
+              let scope =
+                String.concat ~sep:"/"
+                  [
+                    datestamp; Region.to_string region; service; "aws4_request";
+                  ]
+              in
+              let string_to_sign =
+                String.concat ~sep:"\n"
+                  [
+                    "AWS4-HMAC-SHA256";
+                    amz_date;
+                    scope;
+                    sha256_hex canonical_request;
+                  ]
+              in
+              let signing_key =
+                Credentials.signing_key credentials ~datestamp ~region ~service
+              in
+              let signature =
+                Digestif.SHA256.(
+                  hmac_string ~key:signing_key string_to_sign |> to_hex)
+              in
+              let authorization =
+                Fmt.str
+                  "AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, \
+                   Signature=%s"
+                  (Credentials.access_key_id credentials)
+                  scope signed_headers_str signature
+              in
+              Ok
+                {
+                  headers = ("authorization", authorization) :: base_headers;
+                  signed_headers_str;
+                }))
 
 let result_exn = Aws_error.Internal.get_ok_exn
 

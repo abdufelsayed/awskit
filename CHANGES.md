@@ -14,10 +14,14 @@ release packaging.
 - Moved `Awskit.Error` constructors, context tagging, and exception bridge
   helpers under `Awskit.Error.Internal`; application code should use the
   top-level `Awskit.Error` consumer API. (0cfa463)
-- High-level runtime and S3 constructors now accept string `~region` and
-  `~endpoint` values and return structured validation errors when those values
-  are invalid. Bucket no-payload operations now require a trailing `unit`
-  argument. (2c19cd0)
+- High-level runtime constructors now accept string `~region` and `~endpoint`
+  values and return structured validation errors when those values are invalid.
+  S3 constructors now take `?endpoint_config:Awskit_s3.Endpoint_config.t`
+  instead of raw `~endpoint`, `~scheme`, `~addressing_style`, and
+  `~endpoint_variant` groups. Use `Endpoint_config.aws`,
+  `Endpoint_config.local_plaintext`, `Endpoint_config.s3_compatible`, or
+  `Endpoint_config.unsafe_plaintext` to make endpoint policy explicit. Bucket
+  no-payload operations now require a trailing `unit` argument. (2c19cd0)
 - Request builders, XML parsers, runtime internals, and adapter transfer helper
   modules are now private implementation modules. Use the public `Awskit`,
   `Awskit_s3`, and adapter APIs. (fc67929)

@@ -31,26 +31,13 @@ module Body_reader = File_transfer.Make_body_reader (Runtime) (S3)
 module Body = Body_reader.Body
 module Reader = Body_reader.Reader
 
-let parse_endpoint = function
-  | None -> Ok None
-  | Some endpoint -> (
-      match Awskit.Endpoint.of_string endpoint with
-      | Ok endpoint -> Ok (Some (Awskit.Endpoint.to_url_prefix endpoint))
-      | Error _ as error -> error)
-
-let create ~sw ~env ~https ~region ~credentials ?retry_policy ?endpoint
-    ?addressing_style ?endpoint_variant ?scheme () =
+let create ~sw ~env ~https ~region ~credentials ?retry_policy
+    ?(endpoint_config = Awskit_s3.default_endpoint_config) () =
   match
-    ( Awskit_eio.create ~sw ~env ~https ~region ~credentials ?retry_policy (),
-      parse_endpoint endpoint )
+    Awskit_eio.create ~sw ~env ~https ~region ~credentials ?retry_policy ()
   with
-  | Error error, _ | _, Error error -> Error error
-  | Ok aws, Ok endpoint ->
-      let endpoint_config =
-        Awskit_s3.endpoint_config ?addressing_style ?endpoint_variant ?scheme
-          ?endpoint ()
-      in
-      Ok { aws; endpoint_config }
+  | Error _ as error -> error
+  | Ok aws -> Ok { aws; endpoint_config }
 
 module Object = struct
   include S3.Object

@@ -314,6 +314,12 @@ module Https = struct
 end
 
 let https = Https.connector () in
+let endpoint_config =
+  Awskit_s3.Endpoint_config.aws
+    ~endpoint_variant:`Dualstack
+    ~addressing_style:`Auto
+    ()
+in
 let s3 =
   Awskit_s3_eio.create
     ~sw
@@ -321,16 +327,24 @@ let s3 =
     ~https
     ~region:"us-east-1"
     ~credentials
-    ~endpoint_variant:`Dualstack
-    ~addressing_style:`Auto
+    ~endpoint_config
     ()
   |> Result.get_ok
 ]}
 
-Pass [endpoint] for S3 endpoints that are not the default AWS regional host,
-including local test services:
+Use {!module:Awskit_s3.Endpoint_config} for S3 endpoints that are not the
+default AWS regional host. Plain HTTP is explicit; loopback endpoints use
+[local_plaintext], and non-local HTTP requires [unsafe_plaintext]:
 
 {[
+let endpoint_config =
+  Awskit_s3.Endpoint_config.local_plaintext
+    ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
+    ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
+    ~addressing_style:`Path
+    ()
+  |> Result.get_ok
+in
 let s3 =
   Awskit_s3_eio.create
     ~sw
@@ -338,8 +352,7 @@ let s3 =
     ~https:Awskit_eio.http_only
     ~region:"us-east-1"
     ~credentials
-    ~endpoint:"http://127.0.0.1:9000"
-    ~addressing_style:`Path
+    ~endpoint_config
     ()
   |> Result.get_ok
 ]}
@@ -455,11 +468,11 @@ S3.Runtime.Response_body.read reader bytes ~off ~len
 For custom S3 callers, prefer [Body.of_stream] and [Reader.read] so code stays
 within the S3 adapter API.
 
-{1 Presigned URLs}
+{1 Presigned Request Artifacts}
 
 Use adapter-level [Presigned] modules when a connection already exists. Use
-standalone {!module:Awskit_s3.Presigned} helpers when generating URLs without
-an adapter connection.
+standalone {!module:Awskit_s3.Presigned} helpers when generating presigned
+request artifacts without an adapter connection.
 
 {[
 Awskit_s3_eio.Presigned.get_object s3
@@ -469,12 +482,19 @@ Awskit_s3_eio.Presigned.get_object s3
 ]}
 
 {[
-Awskit_s3.Presigned.put_object
-  ~region:"us-east-1"
+let endpoint_config =
+  Awskit_s3.Endpoint_config.local_plaintext
+    ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
+    ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
+    ~addressing_style:`Path
+    ()
+  |> Result.get_ok
+in
+Awskit_s3.Presigned.put_object_with_endpoint_config
+  ~region:(Awskit.Region.of_string_exn "us-east-1")
   ~credentials
   ~now
-  ~endpoint:"http://127.0.0.1:9000"
-  ~addressing_style:`Path
+  ~endpoint_config
   ~bucket:"my-bucket"
   ~key:"upload.txt"
   ()
@@ -495,20 +515,25 @@ Awskit_s3.Presigned.upload_part
   ()
 ]}
 
-Presigned URLs use [UNSIGNED-PAYLOAD] and the same endpoint/addressing options
-as regular operations. Returned [result.signed_headers] are the non-host
-headers that the caller must send with the URL. Use [extra_signed_headers] only
-for additional headers that must be included in the signature. Presigned [PUT]
-and [UploadPart] helpers sign explicit checksum value headers when configured,
-and object presigning options support [expected_bucket_owner] guard rails.
+Presigned request artifacts use [UNSIGNED-PAYLOAD] and the same
+endpoint/addressing options as regular operations. Use
+[Awskit_s3.Presigned.method_], [Awskit_s3.Presigned.safe_uri],
+[Awskit_s3.Presigned.signed_headers], and the expiry accessors for diagnostics
+and user-facing output. [Awskit_s3.Presigned.reveal_url] is the explicit
+bearer-token handoff boundary for the component that will execute the request.
+Use [extra_signed_headers] only for additional headers that must be included in
+the signature. Presigned [PUT] and [UploadPart] helpers sign explicit checksum
+value headers when configured, and object presigning options support
+[expected_bucket_owner] guard rails.
 
 A typical direct-upload multipart flow is:
 
 {ol
   {li Start the upload with [Multipart.create_upload].}
-  {li Presign one [UploadPart] URL per part number with
+  {li Presign one [UploadPart] request artifact per part number with
     [Presigned.upload_part].}
-  {li The uploader sends each part to the corresponding URL.}
+  {li The uploader sends each part using the revealed bearer URL, method, and
+    signed headers.}
   {li Complete the upload with the returned part ETags.}
 }
 
@@ -646,4 +671,5 @@ dune build @minio-contract
 The contract runner defaults to [http://127.0.0.1:9000] with the
 [minioadmin]/[minioadmin] credentials from [docker-compose.yml]. Override with
 [AWSKIT_S3_MINIO_ENDPOINT], [AWSKIT_S3_MINIO_ACCESS_KEY_ID],
-[AWSKIT_S3_MINIO_SECRET_ACCESS_KEY], and [AWSKIT_S3_MINIO_REGION].
+[AWSKIT_S3_MINIO_SECRET_ACCESS_KEY], and [AWSKIT_S3_MINIO_REGION]. Non-local
+HTTP endpoints require [AWSKIT_S3_MINIO_UNSAFE_HTTP=1].

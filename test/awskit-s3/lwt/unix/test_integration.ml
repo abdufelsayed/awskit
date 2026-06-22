@@ -3,6 +3,15 @@ let credentials =
 
 let region = "us-east-1"
 
+let local_endpoint_config =
+  Awskit_s3.Endpoint_config.local_plaintext
+    ~endpoint:(Awskit.Endpoint.http_exn ~host:"localhost" ~port:9000 ())
+    ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
+    ~addressing_style:`Path ()
+  |> function
+  | Ok config -> config
+  | Error error -> Alcotest.failf "%a" Awskit.Error.pp error
+
 let check_endpoint_config conn =
   match
     Awskit_s3.Endpoint_resolver.endpoint
@@ -19,7 +28,7 @@ let test_connection () =
   match
     Awskit_s3_lwt_unix.create ~region ~credentials
       ~clock:(fun () -> Ptime.epoch)
-      ~endpoint:"http://localhost:9000" ()
+      ~endpoint_config:local_endpoint_config ()
   with
   | Error error -> Alcotest.failf "%a" Awskit_s3.Error.pp error
   | Ok conn ->
@@ -40,13 +49,6 @@ let test_create_rejects_invalid_region_string () =
        ~clock:(fun () -> Ptime.epoch)
        ())
 
-let test_create_rejects_invalid_endpoint_string () =
-  expect_validation "invalid endpoint"
-    (Awskit_s3_lwt_unix.create ~region:"us-east-1"
-       ~endpoint:"http://localhost:9000/path" ~credentials
-       ~clock:(fun () -> Ptime.epoch)
-       ())
-
 let suite () =
   [
     ( "connection",
@@ -54,7 +56,5 @@ let suite () =
         Alcotest.test_case "create" `Quick test_connection;
         Alcotest.test_case "rejects invalid region string" `Quick
           test_create_rejects_invalid_region_string;
-        Alcotest.test_case "rejects invalid endpoint string" `Quick
-          test_create_rejects_invalid_endpoint_string;
       ] );
   ]
