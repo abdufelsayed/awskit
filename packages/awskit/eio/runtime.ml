@@ -73,6 +73,12 @@ type response_body_reader = {
   body : Cohttp_eio.Body.t;
   mutable chunk : string;
   mutable offset : int;
+  mutable eof : bool;
+      (* Latch end-of-body. cohttp's chunked reader must not be called again
+         after it returns [Done]: with [remaining = 0] it re-enters the
+         "read next chunk header" path and blocks on [read_line] until the
+         (keep-alive) connection is closed by the server. Once we have seen
+         EOF we never touch the body flow again. *)
 }
 
 type request_body_bridge = {
@@ -370,6 +376,7 @@ let rec read_from_current reader bytes ~off ~len =
     reader.offset <- reader.offset + copied;
     Ok copied
   end
+  else if reader.eof then Ok 0
   else
     let buffer = Cstruct.create 0x8000 in
     let read = Eio.Flow.single_read reader.body buffer in
@@ -382,7 +389,9 @@ let read_response_body reader bytes ~off ~len =
     Error (Awskit.Error.body "invalid read bounds")
   else
     try read_from_current reader bytes ~off ~len with
-    | End_of_file -> Ok 0
+    | End_of_file ->
+        reader.eof <- true;
+        Ok 0
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Awskit.Error.body (Exn.to_string exn))
 
@@ -404,7 +413,7 @@ let discard_response_body_reader (reader : response_body_reader)
     ~max_response_drain_bytes:body.max_response_drain_bytes
 
 let with_response_body (body : response_body) ~consume =
-  let reader = { body = body.body; chunk = ""; offset = 0 } in
+  let reader = { body = body.body; chunk = ""; offset = 0; eof = false } in
   match consume reader with
   | Ok _ as result -> (
       match discard_response_body_reader reader body with
@@ -416,7 +425,9 @@ let with_response_body (body : response_body) ~consume =
       | Error _ as drain_error -> drain_error)
 
 let discard_response_body (body : response_body) =
-  discard_response_body_reader { body = body.body; chunk = ""; offset = 0 } body
+  discard_response_body_reader
+    { body = body.body; chunk = ""; offset = 0; eof = false }
+    body
 
 module Response_body = struct
   let read = read_response_body
