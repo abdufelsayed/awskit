@@ -80,15 +80,15 @@ module Credentials = struct
     match Yojson.Basic.Util.member "Expiration" json with
     | `String value -> (
         match Ptime.of_rfc3339 ~strict:false value with
-        | Ok (time, _, _) -> Ok (Some time)
+        | Ok (time, _, _) -> Ok time
         | Error _ ->
             Error
               (validation ~field "metadata response contains invalid Expiration")
         )
-    | `Null -> Ok None
-    | _ -> Ok None
+    | `Null -> Error (validation ~field "metadata response missing Expiration")
+    | _ -> Error (validation ~field "metadata response missing Expiration")
 
-  let parse_metadata_credentials ~field body =
+  let parse_metadata_credentials ~source ~field body =
     try
       let json = Yojson.Basic.from_string body in
       let code =
@@ -111,13 +111,24 @@ module Credentials = struct
           let* expires_at = parse_expiration ~field json in
           let* credentials =
             Awskit.Credentials.create ~access_key_id ~secret_access_key
-              ~session_token ()
+              ~session_token ~source ~expires_at ()
           in
-          Ok (credentials, expires_at)
+          Ok (credentials, Some expires_at)
     with Yojson.Json_error message ->
       Error
         (validation ~field
            (Printf.sprintf "metadata response is not valid JSON: %s" message))
+
+  type metadata_fetch =
+    | Fetch_resolved of Awskit.Credentials.t * Ptime.t option
+    | Fetch_unavailable of string
+    | Fetch_invalid of Awskit.Error.t
+    | Fetch_failed of Awskit.Error.t
+
+  type 'a metadata_lookup =
+    | Lookup_resolved of 'a
+    | Lookup_invalid of Awskit.Error.t
+    | Lookup_failed of Awskit.Error.t
 
   let needs_refresh ~now = function
     | None -> true
@@ -127,19 +138,33 @@ module Credentials = struct
         | None -> true
         | Some refresh_at -> Ptime.compare refresh_at expires_at >= 0)
 
-  let cached ~clock fetch =
+  let cached ~source ~clock fetch =
     let cache = ref None in
     Provider.create (fun () ->
+        let open Provider in
         if not (needs_refresh ~now:(clock ()) !cache) then
           match !cache with
-          | Some (credentials, _) -> Lwt.return_ok credentials
+          | Some (credentials, _) -> Lwt.return (Resolved credentials)
           | None -> assert false
         else
           Lwt.bind (fetch ()) (function
-            | Error _ as error -> Lwt.return error
-            | Ok (credentials, expires_at) ->
+            | Fetch_unavailable reason ->
+                Lwt.return (Unavailable { source; reason })
+            | Fetch_invalid error -> Lwt.return (Invalid error)
+            | Fetch_failed error -> Lwt.return (Failed error)
+            | Fetch_resolved (credentials, expires_at) ->
                 cache := Some (credentials, expires_at);
-                Lwt.return_ok credentials))
+                Lwt.return (Resolved credentials)))
+
+  let metadata_result_to_fetch = function
+    | Ok (credentials, expires_at) -> Fetch_resolved (credentials, expires_at)
+    | Error error -> Fetch_invalid error
+
+  let metadata_lookup_to_fetch = function
+    | Lookup_resolved (credentials, expires_at) ->
+        Fetch_resolved (credentials, expires_at)
+    | Lookup_invalid error -> Fetch_invalid error
+    | Lookup_failed error -> Fetch_failed error
 
   let read_file path =
     Lwt.catch
@@ -178,23 +203,30 @@ module Credentials = struct
           (validation ~field:"AWS_CONTAINER_CREDENTIALS_FULL_URI"
              "container credential endpoint must use http or https")
 
+  type container_endpoint =
+    | Container_endpoint of Uri.t
+    | Container_endpoint_unavailable of string
+    | Container_endpoint_invalid of Awskit.Error.t
+
   let container_endpoint ?(getenv = getenv_opt) () =
     match getenv "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI" with
     | Some path when not (String.equal path "") ->
         if String.length path > 0 && Char.equal path.[0] '/' then
-          Ok (Uri.of_string (Printf.sprintf "http://%s%s" container_host path))
+          Container_endpoint
+            (Uri.of_string (Printf.sprintf "http://%s%s" container_host path))
         else
-          Error
+          Container_endpoint_invalid
             (validation ~field:"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
                "container credential relative URI must start with /")
     | _ -> (
         match getenv "AWS_CONTAINER_CREDENTIALS_FULL_URI" with
-        | Some uri when not (String.equal uri "") ->
-            validate_container_full_uri (Uri.of_string uri)
+        | Some uri when not (String.equal uri "") -> (
+            match validate_container_full_uri (Uri.of_string uri) with
+            | Ok uri -> Container_endpoint uri
+            | Error error -> Container_endpoint_invalid error)
         | _ ->
-            Error
-              (validation ~field:"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
-                 "container credential endpoint not configured"))
+            Container_endpoint_unavailable
+              "container credential endpoint not configured")
 
   let container_authorization_headers ?(getenv = getenv_opt) () =
     match getenv "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE" with
@@ -210,24 +242,27 @@ module Credentials = struct
 
   let container_provider ?getenv ?(http_call = http_call)
       ?(clock = Ptime_clock.now) () =
-    cached ~clock (fun () ->
+    cached ~source:`Container ~clock (fun () ->
         match container_endpoint ?getenv () with
-        | Error _ as error -> Lwt.return error
-        | Ok uri ->
+        | Container_endpoint_unavailable reason ->
+            Lwt.return (Fetch_unavailable reason)
+        | Container_endpoint_invalid error -> Lwt.return (Fetch_invalid error)
+        | Container_endpoint uri ->
             Lwt.bind (container_authorization_headers ?getenv ()) (function
-              | Error _ as error -> Lwt.return error
+              | Error error -> Lwt.return (Fetch_failed error)
               | Ok headers ->
                   Lwt.bind (http_call ~meth:`GET ~headers uri) (function
-                    | Error _ as error -> Lwt.return error
+                    | Error error -> Lwt.return (Fetch_failed error)
                     | Ok response -> (
                         match
                           expect_success ~field:"container credentials" response
                         with
-                        | Error _ as error -> Lwt.return error
+                        | Error error -> Lwt.return (Fetch_failed error)
                         | Ok response ->
                             Lwt.return
-                              (parse_metadata_credentials
-                                 ~field:"container credentials" response.body)))))
+                              (parse_metadata_credentials ~source:`Container
+                                 ~field:"container credentials" response.body
+                              |> metadata_result_to_fetch)))))
 
   let imds_base_uri path =
     Uri.of_string (Printf.sprintf "http://%s/latest/%s" imds_host path)
@@ -238,18 +273,19 @@ module Credentials = struct
       (http_call ~meth:`PUT ~headers (imds_base_uri "api/token"))
       (function
         | Ok response when response.status >= 200 && response.status < 300 ->
-            Lwt.return_ok (Some response.body)
+            Lwt.return (Lookup_resolved (Some response.body))
         | Ok response
           when response.status = 403
                || response.status = 404
                || response.status = 405 ->
-            Lwt.return_ok None
+            Lwt.return (Lookup_resolved None)
         | Ok response ->
-            Lwt.return_error
-              (validation ~field:"instance metadata token"
-                 (Printf.sprintf "metadata token service returned HTTP %d"
-                    response.status))
-        | Error _ as error -> Lwt.return error)
+            Lwt.return
+              (Lookup_failed
+                 (validation ~field:"instance metadata token"
+                    (Printf.sprintf "metadata token service returned HTTP %d"
+                       response.status)))
+        | Error error -> Lwt.return (Lookup_failed error))
 
   let imds_headers token =
     match token with
@@ -279,67 +315,97 @@ module Credentials = struct
   let fetch_imds_role ~http_call ?token () =
     Lwt.bind (imds_get ~http_call ?token "meta-data/iam/security-credentials/")
       (function
-      | Error _ as error -> Lwt.return error
+      | Error error -> Lwt.return (Lookup_failed error)
       | Ok response -> (
           match expect_success ~field:"instance metadata role" response with
-          | Error _ as error -> Lwt.return error
+          | Error error -> Lwt.return (Lookup_failed error)
           | Ok response -> (
               match first_non_empty_line response.body with
-              | Some role -> Lwt.return_ok role
+              | Some role -> Lwt.return (Lookup_resolved role)
               | None ->
-                  Lwt.return_error
-                    (validation ~field:"instance metadata role"
-                       "metadata response did not include an IAM role"))))
+                  Lwt.return
+                    (Lookup_invalid
+                       (validation ~field:"instance metadata role"
+                          "metadata response did not include an IAM role")))))
 
   let fetch_imds_credentials ~http_call ?token role =
     Lwt.bind
       (imds_get ~http_call ?token
          ("meta-data/iam/security-credentials/" ^ Uri.pct_encode role))
       (function
-        | Error _ as error -> Lwt.return error
+        | Error error -> Lwt.return (Lookup_failed error)
         | Ok response -> (
             match
               expect_success ~field:"instance metadata credentials" response
             with
-            | Error _ as error -> Lwt.return error
+            | Error error -> Lwt.return (Lookup_failed error)
             | Ok response ->
                 Lwt.return
-                  (parse_metadata_credentials
-                     ~field:"instance metadata credentials" response.body)))
+                  (match
+                     parse_metadata_credentials ~source:`Imds
+                       ~field:"instance metadata credentials" response.body
+                   with
+                  | Ok credentials -> Lookup_resolved credentials
+                  | Error error -> Lookup_invalid error)))
 
   let instance_metadata_provider ?(getenv = getenv_opt) ?(http_call = http_call)
       ?(clock = Ptime_clock.now) ?imdsv1_fallback () =
-    cached ~clock (fun () ->
+    cached ~source:`Imds ~clock (fun () ->
         match getenv "AWS_EC2_METADATA_DISABLED" with
         | Some value when truthy (trim value) ->
-            Lwt.return_error
-              (validation ~field:"AWS_EC2_METADATA_DISABLED"
+            Lwt.return
+              (Fetch_unavailable
                  "EC2 instance metadata credentials are disabled")
         | _ ->
             Lwt.bind (imds_token ~http_call ()) (function
-              | Error _ as error -> Lwt.return error
-              | Ok token -> (
+              | Lookup_invalid error -> Lwt.return (Fetch_invalid error)
+              | Lookup_failed error -> Lwt.return (Fetch_failed error)
+              | Lookup_resolved token -> (
                   let fetch ?token () =
                     Lwt.bind (fetch_imds_role ~http_call ?token ()) (function
-                      | Error _ as error -> Lwt.return error
-                      | Ok role -> fetch_imds_credentials ~http_call ?token role)
+                      | Lookup_resolved role ->
+                          fetch_imds_credentials ~http_call ?token role
+                      | Lookup_invalid _ as invalid -> Lwt.return invalid
+                      | Lookup_failed _ as failed -> Lwt.return failed)
                   in
                   match token with
-                  | Some token -> fetch ~token ()
+                  | Some token ->
+                      Lwt.map metadata_lookup_to_fetch (fetch ~token ())
                   | None -> (
                       match
                         imdsv1_fallback_policy ~getenv ?imdsv1_fallback ()
                       with
-                      | `Enabled -> fetch ()
+                      | `Enabled -> Lwt.map metadata_lookup_to_fetch (fetch ())
                       | `Disabled ->
-                          Lwt.return_error
-                            (validation ~field:"AWS_EC2_METADATA_V1_DISABLED"
-                               "IMDSv1 fallback is disabled")))))
+                          Lwt.return
+                            (Fetch_invalid
+                               (validation ~field:"AWS_EC2_METADATA_V1_DISABLED"
+                                  "IMDSv1 fallback is disabled"))))))
+
+  let provider_source_to_lwt = function
+    | `Static -> `Static
+    | `Env -> `Env
+    | `Shared_file path -> `Shared_file path
+    | `Config_file path -> `Config_file path
+    | `Container -> `Container
+    | `Imds -> `Imds
+    | `Custom source -> `Custom source
+
+  let core_provider_resolution_to_lwt resolution =
+    let open Provider in
+    match resolution with
+    | Awskit.Credentials.Provider.Resolved credentials -> Resolved credentials
+    | Awskit.Credentials.Provider.Unavailable { source; reason } ->
+        Unavailable { source = provider_source_to_lwt source; reason }
+    | Awskit.Credentials.Provider.Invalid error -> Invalid error
+    | Awskit.Credentials.Provider.Failed error -> Failed error
 
   let local_provider ?getenv ?home () =
     let provider = Awskit_unix.Credentials.default_provider ?getenv ?home () in
     Provider.create (fun () ->
-        Lwt.return (Awskit.Credentials.Provider.resolve provider))
+        Lwt.return
+          (Awskit.Credentials.Provider.resolve provider
+          |> core_provider_resolution_to_lwt))
 
   let default_provider ?getenv ?home ?http_call ?clock ?imdsv1_fallback () =
     Provider.chain

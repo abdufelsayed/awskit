@@ -145,11 +145,17 @@ cannot construct new {!type:Awskit.Error.t} values directly:
 {[
 type kind = private
   | Validation of validation
-  | Signing of string
+  | Credentials of credentials_error
+  | Signing of signing_error
+  | Endpoint of endpoint_error
   | Transport of transport
+  | Timeout of timeout
+  | Cancelled of cancellation
   | Service of service
-  | Decode of string
   | Body of body
+  | Decode of decode
+  | Retry_exhausted of retry_exhausted
+  | Not_supported of not_supported
   | Multiple of Awskit.Error.t list
 ]}
 

@@ -11,20 +11,38 @@ module Credentials : sig
     type credentials = Awskit.Credentials.t
     (** AWS credentials resolved by this provider. *)
 
+    type source = Awskit.Credentials.Provider.source
+    (** Credential source that produced, skipped, or failed resolution. *)
+
+    type unavailable = { source : source; reason : string }
+    (** Provider was not configured or not applicable, so a chain may continue.
+    *)
+
+    (** Credential resolution outcome. Chains continue only on [Unavailable]. *)
+    type resolution =
+      | Resolved of credentials
+      | Unavailable of unavailable
+      | Invalid of Awskit.Error.t
+      | Failed of Awskit.Error.t
+
     type t
     (** Asynchronous credential provider. *)
 
-    val create : (unit -> (credentials, Awskit.Error.t) result Lwt.t) -> t
+    val create : (unit -> resolution Lwt.t) -> t
     (** Wrap an asynchronous credential lookup function. *)
 
-    val resolve : t -> (credentials, Awskit.Error.t) result Lwt.t
+    val resolve : t -> resolution Lwt.t
     (** Resolve credentials. *)
 
     val static : credentials -> t
     (** Provider that always returns the same credentials. *)
 
     val chain : t list -> t
-    (** Try providers in order and return the first successful credentials. *)
+    (** Try providers in order. The chain continues only when a provider returns
+        [Unavailable]; [Resolved], [Invalid], and [Failed] stop resolution. *)
+
+    val source_label : source -> string
+    (** Stable, human-readable label for a credential provider source. *)
   end
 end
 

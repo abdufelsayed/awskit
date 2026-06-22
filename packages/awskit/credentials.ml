@@ -1,11 +1,78 @@
 module Aws_error = Error
 open Base
 
+type source =
+  [ `Static
+  | `Env
+  | `Shared_file of string
+  | `Config_file of string
+  | `Container
+  | `Imds
+  | `Custom of string ]
+
 type t = {
   access_key_id : string;
   secret_access_key : string;
   session_token : string option;
+  source : source option;
+  expires_at : Ptime.t option;
 }
+
+let source_label_of_source = function
+  | `Static -> "static"
+  | `Env -> "environment"
+  | `Shared_file path -> path
+  | `Config_file path -> path
+  | `Container -> "container"
+  | `Imds -> "instance metadata"
+  | `Custom source -> source
+
+module Provider = struct
+  type credentials = t
+  type nonrec source = source
+  type unavailable = { source : source; reason : string }
+
+  type resolution =
+    | Resolved of credentials
+    | Unavailable of unavailable
+    | Invalid of Aws_error.t
+    | Failed of Aws_error.t
+
+  type t = unit -> resolution
+
+  let create f = f
+  let resolve t = t ()
+
+  let static (credentials : credentials) =
+    let credentials =
+      match credentials.source with
+      | Some _ -> credentials
+      | None -> { credentials with source = Some `Static }
+    in
+    fun () -> Resolved credentials
+
+  let chain providers =
+   fun () ->
+    let rec loop last_unavailable = function
+      | [] ->
+          Unavailable
+            (Option.value last_unavailable
+               ~default:
+                 {
+                   source = `Custom "chain";
+                   reason = "no credential providers configured";
+                 })
+      | provider :: rest -> (
+          match provider () with
+          | Resolved _ as resolved -> resolved
+          | Unavailable unavailable -> loop (Some unavailable) rest
+          | Invalid _ as invalid -> invalid
+          | Failed _ as failed -> failed)
+    in
+    loop None providers
+
+  let source_label = source_label_of_source
+end
 
 let has_ctl_or_del s =
   String.exists s ~f:(fun c ->
@@ -28,7 +95,8 @@ let validate_optional ~field = function
   | None -> Ok ()
   | Some value -> validate_required ~field value
 
-let create ~access_key_id ~secret_access_key ?session_token () =
+let create ~access_key_id ~secret_access_key ?session_token ?source ?expires_at
+    () =
   match validate_required ~field:"access_key_id" access_key_id with
   | Error _ as error -> error
   | Ok () -> (
@@ -37,49 +105,30 @@ let create ~access_key_id ~secret_access_key ?session_token () =
       | Ok () -> (
           match validate_optional ~field:"session_token" session_token with
           | Error _ as error -> error
-          | Ok () -> Ok { access_key_id; secret_access_key; session_token }))
+          | Ok () ->
+              Ok
+                {
+                  access_key_id;
+                  secret_access_key;
+                  session_token;
+                  source;
+                  expires_at;
+                }))
 
-let create_exn ~access_key_id ~secret_access_key ?session_token () =
+let create_exn ~access_key_id ~secret_access_key ?session_token ?source
+    ?expires_at () =
   Aws_error.Internal.get_ok_exn
-    (create ~access_key_id ~secret_access_key ?session_token ())
+    (create ~access_key_id ~secret_access_key ?session_token ?source ?expires_at
+       ())
 
 let hmac_sha256 ~key data =
   Digestif.SHA256.(hmac_string ~key data |> to_raw_string)
 
 let access_key_id t = t.access_key_id
 let session_token t = t.session_token
-
-module Provider = struct
-  type credentials = t
-  type t = unit -> (credentials, Aws_error.t) Result.t
-
-  let create f = f
-  let resolve t = t ()
-  let static credentials = fun () -> Ok credentials
-
-  let chain providers =
-   fun () ->
-    let rec loop errors = function
-      | [] ->
-          let errors = List.rev errors in
-          let error =
-            match errors with
-            | [] ->
-                Aws_error.Internal.validation ~field:"credentials"
-                  "no credential providers configured"
-            | errors ->
-                Aws_error.Internal.multiple errors
-                |> Aws_error.Internal.with_context
-                     "no credential provider resolved credentials"
-          in
-          Error error
-      | provider :: rest -> (
-          match provider () with
-          | Ok _ as ok -> ok
-          | Error error -> loop (error :: errors) rest)
-    in
-    loop [] providers
-end
+let source t = t.source
+let source_label t = Option.map t.source ~f:source_label_of_source
+let expires_at t = t.expires_at
 
 let signing_key t ~datestamp ~region ~service =
   hmac_sha256 ~key:("AWS4" ^ t.secret_access_key) datestamp |> fun key ->

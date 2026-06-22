@@ -21,6 +21,93 @@ let test_credentials_result_and_exn () =
   check_validation_error "blank access key"
     (Awskit.Credentials.create ~access_key_id:"" ~secret_access_key:"SK" ())
 
+let test_credentials_preserve_source_and_expiration () =
+  let expires_at =
+    Ptime.of_date_time ((2026, 4, 8), ((12, 0, 0), 0)) |> Option.value_exn
+  in
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ~source:(`Custom "unit-test") ~expires_at ()
+  in
+  Alcotest.(check (option string))
+    "source label" (Some "unit-test")
+    (Awskit.Credentials.source_label credentials);
+  Alcotest.(check (option bool))
+    "source variant" (Some true)
+    (Option.map (Awskit.Credentials.source credentials) ~f:(function
+      | `Custom "unit-test" -> true
+      | _ -> false));
+  Alcotest.(check (option bool))
+    "expiration" (Some true)
+    (Option.map
+       (Awskit.Credentials.expires_at credentials)
+       ~f:(Ptime.equal expires_at));
+  let direct =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ()
+  in
+  Alcotest.(check (option string))
+    "direct source label" None
+    (Awskit.Credentials.source_label direct);
+  Alcotest.(check (option bool))
+    "direct expiration" None
+    (Option.map (Awskit.Credentials.expires_at direct) ~f:(fun _ -> true))
+
+let test_static_provider_preserves_credential_metadata () =
+  let expires_at =
+    Ptime.of_date_time ((2026, 4, 8), ((12, 0, 0), 0)) |> Option.value_exn
+  in
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ~source:(`Custom "static-input") ~expires_at
+      ()
+  in
+  let provider = Awskit.Credentials.Provider.static credentials in
+  match Awskit.Credentials.Provider.resolve provider with
+  | Resolved resolved ->
+      Alcotest.(check (option string))
+        "source label" (Some "static-input")
+        (Awskit.Credentials.source_label resolved);
+      Alcotest.(check (option bool))
+        "source variant" (Some true)
+        (Option.map (Awskit.Credentials.source resolved) ~f:(function
+          | `Custom "static-input" -> true
+          | _ -> false));
+      Alcotest.(check (option bool))
+        "expiration" (Some true)
+        (Option.map
+           (Awskit.Credentials.expires_at resolved)
+           ~f:(Ptime.equal expires_at))
+  | Unavailable _ | Invalid _ | Failed _ ->
+      Alcotest.fail "static provider should resolve credentials"
+
+let test_static_provider_annotates_absent_source () =
+  let expires_at =
+    Ptime.of_date_time ((2026, 4, 8), ((12, 0, 0), 0)) |> Option.value_exn
+  in
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ~expires_at ()
+  in
+  let provider = Awskit.Credentials.Provider.static credentials in
+  match Awskit.Credentials.Provider.resolve provider with
+  | Resolved resolved ->
+      Alcotest.(check (option string))
+        "source label" (Some "static")
+        (Awskit.Credentials.source_label resolved);
+      Alcotest.(check (option bool))
+        "source variant" (Some true)
+        (Option.map (Awskit.Credentials.source resolved) ~f:(function
+          | `Static -> true
+          | _ -> false));
+      Alcotest.(check (option bool))
+        "expiration" (Some true)
+        (Option.map
+           (Awskit.Credentials.expires_at resolved)
+           ~f:(Ptime.equal expires_at))
+  | Unavailable _ | Invalid _ | Failed _ ->
+      Alcotest.fail "static provider should resolve credentials"
+
 let test_region_result_and_exn () =
   let region = Awskit.Region.of_string_exn "us-east-1" in
   Alcotest.(check string) "region" "us-east-1" (Awskit.Region.to_string region);
@@ -198,44 +285,69 @@ let test_error_multiple_preserves_all_failures () =
     "mentions cleanup" true
     (String.is_substring human ~substring:"cleanup failed")
 
-let test_provider_chain_uses_multiple_errors () =
-  let first =
-    Awskit.Credentials.Provider.create (fun () ->
-        Error
-          (Awskit.Error.Internal.validation ~field:"env"
-             "missing env credentials"))
+let test_provider_chain_continues_only_on_unavailable () =
+  let open Awskit.Credentials.Provider in
+  let valid =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ()
   in
-  let second =
-    Awskit.Credentials.Provider.create (fun () ->
-        Error
-          (Awskit.Error.Internal.validation ~field:"profile"
-             "missing profile credentials"))
+  let chain =
+    chain
+      [
+        create (fun () ->
+            Unavailable { source = `Env; reason = "not configured" });
+        static valid;
+      ]
   in
-  match
-    Awskit.Credentials.Provider.resolve
-      (Awskit.Credentials.Provider.chain [ first; second ])
-  with
-  | Ok _ -> Alcotest.fail "expected provider chain failure"
-  | Error error -> (
-      let human = Awskit.Error.to_string_hum error in
+  match resolve chain with
+  | Resolved credentials ->
+      Alcotest.(check string)
+        "access key" "AKID"
+        (Awskit.Credentials.access_key_id credentials)
+  | Unavailable _ | Invalid _ | Failed _ ->
+      Alcotest.fail "expected resolved credentials"
+
+let test_provider_chain_stops_on_invalid_configured_credentials () =
+  let open Awskit.Credentials.Provider in
+  let valid =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ()
+  in
+  let chain =
+    chain
+      [
+        create (fun () ->
+            Invalid
+              (Awskit.Error.Internal.validation ~field:"AWS_SECRET_ACCESS_KEY"
+                 "missing secret"));
+        static valid;
+      ]
+  in
+  match resolve chain with
+  | Invalid error ->
+      Alcotest.(check bool) "validation" true (Awskit.Error.is_validation error)
+  | Resolved _ | Unavailable _ | Failed _ ->
+      Alcotest.fail "expected invalid credentials to stop chain"
+
+let test_provider_chain_reports_all_unavailable () =
+  let open Awskit.Credentials.Provider in
+  let chain =
+    chain
+      [
+        create (fun () ->
+            Unavailable { source = `Env; reason = "not configured" });
+        create (fun () ->
+            Unavailable { source = `Shared_file "default"; reason = "missing" });
+      ]
+  in
+  match resolve chain with
+  | Unavailable { source = `Shared_file "default"; reason } ->
       Alcotest.(check bool)
-        "mentions provider chain context" true
-        (String.is_substring human
-           ~substring:"no credential provider resolved credentials");
-      match Awskit.Error.kind error with
-      | Awskit.Error.Multiple [ env_error; profile_error ] ->
-          Alcotest.(check (option string))
-            "first provider field" (Some "env")
-            (Awskit.Error.validation_field env_error);
-          Alcotest.(check (option string))
-            "second provider field" (Some "profile")
-            (Awskit.Error.validation_field profile_error)
-      | Awskit.Error.Multiple errors ->
-          Alcotest.failf "expected two provider errors, got %d"
-            (List.length errors)
-      | _ ->
-          Alcotest.failf "expected Multiple, got %s"
-            (Awskit.Error.to_string_hum error))
+        "keeps useful unavailable context" true
+        (String.is_substring reason ~substring:"missing")
+  | Resolved _ -> Alcotest.fail "expected unavailable credentials"
+  | Unavailable _ -> Alcotest.fail "unexpected unavailable source"
+  | Invalid _ | Failed _ -> Alcotest.fail "expected unavailable outcome"
 
 let make_service_error ~status ~code =
   Awskit.Error.Internal.service ~status ?code ~headers:[] ()
@@ -289,6 +401,44 @@ let test_error_multiple_retry_policy () =
   check_retry_class "auth outranks not found" Awskit.Error.Auth
     (Awskit.Error.retry_class auth_over_not_found)
 
+let test_error_production_retry_classes () =
+  let timeout_error =
+    Awskit.Error.Internal.timeout ~operation:"connect" "connection timed out"
+  in
+  let not_found_service =
+    make_service_error ~status:404 ~code:(Some "NoSuchKey")
+  in
+  let cases =
+    [
+      ( "credentials are auth failures",
+        Awskit.Error.Auth,
+        Awskit.Error.Internal.credentials ~source:"environment"
+          "missing access key id" );
+      ("timeouts are retryable", Awskit.Error.Retryable, timeout_error);
+      ( "cancellation is fatal",
+        Awskit.Error.Fatal,
+        Awskit.Error.Internal.cancelled ~reason:"caller cancelled" () );
+      ( "not supported is fatal",
+        Awskit.Error.Fatal,
+        Awskit.Error.Internal.not_supported ~feature:"s3-select"
+          "S3 Select is not supported" );
+      ( "retry exhaustion delegates to timeout",
+        Awskit.Error.Retryable,
+        Awskit.Error.Internal.retry_exhausted ~attempts:3
+          ~last_error:timeout_error "retry policy exhausted" );
+      ( "retry exhaustion delegates to terminal service error",
+        Awskit.Error.Not_found,
+        Awskit.Error.Internal.retry_exhausted ~attempts:3
+          ~last_error:not_found_service "retry policy exhausted" );
+      ( "retry exhaustion without terminal error is fatal",
+        Awskit.Error.Fatal,
+        Awskit.Error.Internal.retry_exhausted ~attempts:3
+          "retry policy exhausted" );
+    ]
+  in
+  List.iter cases ~f:(fun (name, expected, error) ->
+      check_retry_class name expected (Awskit.Error.retry_class error))
+
 let test_error_multiple_classifiers_recurse () =
   let service_error = make_service_error ~status:503 ~code:(Some "SlowDown") in
   let auth_error = make_service_error ~status:403 ~code:(Some "AccessDenied") in
@@ -320,6 +470,54 @@ let test_error_multiple_classifiers_recurse () =
   check_retry_class "aggregated retry class" Awskit.Error.Auth
     (Awskit.Error.retry_class combined)
 
+let test_error_production_categories_and_classifiers () =
+  let credentials_error =
+    Awskit.Error.Internal.credentials ~source:"environment"
+      "missing access key id"
+  in
+  let endpoint_error =
+    Awskit.Error.Internal.endpoint ~uri:"https://s3.amazonaws.com"
+      "endpoint host is invalid"
+  in
+  let timeout_error =
+    Awskit.Error.Internal.timeout ~operation:"connect" "connection timed out"
+  in
+  let cancelled_error =
+    Awskit.Error.Internal.cancelled ~reason:"caller requested cancellation" ()
+  in
+  let combined =
+    Awskit.Error.Internal.multiple
+      [
+        Awskit.Error.Internal.body "stream failed";
+        Awskit.Error.Internal.multiple
+          [ credentials_error; endpoint_error; timeout_error; cancelled_error ];
+      ]
+  in
+  (match Awskit.Error.kind credentials_error with
+  | Awskit.Error.Credentials { source = Some source; message } ->
+      Alcotest.(check string) "credentials source" "environment" source;
+      Alcotest.(check string)
+        "credentials message" "missing access key id" message
+  | _ -> Alcotest.fail "expected credentials kind");
+  (match Awskit.Error.kind endpoint_error with
+  | Awskit.Error.Endpoint { uri = Some uri; message } ->
+      Alcotest.(check string) "endpoint uri" "https://s3.amazonaws.com" uri;
+      Alcotest.(check string)
+        "endpoint message" "endpoint host is invalid" message
+  | _ -> Alcotest.fail "expected endpoint kind");
+  Alcotest.(check bool)
+    "nested credentials classifier" true
+    (Awskit.Error.is_credentials combined);
+  Alcotest.(check bool)
+    "nested endpoint classifier" true
+    (Awskit.Error.is_endpoint combined);
+  Alcotest.(check bool)
+    "nested timeout classifier" true
+    (Awskit.Error.is_timeout combined);
+  Alcotest.(check bool)
+    "nested cancellation classifier" true
+    (Awskit.Error.is_cancelled combined)
+
 let test_exn_apis_raise_sdk_exception () =
   let raised =
     try
@@ -341,6 +539,12 @@ let suite =
       [
         Alcotest.test_case "credentials result/exn" `Quick
           test_credentials_result_and_exn;
+        Alcotest.test_case "credentials preserve source and expiration" `Quick
+          test_credentials_preserve_source_and_expiration;
+        Alcotest.test_case "static provider preserves credential metadata"
+          `Quick test_static_provider_preserves_credential_metadata;
+        Alcotest.test_case "static provider annotates absent source" `Quick
+          test_static_provider_annotates_absent_source;
         Alcotest.test_case "region result/exn" `Quick test_region_result_and_exn;
         Alcotest.test_case "endpoint result/exn" `Quick
           test_endpoint_result_and_exn;
@@ -356,12 +560,20 @@ let suite =
           test_error_context_and_sexp;
         Alcotest.test_case "error multiple preserves failures" `Quick
           test_error_multiple_preserves_all_failures;
-        Alcotest.test_case "provider chain uses multiple errors" `Quick
-          test_provider_chain_uses_multiple_errors;
+        Alcotest.test_case "provider chain continues on unavailable" `Quick
+          test_provider_chain_continues_only_on_unavailable;
+        Alcotest.test_case "provider chain stops on invalid" `Quick
+          test_provider_chain_stops_on_invalid_configured_credentials;
+        Alcotest.test_case "provider chain reports unavailable" `Quick
+          test_provider_chain_reports_all_unavailable;
         Alcotest.test_case "error multiple retry policy" `Quick
           test_error_multiple_retry_policy;
+        Alcotest.test_case "error production retry classes" `Quick
+          test_error_production_retry_classes;
         Alcotest.test_case "error multiple classifiers recurse" `Quick
           test_error_multiple_classifiers_recurse;
+        Alcotest.test_case "error production categories and classifiers" `Quick
+          test_error_production_categories_and_classifiers;
         Alcotest.test_case "exn APIs raise SDK exception" `Quick
           test_exn_apis_raise_sdk_exception;
       ] );

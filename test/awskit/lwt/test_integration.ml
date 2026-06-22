@@ -244,40 +244,106 @@ let test_runtime_bodies () =
     (Option.value (Aws.Runtime.Request_body.descriptor body).content_length
        ~default:(-1L))
 
-let test_provider_chain_uses_multiple_errors () =
-  let first =
-    Awskit_lwt.Credentials.Provider.create (fun () ->
-        Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"env"
-             "missing env credentials"))
+let test_provider_chain_continues_only_on_unavailable () =
+  let open Awskit_lwt.Credentials.Provider in
+  let valid =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ()
   in
-  let second =
-    Awskit_lwt.Credentials.Provider.create (fun () ->
-        Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"profile"
-             "missing profile credentials"))
+  let chain =
+    chain
+      [
+        create (fun () ->
+            Lwt.return
+              (Unavailable { source = `Env; reason = "not configured" }));
+        static valid;
+      ]
   in
-  match
-    Lwt_main.run
-      (Awskit_lwt.Credentials.Provider.resolve
-         (Awskit_lwt.Credentials.Provider.chain [ first; second ]))
-  with
-  | Ok _ -> Alcotest.fail "expected provider chain failure"
-  | Error error -> (
-      match Awskit.Error.kind error with
-      | Awskit.Error.Multiple [ env_error; profile_error ] ->
-          Alcotest.(check (option string))
-            "first provider field" (Some "env")
-            (Awskit.Error.validation_field env_error);
-          Alcotest.(check (option string))
-            "second provider field" (Some "profile")
-            (Awskit.Error.validation_field profile_error)
-      | Awskit.Error.Multiple errors ->
-          Alcotest.failf "expected two provider errors, got %d"
-            (List.length errors)
-      | _ ->
-          Alcotest.failf "expected Multiple, got %s"
-            (Awskit.Error.to_string_hum error))
+  match Lwt_main.run (resolve chain) with
+  | Resolved credentials ->
+      Alcotest.(check string)
+        "access key" "AKID"
+        (Awskit.Credentials.access_key_id credentials)
+  | Unavailable _ | Invalid _ | Failed _ ->
+      Alcotest.fail "expected resolved credentials"
+
+let test_static_provider_source_metadata () =
+  let open Awskit_lwt.Credentials.Provider in
+  let expires_at =
+    Ptime.of_date_time ((2026, 4, 8), ((12, 0, 0), 0)) |> Option.value_exn
+  in
+  let unlabeled =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ~expires_at ()
+  in
+  let labeled =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID2"
+      ~secret_access_key:"SECRET" ~source:(`Custom "lwt-static") ~expires_at ()
+  in
+  let check_static_source label expected credentials =
+    match Lwt_main.run (resolve (static credentials)) with
+    | Resolved resolved ->
+        Alcotest.(check (option bool))
+          label (Some true)
+          (Option.map (Awskit.Credentials.source resolved) ~f:(function
+            | source when Poly.equal source expected -> true
+            | _ -> false));
+        Alcotest.(check (option bool))
+          (label ^ " expiration") (Some true)
+          (Option.map
+             (Awskit.Credentials.expires_at resolved)
+             ~f:(Ptime.equal expires_at))
+    | Unavailable _ | Invalid _ | Failed _ ->
+        Alcotest.fail "static provider should resolve credentials"
+  in
+  check_static_source "unlabeled source" `Static unlabeled;
+  check_static_source "labeled source" (`Custom "lwt-static") labeled
+
+let test_provider_chain_stops_on_invalid_configured_credentials () =
+  let open Awskit_lwt.Credentials.Provider in
+  let valid =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ()
+  in
+  let chain =
+    chain
+      [
+        create (fun () ->
+            Lwt.return
+              (Invalid
+                 (Awskit.Error.Internal.validation
+                    ~field:"AWS_SECRET_ACCESS_KEY" "missing secret")));
+        static valid;
+      ]
+  in
+  match Lwt_main.run (resolve chain) with
+  | Invalid error ->
+      Alcotest.(check bool) "validation" true (Awskit.Error.is_validation error)
+  | Resolved _ | Unavailable _ | Failed _ ->
+      Alcotest.fail "expected invalid credentials to stop chain"
+
+let test_provider_chain_reports_all_unavailable () =
+  let open Awskit_lwt.Credentials.Provider in
+  let chain =
+    chain
+      [
+        create (fun () ->
+            Lwt.return
+              (Unavailable { source = `Env; reason = "not configured" }));
+        create (fun () ->
+            Lwt.return
+              (Unavailable
+                 { source = `Shared_file "default"; reason = "missing" }));
+      ]
+  in
+  match Lwt_main.run (resolve chain) with
+  | Unavailable { source = `Shared_file "default"; reason } ->
+      Alcotest.(check bool)
+        "keeps useful unavailable context" true
+        (String.is_substring reason ~substring:"missing")
+  | Resolved _ -> Alcotest.fail "expected unavailable credentials"
+  | Unavailable _ -> Alcotest.fail "unexpected unavailable source"
+  | Invalid _ | Failed _ -> Alcotest.fail "expected unavailable outcome"
 
 let request_conn () =
   let credentials =
@@ -696,8 +762,14 @@ let suite =
           "credentials provider rejects invalid endpoint string" `Quick
           test_create_with_credentials_provider_rejects_invalid_endpoint_string;
         Alcotest.test_case "runtime bodies" `Quick test_runtime_bodies;
-        Alcotest.test_case "provider chain uses multiple errors" `Quick
-          test_provider_chain_uses_multiple_errors;
+        Alcotest.test_case "provider chain continues on unavailable" `Quick
+          test_provider_chain_continues_only_on_unavailable;
+        Alcotest.test_case "static provider source metadata" `Quick
+          test_static_provider_source_metadata;
+        Alcotest.test_case "provider chain stops on invalid" `Quick
+          test_provider_chain_stops_on_invalid_configured_credentials;
+        Alcotest.test_case "provider chain reports unavailable" `Quick
+          test_provider_chain_reports_all_unavailable;
         Alcotest.test_case "stream request body reaches client" `Quick
           test_stream_request_body_reaches_client;
         Alcotest.test_case "stream request body error propagates" `Quick
