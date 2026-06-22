@@ -63,6 +63,8 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     clock:(unit -> Ptime.t) ->
     ?retry_policy:Awskit.Retry.t ->
     ?sleep:(Ptime.Span.t -> unit Lwt.t) ->
+    ?random_float:(upper_bound:float -> float) ->
+    ?timeout_policy:Awskit.Timeout.policy ->
     ?max_response_drain_bytes:int ->
     unit ->
     (t, Awskit.Error.t) result
@@ -70,11 +72,16 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
       services or custom service endpoints. [region] and [endpoint] are parsed
       and validated when the connection is created; validation failures are
       returned as structured [Awskit.Error.t] values. [retry_policy] defaults to
-      [Awskit.Retry.default]. [sleep] is used between retries and defaults to no
-      delay for custom Lwt backends. [max_response_drain_bytes] defaults to 64
-      MiB. If a response consumer succeeds but the remaining body exceeds this
-      drain limit, the operation fails with a body-limit error. If the consumer
-      fails, the consumer error is returned. *)
+      [Awskit.Retry.default]. When retries are enabled, custom Lwt backends must
+      provide both [sleep] and [random_float]; use [Awskit.Retry.disabled] for
+      deterministic runtimes without real delay/random capabilities.
+      [timeout_policy] defaults to [Awskit.Timeout.default] when [sleep] is
+      supplied and to [Awskit.Timeout.disabled] otherwise. Passing an explicit
+      timeout policy with configured spans requires [sleep], which this generic
+      runtime uses as its timeout clock. [max_response_drain_bytes] defaults to
+      64 MiB. If a response consumer succeeds but the remaining body exceeds
+      this drain limit, the operation fails with a body-limit error. If the
+      consumer fails, the consumer error is returned. *)
 
   val create_with_credentials_provider :
     ?ctx:Client.ctx ->
@@ -84,6 +91,8 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     clock:(unit -> Ptime.t) ->
     ?retry_policy:Awskit.Retry.t ->
     ?sleep:(Ptime.Span.t -> unit Lwt.t) ->
+    ?random_float:(upper_bound:float -> float) ->
+    ?timeout_policy:Awskit.Timeout.policy ->
     ?max_response_drain_bytes:int ->
     unit ->
     (t, Awskit.Error.t) result

@@ -105,6 +105,31 @@ let test_retry_disabled_policy () =
   Alcotest.(check int) "attempts" 1 (List.length conn.calls);
   Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
 
+let test_retry_budget_exhaustion_stops_before_sleep () =
+  let slow_down =
+    {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
+  in
+  let budget = Awskit.Retry.budget_exn ~capacity:4 ~retry_cost:5 () in
+  let retry_policy =
+    Awskit.Retry.create_exn ~max_attempts:3 ~budget ~jitter:0.0 ()
+  in
+  let conn =
+    Recording_runtime.connect ~retry_policy
+      [ response 503 slow_down; response 200 "" ]
+  in
+  (match
+     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+       ~body:(Recording_s3.Body.of_string "body")
+       ()
+   with
+  | Error error when Error.service_code error = Some "SlowDown" ->
+      let text = Awskit.Error.to_string_hum error in
+      check_contains "mentions budget" "retry budget exhausted" text
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected retry budget exhaustion");
+  Alcotest.(check int) "attempts" 1 (List.length conn.calls);
+  Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
+
 let test_non_replayable_request_body_not_retried () =
   let slow_down =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
@@ -248,11 +273,13 @@ let test_retry_jitter_bounds () =
       "temporary transport failure"
   in
   let low =
-    Awskit.Retry.delay policy ~attempt:1 ~error ~random_float:(fun () -> 0.0)
+    Awskit.Retry.delay policy ~attempt:1 ~error
+      ~random_float:(fun ~upper_bound:_ -> 0.0)
     |> Option.get
   in
   let high =
-    Awskit.Retry.delay policy ~attempt:1 ~error ~random_float:(fun () -> 1.0)
+    Awskit.Retry.delay policy ~attempt:1 ~error
+      ~random_float:(fun ~upper_bound -> upper_bound)
     |> Option.get
   in
   Alcotest.(check (float 0.0001)) "low jitter" 0.5 (Ptime.Span.to_float_s low);
@@ -353,6 +380,29 @@ let test_response_body_drain_errors () =
   | Ok _ -> Alcotest.fail "expected discard failure after successful head");
   Alcotest.(check int) "calls" 2 (List.length conn.calls)
 
+let test_response_body_consumer_error_wins_over_drain_error () =
+  let consumer_error = Awskit.Error.Internal.body "consumer failed" in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:[ ("etag", "\"etag\""); ("content-length", "6") ]
+          ~read_error_after:0 "abcdef";
+      ]
+  in
+  match
+    Recording_s3.Object.get conn ~bucket:"my-bucket" ~key:"file"
+      ~consume:(fun _reader -> Error consumer_error)
+      ()
+  with
+  | Error error
+    when string_contains ~substring:"consumer failed"
+           (Awskit.Error.to_string_hum error) ->
+      ()
+  | Error error ->
+      Alcotest.failf "expected consumer error to win, got: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected consumer error"
+
 let test_in_memory_helper_limit_error_uses_max_bytes () =
   let conn =
     Recording_runtime.connect
@@ -387,6 +437,8 @@ let suite =
           test_retry_fatal_error_not_retried;
         Alcotest.test_case "retry disabled policy" `Quick
           test_retry_disabled_policy;
+        Alcotest.test_case "retry budget exhaustion stops before sleep" `Quick
+          test_retry_budget_exhaustion_stops_before_sleep;
         Alcotest.test_case "non-replayable request body not retried" `Quick
           test_non_replayable_request_body_not_retried;
         Alcotest.test_case "retry context formatting on exhaustion" `Quick
@@ -405,6 +457,8 @@ let suite =
           test_request_body_descriptor_validation;
         Alcotest.test_case "response body drain errors" `Quick
           test_response_body_drain_errors;
+        Alcotest.test_case "consumer error wins over drain error" `Quick
+          test_response_body_consumer_error_wins_over_drain_error;
         Alcotest.test_case "in-memory helper limit error uses max_bytes" `Quick
           test_in_memory_helper_limit_error_uses_max_bytes;
       ] );

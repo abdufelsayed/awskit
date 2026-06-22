@@ -13,6 +13,9 @@ module type S = sig
   val return_ok : 'a -> ('a, Error.t) result io
   val return_error : Error.t -> ('a, Error.t) result io
   val endpoint_config : connection -> Endpoint_resolver.t
+  val region : connection -> Awskit.Region.t
+  val now : connection -> Ptime.t
+  val credentials : connection -> (Awskit.Credentials.t, Error.t) result io
 
   val object_request :
     connection ->

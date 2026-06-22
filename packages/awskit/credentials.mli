@@ -72,7 +72,7 @@ val create :
 
     Empty access keys, empty secret keys, and invalid session token values are
     rejected with a validation error. Optional [source] and [expires_at]
-    metadata are preserved for provider chains, refresh, and telemetry. *)
+    metadata are preserved for provider chains, refresh, and diagnostics. *)
 
 val create_exn :
   access_key_id:string ->
@@ -99,6 +99,21 @@ val source_label : t -> string option
 
 val expires_at : t -> Ptime.t option
 (** Return the credential expiration timestamp, if the provider supplied one. *)
+
+val usable_until : t -> Ptime.t option
+(** Return the instant until which these credentials are usable, if they are
+    temporary credentials. *)
+
+val is_expired : now:Ptime.t -> t -> bool
+(** Return [true] when [t] has expiration metadata and is not usable at [now].
+*)
+
+val validate_usable :
+  now:Ptime.t -> operation:string -> t -> (unit, Error.t) result
+(** Return [Ok ()] when credentials can sign [operation] at [now].
+
+    The [operation] name is controlled SDK context for diagnostics. It must not
+    contain request data such as bucket names, keys, URLs, or headers. *)
 
 val validate_fresh : t -> now:Ptime.t -> (unit, Error.t) result
 (** Return [Ok ()] when credentials are still usable at [now].

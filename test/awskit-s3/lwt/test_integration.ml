@@ -25,8 +25,8 @@ let local_endpoint_config =
 let check_endpoint_config conn =
   match
     Awskit_s3.Endpoint_resolver.endpoint
-      (S3.Runtime.s3_endpoint_config conn)
-      ~region:(S3.Runtime.region conn)
+      (S3.Runtime.S3_endpoint.s3_endpoint_config conn)
+      ~region:(S3.Runtime.Endpoint.region conn)
   with
   | Error error -> Alcotest.failf "%a" Awskit.Error.pp error
   | Ok endpoint ->
@@ -38,12 +38,14 @@ let test_connection_roundtrip () =
   let conn =
     S3.create ~region ~credentials
       ~clock:(fun () -> Ptime.epoch)
+      ~sleep:(fun _ -> Lwt.return_unit)
+      ~random_float:(fun ~upper_bound -> upper_bound *. 0.5)
       ~endpoint_config:local_endpoint_config ()
     |> conn_or_fail
   in
   Alcotest.(check string)
     "region" "eu-west-1"
-    (Awskit.Region.to_string (S3.Runtime.region conn));
+    (Awskit.Region.to_string (S3.Runtime.Endpoint.region conn));
   check_endpoint_config conn
 
 let test_create_rejects_invalid_region_string () =

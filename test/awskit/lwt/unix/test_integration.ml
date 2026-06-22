@@ -91,11 +91,11 @@ let test_connection_roundtrip () =
   in
   Alcotest.(check string)
     "region" "eu-west-1"
-    (Awskit_lwt_unix.Runtime.region conn |> Awskit.Region.to_string);
+    (Awskit_lwt_unix.Runtime.Endpoint.region conn |> Awskit.Region.to_string);
   Alcotest.(check (option string))
     "endpoint" (Some "http://localhost:9000")
     (Option.map
-       Awskit_lwt_unix.Runtime.(endpoint conn)
+       (Awskit_lwt_unix.Runtime.Endpoint.endpoint conn)
        ~f:Awskit.Endpoint.to_url_prefix)
 
 let test_connection_defaults () =
@@ -112,7 +112,7 @@ let test_connection_defaults () =
   Alcotest.(check (option string))
     "no endpoint" None
     (Option.map
-       Awskit_lwt_unix.Runtime.(endpoint conn)
+       (Awskit_lwt_unix.Runtime.Endpoint.endpoint conn)
        ~f:Awskit.Endpoint.to_url_prefix)
 
 let test_credentials_from_env () =

@@ -27,11 +27,11 @@ let test_connection_roundtrip env =
   in
   Alcotest.(check string)
     "region" "eu-west-1"
-    (Awskit_eio.Runtime.region conn |> Awskit.Region.to_string);
+    (Awskit_eio.Runtime.Endpoint.region conn |> Awskit.Region.to_string);
   Alcotest.(check (option string))
     "endpoint" (Some "http://localhost:9000")
     (Option.map
-       Awskit_eio.Runtime.(endpoint conn)
+       (Awskit_eio.Runtime.Endpoint.endpoint conn)
        ~f:Awskit.Endpoint.to_url_prefix)
 
 let test_connection_defaults env =
@@ -49,7 +49,7 @@ let test_connection_defaults env =
   Alcotest.(check (option string))
     "no endpoint" None
     (Option.map
-       Awskit_eio.Runtime.(endpoint conn)
+       (Awskit_eio.Runtime.Endpoint.endpoint conn)
        ~f:Awskit.Endpoint.to_url_prefix)
 
 let ptime_of_eio_clock env =
@@ -67,7 +67,7 @@ let test_connection_uses_env_clock_by_default env =
     |> conn_or_fail
   in
   let before = ptime_of_eio_clock env in
-  let actual = Awskit_eio.Runtime.now conn in
+  let actual = Awskit_eio.Runtime.Clock.now conn in
   let after = ptime_of_eio_clock env in
   Alcotest.(check bool)
     "clock between call bounds" true
@@ -84,7 +84,7 @@ let test_runtime_bodies env =
       ~credentials:c ()
     |> conn_or_fail
   in
-  ignore (Awskit_eio.Runtime.region conn : Awskit.Region.t);
+  ignore (Awskit_eio.Runtime.Endpoint.region conn : Awskit.Region.t);
   let body = Awskit_eio.Runtime.Request_body.of_string "hello" in
   Alcotest.(check int64)
     "content length" 5L
@@ -106,6 +106,9 @@ let is_body_error error =
 let body_limit error =
   let open Awskit.Error in
   match kind error with Body { limit; _ } -> limit | _ -> None
+
+let is_timeout_error = Awskit.Error.is_timeout
+let tiny_span = Ptime.Span.of_float_s 0.001 |> Option.value_exn
 
 let is_transport_error_with_message ~substring error =
   let open Awskit.Error in
@@ -289,7 +292,8 @@ let test_https_request_requires_connector env =
   let request = Awskit.Request.create_exn ~method_:`GET ~target () in
   let body = Awskit_eio.Runtime.Request_body.empty in
   match
-    Awskit_eio.Runtime.with_response conn request body ~f:(fun _ _ -> Ok ())
+    Awskit_eio.Runtime.Transport.with_response conn request ~body
+      ~consume:(fun _ _ -> Ok ())
   with
   | Error error
     when is_transport_error_with_message
@@ -325,8 +329,8 @@ let test_stream_request_body_emits_multiple_chunks env =
                     Awskit_eio.Runtime.Request_body.write_string writer "ef"))
       in
       match
-        Awskit_eio.Runtime.with_response conn request body
-          ~f:(fun _ response_body ->
+        Awskit_eio.Runtime.Transport.with_response conn request ~body
+          ~consume:(fun _ response_body ->
             Awskit_eio.Runtime.Response_body.discard response_body)
       with
       | Error error ->
@@ -351,8 +355,8 @@ let test_stream_request_body_error_propagates env =
             | Ok () -> Error stream_error)
       in
       match
-        Awskit_eio.Runtime.with_response conn request body
-          ~f:(fun _ response_body ->
+        Awskit_eio.Runtime.Transport.with_response conn request ~body
+          ~consume:(fun _ response_body ->
             Awskit_eio.Runtime.Response_body.discard response_body)
       with
       | Error error when Awskit.Error.equal error stream_error -> ()
@@ -360,6 +364,36 @@ let test_stream_request_body_error_propagates env =
           Alcotest.failf "unexpected request body error: %a" Awskit.Error.pp
             error
       | Ok () -> Alcotest.fail "expected stream request body error")
+
+let test_stream_request_body_timeout_returns_timeout_error env =
+  let timeout_policy = Awskit.Timeout.create_exn ~request_body:tiny_span () in
+  with_eio_early_response_server env ~status:200 ~response_body:"ok"
+    ~read_request_body:false ~ignore_connection_errors:true (fun endpoint ->
+      Eio.Switch.run @@ fun sw ->
+      let conn =
+        Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only
+          ~region:"us-east-1"
+          ~credentials:
+            (Awskit.Credentials.create_exn ~access_key_id:"AK"
+               ~secret_access_key:"SK" ())
+          ~clock:(fun () -> Ptime.epoch)
+          ~timeout_policy ()
+        |> conn_or_fail
+      in
+      let request = request_body_request_for_endpoint endpoint in
+      let body =
+        Awskit_eio.Runtime.Request_body.of_stream (stream_descriptor 4L)
+          ~write:(fun _writer -> Eio.Fiber.await_cancel ())
+      in
+      match
+        Awskit_eio.Runtime.Transport.with_response conn request ~body
+          ~consume:(fun _ response_body ->
+            Awskit_eio.Runtime.Response_body.discard response_body)
+      with
+      | Error error when is_timeout_error error -> ()
+      | Error error ->
+          Alcotest.failf "expected timeout error, got: %a" Awskit.Error.pp error
+      | Ok () -> Alcotest.fail "expected request body timeout")
 
 let expect_request_body_error label = function
   | Error error when is_body_error error -> ()
@@ -378,8 +412,8 @@ let test_stream_request_body_rejects_short_body env =
           ~write:(fun writer ->
             Awskit_eio.Runtime.Request_body.write_string writer "ab")
       in
-      Awskit_eio.Runtime.with_response conn request body
-        ~f:(fun _ response_body ->
+      Awskit_eio.Runtime.Transport.with_response conn request ~body
+        ~consume:(fun _ response_body ->
           Awskit_eio.Runtime.Response_body.discard response_body)
       |> expect_request_body_error "short request body")
 
@@ -398,8 +432,8 @@ let test_stream_request_body_rejects_long_body env =
             | Error _ as error -> error
             | Ok () -> Awskit_eio.Runtime.Request_body.write_string writer "e")
       in
-      Awskit_eio.Runtime.with_response conn request body
-        ~f:(fun _ response_body ->
+      Awskit_eio.Runtime.Transport.with_response conn request ~body
+        ~consume:(fun _ response_body ->
           Awskit_eio.Runtime.Response_body.discard response_body)
       |> expect_request_body_error "long request body")
 
@@ -433,8 +467,8 @@ let test_stream_request_body_early_response_cancels_producer_and_preserves_body
       let result =
         try
           Eio.Time.with_timeout_exn clock lifecycle_timeout (fun () ->
-              Awskit_eio.Runtime.with_response conn request body
-                ~f:(fun response response_body ->
+              Awskit_eio.Runtime.Transport.with_response conn request ~body
+                ~consume:(fun response response_body ->
                   match read_response_body_to_string response_body with
                   | Ok body -> Ok (response, body)
                   | Error _ as error -> error))
@@ -469,8 +503,8 @@ let test_stream_request_body_success_response_body_is_scoped env =
             Awskit_eio.Runtime.Request_body.write_string writer "ok")
       in
       let result =
-        Awskit_eio.Runtime.with_response conn request body
-          ~f:(fun response response_body ->
+        Awskit_eio.Runtime.Transport.with_response conn request ~body
+          ~consume:(fun response response_body ->
             match read_response_body_to_string response_body with
             | Ok body -> Ok (response, body)
             | Error _ as error -> error)
@@ -496,8 +530,8 @@ let test_callback_exception_is_not_transport_error env =
       let body = Awskit_eio.Runtime.Request_body.of_string "ok" in
       try
         ignore
-          (Awskit_eio.Runtime.with_response conn request body
-             ~f:(fun _response _body -> raise callback_exn)
+          (Awskit_eio.Runtime.Transport.with_response conn request ~body
+             ~consume:(fun _response _body -> raise callback_exn)
             : (unit, Awskit.Error.t) Result.t);
         Alcotest.fail "expected callback exception"
       with
@@ -519,8 +553,9 @@ let with_eio_response_body env ~max_response_drain_bytes response_body ~f =
       Eio.Switch.run @@ fun sw ->
       let conn = request_conn ~max_response_drain_bytes env sw in
       let request = request_body_request_for_endpoint endpoint in
-      Awskit_eio.Runtime.with_response conn request
-        Awskit_eio.Runtime.Request_body.empty ~f:(fun _ body -> f body))
+      Awskit_eio.Runtime.Transport.with_response conn request
+        ~body:Awskit_eio.Runtime.Request_body.empty ~consume:(fun _ body ->
+          f body))
 
 let test_discard_response_body_enforces_limit env =
   with_eio_response_body env ~max_response_drain_bytes:3 "abcdef"
@@ -568,8 +603,9 @@ let test_with_response_body_drains_after_consumer_exception env =
       let observed =
         try
           ignore
-            (Awskit_eio.Runtime.with_response conn request
-               Awskit_eio.Runtime.Request_body.empty ~f:(fun _ body ->
+            (Awskit_eio.Runtime.Transport.with_response conn request
+               ~body:Awskit_eio.Runtime.Request_body.empty
+               ~consume:(fun _ body ->
                  Awskit_eio.Runtime.Response_body.with_reader body
                    ~consume:(fun _reader -> raise Consumer_failed))
               : (unit, Awskit.Error.t) Result.t);
@@ -611,6 +647,8 @@ let suite env =
           (fun () -> test_stream_request_body_emits_multiple_chunks env);
         Alcotest.test_case "stream request body error propagates" `Quick
           (fun () -> test_stream_request_body_error_propagates env);
+        Alcotest.test_case "stream request body timeout" `Quick (fun () ->
+            test_stream_request_body_timeout_returns_timeout_error env);
         Alcotest.test_case "stream request body rejects short body" `Quick
           (fun () -> test_stream_request_body_rejects_short_body env);
         Alcotest.test_case "stream request body rejects long body" `Quick

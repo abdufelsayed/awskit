@@ -439,6 +439,93 @@ let test_error_production_retry_classes () =
   List.iter cases ~f:(fun (name, expected, error) ->
       check_retry_class name expected (Awskit.Error.retry_class error))
 
+let test_retry_timeout_and_credential_timing_contracts () =
+  Alcotest.(check bool)
+    "default retry has production jitter" true
+    Float.(Awskit.Retry.jitter Awskit.Retry.default > 0.0);
+  let retryable =
+    Awskit.Error.Internal.transport ~retryable:true "connection reset"
+  in
+  let policy =
+    Awskit.Retry.create_exn ~max_attempts:2 ~jitter:1.0
+      ~base_delay:(Ptime.Span.of_float_s 1.0 |> Option.value_exn)
+      ~max_delay:(Ptime.Span.of_float_s 1.0 |> Option.value_exn)
+      ()
+  in
+  let delay =
+    Awskit.Retry.delay
+      ~random_float:(fun ~upper_bound ->
+        Alcotest.(check (float 0.000001)) "upper bound" 1.0 upper_bound;
+        0.25)
+      policy ~attempt:1 ~error:retryable
+  in
+  Alcotest.(check (option bool))
+    "explicit random controls delay" (Some true)
+    (Option.map delay ~f:(fun span ->
+         Float.(
+           Ptime.Span.to_float_s span > 0.0 && Ptime.Span.to_float_s span <= 1.0)));
+  check_validation_error "retry budget capacity"
+    (Awskit.Retry.budget ~capacity:0 ());
+  check_validation_error "retry budget cost"
+    (Awskit.Retry.budget ~retry_cost:0 ());
+  let connect = Ptime.Span.of_float_s 2.0 |> Option.value_exn in
+  let drain = Ptime.Span.of_float_s 3.0 |> Option.value_exn in
+  let timeout = Awskit.Timeout.create_exn ~connect ~drain () in
+  Alcotest.(check (option bool))
+    "connect timeout" (Some true)
+    (Option.map
+       (Awskit.Timeout.span timeout `Connect)
+       ~f:(Ptime.Span.equal connect));
+  Alcotest.(check (option bool))
+    "drain timeout" (Some true)
+    (Option.map
+       (Awskit.Timeout.span timeout `Drain)
+       ~f:(Ptime.Span.equal drain));
+  check_validation_error "negative timeout span"
+    (Awskit.Timeout.create
+       ~operation:(Ptime.Span.of_float_s (-1.0) |> Option.value_exn)
+       ());
+  let now =
+    Ptime.of_date_time ((2026, 6, 22), ((12, 0, 0), 0)) |> Option.value_exn
+  in
+  let later =
+    Ptime.of_date_time ((2026, 6, 22), ((12, 1, 0), 0)) |> Option.value_exn
+  in
+  let earlier =
+    Ptime.of_date_time ((2026, 6, 22), ((11, 59, 0), 0)) |> Option.value_exn
+  in
+  let usable =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ~expires_at:later ()
+  in
+  let expired =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ~source:`Env ~expires_at:earlier ()
+  in
+  Alcotest.(check bool)
+    "usable credentials are not expired" false
+    (Awskit.Credentials.is_expired ~now usable);
+  Alcotest.(check (option bool))
+    "usable until" (Some true)
+    (Option.map (Awskit.Credentials.usable_until usable) ~f:(Ptime.equal later));
+  Alcotest.(check (result unit reject))
+    "usable credentials validate" (Ok ())
+    (Awskit.Credentials.validate_usable ~now ~operation:"GetObject" usable);
+  Alcotest.(check bool)
+    "expired credentials are expired" true
+    (Awskit.Credentials.is_expired ~now expired);
+  (match
+     Awskit.Credentials.validate_usable ~now ~operation:"GetObject" expired
+   with
+  | Error error when Awskit.Error.is_credentials error -> ()
+  | Error error ->
+      Alcotest.failf "expired credentials returned unexpected error: %a"
+        Awskit.Error.pp error
+  | Ok () -> Alcotest.fail "expired credentials should fail");
+  Alcotest.(check (result unit reject))
+    "fresh alias remains available" (Ok ())
+    (Awskit.Credentials.validate_fresh usable ~now)
+
 let test_error_multiple_classifiers_recurse () =
   let service_error = make_service_error ~status:503 ~code:(Some "SlowDown") in
   let auth_error = make_service_error ~status:403 ~code:(Some "AccessDenied") in
@@ -570,6 +657,8 @@ let suite =
           test_error_multiple_retry_policy;
         Alcotest.test_case "error production retry classes" `Quick
           test_error_production_retry_classes;
+        Alcotest.test_case "retry timeout and credential timing" `Quick
+          test_retry_timeout_and_credential_timing_contracts;
         Alcotest.test_case "error multiple classifiers recurse" `Quick
           test_error_multiple_classifiers_recurse;
         Alcotest.test_case "error production categories and classifiers" `Quick

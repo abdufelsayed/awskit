@@ -7,8 +7,12 @@ module type RUNTIME = sig
 
   include Awskit.Runtime.S
 
-  val s3_endpoint_config : connection -> Endpoint_resolver.t
-  (** Return S3 addressing/endpoint configuration for this connection. *)
+  module S3_endpoint : sig
+    type nonrec connection = connection
+
+    val s3_endpoint_config : connection -> Endpoint_resolver.t
+    (** Return S3 addressing/endpoint configuration for this connection. *)
+  end
 end
 
 module type BODY = sig

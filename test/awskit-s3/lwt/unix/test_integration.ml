@@ -15,8 +15,8 @@ let local_endpoint_config =
 let check_endpoint_config conn =
   match
     Awskit_s3.Endpoint_resolver.endpoint
-      (Awskit_s3_lwt_unix.Runtime.s3_endpoint_config conn)
-      ~region:(Awskit_s3_lwt_unix.Runtime.region conn)
+      (Awskit_s3_lwt_unix.Runtime.S3_endpoint.s3_endpoint_config conn)
+      ~region:(Awskit_s3_lwt_unix.Runtime.Endpoint.region conn)
   with
   | Error error -> Alcotest.failf "%a" Awskit.Error.pp error
   | Ok endpoint ->
@@ -34,7 +34,8 @@ let test_connection () =
   | Ok conn ->
       Alcotest.(check string)
         "region" "us-east-1"
-        (Awskit.Region.to_string (Awskit_s3_lwt_unix.Runtime.region conn));
+        (Awskit.Region.to_string
+           (Awskit_s3_lwt_unix.Runtime.Endpoint.region conn));
       check_endpoint_config conn
 
 let expect_validation label = function

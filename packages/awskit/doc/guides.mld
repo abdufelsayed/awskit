@@ -177,7 +177,9 @@ For example, [awskit-s3] exposes [Awskit_s3.Error.is_no_such_key] and
 
 Service packages use {!module:Awskit.Retry} for built-in retries. The default
 policy retries retryable transport failures, throttling responses, and 5xx
-service responses when the request body is replayable.
+service responses when the request body is replayable. The default policy uses
+jitter and a per-operation retry budget so repeated transient failures cannot
+turn into an unbounded tight loop.
 
 {[
 let retry_policy =
@@ -192,12 +194,37 @@ let retry_policy =
 Use {!val:Awskit.Retry.disabled} when an application wants to own all retry
 behavior itself.
 
+Runtime adapters must provide the sleep and random capabilities used by retry
+delays. Generic adapters that do not have a real sleeper or random source reject
+retry-enabled construction instead of silently spinning.
+
+{1 Timeout Policy}
+
+Use {!module:Awskit.Timeout} to describe timeout spans by phase. A policy can
+carry connect, attempt, whole-operation, request-body, response-body, and drain
+limits:
+
+{[
+let timeout_policy =
+  Awskit.Timeout.create_exn
+    ~connect:(Ptime.Span.of_float_s 3.1 |> Option.get)
+    ~attempt:(Ptime.Span.of_float_s 30.0 |> Option.get)
+    ~operation:(Ptime.Span.of_float_s 120.0 |> Option.get)
+    ~drain:(Ptime.Span.of_float_s 10.0 |> Option.get)
+    ()
+]}
+
+Timeout support is part of the runtime contract. Each adapter documents and
+tests the phases it can enforce natively. Cancellation remains runtime-native:
+for example, Eio cancellation and [Lwt.Canceled] are preserved as native
+cancellation rather than converted into ordinary SDK errors.
+
 {1 Runtime Body Model}
 
 The runtime abstraction keeps HTTP metadata separate from bodies:
 
 {ul
-  {li request bodies are passed separately to [Runtime.with_response]}
+  {li request bodies are passed separately to [Runtime.Transport.with_response]}
   {li response bodies are valid inside the [with_response] callback}
   {li response body readers are scoped through [Runtime.Response_body.with_reader]}
   {li request and response records are body-free}
@@ -234,7 +261,7 @@ Response bodies must be consumed inside the [with_response] callback, normally
 through [Runtime.Response_body.with_reader]:
 
 {[
-Runtime.with_response conn request body ~f:(fun response body ->
+Runtime.Transport.with_response conn request ~body ~consume:(fun response body ->
   Runtime.Response_body.with_reader body ~consume:(fun reader ->
     Runtime.Response_body.read reader bytes ~off:0 ~len:(Bytes.length bytes)))
 ]}
@@ -325,16 +352,21 @@ module Runtime = Awskit_lwt.Make (Cohttp_lwt_unix.Client)
 {1 Custom Runtime Adapters}
 
 Implement {!module-type:Awskit.Runtime.S} when integrating another concurrency
-or HTTP stack. Service package functors need:
+or HTTP stack. The signature is grouped into named capabilities so adapter
+authors can see exactly which law belongs to which part of the runtime:
 
 {ul
-  {li a monad type and bind/return}
-  {li connection region, credentials, clock, and optional endpoint}
-  {li request body constructors and request descriptors}
-  {li response body scoped consumption}
-  {li HTTP transport through [with_response]}
+  {li [IO] for bind and return}
+  {li [Transport] for HTTP execution and response-body scope}
+  {li [Request_body] and [Response_body] for streaming bodies}
+  {li [Clock], [Sleeper], and [Random] for signing time and retry delay}
+  {li [Credentials] and [Endpoint] for request configuration}
+  {li [Retry] and [Timeout] for operational policy}
 }
 
-S3 adapters extend the core runtime with [s3_endpoint_config] so S3 endpoint
-resolution can stay AWS-aware without putting S3 concepts into the core AWS
-runtime abstraction.
+S3 adapters extend the core runtime with [S3_endpoint.s3_endpoint_config] so S3
+endpoint resolution can stay AWS-aware without putting S3 concepts into the core
+AWS runtime abstraction. Run [opam exec -- dune build @runtime-conformance] when
+changing a runtime implementation; the conformance suite checks the shared
+runtime laws for retry, timeout visibility, request body descriptors, and
+response-body cleanup precedence.

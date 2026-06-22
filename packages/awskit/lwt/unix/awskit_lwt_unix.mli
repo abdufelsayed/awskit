@@ -89,6 +89,8 @@ val create :
   ?credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
   ?retry_policy:Awskit.Retry.t ->
+  ?random_float:(upper_bound:float -> float) ->
+  ?timeout_policy:Awskit.Timeout.policy ->
   ?max_response_drain_bytes:int ->
   ?imdsv1_fallback:Credentials.imdsv1_fallback ->
   unit ->
@@ -111,6 +113,11 @@ val create :
     @param retry_policy
       Retry behavior for retryable AWS errors and transient transport failures
       (default: [Awskit.Retry.default])
+    @param random_float
+      Random delay source for retry jitter. Defaults to a connection-local
+      random state.
+    @param timeout_policy
+      Runtime timeout policy (default: [Awskit.Timeout.default]).
     @param max_response_drain_bytes
       Maximum response body bytes to drain after callbacks (default: 64 MiB). If
       a response consumer succeeds but the remaining body exceeds this drain

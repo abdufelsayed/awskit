@@ -1,5 +1,5 @@
 module Make (R : Awskit_s3_intf.RUNTIME) = struct
-  let ( let* ) = R.bind
+  let ( let* ) = R.IO.bind
 
   module Body = struct
     type 'a io = 'a R.t
@@ -43,27 +43,28 @@ module Make (R : Awskit_s3_intf.RUNTIME) = struct
         (Fmt.str "chunk_size must be positive, got %d" chunk_size)
 
     let next ?(chunk_size = default_chunk_size) reader =
-      if chunk_size <= 0 then R.return (Error (invalid_chunk_size chunk_size))
+      if chunk_size <= 0 then
+        R.IO.return (Error (invalid_chunk_size chunk_size))
       else
         let bytes = Bytes.create chunk_size in
         let* read = R.Response_body.read reader bytes ~off:0 ~len:chunk_size in
         match read with
-        | Error _ as error -> R.return error
-        | Ok 0 -> R.return (Ok None)
+        | Error _ as error -> R.IO.return error
+        | Ok 0 -> R.IO.return (Ok None)
         | Ok n ->
             let chunk = if n = chunk_size then bytes else Bytes.sub bytes 0 n in
-            R.return (Ok (Some chunk))
+            R.IO.return (Ok (Some chunk))
 
     let fold ?chunk_size reader ~init ~f =
       let rec loop acc =
         let* chunk = next ?chunk_size reader in
         match chunk with
-        | Error _ as error -> R.return error
-        | Ok None -> R.return (Ok acc)
+        | Error _ as error -> R.IO.return error
+        | Ok None -> R.IO.return (Ok acc)
         | Ok (Some chunk) -> (
             let* folded = f acc chunk in
             match folded with
-            | Error _ as error -> R.return error
+            | Error _ as error -> R.IO.return error
             | Ok acc -> loop acc)
       in
       loop init
@@ -85,25 +86,25 @@ module Make (R : Awskit_s3_intf.RUNTIME) = struct
         fold ?chunk_size reader ~init:0L ~f:(fun total chunk ->
             let total = Int64.add total (Int64.of_int (Bytes.length chunk)) in
             match check_limit ?max_bytes total with
-            | Error _ as error -> R.return error
+            | Error _ as error -> R.IO.return error
             | Ok () ->
                 Buffer.add_bytes buffer chunk;
-                R.return (Ok total))
+                R.IO.return (Ok total))
       in
       match result with
-      | Error _ as error -> R.return error
-      | Ok _ -> R.return (Ok buffer)
+      | Error _ as error -> R.IO.return error
+      | Ok _ -> R.IO.return (Ok buffer)
 
     let to_bytes ?chunk_size ?max_bytes reader =
       let* result = drain_to_buffer ?chunk_size ?max_bytes reader in
       match result with
-      | Error _ as error -> R.return error
-      | Ok buffer -> R.return (Ok (Buffer.to_bytes buffer))
+      | Error _ as error -> R.IO.return error
+      | Ok buffer -> R.IO.return (Ok (Buffer.to_bytes buffer))
 
     let to_string ?chunk_size ?max_bytes reader =
       let* result = drain_to_buffer ?chunk_size ?max_bytes reader in
       match result with
-      | Error _ as error -> R.return error
-      | Ok buffer -> R.return (Ok (Buffer.contents buffer))
+      | Error _ as error -> R.IO.return error
+      | Ok buffer -> R.IO.return (Ok (Buffer.contents buffer))
   end
 end

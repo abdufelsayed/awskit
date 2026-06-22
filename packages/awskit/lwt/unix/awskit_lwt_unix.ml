@@ -417,7 +417,8 @@ module Credentials = struct
 end
 
 let create ?ctx ?endpoint ?region ?credentials ?(clock = Ptime_clock.now)
-    ?retry_policy ?max_response_drain_bytes ?imdsv1_fallback () =
+    ?retry_policy ?random_float ?timeout_policy ?max_response_drain_bytes
+    ?imdsv1_fallback () =
   match
     ( (match region with
       | Some region -> Awskit.Region.of_string region
@@ -435,6 +436,13 @@ let create ?ctx ?endpoint ?region ?credentials ?(clock = Ptime_clock.now)
   with
   | Ok region, Ok endpoint, Ok credentials_provider ->
       let sleep span = Lwt_unix.sleep (Ptime.Span.to_float_s span) in
+      let random_float =
+        match random_float with
+        | Some random_float -> random_float
+        | None ->
+            let state = Random.State.make_self_init () in
+            fun ~upper_bound -> Random.State.float state upper_bound
+      in
       let region = Awskit.Region.to_string region in
       let endpoint =
         match endpoint with
@@ -442,6 +450,6 @@ let create ?ctx ?endpoint ?region ?credentials ?(clock = Ptime_clock.now)
         | Some endpoint -> Some (Awskit.Endpoint.to_url_prefix endpoint)
       in
       Strict.create_with_credentials_provider ?ctx ?endpoint ~region
-        ~credentials_provider ~clock ?retry_policy ~sleep
-        ?max_response_drain_bytes ()
+        ~credentials_provider ~clock ?retry_policy ~sleep ~random_float
+        ?timeout_policy ?max_response_drain_bytes ()
   | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error

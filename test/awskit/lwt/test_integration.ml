@@ -209,6 +209,8 @@ let expect_validation label = function
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected validation error" label
 
+let tiny_span = Ptime.Span.of_float_s 0.001 |> Option.value_exn
+
 let test_connection_roundtrip () =
   let c =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
@@ -217,14 +219,18 @@ let test_connection_roundtrip () =
   let region = "eu-west-1" in
   let endpoint = "http://localhost:9000" in
   let conn =
-    Aws.create ~region ~credentials:c ~clock ~endpoint () |> conn_or_fail
+    Aws.create ~region ~credentials:c ~clock ~endpoint
+      ~retry_policy:Awskit.Retry.disabled ()
+    |> conn_or_fail
   in
   Alcotest.(check string)
     "region" "eu-west-1"
-    (Aws.Runtime.region conn |> Awskit.Region.to_string);
+    (Aws.Runtime.Endpoint.region conn |> Awskit.Region.to_string);
   Alcotest.(check (option string))
     "endpoint" (Some "http://localhost:9000")
-    (Option.map Aws.Runtime.(endpoint conn) ~f:Awskit.Endpoint.to_url_prefix)
+    (Option.map
+       (Aws.Runtime.Endpoint.endpoint conn)
+       ~f:Awskit.Endpoint.to_url_prefix)
 
 let test_connection_defaults () =
   let c =
@@ -232,10 +238,57 @@ let test_connection_defaults () =
   in
   let clock () = Ptime.epoch in
   let region = "us-east-1" in
-  let conn = Aws.create ~region ~credentials:c ~clock () |> conn_or_fail in
+  let conn =
+    Aws.create ~region ~credentials:c ~clock ~retry_policy:Awskit.Retry.disabled
+      ()
+    |> conn_or_fail
+  in
   Alcotest.(check (option string))
     "no endpoint" None
-    (Option.map Aws.Runtime.(endpoint conn) ~f:Awskit.Endpoint.to_url_prefix)
+    (Option.map
+       (Aws.Runtime.Endpoint.endpoint conn)
+       ~f:Awskit.Endpoint.to_url_prefix)
+
+let test_generic_lwt_retry_requires_real_sleep_and_random () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let make ?retry_policy ?sleep ?random_float () =
+    Aws.create ~region:"us-east-1" ~credentials
+      ~clock:(fun () -> Ptime.epoch)
+      ?retry_policy ?sleep ?random_float ()
+  in
+  make () |> expect_validation "default retry without sleep/random";
+  make ~sleep:(fun _ -> Lwt.return_unit) ()
+  |> expect_validation "default retry without random";
+  make ~random_float:(fun ~upper_bound:_ -> 0.0) ()
+  |> expect_validation "default retry without sleep";
+  ignore (make ~retry_policy:Awskit.Retry.disabled () |> conn_or_fail : Aws.t);
+  ignore
+    (make
+       ~sleep:(fun _ -> Lwt.return_unit)
+       ~random_float:(fun ~upper_bound -> upper_bound /. 2.0)
+       ()
+     |> conn_or_fail
+      : Aws.t)
+
+let test_generic_lwt_timeout_requires_real_sleep () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let timeout_policy = Awskit.Timeout.create_exn ~attempt:tiny_span () in
+  Aws.create ~region:"us-east-1" ~credentials
+    ~clock:(fun () -> Ptime.epoch)
+    ~retry_policy:Awskit.Retry.disabled ~timeout_policy ()
+  |> expect_validation "timeout without sleep";
+  ignore
+    (Aws.create ~region:"us-east-1" ~credentials
+       ~clock:(fun () -> Ptime.epoch)
+       ~retry_policy:Awskit.Retry.disabled ~timeout_policy
+       ~sleep:(fun _ -> Lwt.return_unit)
+       ()
+     |> conn_or_fail
+      : Aws.t)
 
 let test_runtime_bodies () =
   let body = Aws.Runtime.Request_body.of_string "hello" in
@@ -350,7 +403,9 @@ let request_conn () =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let region = "us-east-1" in
-  RequestAws.create ~region ~credentials ~clock:(fun () -> Ptime.epoch) ()
+  RequestAws.create ~region ~credentials
+    ~clock:(fun () -> Ptime.epoch)
+    ~retry_policy:Awskit.Retry.disabled ()
   |> conn_or_fail
 
 let early_response_conn () =
@@ -358,7 +413,9 @@ let early_response_conn () =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let region = "us-east-1" in
-  EarlyResponseAws.create ~region ~credentials ~clock:(fun () -> Ptime.epoch) ()
+  EarlyResponseAws.create ~region ~credentials
+    ~clock:(fun () -> Ptime.epoch)
+    ~retry_policy:Awskit.Retry.disabled ()
   |> conn_or_fail
 
 let backpressure_conn () =
@@ -366,7 +423,9 @@ let backpressure_conn () =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let region = "us-east-1" in
-  BackpressureAws.create ~region ~credentials ~clock:(fun () -> Ptime.epoch) ()
+  BackpressureAws.create ~region ~credentials
+    ~clock:(fun () -> Ptime.epoch)
+    ~retry_policy:Awskit.Retry.disabled ()
   |> conn_or_fail
 
 let request_body_request =
@@ -391,6 +450,8 @@ let body_limit error =
   let open Awskit.Error in
   match kind error with Body { limit; _ } -> limit | _ -> None
 
+let is_timeout_error = Awskit.Error.is_timeout
+
 let test_stream_request_body_reaches_client () =
   Request_body_client.request_body := None;
   let body =
@@ -403,8 +464,9 @@ let test_stream_request_body_reaches_client () =
   in
   match
     Lwt_main.run
-      (RequestAws.Runtime.with_response (request_conn ()) request_body_request
-         body ~f:(fun _ body -> RequestAws.Runtime.Response_body.discard body))
+      (RequestAws.Runtime.Transport.with_response (request_conn ())
+         request_body_request ~body ~consume:(fun _ body ->
+           RequestAws.Runtime.Response_body.discard body))
   with
   | Error error ->
       Alcotest.failf "unexpected request body error: %a" Awskit.Error.pp error
@@ -426,8 +488,9 @@ let test_stream_request_body_error_propagates () =
   in
   match
     Lwt_main.run
-      (RequestAws.Runtime.with_response (request_conn ()) request_body_request
-         body ~f:(fun _ body -> RequestAws.Runtime.Response_body.discard body))
+      (RequestAws.Runtime.Transport.with_response (request_conn ())
+         request_body_request ~body ~consume:(fun _ body ->
+           RequestAws.Runtime.Response_body.discard body))
   with
   | Error error when Awskit.Error.equal error stream_error -> ()
   | Error error ->
@@ -450,8 +513,8 @@ let test_stream_request_body_cancellation_propagates () =
          (fun () ->
            Lwt.map
              (fun result -> `Returned result)
-             (RequestAws.Runtime.with_response (request_conn ())
-                request_body_request body ~f:(fun _ body ->
+             (RequestAws.Runtime.Transport.with_response (request_conn ())
+                request_body_request ~body ~consume:(fun _ body ->
                   RequestAws.Runtime.Response_body.discard body)))
          (fun exn -> Lwt.return (`Raised exn)))
   with
@@ -463,6 +526,91 @@ let test_stream_request_body_cancellation_propagates () =
         Awskit.Error.pp error
   | `Returned (Ok _) -> Alcotest.fail "expected request body cancellation"
 
+let test_stream_request_body_timeout_returns_timeout_error () =
+  Request_body_client.request_body := None;
+  let timeout_policy = Awskit.Timeout.create_exn ~request_body:tiny_span () in
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let conn =
+    RequestAws.create ~region:"us-east-1" ~credentials
+      ~clock:(fun () -> Ptime.epoch)
+      ~retry_policy:Awskit.Retry.disabled ~timeout_policy
+      ~sleep:(fun _ -> Lwt.return_unit)
+      ()
+    |> conn_or_fail
+  in
+  let body =
+    RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
+      ~write:(fun _writer ->
+        let forever, _wake = Lwt.wait () in
+        forever)
+  in
+  match
+    Lwt_main.run
+      (RequestAws.Runtime.Transport.with_response conn request_body_request
+         ~body ~consume:(fun _ body ->
+           RequestAws.Runtime.Response_body.discard body))
+  with
+  | Error error when is_timeout_error error -> ()
+  | Error error ->
+      Alcotest.failf "expected timeout error, got: %a" Awskit.Error.pp error
+  | Ok () -> Alcotest.fail "expected request body timeout"
+
+let test_transport_timeout_cancels_stream_request_body () =
+  Request_body_client.request_body := None;
+  let timeout_policy = Awskit.Timeout.create_exn ~attempt:tiny_span () in
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let rec wait_until ?(attempts = 1_000) condition =
+    if condition () || attempts <= 0 then Lwt.return_unit
+    else
+      Lwt.bind (Lwt.pause ()) (fun () ->
+          wait_until ~attempts:(attempts - 1) condition)
+  in
+  let producer_started, wake_producer_started = Lwt.wait () in
+  let conn =
+    RequestAws.create ~region:"us-east-1" ~credentials
+      ~clock:(fun () -> Ptime.epoch)
+      ~retry_policy:Awskit.Retry.disabled ~timeout_policy
+      ~sleep:(fun _ -> producer_started)
+      ()
+    |> conn_or_fail
+  in
+  let producer_finalized = ref false in
+  let body =
+    RequestAws.Runtime.Request_body.of_stream (stream_descriptor 1024L)
+      ~write:(fun writer ->
+        Lwt.finalize
+          (fun () ->
+            Lwt.wakeup_later wake_producer_started ();
+            Lwt.bind (RequestAws.Runtime.Request_body.write_string writer "ab")
+              (function
+              | Error _ as error -> Lwt.return error
+              | Ok () -> Lwt_unix.sleep 60.0 |> Lwt.map (fun () -> Ok ())))
+          (fun () ->
+            producer_finalized := true;
+            Lwt.return_unit))
+  in
+  let result, producer_finalized =
+    Lwt_main.run
+      (Lwt.bind
+         (RequestAws.Runtime.Transport.with_response conn request_body_request
+            ~body ~consume:(fun _ body ->
+              RequestAws.Runtime.Response_body.discard body))
+         (fun result ->
+           Lwt.bind
+             (wait_until (fun () -> !producer_finalized))
+             (fun () -> Lwt.return (result, !producer_finalized))))
+  in
+  (match result with
+  | Error error when is_timeout_error error -> ()
+  | Error error ->
+      Alcotest.failf "expected timeout error, got: %a" Awskit.Error.pp error
+  | Ok () -> Alcotest.fail "expected transport timeout");
+  Alcotest.(check bool) "producer finalized" true producer_finalized
+
 let test_callback_exception_is_not_transport_error () =
   let callback_exn = Failure "callback exploded" in
   let body = RequestAws.Runtime.Request_body.of_string "ok" in
@@ -472,8 +620,8 @@ let test_callback_exception_is_not_transport_error () =
          (fun () ->
            Lwt.map
              (fun result -> `Returned result)
-             (RequestAws.Runtime.with_response (request_conn ())
-                request_body_request body ~f:(fun _response _body ->
+             (RequestAws.Runtime.Transport.with_response (request_conn ())
+                request_body_request ~body ~consume:(fun _response _body ->
                   Lwt.fail callback_exn)))
          (fun exn -> Lwt.return (`Raised exn)))
   with
@@ -546,9 +694,9 @@ let test_stream_request_body_early_response_preserves_body () =
          (fun () ->
            Lwt_unix.with_timeout 0.5 (fun () ->
                Lwt.bind
-                 (EarlyResponseAws.Runtime.with_response
-                    (early_response_conn ()) request_body_request body
-                    ~f:(fun response response_body ->
+                 (EarlyResponseAws.Runtime.Transport.with_response
+                    (early_response_conn ()) request_body_request ~body
+                    ~consume:(fun response response_body ->
                       Lwt.bind (read_early_response_body response_body)
                         (function
                         | Error _ as error -> Lwt.return error
@@ -597,8 +745,8 @@ let test_stream_request_body_backpressure_limits_read_ahead () =
   in
   (match
      Lwt_main.run
-       (BackpressureAws.Runtime.with_response (backpressure_conn ())
-          request_body_request body ~f:(fun _ body ->
+       (BackpressureAws.Runtime.Transport.with_response (backpressure_conn ())
+          request_body_request ~body ~consume:(fun _ body ->
             BackpressureAws.Runtime.Response_body.discard body))
    with
   | Error error ->
@@ -621,8 +769,9 @@ let test_stream_request_body_rejects_short_body () =
         RequestAws.Runtime.Request_body.write_string writer "ab")
   in
   Lwt_main.run
-    (RequestAws.Runtime.with_response (request_conn ()) request_body_request
-       body ~f:(fun _ body -> RequestAws.Runtime.Response_body.discard body))
+    (RequestAws.Runtime.Transport.with_response (request_conn ())
+       request_body_request ~body ~consume:(fun _ body ->
+         RequestAws.Runtime.Response_body.discard body))
   |> expect_request_body_error "short request body"
 
 let test_stream_request_body_rejects_long_body () =
@@ -636,8 +785,9 @@ let test_stream_request_body_rejects_long_body () =
           | Ok () -> RequestAws.Runtime.Request_body.write_string writer "e"))
   in
   Lwt_main.run
-    (RequestAws.Runtime.with_response (request_conn ()) request_body_request
-       body ~f:(fun _ body -> RequestAws.Runtime.Response_body.discard body))
+    (RequestAws.Runtime.Transport.with_response (request_conn ())
+       request_body_request ~body ~consume:(fun _ body ->
+         RequestAws.Runtime.Response_body.discard body))
   |> expect_request_body_error "long request body"
 
 let limited_conn ~max_response_drain_bytes =
@@ -647,7 +797,7 @@ let limited_conn ~max_response_drain_bytes =
   let region = "us-east-1" in
   LimitedAws.create ~region ~credentials
     ~clock:(fun () -> Ptime.epoch)
-    ~max_response_drain_bytes ()
+    ~retry_policy:Awskit.Retry.disabled ~max_response_drain_bytes ()
   |> conn_or_fail
 
 let test_create_rejects_invalid_region_string () =
@@ -692,8 +842,9 @@ let with_limited_response ~max_response_drain_bytes body ~f =
   Limited_body_client.drained_chunks := [];
   let conn = limited_conn ~max_response_drain_bytes in
   Lwt_main.run
-    (LimitedAws.Runtime.with_response conn limited_request
-       LimitedAws.Runtime.Request_body.empty ~f:(fun _ body -> f body))
+    (LimitedAws.Runtime.Transport.with_response conn limited_request
+       ~body:LimitedAws.Runtime.Request_body.empty ~consume:(fun _ body ->
+         f body))
 
 let drained_limited_body () =
   List.rev !Limited_body_client.drained_chunks |> String.concat ~sep:""
@@ -754,6 +905,10 @@ let suite =
       [
         Alcotest.test_case "roundtrip" `Quick test_connection_roundtrip;
         Alcotest.test_case "defaults" `Quick test_connection_defaults;
+        Alcotest.test_case "retry requires real sleep and random" `Quick
+          test_generic_lwt_retry_requires_real_sleep_and_random;
+        Alcotest.test_case "timeout requires real sleep" `Quick
+          test_generic_lwt_timeout_requires_real_sleep;
         Alcotest.test_case "rejects invalid region string" `Quick
           test_create_rejects_invalid_region_string;
         Alcotest.test_case "rejects invalid endpoint string" `Quick
@@ -776,6 +931,10 @@ let suite =
           test_stream_request_body_error_propagates;
         Alcotest.test_case "stream request body cancellation propagates" `Quick
           test_stream_request_body_cancellation_propagates;
+        Alcotest.test_case "stream request body timeout" `Quick
+          test_stream_request_body_timeout_returns_timeout_error;
+        Alcotest.test_case "transport timeout cancels stream request body"
+          `Quick test_transport_timeout_cancels_stream_request_body;
         Alcotest.test_case "callback exception is not transport error" `Quick
           test_callback_exception_is_not_transport_error;
         Alcotest.test_case "stream request body early response preserves body"

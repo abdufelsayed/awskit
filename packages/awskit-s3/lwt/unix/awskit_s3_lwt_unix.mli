@@ -18,6 +18,8 @@ val create :
   ?credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
   ?retry_policy:Awskit.Retry.t ->
+  ?random_float:(upper_bound:float -> float) ->
+  ?timeout_policy:Awskit.Timeout.policy ->
   ?imdsv1_fallback:Awskit_lwt_unix.Credentials.imdsv1_fallback ->
   unit ->
   (t, Awskit_s3.Error.t) result

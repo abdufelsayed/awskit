@@ -27,6 +27,9 @@ module Body = Body
 module Retry = Retry
 (** Shared retry policy for AWS service packages. *)
 
+module Timeout = Timeout
+(** Runtime timeout policy. *)
+
 module Signing = Signing
 (** AWS Signature Version 4 signing. *)
 

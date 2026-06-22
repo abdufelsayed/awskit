@@ -108,7 +108,7 @@ module Make (C : Request_context.S) = struct
     | Ok () -> (
         let region =
           match options.region with
-          | None -> Ok (R.region conn)
+          | None -> Ok (region conn)
           | Some region -> Awskit.Region.of_string region
         in
         match region with

@@ -73,13 +73,13 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
   let create = Inner.create
 
   let create_with_credentials_provider ?ctx ?endpoint ~region
-      ~credentials_provider ~clock ?retry_policy ?sleep
-      ?max_response_drain_bytes () =
+      ~credentials_provider ~clock ?retry_policy ?sleep ?random_float
+      ?timeout_policy ?max_response_drain_bytes () =
     let credentials_provider () =
       Lwt.map provider_resolution_to_result
         (Credentials.Provider.resolve credentials_provider)
     in
     Inner.create_with_credentials_provider ?ctx ?endpoint ~region
-      ~credentials_provider ~clock ?retry_policy ?sleep
-      ?max_response_drain_bytes ()
+      ~credentials_provider ~clock ?retry_policy ?sleep ?random_float
+      ?timeout_policy ?max_response_drain_bytes ()
 end

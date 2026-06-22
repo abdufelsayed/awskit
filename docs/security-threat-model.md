@@ -16,7 +16,7 @@ contract target where executable contract coverage exists.
 - Endpoint configuration, including hosts, schemes, signing regions, TLS policy,
   and any rejected userinfo or path/query/fragment material.
 - Object metadata, headers, and operation inputs that may contain user secrets.
-- Logs, exception messages, public printers, sexps, and telemetry payloads.
+- Logs, exception messages, public printers, and sexps.
 
 ## Trust Boundaries
 
@@ -48,8 +48,8 @@ contract target where executable contract coverage exists.
 
 ## Review Rules
 
-- New public printers, sexps, exceptions, logs, and telemetry payloads must be
-  redaction-safe by default.
+- New public printers, sexps, exceptions, and logs must be redaction-safe by
+  default.
 - Raw access to credentials or bearer presigned URLs must use deliberate
   `reveal_*` or `Unsafe_*` naming.
 - Runtime packages may expose advanced SDK APIs directly, but they must preserve

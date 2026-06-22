@@ -62,26 +62,28 @@ module Make (R : RUNTIME) = struct
     type request_body = R.request_body
     type response_body_reader = R.response_body_reader
 
-    let bind = R.bind
-    let ( let* ) = R.bind
-    let return = R.return
-    let return_ok value = R.return (Ok value)
-    let return_error error = R.return (Error error)
+    let bind = R.IO.bind
+    let ( let* ) = R.IO.bind
+    let return = R.IO.return
+    let return_ok value = R.IO.return (Ok value)
+    let return_error error = R.IO.return (Error error)
     let empty_hash = Awskit.Body.Payload_hash.sha256_of_string ""
-    let endpoint_config conn = R.s3_endpoint_config conn
+    let endpoint_config conn = R.S3_endpoint.s3_endpoint_config conn
+    let region conn = R.Endpoint.region conn
+    let now conn = R.Clock.now conn
+    let credentials conn = R.Credentials.resolve conn
 
     let object_request conn ~bucket ~key =
       Endpoint_resolver.resolve_object_request (endpoint_config conn)
-        ~region:(R.region conn) ~bucket ~key
+        ~region:(region conn) ~bucket ~key
 
     let bucket_request conn ~bucket ~suffix ~signing_suffix =
       Endpoint_resolver.resolve_bucket_request (endpoint_config conn)
-        ~region:(R.region conn) ~bucket ~suffix ~signing_suffix
+        ~region:(region conn) ~bucket ~suffix ~signing_suffix
 
     let root_request conn =
       match
-        Endpoint_resolver.endpoint (endpoint_config conn)
-          ~region:(R.region conn)
+        Endpoint_resolver.endpoint (endpoint_config conn) ~region:(region conn)
       with
       | Error _ as error -> error
       | Ok endpoint ->
@@ -92,7 +94,7 @@ module Make (R : RUNTIME) = struct
               signing_path = "/";
               signing_region =
                 Endpoint_config.signing_region (endpoint_config conn)
-                  ~client_region:(R.region conn);
+                  ~client_region:(region conn);
               style = `Path;
             }
 
@@ -141,7 +143,7 @@ module Make (R : RUNTIME) = struct
       let headers =
         ("host", Awskit.Endpoint.authority request.endpoint) :: headers
       in
-      let* credentials = R.credentials conn in
+      let* credentials = credentials conn in
       match credentials with
       | Error error -> return_error error
       | Ok credentials -> (
@@ -149,7 +151,7 @@ module Make (R : RUNTIME) = struct
             Awskit.Signing.sign_request_params ~credentials
               ~region:request.signing_region ~service:"s3" ~method_
               ~path:request.signing_path ~query_params:query ~headers
-              ~payload_hash ~now:(R.now conn)
+              ~payload_hash ~now:(now conn)
           with
           | Error error -> return_error error
           | Ok signed -> (
@@ -169,13 +171,22 @@ module Make (R : RUNTIME) = struct
                   | Error error -> return_error error
                   | Ok request -> return_ok request)))
 
-    let retry_or_error conn ~attempt ~replayable error retry =
-      let policy = R.retry_policy conn in
+    let retry_or_error conn ~attempt ~budget_state ~replayable error retry =
+      let policy = R.Retry.policy conn in
       let max_attempts = Awskit.Retry.max_attempts policy in
-      match Awskit.Retry.delay policy ~attempt ~error with
-      | Some delay when replayable ->
-          let* () = R.sleep conn delay in
-          retry (attempt + 1)
+      match
+        Awskit.Retry.delay policy ~attempt ~error
+          ~random_float:(R.Random.float conn)
+      with
+      | Some delay when replayable -> (
+          match Awskit.Retry.charge_retry policy budget_state error with
+          | None ->
+              return_error
+                (Awskit.Error.Internal.with_retry ~attempt ~max_attempts
+                   ~reason:"retry budget exhausted" error)
+          | Some budget_state ->
+              let* () = R.Sleeper.sleep conn delay in
+              retry budget_state (attempt + 1))
       | Some _delay ->
           return_error
             (Awskit.Error.Internal.with_retry ~attempt ~max_attempts
@@ -197,7 +208,9 @@ module Make (R : RUNTIME) = struct
     let with_response conn ~method_ ~request ~query ~headers ~payload_hash body
         ~f =
       let replayable = (R.Request_body.descriptor body).replayable in
-      let rec attempt attempt_number =
+      let policy = R.Retry.policy conn in
+      let initial_budget_state = Awskit.Retry.initial_budget_state policy in
+      let rec attempt budget_state attempt_number =
         let* request =
           signed_request conn ~method_ ~request ~query ~headers ~payload_hash
         in
@@ -205,8 +218,8 @@ module Make (R : RUNTIME) = struct
         | Error error -> return_error error
         | Ok request -> (
             let* response =
-              R.with_response conn request body
-                ~f:(fun response response_body ->
+              R.Transport.with_response conn request ~body
+                ~consume:(fun response response_body ->
                   if Awskit.Response.is_success response then
                     let* result = f response response_body in
                     return_ok (Done result)
@@ -217,18 +230,19 @@ module Make (R : RUNTIME) = struct
                     match body with
                     | Error error -> return_ok (Done (Error error))
                     | Ok body ->
-                        return_ok (Retry (service_error response (Some body))))
+                        let error = service_error response (Some body) in
+                        return_ok (Retry error))
             in
             match response with
             | Error error ->
-                retry_or_error conn ~attempt:attempt_number ~replayable error
-                  attempt
+                retry_or_error conn ~attempt:attempt_number ~budget_state
+                  ~replayable error attempt
             | Ok (Done result) -> return result
             | Ok (Retry error) ->
-                retry_or_error conn ~attempt:attempt_number ~replayable error
-                  attempt)
+                retry_or_error conn ~attempt:attempt_number ~budget_state
+                  ~replayable error attempt)
       in
-      attempt 1
+      attempt initial_budget_state 1
 
     let with_empty_response conn ~method_ ~request ~query ~headers ~f =
       with_response conn ~method_ ~request ~query ~headers

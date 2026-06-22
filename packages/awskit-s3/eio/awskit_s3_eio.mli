@@ -17,6 +17,8 @@ val create :
   region:string ->
   credentials:Awskit.Credentials.t ->
   ?retry_policy:Awskit.Retry.t ->
+  ?random_float:(upper_bound:float -> float) ->
+  ?timeout_policy:Awskit.Timeout.policy ->
   ?endpoint_config:Awskit_s3.Endpoint_config.t ->
   unit ->
   (t, Awskit_s3.Error.t) result

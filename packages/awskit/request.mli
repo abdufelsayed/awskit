@@ -1,7 +1,7 @@
 (** Body-free HTTP request metadata.
 
     Runtime adapters receive request bodies separately through
-    {!Runtime.S.with_response}. *)
+    {!Runtime.Transport.with_response}. *)
 
 module Method : sig
   type t = [ `GET | `PUT | `POST | `DELETE | `HEAD | `PATCH ]

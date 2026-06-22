@@ -52,7 +52,7 @@ module Bucket = struct
         Ok
           {
             Head_bucket.name = bucket;
-            region = Some (Runtime.region conn);
+            region = Some (Runtime.Endpoint.region conn);
             response = response 200;
           }
 
@@ -78,7 +78,7 @@ module Bucket = struct
     | Ok _ ->
         Ok
           {
-            Get_bucket_location.region = Some (Runtime.region conn);
+            Get_bucket_location.region = Some (Runtime.Endpoint.region conn);
             response = response 200;
           }
 

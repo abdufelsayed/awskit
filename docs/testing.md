@@ -85,6 +85,12 @@ opam exec -- dune build --force @minio-contract
 docker compose down -v
 ```
 
+For runtime contract work:
+
+```sh
+opam exec -- dune build @runtime-conformance
+```
+
 For releases:
 
 ```sh

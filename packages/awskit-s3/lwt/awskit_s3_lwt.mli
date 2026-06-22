@@ -20,15 +20,19 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     clock:(unit -> Ptime.t) ->
     ?retry_policy:Awskit.Retry.t ->
     ?sleep:(Ptime.Span.t -> unit Lwt.t) ->
+    ?random_float:(upper_bound:float -> float) ->
+    ?timeout_policy:Awskit.Timeout.policy ->
     unit ->
     (t, Awskit.Error.t) result
   (** Create a generic Lwt S3 client.
 
       Use this when the application owns the Cohttp client module/context. The
-      ready-to-use Unix variant is [awskit-s3-lwt-unix]. [sleep] defaults to a
-      no-op unless supplied, so production callers that want retry backoff
-      should pass a real sleep function. Use [endpoint_config] for AWS endpoint
-      variants, local S3-compatible tests, or custom S3-compatible endpoints. *)
+      ready-to-use Unix variant is [awskit-s3-lwt-unix]. When retries are
+      enabled, custom Lwt backends must pass real [sleep] and [random_float]
+      capabilities or use [Awskit.Retry.disabled]. Explicit timeout policies
+      with configured spans also require [sleep]. Use [endpoint_config] for AWS
+      endpoint variants, local S3-compatible tests, or custom S3-compatible
+      endpoints. *)
 
   module Body : sig
     include

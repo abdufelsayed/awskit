@@ -5,6 +5,10 @@ release packaging.
 
 ## Breaking
 
+- Split the public runtime contract into named capabilities for IO, request and
+  response bodies, transport, clock, sleep, random, credentials, endpoint,
+  retry, and timeout. Custom runtimes should implement the grouped capability
+  modules accepted by `Awskit_s3.Make`. (6cce011)
 - Replaced object-specific string and file shortcuts with adapter `Body` and
   `Reader` helpers for uploads and downloads. Use `Object.put` with `Body`
   helpers, `Object.get ~consume` with scoped readers, and transfer helpers for
@@ -28,6 +32,8 @@ release packaging.
 
 ## Added
 
+- Added `Awskit.Timeout` policies and explicit retry budgets with runtime
+  supplied jitter randomness. (6cce011)
 - Added native streaming S3 upload and download APIs with adapter-level `Body`
   and `Reader` modules, plus unified multipart body handling. (#5, 53a7642)
 - Added live S3 SDK examples for put/get, listing, presigning, file transfer,
@@ -38,6 +44,12 @@ release packaging.
 
 ## Fixed
 
+- Generic Lwt runtimes now reject enabled retry policies unless the runtime
+  supplies real sleep and random capabilities. S3 retries now spend a
+  per-operation retry budget before sleeping. (6cce011)
+- Custom and simulator response bodies preserve consumer errors over cleanup
+  drain errors, while still reporting drain errors after successful consumers.
+  (6cce011)
 - Hardened scoped body cleanup and transfer helpers so consumer exceptions,
   canceled multipart uploads, and ranged downloads preserve resource ownership
   and object identity. (391b216, b251b54)

@@ -1,0 +1,9 @@
+(executable
+ (name test_runtime_conformance)
+ (modules test_runtime_conformance)
+ (libraries awskit awskit-s3 awskit_s3_test alcotest ptime))
+
+(rule
+ (alias runtime-conformance)
+ (action
+  (run ./test_runtime_conformance.exe)))

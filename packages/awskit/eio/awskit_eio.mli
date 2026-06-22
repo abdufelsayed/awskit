@@ -10,9 +10,6 @@
     conn
     ]} *)
 
-type t = Runtime.conn
-(** Eio connection handle. Create with {!val:create}. *)
-
 type 'flow https =
   (Uri.t -> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Std.r -> 'flow)
   option
@@ -29,11 +26,14 @@ val http_only : 'flow https
 
 (** Direct-style runtime implementation used by service packages. *)
 module Runtime : sig
-  include Awskit.Runtime.S with type 'a t = 'a and type connection = t
-
-  type conn = connection
+  type conn
   (** Concrete Eio connection record used by {!type:Awskit_eio.t}. *)
+
+  include Awskit.Runtime.S with type 'a t = 'a and type connection = conn
 end
+
+type t = Runtime.conn
+(** Eio connection handle. Create with {!val:create}. *)
 
 val create :
   env:< clock : _ Eio.Time.clock ; net : _ Eio.Net.t ; .. > ->
@@ -43,6 +43,8 @@ val create :
   credentials:Awskit.Credentials.t ->
   ?clock:(unit -> Ptime.t) ->
   ?retry_policy:Awskit.Retry.t ->
+  ?random_float:(upper_bound:float -> float) ->
+  ?timeout_policy:Awskit.Timeout.policy ->
   ?endpoint:string ->
   ?max_response_drain_bytes:int ->
   unit ->
@@ -56,7 +58,9 @@ val create :
     services or custom service endpoints. [region] and [endpoint] are parsed and
     validated when the connection is created; validation failures are returned
     as structured [Awskit.Error.t] values. [retry_policy] defaults to
-    [Awskit.Retry.default]. [max_response_drain_bytes] defaults to 64 MiB. If a
-    response consumer succeeds but the remaining body exceeds this drain limit,
-    the operation fails with a body-limit error. If the consumer fails, the
-    consumer error is returned. *)
+    [Awskit.Retry.default]. [random_float] defaults to a connection-local random
+    state for retry jitter. [timeout_policy] defaults to
+    [Awskit.Timeout.default]. [max_response_drain_bytes] defaults to 64 MiB. If
+    a response consumer succeeds but the remaining body exceeds this drain
+    limit, the operation fails with a body-limit error. If the consumer fails,
+    the consumer error is returned. *)

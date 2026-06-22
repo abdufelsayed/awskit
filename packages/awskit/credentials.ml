@@ -129,16 +129,23 @@ let session_token t = t.session_token
 let source t = t.source
 let source_label t = Option.map t.source ~f:source_label_of_source
 let expires_at t = t.expires_at
+let usable_until = expires_at
 
-let validate_fresh t ~now =
+let is_expired ~now t =
   match t.expires_at with
-  | None -> Ok ()
-  | Some expires_at when Ptime.compare expires_at now > 0 -> Ok ()
-  | Some _ ->
-      Error
-        (Aws_error.Internal.credentials
-           ?source:(Option.map t.source ~f:source_label_of_source)
-           "credentials expired before signing")
+  | None -> false
+  | Some expires_at -> Ptime.compare expires_at now <= 0
+
+let validate_usable ~now ~operation t =
+  if is_expired ~now t then
+    Error
+      (Aws_error.Internal.credentials
+         ?source:(Option.map t.source ~f:source_label_of_source)
+         "credentials expired before signing"
+      |> Aws_error.Internal.with_operation ~service:"aws" ~name:operation ())
+  else Ok ()
+
+let validate_fresh t ~now = validate_usable ~now ~operation:"SignRequest" t
 
 let signing_key t ~datestamp ~region ~service =
   hmac_sha256 ~key:("AWS4" ^ t.secret_access_key) datestamp |> fun key ->

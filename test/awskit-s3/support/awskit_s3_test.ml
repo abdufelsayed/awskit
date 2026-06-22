@@ -80,10 +80,6 @@ module Recording_runtime = struct
   }
 
   type 'a t = 'a
-
-  let return value = value
-  let bind value f = f value
-
   type response_body = { body : string; read_error_after : int option }
   type request_body_writer = Buffer.t
 
@@ -111,14 +107,6 @@ module Recording_runtime = struct
     match conn.calls with
     | call :: _ -> call
     | [] -> Alcotest.fail "expected recorded request"
-
-  let now _ = test_time
-  let region conn = conn.region
-  let credentials conn = Ok conn.credentials
-  let s3_endpoint_config conn = conn.endpoint_config
-  let retry_policy conn = conn.retry_policy
-  let sleep conn span = conn.sleeps <- span :: conn.sleeps
-  let endpoint _ = None
 
   let descriptor ?(replayable = true) body =
     {
@@ -188,10 +176,7 @@ module Recording_runtime = struct
     match consume reader with
     | Ok _ as result -> (
         match drain reader with Ok () -> result | Error _ as error -> error)
-    | Error _ as error -> (
-        match drain reader with
-        | Ok () -> error
-        | Error _ as drain_error -> drain_error)
+    | Error _ as error -> ( match drain reader with Ok () | Error _ -> error)
 
   let discard_response_body (body : response_body) =
     let reader =
@@ -201,21 +186,44 @@ module Recording_runtime = struct
     result
 
   module Request_body = struct
+    type 'a io = 'a
+    type t = request_body
+    type writer = request_body_writer
+
     let empty = empty_request_body
     let of_string = string_request_body
     let of_bytes = bytes_request_body
     let of_stream = stream_request_body
     let descriptor = request_body_descriptor
+    let content_length body = (request_body_descriptor body).content_length
     let write_string = write_request_body_string
+
+    let write_bytes writer bytes =
+      write_request_body_string writer (Bytes.to_string bytes)
   end
 
   module Response_body = struct
+    type 'a io = 'a
+    type t = response_body
+    type reader = response_body_reader
+
     let read = read_response_body
+
+    let next ?(chunk_size = 8192) reader =
+      if chunk_size <= 0 then
+        Error (Awskit.Error.Internal.body "chunk_size must be positive")
+      else
+        let bytes = Bytes.create chunk_size in
+        match read_response_body reader bytes ~off:0 ~len:chunk_size with
+        | Error _ as error -> error
+        | Ok 0 -> Ok None
+        | Ok n -> Ok (Some (Bytes.sub bytes 0 n))
+
     let with_reader = with_response_body
     let discard = discard_response_body
   end
 
-  let with_response conn request (body : request_body) ~f =
+  let do_with_response conn request (body : request_body) ~f =
     match body.body with
     | Error _ as error -> error
     | Ok body -> (
@@ -234,6 +242,74 @@ module Recording_runtime = struct
                 body = response.body;
                 read_error_after = response.read_error_after;
               })
+
+  module IO = struct
+    type 'a t = 'a
+
+    let return value = value
+    let bind value f = f value
+  end
+
+  module Transport = struct
+    type 'a io = 'a
+    type nonrec connection = connection
+    type nonrec request_body = request_body
+    type nonrec response_body = response_body
+
+    let with_response conn request ~body ~consume =
+      do_with_response conn request body ~f:consume
+  end
+
+  module Clock = struct
+    type nonrec connection = connection
+
+    let now _ = test_time
+  end
+
+  module Sleeper = struct
+    type 'a io = 'a
+    type nonrec connection = connection
+
+    let sleep conn span = conn.sleeps <- span :: conn.sleeps
+  end
+
+  module Random = struct
+    type nonrec connection = connection
+
+    let float _ ~upper_bound = upper_bound /. 2.
+  end
+
+  module Credentials = struct
+    type 'a io = 'a
+    type nonrec connection = connection
+
+    let resolve conn = Ok conn.credentials
+  end
+
+  module Endpoint = struct
+    type nonrec connection = connection
+
+    let region conn = conn.region
+    let endpoint _ = None
+  end
+
+  module Retry = struct
+    type nonrec connection = connection
+
+    let policy conn = conn.retry_policy
+  end
+
+  module Timeout = struct
+    type nonrec connection = connection
+
+    let policy _ = Awskit.Timeout.default
+  end
+
+  module S3_endpoint = struct
+    type nonrec connection = connection
+
+    let s3_endpoint_config conn = conn.endpoint_config
+  end
 end
 
 module Recording_s3 = Awskit_s3.Make (Recording_runtime)

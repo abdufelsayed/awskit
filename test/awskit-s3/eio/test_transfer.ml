@@ -137,22 +137,113 @@ module Runtime = struct
   let discard_response_body _ = Ok ()
 
   module Request_body = struct
+    type 'a io = 'a
+    type t = request_body
+    type writer = request_body_writer
+
     let empty = empty_request_body
     let of_string = string_request_body
     let of_bytes = bytes_request_body
     let of_stream = stream_request_body
     let descriptor = request_body_descriptor
+    let content_length body = (request_body_descriptor body).content_length
     let write_string = write_request_body_string
+
+    let write_bytes writer bytes =
+      write_request_body_string writer (Bytes.to_string bytes)
   end
 
   module Response_body = struct
+    type 'a io = 'a
+    type t = response_body
+    type reader = response_body_reader
+
     let read = read_response_body
+
+    let next ?(chunk_size = 8192) reader =
+      if chunk_size <= 0 then
+        Error (Awskit.Error.Internal.body "chunk_size must be positive")
+      else
+        let bytes = Bytes.create chunk_size in
+        match read_response_body reader bytes ~off:0 ~len:chunk_size with
+        | Error _ as error -> error
+        | Ok 0 -> Ok None
+        | Ok n -> Ok (Some (Bytes.sub bytes 0 n))
+
     let with_reader = with_response_body
     let discard = discard_response_body
   end
 
-  let with_response _ _ _ ~f:_ =
-    Error (Awskit.Error.Internal.transport ~retryable:false "not implemented")
+  module IO = struct
+    type 'a t = 'a
+
+    let return value = value
+    let bind value f = f value
+  end
+
+  module Transport = struct
+    type 'a io = 'a
+    type nonrec connection = connection
+    type nonrec request_body = request_body
+    type nonrec response_body = response_body
+
+    let with_response _ _ ~body:_ ~consume:_ =
+      Error (Awskit.Error.Internal.transport ~retryable:false "not implemented")
+  end
+
+  module Clock = struct
+    type nonrec connection = connection
+
+    let now _ = Ptime.epoch
+  end
+
+  module Sleeper = struct
+    type 'a io = 'a
+    type nonrec connection = connection
+
+    let sleep _ _ = ()
+  end
+
+  module Random = struct
+    type nonrec connection = connection
+
+    let float _ ~upper_bound = upper_bound /. 2.
+  end
+
+  module Credentials = struct
+    type 'a io = 'a
+    type nonrec connection = connection
+
+    let resolve _ =
+      Ok
+        (Awskit.Credentials.create_exn ~access_key_id:"AK"
+           ~secret_access_key:"SK" ())
+  end
+
+  module Endpoint = struct
+    type nonrec connection = connection
+
+    let region _ = Awskit.Region.of_string_exn "us-east-1"
+    let endpoint _ = None
+  end
+
+  module Retry = struct
+    type nonrec connection = connection
+
+    let policy _ = Awskit.Retry.default
+  end
+
+  module Timeout = struct
+    type nonrec connection = connection
+
+    let policy _ = Awskit.Timeout.default
+  end
+
+  module S3_endpoint = struct
+    type nonrec connection = connection
+
+    let s3_endpoint_config _ = Awskit_s3.default_endpoint_config
+  end
 end
 
 let connection ?(response_body = "") ?head_etag ?head_version_id () =

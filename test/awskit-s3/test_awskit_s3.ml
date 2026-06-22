@@ -1,4 +1,5 @@
 open Awskit_s3_test
+module Runtime_api_compile_check = Test_runtime_api
 
 let test_bounded_response_body_error_mentions_context () =
   let oversized_body = String.make 1_048_577 'x' in
