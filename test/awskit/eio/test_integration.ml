@@ -353,6 +353,52 @@ let eio_response_body ~max_response_drain_bytes body =
     max_response_drain_bytes;
   }
 
+(* A response body flow that yields its payload once, then signals EOF, and
+   raises [Read_past_eof] if read again. This reproduces cohttp's chunked
+   reader: after it returns [Done] it must not be called again (re-entry would
+   block on the next chunk header until the keep-alive connection is closed by
+   the server). The runtime must latch EOF and never touch the flow afterwards;
+   here a stray read fails loudly instead of hanging. *)
+exception Read_past_eof
+
+module Tripwire_source = struct
+  type t = { payload : string; mutable reads : int }
+
+  let single_read t dst =
+    t.reads <- t.reads + 1;
+    match t.reads with
+    | 1 ->
+        let len = min (Cstruct.length dst) (String.length t.payload) in
+        Cstruct.blit_from_string t.payload 0 dst 0 len;
+        len
+    | 2 -> raise End_of_file
+    | _ -> raise Read_past_eof
+
+  let read_methods = []
+end
+
+let tripwire_response_body payload : Awskit_eio__Runtime.response_body =
+  let ops = Eio.Flow.Pi.source (module Tripwire_source) in
+  let flow = Eio.Resource.T ({ Tripwire_source.payload; reads = 0 }, ops) in
+  { Awskit_eio__Runtime.body = flow; max_response_drain_bytes = 1024 }
+
+(* Regression: the scoped-read drain must not read the body flow after the
+   consumer has reached EOF. Before the fix, [with_reader]'s post-consume drain
+   re-read the body, re-entering cohttp's chunked reader past [Done] and
+   blocking ~65s until the server closed the keep-alive connection. *)
+let test_no_read_past_eof _env =
+  let body = tripwire_response_body "hello" in
+  match
+    Awskit_eio__Runtime.Response_body.with_reader body ~consume:(fun reader ->
+        Ok (read_all reader (Buffer.create 8)))
+  with
+  | Ok payload -> Alcotest.(check string) "consumed body" "hello" payload
+  | Error error ->
+      Alcotest.failf "unexpected body read error: %a" Awskit.Error.pp error
+  | exception Read_past_eof ->
+      Alcotest.fail
+        "body flow read after EOF (chunked keep-alive stall regression)"
+
 let expect_body_limit label expected = function
   | Error (Awskit.Error.Body { limit = Some limit; _ }) ->
       Alcotest.(check int64) label expected limit
@@ -399,6 +445,8 @@ let suite env =
         Alcotest.test_case "stream request body success response body is scoped"
           `Quick (fun () ->
             test_stream_request_body_success_response_body_is_scoped env);
+        Alcotest.test_case "no read past EOF (chunked keep-alive)" `Quick
+          (fun () -> test_no_read_past_eof env);
         Alcotest.test_case "discard body limit" `Quick (fun () ->
             test_discard_response_body_enforces_limit env);
         Alcotest.test_case "scoped drain body limit" `Quick (fun () ->
