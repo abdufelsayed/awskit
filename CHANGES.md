@@ -26,6 +26,12 @@ release packaging.
   `Endpoint_config.local_plaintext`, `Endpoint_config.s3_compatible`, or
   `Endpoint_config.unsafe_plaintext` to make endpoint policy explicit. Bucket
   no-payload operations now require a trailing `unit` argument. (2c19cd0)
+- Standardized S3 object and bucket operation APIs around typed bucket names,
+  object keys, metadata, tag sets, owner guards, content/header values,
+  operation option builders, and field-addressable object get results. Callers
+  should construct domain values with `Bucket_name`, `Object_key`, `Metadata`,
+  `Tag.Set`, and operation `options`/`options_exn` builders instead of passing
+  raw strings or relying on tuple-style get results. (138ab16)
 - Request builders, XML parsers, runtime internals, and adapter transfer helper
   modules are now private implementation modules. Use the public `Awskit`,
   `Awskit_s3`, and adapter APIs. (fc67929)
