@@ -28,6 +28,28 @@ Use `private` records or variants when callers need to inspect values but must
 not construct invalid ones. Use ordinary records for option/result records where
 callers are expected to build values directly, such as operation option records.
 
+## Public Naming Standard
+
+Use role names consistently in public interfaces:
+
+- `Runtime` for effect, clock, sleep, random, timeout, cancellation, and
+  transport execution contracts.
+- `Provider` for values resolved from an environment or backend, such as
+  credentials and region providers.
+- `Transport` for HTTP execution boundaries.
+- `Body` and `Reader` for request and response body ownership.
+- `Credentials`, `Endpoint`, `Retry`, and `Timeout` for their domain modules.
+- `S` for the primary module type in a role namespace.
+- `Make` for public functors, including custom runtime composition.
+
+`Internal` is not a supported extension role. Use private Dune modules for
+implementation details, or a role name such as `Runtime`, `Transport`, or
+`Provider` when the contract is intentionally public.
+
+Advanced application APIs are normal SDK APIs with deeper control. They use the
+same client handle, domain values, options, result records, and
+`Awskit.Error.t` as convenience helpers.
+
 ## Module Boundaries
 
 Every `.ml` file is a module, so treat files as real API and dependency

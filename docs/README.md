@@ -10,6 +10,8 @@ This directory documents maintainer and agent workflows for Awskit.
 - `testing.md` defines test and validation rules.
 - `security-threat-model.md` summarizes protected SDK assets, trust
   boundaries, and the executable evidence for security-sensitive behavior.
+- `release-gates.md` defines the local, CI, API snapshot, and GitHub
+  branch/ruleset evidence required for production-ready release claims.
 - `changelog.md` defines release-note and changelog rules.
 - `release.md` is the release branch, release PR, tagging, and publication
   playbook.

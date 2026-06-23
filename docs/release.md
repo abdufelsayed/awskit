@@ -87,6 +87,7 @@ Required release-branch checks:
 - Default package build and tests.
 - Eio package build and tests.
 - Documentation, examples, and docs content policy.
+- Release governance, API snapshot, and protocol evidence.
 - MinIO S3 contract.
 
 The `publish-docs` job is expected to skip on release branches because it only
@@ -101,8 +102,21 @@ scripts/release-check.sh
 ```
 
 This validates package metadata, formatting, tests, examples, documentation
-content policy, generated documentation, distribution archives, and the MinIO
-contract.
+content policy, API snapshot review, protocol evidence, generated
+documentation, distribution archives, and the MinIO contract.
+
+## Release Gates
+
+Follow `docs/release-gates.md` before merging a production-ready release PR.
+In particular:
+
+- record the release branch head SHA used for validation;
+- run `scripts/release-check.sh`;
+- confirm API snapshot diffs were reviewed;
+- confirm `SUPPORT.md` and `SECURITY.md` match the release scope;
+- run `scripts/check-github-ruleset.sh main` or equivalent `gh api` commands;
+- state that live AWS is not a release gate unless `SUPPORT.md` promises live
+  AWS coverage.
 
 ## Merge, Tag, And Publish
 

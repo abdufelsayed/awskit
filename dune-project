@@ -115,7 +115,7 @@
  (name awskit-eio)
  (synopsis "Eio runtime adapter for Awskit")
  (description
-  "Direct-style Eio runtime adapter for Awskit using Cohttp Eio.")
+  "Direct-style Eio runtime adapter for Awskit with caller-owned transport and HTTPS policy.")
  (depends
   (ocaml
    (>= 5.2))
@@ -242,7 +242,8 @@
 (package
  (name awskit-s3-eio)
  (synopsis "Eio adapter for Awskit S3")
- (description "S3 client adapter over the Awskit Eio runtime.")
+ (description
+  "S3 client adapter over the Awskit Eio runtime with caller-owned HTTPS transport policy.")
  (depends
   (ocaml
    (>= 5.2))

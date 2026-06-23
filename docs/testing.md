@@ -12,6 +12,7 @@ docs, or releases.
 | --- | --- | --- |
 | Deterministic examples | Named regressions, common workflows, and resource/lifecycle stories whose expected behavior is clearest as a short scenario. | `opam exec -- dune runtest <dir>` |
 | Compile-only API tests | Public call shape, module roles, and migration-sensitive ergonomic examples. Do not add tombstone tests for removed APIs. | `opam exec -- dune build @api-compile` |
+| API snapshot | Installed public module surface and role-tier review for intentional public API changes. This is not a pre-1.0 compatibility freeze. | `opam exec -- dune build @api-snapshot` |
 | Unit tests | Pure validation, option builders, error classification, request construction, and focused parser failures. | package or directory `runtest` |
 | Property tests | Parsers, formatters, validators, endpoint policy, canonical query/header normalization, pagination, retry jitter bounds, and transfer planning. Keep seeds fixed in CI and print generated cases clearly. | `opam exec -- dune build @protocol-pbt` |
 | Golden fixtures | Exact protocol artifacts that reviewers should inspect: presigned artifacts, endpoint resolution, XML decode/encode bodies, pagination, multipart XML, service errors, and normalized wire summaries. | `opam exec -- dune build @protocol-fixtures` |
@@ -31,7 +32,8 @@ mentioning a field name.
 
 | Alias | Purpose | External service |
 | --- | --- | --- |
-| `@check-fast` | Local `runtest`, API compile checks, docs content policy, and examples. | No |
+| `@check-fast` | Local `runtest`, API compile checks, API snapshot, docs content policy, and examples. | No |
+| `@api-snapshot` | Compare the installed public `.cmi` surface with the checked-in snapshot. | No |
 | `@check-protocol` | Protocol PBT, protocol fixtures, fuzz replay, simulator contract, and runtime conformance. | No |
 | `@protocol-pbt` | Fast deterministic protocol property tests. | No |
 | `@protocol-fixtures` | Fixture-backed protocol artifact tests with normalized comparisons. | No |
@@ -127,6 +129,7 @@ opam exec -- dune build
 opam exec -- dune test
 opam exec -- dune build @check-fast
 opam exec -- dune build @check-protocol
+opam exec -- dune build @api-snapshot
 opam exec -- dune build @doc @examples @docs-content
 opam exec -- dune build @opam
 git diff --check

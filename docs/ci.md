@@ -37,6 +37,13 @@ as release branch pushes, scheduled runs, and manual dispatches.
 - Builds executable examples, odoc documentation, and docs content policy with
   `opam exec -- dune build @examples @doc @docs-content`.
 
+`governance`
+
+- Runs on Ubuntu with the latest OCaml 5 compiler.
+- Installs test and documentation dependencies for all packages.
+- Runs `scripts/check-release-governance.sh`.
+- Builds protocol evidence with `opam exec -- dune build @check-protocol`.
+
 `s3-minio-contract`
 
 - Runs on Ubuntu.
@@ -48,6 +55,7 @@ as release branch pushes, scheduled runs, and manual dispatches.
 
 - Runs only on pushes to `main`.
 - Requires build/test, docs/examples, and MinIO jobs to pass.
+- Also requires the governance job to pass.
 - Builds odoc documentation and deploys `_build/default/_doc/_html` to GitHub
   Pages.
 

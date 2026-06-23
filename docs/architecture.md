@@ -17,6 +17,36 @@ When a change touches public APIs, update examples, package documentation,
 tests, and `CHANGES.md` together after the implementation commit exists and the
 changelog entry can reference the correct commit.
 
+## Package Roles And Layout
+
+Package, file, and folder boundaries are repository design, not incidental
+build plumbing.
+
+| Role | Package and file location | Dependency rule |
+| --- | --- | --- |
+| Runtime-neutral core | `packages/awskit` | No Unix, Lwt, Eio, Cohttp runtime, or platform dependencies. |
+| Platform helpers | `packages/awskit/unix` | Unix-only helpers such as environment, profile files, clocks, and local filesystem behavior. |
+| Runtime package | `packages/awskit/lwt`, `packages/awskit/eio` | Own runtime dependencies and caller-supplied transport contracts. |
+| Ready platform runtime | `packages/awskit/lwt/unix` | Owns ready Lwt Unix defaults and standard provider wiring. |
+| Service core | `packages/awskit-s3` | Runtime-neutral S3 domain, request construction, signing inputs, XML, and operation contracts. |
+| Service runtime package | `packages/awskit-s3/lwt`, `packages/awskit-s3/eio`, `packages/awskit-s3/lwt/unix` | Owns service-specific client entrypoints for the selected runtime. |
+| Simulator package | `packages/awskit-s3/sim` | Public root simulator API; implementation modules stay private. |
+| Examples | `examples/<runtime-or-backend>` | Buildable workflows using supported public APIs. |
+| Tests | `test/<package-or-contract>` | Deterministic tests, protocol evidence, runtime conformance, simulator contracts, and integration contracts. |
+
+Public `.mli` files live beside their implementation. Package overview docs
+live in `packages/*/doc`. Test helpers live under `test/support` or a
+package-scoped `test/*/support` library and remain private unless a later
+design intentionally publishes a conformance contract.
+
+Protocol fixtures belong under `test/*/fixtures`. Property tests, fuzz replay,
+simulator contracts, runtime conformance, and MinIO contracts belong under
+named test directories with Dune aliases documented in `docs/testing.md`.
+
+Package boundaries are public design. Add a dependency only when it improves
+correctness or gives a clear DX benefit, and keep it in the smallest package
+that needs it.
+
 ## Runtime Boundaries
 
 Keep core packages runtime-neutral. Lwt and Eio code belongs in adapter packages

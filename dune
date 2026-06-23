@@ -3,6 +3,7 @@
  (deps
   (alias_rec runtest)
   (alias_rec api-compile)
+  (alias_rec api-snapshot)
   (alias_rec docs-content)
   (alias_rec examples)))
 
@@ -27,3 +28,16 @@
   (source_tree examples))
  (action
   (run ./scripts/check-docs-content.sh)))
+
+(rule
+ (alias api-snapshot)
+ (deps
+  (alias_rec install)
+  scripts/api-snapshot.sh
+  api-snapshot/public-api-tiers.sexp
+  api-snapshot/current-installed-cmis.txt)
+ (action
+  (setenv
+   AWSKIT_API_SNAPSHOT_USE_CURRENT_BUILD
+   1
+   (run ./scripts/api-snapshot.sh))))

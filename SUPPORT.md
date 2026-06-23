@@ -90,6 +90,7 @@ The supported scope is backed by a layered test model:
 
 - deterministic unit/integration tests;
 - compile-only API tests;
+- API snapshot review for installed public modules;
 - protocol property tests and golden fixtures;
 - simulator contracts;
 - runtime conformance tests;

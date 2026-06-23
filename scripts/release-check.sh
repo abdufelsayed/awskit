@@ -32,9 +32,14 @@ awskit_require_release_version
 
 opam exec -- dune build @opam
 opam lint ./*.opam
-opam install . --yes --working-dir
+for package in "$@"; do
+  opam pin add --yes --no-action "$package" .
+done
+opam install --yes --working-dir "$@"
 opam exec -- dune fmt
+scripts/check-release-governance.sh
 opam exec -- dune runtest --force
+opam exec -- dune build @check-protocol
 opam exec -- dune build @examples @docs-content
 opam exec -- dune build @all @doc @install
 git diff --check

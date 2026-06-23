@@ -1,4 +1,25 @@
 (library
  (name awskit_s3_sim)
  (public_name awskit-s3-sim)
+ (private_modules
+  simulator_bucket
+  simulator_checksum
+  simulator_error
+  simulator_headers
+  simulator_inspect
+  simulator_multipart
+  simulator_object
+  simulator_object_body
+  simulator_object_copy
+  simulator_object_delete
+  simulator_object_listing
+  simulator_object_read
+  simulator_object_tagging
+  simulator_object_versions
+  simulator_object_write
+  simulator_presigned
+  simulator_runtime
+  simulator_state
+  simulator_store
+  simulator_support)
  (libraries awskit awskit-s3 digestif ptime fmt base64 uri))

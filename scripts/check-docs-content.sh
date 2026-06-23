@@ -2,7 +2,13 @@
 
 set -eu
 
-for file in SUPPORT.md SECURITY.md README.md docs/security-threat-model.md; do
+for file in \
+  SUPPORT.md \
+  SECURITY.md \
+  README.md \
+  docs/release-gates.md \
+  docs/security-threat-model.md
+do
   test -f "$file"
 done
 
@@ -14,6 +20,8 @@ grep -q "Credential" SUPPORT.md
 grep -q "Do not include AWS access keys" SECURITY.md
 grep -q "Presigned URLs are bearer tokens" SECURITY.md
 grep -q "Unsafe_diagnostics" SECURITY.md
+grep -q "API snapshot" docs/release-gates.md
+grep -q "branch protection" docs/release-gates.md
 
 if grep -R -n -E "Ready-to-use adapters for Eio|ready-to-use Eio" \
   README.md packages docs; then
