@@ -114,43 +114,56 @@ module Object = struct
   let list conn ~bucket ?options () =
     Raw.list conn ~bucket:(bucket_to_string bucket) ?options ()
 
-  let list_keys conn ~bucket ?options () =
-    Raw.list_keys conn ~bucket:(bucket_to_string bucket) ?options ()
+  module List = struct
+    type 'acc fold_step = 'acc Raw.List.fold_step =
+      | Continue of 'acc
+      | Stop of 'acc
 
-  module List_objects_v2 = struct
     let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
-      Raw.List_objects_v2.fold_pages conn ~bucket:(bucket_to_string bucket)
-        ?options ?max_pages ~init ~f ()
+      Raw.List.fold_pages conn ~bucket:(bucket_to_string bucket) ?options
+        ?max_pages ~init ~f ()
 
-    let pages conn ~bucket ?options ?max_pages () =
-      Raw.List_objects_v2.pages conn ~bucket:(bucket_to_string bucket) ?options
-        ?max_pages ()
+    let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
+      Raw.List.fold_pages_until conn ~bucket:(bucket_to_string bucket) ?options
+        ?max_pages ~init ~f ()
 
-    let objects conn ~bucket ?options ?max_pages () =
-      Raw.List_objects_v2.objects conn ~bucket:(bucket_to_string bucket)
-        ?options ?max_pages ()
+    let pages conn ~bucket ?options ~max_pages () =
+      Raw.List.pages conn ~bucket:(bucket_to_string bucket) ?options ~max_pages
+        ()
 
-    let keys conn ~bucket ?options ?max_pages () =
-      Raw.List_objects_v2.keys conn ~bucket:(bucket_to_string bucket) ?options
-        ?max_pages ()
+    let objects conn ~bucket ?options ~max_pages () =
+      Raw.List.objects conn ~bucket:(bucket_to_string bucket) ?options
+        ~max_pages ()
+
+    let keys conn ~bucket ?options ~max_pages () =
+      Raw.List.keys conn ~bucket:(bucket_to_string bucket) ?options ~max_pages
+        ()
   end
 
-  module List_object_versions = struct
+  module Versions = struct
+    type 'acc fold_step = 'acc Raw.Versions.fold_step =
+      | Continue of 'acc
+      | Stop of 'acc
+
     let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
-      Raw.List_object_versions.fold_pages conn ~bucket:(bucket_to_string bucket)
+      Raw.Versions.fold_pages conn ~bucket:(bucket_to_string bucket) ?options
+        ?max_pages ~init ~f ()
+
+    let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
+      Raw.Versions.fold_pages_until conn ~bucket:(bucket_to_string bucket)
         ?options ?max_pages ~init ~f ()
 
-    let pages conn ~bucket ?options ?max_pages () =
-      Raw.List_object_versions.pages conn ~bucket:(bucket_to_string bucket)
-        ?options ?max_pages ()
+    let pages conn ~bucket ?options ~max_pages () =
+      Raw.Versions.pages conn ~bucket:(bucket_to_string bucket) ?options
+        ~max_pages ()
 
-    let object_versions conn ~bucket ?options ?max_pages () =
-      Raw.List_object_versions.object_versions conn
-        ~bucket:(bucket_to_string bucket) ?options ?max_pages ()
+    let object_versions conn ~bucket ?options ~max_pages () =
+      Raw.Versions.object_versions conn ~bucket:(bucket_to_string bucket)
+        ?options ~max_pages ()
 
-    let delete_markers conn ~bucket ?options ?max_pages () =
-      Raw.List_object_versions.delete_markers conn
-        ~bucket:(bucket_to_string bucket) ?options ?max_pages ()
+    let delete_markers conn ~bucket ?options ~max_pages () =
+      Raw.Versions.delete_markers conn ~bucket:(bucket_to_string bucket)
+        ?options ~max_pages ()
   end
 
   module Tagging = struct

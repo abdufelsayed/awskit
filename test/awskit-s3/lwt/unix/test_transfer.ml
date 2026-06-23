@@ -434,27 +434,36 @@ module S3 = struct
 
     let list_versions _ ~bucket:_ ?options:_ () = unsupported ()
     let list _ ~bucket:_ ?options:_ () = unsupported ()
-    let list_keys _ ~bucket:_ ?options:_ () = unsupported ()
 
-    module List_objects_v2 = struct
+    module List = struct
+      type 'acc fold_step = Continue of 'acc | Stop of 'acc
+
       let fold_pages _ ~bucket:_ ?options:_ ?max_pages:_ ~init:_ ~f:_ () =
         unsupported ()
 
-      let pages _ ~bucket:_ ?options:_ ?max_pages:_ () = unsupported ()
-      let objects _ ~bucket:_ ?options:_ ?max_pages:_ () = unsupported ()
-      let keys _ ~bucket:_ ?options:_ ?max_pages:_ () = unsupported ()
+      let fold_pages_until _ ~bucket:_ ?options:_ ?max_pages:_ ~init:_ ~f:_ () =
+        unsupported ()
+
+      let pages _ ~bucket:_ ?options:_ ~max_pages:_ () = unsupported ()
+      let objects _ ~bucket:_ ?options:_ ~max_pages:_ () = unsupported ()
+      let keys _ ~bucket:_ ?options:_ ~max_pages:_ () = unsupported ()
     end
 
-    module List_object_versions = struct
+    module Versions = struct
+      type 'acc fold_step = Continue of 'acc | Stop of 'acc
+
       let fold_pages _ ~bucket:_ ?options:_ ?max_pages:_ ~init:_ ~f:_ () =
         unsupported ()
 
-      let pages _ ~bucket:_ ?options:_ ?max_pages:_ () = unsupported ()
-
-      let object_versions _ ~bucket:_ ?options:_ ?max_pages:_ () =
+      let fold_pages_until _ ~bucket:_ ?options:_ ?max_pages:_ ~init:_ ~f:_ () =
         unsupported ()
 
-      let delete_markers _ ~bucket:_ ?options:_ ?max_pages:_ () = unsupported ()
+      let pages _ ~bucket:_ ?options:_ ~max_pages:_ () = unsupported ()
+
+      let object_versions _ ~bucket:_ ?options:_ ~max_pages:_ () =
+        unsupported ()
+
+      let delete_markers _ ~bucket:_ ?options:_ ~max_pages:_ () = unsupported ()
     end
 
     let put_string _ ~bucket:_ ~key:_ ?options:_ _ = unsupported ()

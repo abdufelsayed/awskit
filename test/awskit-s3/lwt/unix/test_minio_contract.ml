@@ -90,17 +90,19 @@ let expect_status label status result =
 let bucket_name_string suffix =
   Printf.sprintf "awskit-minio-%d-%s" (Unix.getpid ()) suffix
 
-let delete_object key = Delete_objects.object_ ~key:(object_key key) ()
+let delete_object_key key = Delete_objects.object_ ~key ()
+let delete_object key = delete_object_key (object_key key)
 
 let delete_object_version key version_id =
   match version_id with
-  | Some version_id ->
-      Delete_objects.object_ ~key:(object_key key) ~version_id ()
-  | None -> delete_object key
+  | Some version_id -> Delete_objects.object_ ~key ~version_id ()
+  | None -> delete_object_key key
 
 let cleanup_bucket conn ~bucket =
   let open Lwt.Syntax in
-  let* versions_result = S3.Object.List_object_versions.pages conn ~bucket () in
+  let* versions_result =
+    S3.Object.Versions.pages conn ~bucket ~max_pages:100 ()
+  in
   (match versions_result with
     | Ok pages ->
         let objects =
@@ -126,11 +128,11 @@ let cleanup_bucket conn ~bucket =
           let* _ = S3.Object.delete_objects conn ~bucket ~objects () in
           Lwt.return_unit
     | Error _ -> (
-        let* keys_result = S3.Object.list_keys conn ~bucket () in
+        let* keys_result = S3.Object.List.keys conn ~bucket ~max_pages:100 () in
         match keys_result with
         | Ok [] -> Lwt.return_unit
         | Ok keys ->
-            let objects = List.map delete_object keys in
+            let objects = List.map delete_object_key keys in
             let* _ = S3.Object.delete_objects conn ~bucket ~objects () in
             Lwt.return_unit
         | Error _ -> Lwt.return_unit))
@@ -332,8 +334,8 @@ let test_object_versioning () =
       in
       let versions =
         await "list versions"
-          (S3.Object.List_object_versions.object_versions conn ~bucket
-             ~options:list_options ())
+          (S3.Object.Versions.object_versions conn ~bucket ~options:list_options
+             ~max_pages:10 ())
       in
       let listed_versions =
         List.filter_map
@@ -349,8 +351,8 @@ let test_object_versioning () =
         (List.mem (Object.Version_id.to_string v2) listed_versions);
       let markers =
         await "list delete markers"
-          (S3.Object.List_object_versions.delete_markers conn ~bucket
-             ~options:list_options ())
+          (S3.Object.Versions.delete_markers conn ~bucket ~options:list_options
+             ~max_pages:10 ())
       in
       let listed_markers =
         List.filter_map

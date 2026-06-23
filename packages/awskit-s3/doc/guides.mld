@@ -113,24 +113,25 @@ The object surface also includes:
 {ul
   {li [Object.delete] and [Object.delete_objects]}
   {li [Object.copy]}
-  {li [Object.list] for rich pages and [Object.list_keys] for key-only pages}
+  {li [Object.list] for one rich [ListObjectsV2] page}
   {li [Object.list_versions] for [ListObjectVersions] pages, including object
     versions and delete markers}
-  {li [Object.List_objects_v2.pages], [objects], and [keys] for following
-    [ListObjectsV2] continuation tokens}
-  {li [Object.List_object_versions.pages], [object_versions], and
+  {li [Object.List.pages], [objects], and [keys] for following
+    [ListObjectsV2] continuation tokens with an explicit [max_pages] bound}
+  {li [Object.Versions.pages], [object_versions], and
     [delete_markers] for following version-listing markers}
   {li [Object.Tagging.get], [put], and [delete]}
 }
 
 Pagination helpers preserve the regular [List_objects_v2.options] record and
-update only the continuation token between requests. Use [max_pages] to cap
-traversal:
+update only the continuation token between requests. Collection helpers require
+an explicit [max_pages] bound and return an error if S3 reports more pages than
+the bound allows:
 
 {[
 let prefix = Awskit_s3.Object_key.Prefix.of_string_exn "logs/" in
 let keys =
-  Awskit_s3_eio.Object.List_objects_v2.keys s3
+  Awskit_s3_eio.Object.List.keys s3
     ~bucket
     ~options:(Awskit_s3.List_objects_v2.options_exn ~prefix ())
     ~max_pages:10
@@ -146,8 +147,8 @@ source version with [Copy_object.source_version_id].
 
 Deleting the current object in a versioned bucket creates a delete marker.
 [Object.list_versions] returns object versions and delete markers, and
-[Object.List_object_versions] provides pagination helpers for traversing the
-full history. [List_object_versions] is the public alias for version-listing
+[Object.Versions] provides pagination helpers for traversing the full history.
+[List_object_versions] is the public alias for version-listing
 options and page types:
 
 {[
@@ -156,9 +157,10 @@ let options =
     ~prefix:(Awskit_s3.Object_key.Prefix.of_string_exn "logs/")
     ()
 in
-Awskit_s3_eio.Object.List_object_versions.object_versions s3
+Awskit_s3_eio.Object.Versions.object_versions s3
   ~bucket
   ~options
+  ~max_pages:10
   ()
 ]}
 

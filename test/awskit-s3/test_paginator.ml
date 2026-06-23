@@ -4,6 +4,70 @@ open Awskit_s3_test
 let is_decode_error error =
   match Awskit.Error.kind error with Decode _ -> true | _ -> false
 
+let is_validation_field field error =
+  Awskit.Error.is_validation error
+  && Awskit.Error.validation_field error = Some field
+
+let qcheck_seed = 0xA5111
+
+let to_alcotest test =
+  QCheck_alcotest.to_alcotest ~speed_level:`Quick
+    ~rand:(Random.State.make [| qcheck_seed |])
+    test
+
+let chunk size values =
+  let rec take n acc = function
+    | rest when n = 0 -> (List.rev acc, rest)
+    | [] -> (List.rev acc, [])
+    | value :: rest -> take (n - 1) (value :: acc) rest
+  in
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | values ->
+        let chunk, rest = take size [] values in
+        loop (chunk :: acc) rest
+  in
+  loop [] values
+
+let list_pages_for_keys ~page_size keys =
+  let chunks = if keys = [] then [ [] ] else chunk page_size keys in
+  let last_index = List.length chunks - 1 in
+  List.mapi
+    (fun index keys ->
+      let continuation_token =
+        if index = 0 then None else Some (Fmt.str "token-%d" index)
+      in
+      let next_continuation_token =
+        if index = last_index then None
+        else Some (Fmt.str "token-%d" (index + 1))
+      in
+      list_page ?continuation_token ?next_continuation_token
+        ~truncated:(index < last_index) keys)
+    chunks
+
+let prop_list_paginator_collects_ordered_keys =
+  let gen = QCheck.Gen.(pair (int_range 0 30) (int_range 1 7)) in
+  QCheck.Test.make ~count:100
+    ~name:"list paginator collects ordered generated pages"
+    (QCheck.make
+       ~print:(fun (count, page_size) ->
+         Fmt.str "count=%d page_size=%d" count page_size)
+       gen)
+    (fun (count, page_size) ->
+      let keys = List.init count (Fmt.str "key-%03d") in
+      let responses =
+        list_pages_for_keys ~page_size keys |> List.map (response 200)
+      in
+      let conn = Recording_runtime.connect responses in
+      match
+        Recording_s3.Object.List.keys conn ~bucket:(bucket_name "my-bucket")
+          ~max_pages:(max 1 (List.length responses))
+          ()
+      with
+      | Ok actual ->
+          List.equal String.equal keys (List.map Object_key.to_string actual)
+      | Error _ -> false)
+
 let test_object_paginator_follows_tokens () =
   let conn =
     Recording_runtime.connect
@@ -17,9 +81,10 @@ let test_object_paginator_follows_tokens () =
   in
   let options = List_objects_v2.options_exn ~max_keys:1 () in
   let keys =
-    Recording_s3.Object.List_objects_v2.keys conn
-      ~bucket:(bucket_name "my-bucket") ~options ()
+    Recording_s3.Object.List.keys conn ~bucket:(bucket_name "my-bucket")
+      ~options ~max_pages:10 ()
     |> ok_or_fail "paginator keys"
+    |> List.map Object_key.to_string
   in
   Alcotest.(check (list string)) "keys" [ "a.txt"; "b.txt" ] keys;
   let calls = List.rev conn.calls in
@@ -41,12 +106,93 @@ let test_object_paginator_max_pages () =
         response 200 (list_page ~truncated:false [ "b.txt" ]);
       ]
   in
-  let pages =
-    Recording_s3.Object.List_objects_v2.pages conn
-      ~bucket:(bucket_name "my-bucket") ~max_pages:1 ()
-    |> ok_or_fail "paginator pages"
+  match
+    Recording_s3.Object.List.pages conn ~bucket:(bucket_name "my-bucket")
+      ~max_pages:1 ()
+  with
+  | Error error when is_validation_field "max_pages" error ->
+      Alcotest.(check int) "calls" 1 (List.length conn.calls)
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected max_pages bound error"
+
+let version_page ?next_key_marker ~truncated keys =
+  let next_marker_xml =
+    match next_key_marker with
+    | None -> ""
+    | Some key ->
+        Fmt.str
+          "<NextKeyMarker>%s</NextKeyMarker><NextVersionIdMarker>version-next</NextVersionIdMarker>"
+          key
   in
-  Alcotest.(check int) "page count" 1 (List.length pages);
+  let versions =
+    keys
+    |> List.map (fun key ->
+        Fmt.str
+          "<Version><Key>%s</Key><VersionId>version-%s</VersionId></Version>"
+          key key)
+    |> String.concat ""
+  in
+  Fmt.str
+    "<ListVersionsResult><Name>my-bucket</Name><IsTruncated>%b</IsTruncated>%s%s</ListVersionsResult>"
+    truncated next_marker_xml versions
+
+let test_object_paginator_early_stop () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          (list_page ~next_continuation_token:"token-1" ~truncated:true
+             [ "a.txt" ]);
+        response 200 (list_page ~truncated:false [ "b.txt" ]);
+      ]
+  in
+  let keys =
+    Recording_s3.Object.List.fold_pages_until conn
+      ~bucket:(bucket_name "my-bucket") ~init:[]
+      ~f:(fun keys (page : List_objects_v2.page) ->
+        let keys =
+          List.rev_append
+            (List.map
+               (fun (object_ : List_objects_v2.object_summary) ->
+                 Object_key.to_string object_.key)
+               page.objects)
+            keys
+        in
+        Ok (Recording_s3.Object.List.Stop keys))
+      ()
+    |> ok_or_fail "early stop list"
+    |> List.rev
+  in
+  Alcotest.(check (list string)) "keys" [ "a.txt" ] keys;
+  Alcotest.(check int) "calls" 1 (List.length conn.calls)
+
+let test_version_paginator_early_stop () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          (version_page ~next_key_marker:"b.txt" ~truncated:true [ "a.txt" ]);
+        response 200 (version_page ~truncated:false [ "b.txt" ]);
+      ]
+  in
+  let keys =
+    Recording_s3.Object.Versions.fold_pages_until conn
+      ~bucket:(bucket_name "my-bucket") ~init:[]
+      ~f:(fun keys (page : List_object_versions.page) ->
+        let keys =
+          List.rev_append
+            (List.map
+               (fun (version : List_object_versions.object_version) ->
+                 Object_key.to_string version.key)
+               page.versions)
+            keys
+        in
+        Ok (Recording_s3.Object.Versions.Stop keys))
+      ()
+    |> ok_or_fail "early stop versions"
+    |> List.rev
+  in
+  Alcotest.(check (list string)) "keys" [ "a.txt" ] keys;
   Alcotest.(check int) "calls" 1 (List.length conn.calls)
 
 let test_multipart_paginator_follows_markers () =
@@ -133,12 +279,17 @@ let test_multipart_list_parts_rejects_invalid_numeric_fields () =
 
 let suite =
   [
+    ("pbt:paginator", [ to_alcotest prop_list_paginator_collects_ordered_keys ]);
     ( "paginator",
       [
         Alcotest.test_case "object paginator follows tokens" `Quick
           test_object_paginator_follows_tokens;
         Alcotest.test_case "object paginator max pages" `Quick
           test_object_paginator_max_pages;
+        Alcotest.test_case "object paginator early stop" `Quick
+          test_object_paginator_early_stop;
+        Alcotest.test_case "version paginator early stop" `Quick
+          test_version_paginator_early_stop;
         Alcotest.test_case "multipart paginator follows markers" `Quick
           test_multipart_paginator_follows_markers;
         Alcotest.test_case "multipart list parts rejects malformed fields"

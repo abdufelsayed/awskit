@@ -454,9 +454,15 @@ module Copy = struct
 end
 
 module Versions = struct
+  module Delimiter = struct
+    include Object_key.Delimiter
+
+    let slash = of_string_exn "/"
+  end
+
   type options = {
     prefix : Object_key.Prefix.t option;
-    delimiter : Object_key.Delimiter.t option;
+    delimiter : Delimiter.t option;
     max_keys : int option;
     key_marker : Object_key.t option;
     version_id_marker : Version_id.t option;
@@ -464,7 +470,7 @@ module Versions = struct
   }
 
   type object_version = {
-    key : string;
+    key : Object_key.t;
     version_id : Version_id.t option;
     is_latest : bool option;
     last_modified : Ptime.t option;
@@ -476,7 +482,7 @@ module Versions = struct
   }
 
   type delete_marker = {
-    key : string;
+    key : Object_key.t;
     version_id : Version_id.t option;
     is_latest : bool option;
     last_modified : Ptime.t option;
@@ -484,16 +490,16 @@ module Versions = struct
   }
 
   type page = {
-    bucket : string option;
-    prefix : string option;
-    delimiter : string option;
+    bucket : Bucket_name.t option;
+    prefix : Object_key.Prefix.t option;
+    delimiter : Delimiter.t option;
     versions : object_version list;
     delete_markers : delete_marker list;
-    common_prefixes : string list;
+    common_prefixes : Object_key.Prefix.t list;
     is_truncated : bool;
-    key_marker : string option;
+    key_marker : Object_key.t option;
     version_id_marker : Version_id.t option;
-    next_key_marker : string option;
+    next_key_marker : Object_key.t option;
     next_version_id_marker : Version_id.t option;
     response : Awskit.Response.t;
   }
@@ -508,8 +514,14 @@ module Versions = struct
       expected_bucket_owner = None;
     }
 
+  let validate_max_keys = function
+    | None -> Ok ()
+    | Some value when value > 0 && value <= 1000 -> Ok ()
+    | Some _ -> invalid ~field:"max_keys" "max_keys must be between 1 and 1000"
+
   let options ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
       ?expected_bucket_owner () =
+    let* () = validate_max_keys max_keys in
     Ok
       {
         prefix;
@@ -528,17 +540,41 @@ module Versions = struct
 end
 
 module List = struct
+  module Continuation_token = struct
+    type t = string
+
+    let of_string value =
+      if value = "" then
+        invalid ~field:"continuation_token"
+          "continuation token must be non-empty"
+      else if has_ctl_or_del value then
+        invalid ~field:"continuation_token"
+          "continuation token contains control characters"
+      else Ok value
+
+    let of_string_exn value = result_exn (of_string value)
+    let to_string value = value
+    let pp fmt value = Format.pp_print_string fmt value
+    let equal = String.equal
+  end
+
+  module Delimiter = struct
+    include Object_key.Delimiter
+
+    let slash = of_string_exn "/"
+  end
+
   type options = {
     prefix : Object_key.Prefix.t option;
-    delimiter : Object_key.Delimiter.t option;
+    delimiter : Delimiter.t option;
     max_keys : int option;
     start_after : Object_key.t option;
-    continuation_token : string option;
+    continuation_token : Continuation_token.t option;
     expected_bucket_owner : Account_id.t option;
   }
 
   type object_summary = {
-    key : string;
+    key : Object_key.t;
     size : int64 option;
     etag : Etag.t option;
     last_modified : Ptime.t option;
@@ -547,15 +583,15 @@ module List = struct
   }
 
   type page = {
-    bucket : string option;
-    prefix : string option;
-    delimiter : string option;
+    bucket : Bucket_name.t option;
+    prefix : Object_key.Prefix.t option;
+    delimiter : Delimiter.t option;
     objects : object_summary list;
-    common_prefixes : string list;
+    common_prefixes : Object_key.Prefix.t list;
     key_count : int option;
     is_truncated : bool;
-    continuation_token : string option;
-    next_continuation_token : string option;
+    continuation_token : Continuation_token.t option;
+    next_continuation_token : Continuation_token.t option;
     response : Awskit.Response.t;
   }
 
@@ -569,8 +605,14 @@ module List = struct
       expected_bucket_owner = None;
     }
 
+  let validate_max_keys = function
+    | None -> Ok ()
+    | Some value when value > 0 && value <= 1000 -> Ok ()
+    | Some _ -> invalid ~field:"max_keys" "max_keys must be between 1 and 1000"
+
   let options ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
       ?expected_bucket_owner () =
+    let* () = validate_max_keys max_keys in
     Ok
       {
         prefix;

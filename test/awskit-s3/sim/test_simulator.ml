@@ -355,7 +355,9 @@ let test_simulator_buffer_roundtrip () =
   in
   match page.objects with
   | [ object_ ] ->
-      Alcotest.(check string) "listed key" "hello.txt" object_.key;
+      Alcotest.(check string)
+        "listed key" "hello.txt"
+        (Object_key.to_string object_.key);
       Alcotest.(check (option int64)) "listed size" (Some 5L) object_.size
   | _ -> Alcotest.fail "expected one listed object"
 
@@ -523,12 +525,110 @@ let test_simulator_paginator_keys () =
       ~max_keys:1 ()
   in
   let keys =
-    Simulator.Object.List_objects_v2.keys conn
+    Simulator.Object.List.keys conn
       ~bucket:(bucket_name "test-bucket")
-      ~options ()
+      ~options ~max_pages:10 ()
     |> ok_or_fail "simulator paginator keys"
+    |> List.map Object_key.to_string
   in
   Alcotest.(check (list string)) "keys" [ "logs/a.txt"; "logs/b.txt" ] keys
+
+let test_simulator_list_common_prefixes () =
+  let conn = make_simulator () in
+  let put key body =
+    Simulator.Object.put conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key key)
+      ~body:(Simulator.Body.of_string body)
+      ()
+    |> ok_or_fail ("put " ^ key)
+  in
+  ignore (put "logs/a" "a");
+  ignore (put "logs/2026/a" "nested");
+  ignore (put "reports/a" "report");
+  let options =
+    List_objects_v2.options_exn
+      ~prefix:(Object_key.Prefix.of_string_exn "logs/")
+      ~delimiter:List_objects_v2.Delimiter.slash ()
+  in
+  let page =
+    Simulator.Object.list conn ~bucket:(bucket_name "test-bucket") ~options ()
+    |> ok_or_fail "list with delimiter"
+  in
+  Alcotest.(check (list string))
+    "direct objects" [ "logs/a" ]
+    (List.map
+       (fun (object_ : List_objects_v2.object_summary) ->
+         Object_key.to_string object_.key)
+       page.objects);
+  Alcotest.(check (list string))
+    "common prefixes" [ "logs/2026/" ]
+    (List.map Object_key.Prefix.to_string page.common_prefixes)
+
+let test_simulator_list_token_handles_control_key () =
+  let conn = make_simulator () in
+  let put key body =
+    Simulator.Object.put conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key key)
+      ~body:(Simulator.Body.of_string body)
+      ()
+    |> ok_or_fail ("put " ^ key)
+  in
+  ignore (put "logs/a\nx" "a");
+  ignore (put "logs/b" "b");
+  let options =
+    List_objects_v2.options_exn
+      ~prefix:(Object_key.Prefix.of_string_exn "logs/")
+      ~max_keys:1 ()
+  in
+  let keys =
+    Simulator.Object.List.keys conn
+      ~bucket:(bucket_name "test-bucket")
+      ~options ~max_pages:10 ()
+    |> ok_or_fail "paginate control key"
+    |> List.map Object_key.to_string
+  in
+  Alcotest.(check (list string)) "keys" [ "logs/a\nx"; "logs/b" ] keys
+
+let test_simulator_version_list_common_prefixes () =
+  let conn = make_simulator () in
+  ignore
+    (Simulator.Bucket.Versioning.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~status:Bucket.Versioning.Status.Enabled ()
+    |> ok_or_fail "enable versioning");
+  let put key body =
+    Simulator.Object.put conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key key)
+      ~body:(Simulator.Body.of_string body)
+      ()
+    |> ok_or_fail ("put " ^ key)
+  in
+  ignore (put "logs/a" "a");
+  ignore (put "logs/2026/a" "nested");
+  ignore (put "reports/a" "report");
+  let options =
+    List_object_versions.options_exn
+      ~prefix:(Object_key.Prefix.of_string_exn "logs/")
+      ~delimiter:List_object_versions.Delimiter.slash ()
+  in
+  let page =
+    Simulator.Object.list_versions conn
+      ~bucket:(bucket_name "test-bucket")
+      ~options ()
+    |> ok_or_fail "list versions with delimiter"
+  in
+  Alcotest.(check (list string))
+    "direct versions" [ "logs/a" ]
+    (List.map
+       (fun (version : List_object_versions.object_version) ->
+         Object_key.to_string version.key)
+       page.versions);
+  Alcotest.(check (list string))
+    "common prefixes" [ "logs/2026/" ]
+    (List.map Object_key.Prefix.to_string page.common_prefixes)
 
 let suite =
   [
@@ -560,5 +660,11 @@ let suite =
         Alcotest.test_case "in-memory helper limit" `Quick test_buffer_limit;
         Alcotest.test_case "simulator paginator keys" `Quick
           test_simulator_paginator_keys;
+        Alcotest.test_case "simulator list common prefixes" `Quick
+          test_simulator_list_common_prefixes;
+        Alcotest.test_case "simulator list token handles control key" `Quick
+          test_simulator_list_token_handles_control_key;
+        Alcotest.test_case "simulator version list common prefixes" `Quick
+          test_simulator_version_list_common_prefixes;
       ] );
   ]

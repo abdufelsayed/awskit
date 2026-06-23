@@ -31,15 +31,13 @@ let run () =
   in
   let s3 = create_s3 () in
   let options = Awskit_s3.Object.List.options_exn ~prefix ~max_keys:25 () in
-  let* objects =
-    S3.Object.List_objects_v2.objects s3 ~bucket ~options ~max_pages:4 ()
-  in
+  let* objects = S3.Object.List.objects s3 ~bucket ~options ~max_pages:4 () in
   let objects = unwrap "list objects" objects in
   Format.printf "s3://%a/%s@." Awskit_s3.Bucket_name.pp bucket
     (Awskit_s3.Object_key.Prefix.to_string prefix);
   List.iter
     (fun (object_ : Awskit_s3.Object.List.object_summary) ->
-      Format.printf "- %s" object_.key;
+      Format.printf "- %s" (Awskit_s3.Object_key.to_string object_.key);
       Option.iter (Format.printf " (%Ld bytes)") object_.size;
       Format.printf "@.")
     objects;

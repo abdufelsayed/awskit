@@ -203,7 +203,7 @@ module type OBJECT = sig
     ?options:Object.Versions.options ->
     unit ->
     (Object.Versions.page, Awskit.Error.t) result io
-  (** Fetch one [ListObjectVersions] page. Use [List_object_versions] helpers to
+  (** Fetch one [ListObjectVersions] page. Use {!module:Versions} helpers to
       follow pagination. *)
 
   val list :
@@ -212,19 +212,17 @@ module type OBJECT = sig
     ?options:Object.List.options ->
     unit ->
     (Object.List.page, Awskit.Error.t) result io
-  (** Fetch one [ListObjectsV2] page. Use [List_objects_v2] helpers to follow
+  (** Fetch one [ListObjectsV2] page. Use {!module:List} helpers to follow
       pagination. *)
 
-  val list_keys :
-    connection ->
-    bucket:Bucket_name.t ->
-    ?options:Object.List.options ->
-    unit ->
-    (string list, Awskit.Error.t) result io
-  (** Fetch one listing page and return only object keys from that page. *)
-
-  module List_objects_v2 : sig
+  module List : sig
     (** Pagination helpers for [ListObjectsV2]. *)
+
+    type 'acc fold_step =
+      | Continue of 'acc
+      | Stop of 'acc
+          (** Decision returned by {!val:fold_pages_until}. [Stop] returns the
+              accumulator without fetching another page. *)
 
     val fold_pages :
       connection ->
@@ -238,36 +236,56 @@ module type OBJECT = sig
     (** Follow continuation tokens and fold pages until S3 stops returning a
         next token or [max_pages] is reached. *)
 
-    val pages :
+    val fold_pages_until :
       connection ->
       bucket:Bucket_name.t ->
       ?options:Object.List.options ->
       ?max_pages:int ->
+      init:'acc ->
+      f:('acc -> Object.List.page -> ('acc fold_step, Awskit.Error.t) result io) ->
+      unit ->
+      ('acc, Awskit.Error.t) result io
+    (** Follow continuation tokens and fold pages until S3 stops returning a
+        next token, [max_pages] is reached, or [f] returns [Stop]. *)
+
+    val pages :
+      connection ->
+      bucket:Bucket_name.t ->
+      ?options:Object.List.options ->
+      max_pages:int ->
       unit ->
       (Object.List.page list, Awskit.Error.t) result io
-    (** Collect listing pages. *)
+    (** Collect listing pages up to the explicit [max_pages] bound.
+
+        Returns an error if S3 reports more pages than the bound allows. *)
 
     val objects :
       connection ->
       bucket:Bucket_name.t ->
       ?options:Object.List.options ->
-      ?max_pages:int ->
+      max_pages:int ->
       unit ->
       (Object.List.object_summary list, Awskit.Error.t) result io
-    (** Collect object summaries across listing pages. *)
+    (** Collect object summaries across listing pages up to [max_pages]. *)
 
     val keys :
       connection ->
       bucket:Bucket_name.t ->
       ?options:Object.List.options ->
-      ?max_pages:int ->
+      max_pages:int ->
       unit ->
-      (string list, Awskit.Error.t) result io
-    (** Collect object keys across listing pages. *)
+      (Object_key.t list, Awskit.Error.t) result io
+    (** Collect object keys across listing pages up to [max_pages]. *)
   end
 
-  module List_object_versions : sig
+  module Versions : sig
     (** Pagination helpers for [ListObjectVersions]. *)
+
+    type 'acc fold_step =
+      | Continue of 'acc
+      | Stop of 'acc
+          (** Decision returned by {!val:fold_pages_until}. [Stop] returns the
+              accumulator without fetching another page. *)
 
     val fold_pages :
       connection ->
@@ -281,32 +299,49 @@ module type OBJECT = sig
     (** Follow key/version markers and fold pages until S3 stops returning next
         markers or [max_pages] is reached. *)
 
-    val pages :
+    val fold_pages_until :
       connection ->
       bucket:Bucket_name.t ->
       ?options:Object.Versions.options ->
       ?max_pages:int ->
+      init:'acc ->
+      f:
+        ('acc ->
+        Object.Versions.page ->
+        ('acc fold_step, Awskit.Error.t) result io) ->
+      unit ->
+      ('acc, Awskit.Error.t) result io
+    (** Follow key/version markers and fold pages until S3 stops returning next
+        markers, [max_pages] is reached, or [f] returns [Stop]. *)
+
+    val pages :
+      connection ->
+      bucket:Bucket_name.t ->
+      ?options:Object.Versions.options ->
+      max_pages:int ->
       unit ->
       (Object.Versions.page list, Awskit.Error.t) result io
-    (** Collect version listing pages. *)
+    (** Collect version listing pages up to the explicit [max_pages] bound.
+
+        Returns an error if S3 reports more pages than the bound allows. *)
 
     val object_versions :
       connection ->
       bucket:Bucket_name.t ->
       ?options:Object.Versions.options ->
-      ?max_pages:int ->
+      max_pages:int ->
       unit ->
       (Object.Versions.object_version list, Awskit.Error.t) result io
-    (** Collect object-version entries across pages. *)
+    (** Collect object-version entries across pages up to [max_pages]. *)
 
     val delete_markers :
       connection ->
       bucket:Bucket_name.t ->
       ?options:Object.Versions.options ->
-      ?max_pages:int ->
+      max_pages:int ->
       unit ->
       (Object.Versions.delete_marker list, Awskit.Error.t) result io
-    (** Collect delete-marker entries across pages. *)
+    (** Collect delete-marker entries across pages up to [max_pages]. *)
   end
 
   module Tagging : sig

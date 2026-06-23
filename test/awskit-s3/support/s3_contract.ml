@@ -322,7 +322,11 @@ module Make (Client : SUBJECT) = struct
          ~objects:[ delete_object "logs/a.txt"; delete_object "logs/b.txt" ]
          ()
       |> ok_or_fail "delete objects");
-    let keys = Client.Object.list_keys conn ~bucket () |> ok_or_fail "keys" in
+    let keys =
+      Client.Object.List.keys conn ~bucket ~max_pages:10 ()
+      |> ok_or_fail "keys"
+      |> List.map Object_key.to_string
+    in
     Alcotest.(check (list string))
       "remaining keys"
       [ "copy/a.txt"; "other.txt" ]
@@ -497,8 +501,8 @@ module Make (Client : SUBJECT) = struct
       (List.length first_versions_page.versions
       + List.length first_versions_page.delete_markers);
     let all_versions =
-      Client.Object.List_object_versions.object_versions conn ~bucket
-        ~options:versions_options ()
+      Client.Object.Versions.object_versions conn ~bucket
+        ~options:versions_options ~max_pages:10 ()
       |> ok_or_fail "paginate object versions"
     in
     Alcotest.(check (list string))
@@ -509,8 +513,8 @@ module Make (Client : SUBJECT) = struct
            Option.map Object.Version_id.to_string version.version_id)
          all_versions);
     let all_markers =
-      Client.Object.List_object_versions.delete_markers conn ~bucket
-        ~options:versions_options ()
+      Client.Object.Versions.delete_markers conn ~bucket
+        ~options:versions_options ~max_pages:10 ()
       |> ok_or_fail "paginate delete markers"
     in
     Alcotest.(check (list string))
@@ -646,12 +650,12 @@ module Make (Client : SUBJECT) = struct
     Alcotest.(check string)
       "enabled version body" "enabled" result.Get_object.value;
     let suspended_versions =
-      Client.Object.List_object_versions.object_versions conn ~bucket
+      Client.Object.Versions.object_versions conn ~bucket
         ~options:
           (List_object_versions.options_exn
              ~prefix:(Object_key.Prefix.of_string_exn "suspended.txt")
              ())
-        ()
+        ~max_pages:10 ()
       |> ok_or_fail "list suspended versions"
     in
     Alcotest.(check bool)

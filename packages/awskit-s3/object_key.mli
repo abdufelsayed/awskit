@@ -22,8 +22,8 @@ val equal : t -> t -> bool
 
 module Prefix : sig
   type t
-  (** Object listing prefix. Empty prefixes are valid and mean no prefix
-      restriction. *)
+  (** Non-empty object listing prefix. Use [None] in operation options and page
+      records for "no prefix" rather than constructing an empty prefix value. *)
 
   val of_string : string -> (t, Awskit.Error.t) result
   val of_string_exn : string -> t

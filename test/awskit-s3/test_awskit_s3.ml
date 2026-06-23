@@ -28,6 +28,7 @@ let () =
          ];
          Test_domain_types.suite;
          Test_api.suite;
+         Test_listing_api.suite;
          Test_endpoint.suite;
          Test_presigned.suite;
          Test_bucket_request.suite;

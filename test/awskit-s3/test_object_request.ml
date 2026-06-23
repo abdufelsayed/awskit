@@ -493,7 +493,8 @@ let test_object_versioning_requests_and_parse () =
   Alcotest.(check int) "version count" 1 (List.length page.versions);
   Alcotest.(check int) "delete marker count" 1 (List.length page.delete_markers);
   Alcotest.(check (option string))
-    "next key marker" (Some "logs/b.txt") page.next_key_marker;
+    "next key marker" (Some "logs/b.txt")
+    (Option.map Object_key.to_string page.next_key_marker);
   Alcotest.(check (option string))
     "next version marker"
     (Some (Object.Version_id.to_string next_version_id))
@@ -560,11 +561,15 @@ let test_object_versioning_empty_markers_are_absent () =
     Recording_s3.Object.list_versions conn ~bucket:(bucket_name "my-bucket") ()
     |> ok_or_fail "list versions"
   in
-  Alcotest.(check (option string)) "key marker" None page.key_marker;
+  Alcotest.(check (option string))
+    "key marker" None
+    (Option.map Object_key.to_string page.key_marker);
   Alcotest.(check (option string))
     "version marker" None
     (version_string page.version_id_marker);
-  Alcotest.(check (option string)) "next key marker" None page.next_key_marker;
+  Alcotest.(check (option string))
+    "next key marker" None
+    (Option.map Object_key.to_string page.next_key_marker);
   Alcotest.(check (option string))
     "next version marker" None
     (version_string page.next_version_id_marker)
@@ -578,10 +583,10 @@ let test_version_paginator_rejects_invalid_next_key_marker () =
   in
   let conn = Recording_runtime.connect [ response 200 body ] in
   match
-    Recording_s3.Object.List_object_versions.pages conn
-      ~bucket:(bucket_name "my-bucket") ()
+    Recording_s3.Object.Versions.pages conn ~bucket:(bucket_name "my-bucket")
+      ~max_pages:2 ()
   with
-  | Error error when is_validation_field "key" error ->
+  | Error error when is_decode_error error ->
       Alcotest.(check int)
         "stops before second request" 1 (List.length conn.calls)
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
@@ -815,10 +820,20 @@ let test_object_list_rejects_negative_numeric_fields () =
       | Ok _ -> Alcotest.failf "expected negative %s decode error" field)
     cases
 
-let test_object_versions_rejects_malformed_known_fields () =
-  let body =
-    "<ListVersionsResult><Version><Key>a.txt</Key><IsLatest>maybe</IsLatest></Version></ListVersionsResult>"
-  in
+let expect_list_decode_error label body field =
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  match Recording_s3.Object.list conn ~bucket:(bucket_name "my-bucket") () with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        (label ^ " mentions " ^ field)
+        true
+        (string_contains text ~substring:field)
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected decode error" label
+
+let expect_version_list_decode_error label body field =
   let conn = Recording_runtime.connect [ response 200 body ] in
   match
     Recording_s3.Object.list_versions conn ~bucket:(bucket_name "my-bucket") ()
@@ -826,10 +841,156 @@ let test_object_versions_rejects_malformed_known_fields () =
   | Error error when is_decode_error error ->
       let text = Awskit.Error.to_string_hum error in
       Alcotest.(check bool)
-        "mentions IsLatest" true
-        (string_contains text ~substring:"IsLatest")
-  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected malformed IsLatest decode error"
+        (label ^ " mentions " ^ field)
+        true
+        (string_contains text ~substring:field)
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected decode error" label
+
+let test_object_list_rejects_invalid_typed_fields () =
+  [
+    ( "invalid key",
+      "<ListBucketResult><Contents><Key></Key></Contents></ListBucketResult>",
+      "Key" );
+    ( "invalid bucket",
+      "<ListBucketResult><Name>Bad_Bucket</Name></ListBucketResult>",
+      "Name" );
+    ( "invalid delimiter",
+      "<ListBucketResult><Delimiter></Delimiter></ListBucketResult>",
+      "Delimiter" );
+    ( "invalid continuation token",
+      "<ListBucketResult><NextContinuationToken></NextContinuationToken></ListBucketResult>",
+      "NextContinuationToken" );
+    ( "invalid common prefix",
+      "<ListBucketResult><CommonPrefixes><Prefix></Prefix></CommonPrefixes></ListBucketResult>",
+      "Prefix" );
+  ]
+  |> List.iter (fun (label, body, field) ->
+      expect_list_decode_error label body field)
+
+let test_object_versions_rejects_invalid_typed_fields () =
+  [
+    ( "invalid version key",
+      "<ListVersionsResult><Version><Key></Key></Version></ListVersionsResult>",
+      "Key" );
+    ( "invalid delete marker key",
+      "<ListVersionsResult><DeleteMarker><Key></Key></DeleteMarker></ListVersionsResult>",
+      "Key" );
+    ( "invalid bucket",
+      "<ListVersionsResult><Name>Bad_Bucket</Name></ListVersionsResult>",
+      "Name" );
+    ( "invalid delimiter",
+      "<ListVersionsResult><Delimiter></Delimiter></ListVersionsResult>",
+      "Delimiter" );
+    ( "invalid common prefix",
+      "<ListVersionsResult><CommonPrefixes><Prefix></Prefix></CommonPrefixes></ListVersionsResult>",
+      "Prefix" );
+    ( "invalid delete marker version id",
+      "<ListVersionsResult><DeleteMarker><Key>a.txt</Key><VersionId></VersionId></DeleteMarker></ListVersionsResult>",
+      "VersionId" );
+  ]
+  |> List.iter (fun (label, body, field) ->
+      expect_version_list_decode_error label body field)
+
+let test_list_options_reject_invalid_max_keys () =
+  let check label result =
+    match result with
+    | Error error when is_validation_field "max_keys" error -> ()
+    | Error error ->
+        Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+    | Ok _ -> Alcotest.failf "%s: expected max_keys validation error" label
+  in
+  [
+    ("list zero", List_objects_v2.options ~max_keys:0 ());
+    ("list negative", List_objects_v2.options ~max_keys:(-1) ());
+    ("list too large", List_objects_v2.options ~max_keys:1001 ());
+  ]
+  |> List.iter (fun (label, result) -> check label result);
+  [
+    ("versions zero", List_object_versions.options ~max_keys:0 ());
+    ("versions negative", List_object_versions.options ~max_keys:(-1) ());
+    ("versions too large", List_object_versions.options ~max_keys:1001 ());
+  ]
+  |> List.iter (fun (label, build) -> check label build)
+
+let test_list_operations_reject_record_max_keys () =
+  let check label result =
+    match result with
+    | Error error when is_validation_field "max_keys" error -> ()
+    | Error error ->
+        Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+    | Ok _ -> Alcotest.failf "%s: expected max_keys validation error" label
+  in
+  let list_options =
+    { List_objects_v2.default_options with max_keys = Some 0 }
+  in
+  let version_options =
+    { List_object_versions.default_options with max_keys = Some 1001 }
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 "<ListBucketResult></ListBucketResult>";
+        response 200 "<ListVersionsResult></ListVersionsResult>";
+      ]
+  in
+  check "list operation"
+    (Recording_s3.Object.list conn ~bucket:(bucket_name "my-bucket")
+       ~options:list_options ());
+  check "versions operation"
+    (Recording_s3.Object.list_versions conn ~bucket:(bucket_name "my-bucket")
+       ~options:version_options ())
+
+let test_list_decodes_empty_prefix_as_none () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          "<ListBucketResult><Name>my-bucket</Name><Prefix></Prefix><IsTruncated>false</IsTruncated></ListBucketResult>";
+        response 200
+          "<ListVersionsResult><Name>my-bucket</Name><Prefix></Prefix><IsTruncated>false</IsTruncated></ListVersionsResult>";
+      ]
+  in
+  let page =
+    Recording_s3.Object.list conn ~bucket:(bucket_name "my-bucket") ()
+    |> ok_or_fail "list empty prefix"
+  in
+  Alcotest.(check bool) "list prefix absent" true (Option.is_none page.prefix);
+  let versions =
+    Recording_s3.Object.list_versions conn ~bucket:(bucket_name "my-bucket") ()
+    |> ok_or_fail "versions empty prefix"
+  in
+  Alcotest.(check bool)
+    "versions prefix absent" true
+    (Option.is_none versions.prefix)
+
+let test_object_versions_rejects_malformed_known_fields () =
+  let cases =
+    [
+      ( "IsLatest",
+        "<ListVersionsResult><Version><Key>a.txt</Key><IsLatest>maybe</IsLatest></Version></ListVersionsResult>"
+      );
+      ( "VersionId",
+        "<ListVersionsResult><Version><Key>a.txt</Key><VersionId></VersionId></Version></ListVersionsResult>"
+      );
+    ]
+  in
+  List.iter
+    (fun (field, body) ->
+      let conn = Recording_runtime.connect [ response 200 body ] in
+      match
+        Recording_s3.Object.list_versions conn ~bucket:(bucket_name "my-bucket")
+          ()
+      with
+      | Error error when is_decode_error error ->
+          let text = Awskit.Error.to_string_hum error in
+          Alcotest.(check bool)
+            ("mentions " ^ field) true
+            (string_contains text ~substring:field)
+      | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+      | Ok _ -> Alcotest.failf "expected malformed %s decode error" field)
+    cases
 
 let test_object_list_allows_unknown_extra_elements () =
   let body =
@@ -1125,6 +1286,16 @@ let suite =
           test_object_list_rejects_malformed_known_fields;
         Alcotest.test_case "object list rejects negative numeric fields" `Quick
           test_object_list_rejects_negative_numeric_fields;
+        Alcotest.test_case "object list rejects invalid typed fields" `Quick
+          test_object_list_rejects_invalid_typed_fields;
+        Alcotest.test_case "object versions rejects invalid typed fields" `Quick
+          test_object_versions_rejects_invalid_typed_fields;
+        Alcotest.test_case "list options reject invalid max keys" `Quick
+          test_list_options_reject_invalid_max_keys;
+        Alcotest.test_case "list operations reject record max keys" `Quick
+          test_list_operations_reject_record_max_keys;
+        Alcotest.test_case "list decodes empty prefix as none" `Quick
+          test_list_decodes_empty_prefix_as_none;
         Alcotest.test_case "object versions rejects malformed known fields"
           `Quick test_object_versions_rejects_malformed_known_fields;
         Alcotest.test_case "object list allows unknown extra elements" `Quick

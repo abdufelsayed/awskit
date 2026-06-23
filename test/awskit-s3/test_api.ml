@@ -70,25 +70,25 @@ let test_public_operation_aliases () =
   ignore
     (List_objects_v2.options
        ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-       ~delimiter:(Object_key.Delimiter.of_string_exn "/")
+       ~delimiter:List_objects_v2.Delimiter.slash
        ~start_after:(object_key "logs/0001.txt")
        ~max_keys:100 ~expected_bucket_owner:owner ()
       : (List_objects_v2.options, Error.t) result);
   ignore
     (List_objects_v2.options_exn
        ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-       ~delimiter:(Object_key.Delimiter.of_string_exn "/")
+       ~delimiter:List_objects_v2.Delimiter.slash
        ~start_after:(object_key "logs/0001.txt")
        ~max_keys:100 ~expected_bucket_owner:owner ()
       : List_objects_v2.options);
   let listed_object : List_objects_v2.object_summary =
     {
-      key = "file.txt";
+      key = object_key "file.txt";
       size = Some 1L;
       etag = None;
       last_modified = None;
       storage_class = None;
-      checksum = { Object.Checksum.algorithms = []; checksum_type = None };
+      checksum = Object.Checksum.empty_summary;
     }
   in
   ignore (listed_object : List_objects_v2.object_summary);
@@ -96,14 +96,14 @@ let test_public_operation_aliases () =
   ignore
     (List_object_versions.options
        ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-       ~delimiter:(Object_key.Delimiter.of_string_exn "/")
+       ~delimiter:List_object_versions.Delimiter.slash
        ~key_marker:(object_key "logs/0001.txt")
        ~max_keys:100 ~expected_bucket_owner:owner ()
       : (List_object_versions.options, Error.t) result);
   ignore
     (List_object_versions.options_exn
        ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-       ~delimiter:(Object_key.Delimiter.of_string_exn "/")
+       ~delimiter:List_object_versions.Delimiter.slash
        ~key_marker:(object_key "logs/0001.txt")
        ~max_keys:100 ~expected_bucket_owner:owner ()
       : List_object_versions.options);

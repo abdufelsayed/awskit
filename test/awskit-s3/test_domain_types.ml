@@ -80,7 +80,7 @@ let ipv4_bucket_gen =
   return (Printf.sprintf "%d.%d.%d.%d" a b c d)
 
 let object_key_gen = gen_string ~min:1 ~max:128 ~chars:header_value_chars
-let object_prefix_gen = gen_string ~min:0 ~max:128 ~chars:header_value_chars
+let object_prefix_gen = gen_string ~min:1 ~max:128 ~chars:header_value_chars
 let delimiter_gen = gen_string ~min:1 ~max:8 ~chars:header_value_chars
 let account_id_gen = gen_fixed_string ~len:12 ~chars:digit_chars
 let invalid_short_account_id_gen = gen_string ~min:0 ~max:11 ~chars:digit_chars
@@ -219,9 +219,10 @@ let test_object_key_prefix_and_delimiter () =
   expect_error_field "key" (Object_key.of_string "");
   expect_error_field "key" (Object_key.of_string (repeat_char 1025 'a'));
   expect_error_field "key" (Object_key.of_string "\xC0\x80");
-  let prefix = expect_ok "empty prefix" (Object_key.Prefix.of_string "") in
+  expect_error_field "prefix" (Object_key.Prefix.of_string "");
+  let prefix = expect_ok "prefix" (Object_key.Prefix.of_string "logs/") in
   Alcotest.(check string)
-    "empty prefix allowed" ""
+    "prefix round trips" "logs/"
     (Object_key.Prefix.to_string prefix);
   expect_error_field "prefix" (Object_key.Prefix.of_string "\xFF");
   let delimiter = expect_ok "delimiter" (Object_key.Delimiter.of_string "/") in

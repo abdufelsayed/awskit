@@ -98,6 +98,10 @@ module Checksum : sig
     checksum_type : Type.t option;
   }
   (** Compact checksum metadata returned by list operations. *)
+
+  val empty_summary : summary
+  (** Empty checksum summary for responses that do not include checksum
+      metadata. *)
 end
 
 module Encryption : sig
@@ -537,10 +541,24 @@ module Copy : sig
 end
 
 module Versions : sig
+  module Delimiter : sig
+    type t = Object_key.Delimiter.t
+    (** Object-version listing delimiter. *)
+
+    val slash : t
+    (** Slash delimiter, the common S3 path-like grouping delimiter. *)
+
+    val of_string : string -> (t, Awskit.Error.t) result
+    val of_string_exn : string -> t
+    val to_string : t -> string
+    val pp : Format.formatter -> t -> unit
+    val equal : t -> t -> bool
+  end
+
   type options = {
     prefix : Object_key.Prefix.t option;
         (** Return versions whose keys begin with this prefix. *)
-    delimiter : Object_key.Delimiter.t option;
+    delimiter : Delimiter.t option;
         (** Group keys using this delimiter, commonly ["/"]. *)
     max_keys : int option;
         (** Maximum number of keys/markers S3 should return in one page. *)
@@ -556,7 +574,7 @@ module Versions : sig
   (** [ListObjectVersions] request options. *)
 
   type object_version = {
-    key : string;  (** Object key. *)
+    key : Object_key.t;  (** Object key. *)
     version_id : Version_id.t option;  (** Object version id. *)
     is_latest : bool option;
         (** Whether this entry is the latest version for the key. *)
@@ -571,7 +589,7 @@ module Versions : sig
   (** One object version entry from [ListObjectVersions]. *)
 
   type delete_marker = {
-    key : string;  (** Object key. *)
+    key : Object_key.t;  (** Object key. *)
     version_id : Version_id.t option;  (** Delete marker version id. *)
     is_latest : bool option;
         (** Whether this delete marker is latest for the key. *)
@@ -581,18 +599,19 @@ module Versions : sig
   (** One delete marker entry from [ListObjectVersions]. *)
 
   type page = {
-    bucket : string option;  (** Bucket name echoed by S3. *)
-    prefix : string option;  (** Prefix applied to this page. *)
-    delimiter : string option;  (** Delimiter applied to this page. *)
+    bucket : Bucket_name.t option;  (** Bucket name echoed by S3. *)
+    prefix : Object_key.Prefix.t option;  (** Prefix applied to this page. *)
+    delimiter : Delimiter.t option;  (** Delimiter applied to this page. *)
     versions : object_version list;  (** Object versions in this page. *)
     delete_markers : delete_marker list;  (** Delete markers in this page. *)
-    common_prefixes : string list;
+    common_prefixes : Object_key.Prefix.t list;
         (** Grouped prefixes returned when [delimiter] is set. *)
     is_truncated : bool;  (** Whether more pages are available. *)
-    key_marker : string option;  (** Current page key marker. *)
+    key_marker : Object_key.t option;  (** Current page key marker. *)
     version_id_marker : Version_id.t option;
         (** Current page version marker. *)
-    next_key_marker : string option;  (** Marker to use for the next page. *)
+    next_key_marker : Object_key.t option;
+        (** Marker to use for the next page. *)
     next_version_id_marker : Version_id.t option;
         (** Version marker to use for the next page. *)
     response : Awskit.Response.t;  (** Raw response metadata. *)
@@ -603,7 +622,7 @@ module Versions : sig
 
   val options :
     ?prefix:Object_key.Prefix.t ->
-    ?delimiter:Object_key.Delimiter.t ->
+    ?delimiter:Delimiter.t ->
     ?max_keys:int ->
     ?key_marker:Object_key.t ->
     ?version_id_marker:Version_id.t ->
@@ -614,7 +633,7 @@ module Versions : sig
 
   val options_exn :
     ?prefix:Object_key.Prefix.t ->
-    ?delimiter:Object_key.Delimiter.t ->
+    ?delimiter:Delimiter.t ->
     ?max_keys:int ->
     ?key_marker:Object_key.t ->
     ?version_id_marker:Version_id.t ->
@@ -625,16 +644,44 @@ module Versions : sig
 end
 
 module List : sig
+  module Continuation_token : sig
+    type t
+    (** Opaque [ListObjectsV2] continuation token returned by S3.
+
+        Tokens are service values. Callers may store and pass them back, but
+        should not parse them. *)
+
+    val of_string : string -> (t, Awskit.Error.t) result
+    val of_string_exn : string -> t
+    val to_string : t -> string
+    val pp : Format.formatter -> t -> unit
+    val equal : t -> t -> bool
+  end
+
+  module Delimiter : sig
+    type t = Object_key.Delimiter.t
+    (** Object listing delimiter. *)
+
+    val slash : t
+    (** Slash delimiter, the common S3 path-like grouping delimiter. *)
+
+    val of_string : string -> (t, Awskit.Error.t) result
+    val of_string_exn : string -> t
+    val to_string : t -> string
+    val pp : Format.formatter -> t -> unit
+    val equal : t -> t -> bool
+  end
+
   type options = {
     prefix : Object_key.Prefix.t option;
         (** Return keys that begin with this prefix. *)
-    delimiter : Object_key.Delimiter.t option;
+    delimiter : Delimiter.t option;
         (** Group keys using this delimiter, commonly ["/"]. *)
     max_keys : int option;
         (** Maximum number of objects S3 should return in one page. *)
     start_after : Object_key.t option;
         (** Start listing after this key for the first page. *)
-    continuation_token : string option;
+    continuation_token : Continuation_token.t option;
         (** Pagination token, usually supplied from a previous page. *)
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
@@ -642,7 +689,7 @@ module List : sig
   (** [ListObjectsV2] request options. *)
 
   type object_summary = {
-    key : string;  (** Object key. *)
+    key : Object_key.t;  (** Object key. *)
     size : int64 option;  (** Object size in bytes. *)
     etag : Etag.t option;  (** Object ETag. *)
     last_modified : Ptime.t option;  (** Last modified timestamp. *)
@@ -652,16 +699,17 @@ module List : sig
   (** One object summary from a listing page. *)
 
   type page = {
-    bucket : string option;  (** Bucket name echoed by S3. *)
-    prefix : string option;  (** Prefix applied to this page. *)
-    delimiter : string option;  (** Delimiter applied to this page. *)
+    bucket : Bucket_name.t option;  (** Bucket name echoed by S3. *)
+    prefix : Object_key.Prefix.t option;  (** Prefix applied to this page. *)
+    delimiter : Delimiter.t option;  (** Delimiter applied to this page. *)
     objects : object_summary list;  (** Object summaries in this page. *)
-    common_prefixes : string list;
+    common_prefixes : Object_key.Prefix.t list;
         (** Grouped prefixes returned when [delimiter] is set. *)
     key_count : int option;  (** Number of keys S3 reports in this page. *)
     is_truncated : bool;  (** Whether more pages are available. *)
-    continuation_token : string option;  (** Token used to request this page. *)
-    next_continuation_token : string option;
+    continuation_token : Continuation_token.t option;
+        (** Token used to request this page. *)
+    next_continuation_token : Continuation_token.t option;
         (** Token to use for the next page. *)
     response : Awskit.Response.t;  (** Raw response metadata. *)
   }
@@ -671,10 +719,10 @@ module List : sig
 
   val options :
     ?prefix:Object_key.Prefix.t ->
-    ?delimiter:Object_key.Delimiter.t ->
+    ?delimiter:Delimiter.t ->
     ?max_keys:int ->
     ?start_after:Object_key.t ->
-    ?continuation_token:string ->
+    ?continuation_token:Continuation_token.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
@@ -682,10 +730,10 @@ module List : sig
 
   val options_exn :
     ?prefix:Object_key.Prefix.t ->
-    ?delimiter:Object_key.Delimiter.t ->
+    ?delimiter:Delimiter.t ->
     ?max_keys:int ->
     ?start_after:Object_key.t ->
-    ?continuation_token:string ->
+    ?continuation_token:Continuation_token.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     options

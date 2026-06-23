@@ -401,24 +401,33 @@ module S3 = struct
 
     let list_versions _ ~bucket:_ ?options:_ () = assert false
     let list _ ~bucket:_ ?options:_ () = assert false
-    let list_keys _ ~bucket:_ ?options:_ () = assert false
 
-    module List_objects_v2 = struct
+    module List = struct
+      type 'acc fold_step = Continue of 'acc | Stop of 'acc
+
       let fold_pages _ ~bucket:_ ?options:_ ?max_pages:_ ~init:_ ~f:_ () =
         assert false
 
-      let pages _ ~bucket:_ ?options:_ ?max_pages:_ () = assert false
-      let objects _ ~bucket:_ ?options:_ ?max_pages:_ () = assert false
-      let keys _ ~bucket:_ ?options:_ ?max_pages:_ () = assert false
+      let fold_pages_until _ ~bucket:_ ?options:_ ?max_pages:_ ~init:_ ~f:_ () =
+        assert false
+
+      let pages _ ~bucket:_ ?options:_ ~max_pages:_ () = assert false
+      let objects _ ~bucket:_ ?options:_ ~max_pages:_ () = assert false
+      let keys _ ~bucket:_ ?options:_ ~max_pages:_ () = assert false
     end
 
-    module List_object_versions = struct
+    module Versions = struct
+      type 'acc fold_step = Continue of 'acc | Stop of 'acc
+
       let fold_pages _ ~bucket:_ ?options:_ ?max_pages:_ ~init:_ ~f:_ () =
         assert false
 
-      let pages _ ~bucket:_ ?options:_ ?max_pages:_ () = assert false
-      let object_versions _ ~bucket:_ ?options:_ ?max_pages:_ () = assert false
-      let delete_markers _ ~bucket:_ ?options:_ ?max_pages:_ () = assert false
+      let fold_pages_until _ ~bucket:_ ?options:_ ?max_pages:_ ~init:_ ~f:_ () =
+        assert false
+
+      let pages _ ~bucket:_ ?options:_ ~max_pages:_ () = assert false
+      let object_versions _ ~bucket:_ ?options:_ ~max_pages:_ () = assert false
+      let delete_markers _ ~bucket:_ ?options:_ ~max_pages:_ () = assert false
     end
 
     let put_string _ ~bucket:_ ~key:_ ?options:_ _ = assert false
