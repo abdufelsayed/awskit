@@ -27,8 +27,8 @@ release packaging.
 - Eio callers now provide their own HTTPS policy when creating runtime and S3
   clients. (#8, c53921f)
 - Moved `Awskit.Error` constructors, context tagging, and exception bridge
-  helpers under `Awskit.Error.Internal`; application code should use the
-  top-level `Awskit.Error` consumer API. (0cfa463)
+  helpers under `Awskit.Error.Producer`; application code should use the
+  top-level `Awskit.Error` consumer API. (0cfa463, be75643)
 - High-level runtime constructors now accept string `~region` and `~endpoint`
   values and return structured validation errors when those values are invalid.
   S3 constructors now take `?endpoint_config:Awskit_s3.Endpoint_config.t`
