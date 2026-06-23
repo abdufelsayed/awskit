@@ -100,6 +100,9 @@ release packaging.
 - Installed Eio HTTPS example-only dependencies in documentation/example CI and
   local release validation without adding them to published package
   dependencies. (d804565)
+- Included paginator property coverage in the `@protocol-pbt` evidence alias so
+  pagination PBT runs with the rest of the deterministic protocol checks.
+  (3187e10)
 - Expanded public API documentation across core Awskit modules, S3 operations,
   adapter entrypoints, simulator APIs, and guide examples. (#3, 0e2021c)
 - Updated README and guide coverage for the v0.2.0 S3 streaming API, package
