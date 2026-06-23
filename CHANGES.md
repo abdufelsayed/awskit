@@ -18,7 +18,7 @@ release packaging.
 - Reworked multipart upload APIs around typed upload handles, typed part
   numbers, named operation results, ownership-aware transfer lifecycle, and
   resume helpers that complete only from fresh `UploadPart` results.
-  (4aee1e4)
+  (aab863c)
 - Eio callers now provide their own HTTPS policy when creating runtime and S3
   clients. (#8, c53921f)
 - Moved `Awskit.Error` constructors, context tagging, and exception bridge
