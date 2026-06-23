@@ -48,7 +48,9 @@ release packaging.
   `Awskit_s3`, and adapter APIs. (fc67929)
 - Moved the S3 signature-sharing module out of the installed public surface.
   Runtime authors should use the public `Awskit_s3.RUNTIME`, `BODY`, `READER`,
-  operation module types, `S`, and `Make` surface directly. (191d03e)
+  operation module types, `S`, and `Make` surface directly; the root
+  `Awskit_s3` interface remains self-contained for downstream runtime
+  packages. (191d03e, 733c4bc)
 - S3 simulator implementation modules are now private. Use the public
   `Awskit_s3_sim` root API for deterministic simulator stores, connections,
   faults, history, inspection, and operation modules. (2aa5523)
