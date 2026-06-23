@@ -297,6 +297,63 @@ let test_public_operation_aliases () =
   ignore
     (Transfer.default_upload_options.list_parts_options : List_parts.options);
   ignore (Transfer.default_download_options.get_options : Get_object.options);
+  let transfer_upload_options =
+    Transfer.upload_options_exn
+      ~multipart_threshold:Transfer.default_multipart_threshold
+      ~part_size:Transfer.default_part_size
+      ~concurrency:Transfer.default_concurrency ()
+  in
+  ignore (transfer_upload_options : Transfer.upload_options);
+  ignore (Transfer.upload_multipart_threshold transfer_upload_options : int64);
+  ignore (Transfer.upload_part_size transfer_upload_options : int);
+  ignore (Transfer.upload_concurrency transfer_upload_options : int);
+  ignore
+    (Transfer.upload_put_options transfer_upload_options : Put_object.options);
+  ignore
+    (Transfer.upload_create_options transfer_upload_options
+      : Create_multipart_upload.options);
+  ignore
+    (Transfer.upload_part_options transfer_upload_options : Upload_part.options);
+  ignore
+    (Transfer.upload_complete_options transfer_upload_options
+      : Complete_multipart_upload.options);
+  ignore
+    (Transfer.upload_abort_options transfer_upload_options
+      : Abort_multipart_upload.options);
+  ignore
+    (Transfer.upload_list_parts_options transfer_upload_options
+      : List_parts.options);
+  ignore
+    (Transfer.upload_options ~part_size:1 ()
+      : (Transfer.upload_options, Error.t) result);
+  let transfer_download_options =
+    Transfer.download_options_exn
+      ~multipart_threshold:Transfer.default_multipart_threshold ~part_size:1
+      ~concurrency:Transfer.default_concurrency
+      ~overwrite:Transfer.Error_if_exists ()
+  in
+  ignore (transfer_download_options : Transfer.download_options);
+  ignore
+    (Transfer.download_multipart_threshold transfer_download_options : int64);
+  ignore (Transfer.download_part_size transfer_download_options : int);
+  ignore (Transfer.download_concurrency transfer_download_options : int);
+  ignore
+    (Transfer.download_overwrite transfer_download_options : Transfer.overwrite);
+  ignore
+    (Transfer.download_get_options transfer_download_options
+      : Get_object.options);
+  ignore
+    (Transfer.download_options ~part_size:0 ()
+      : (Transfer.download_options, Error.t) result);
+  let progress =
+    Transfer.progress ~direction:Transfer.Upload ~phase:Transfer.Part
+      ~transferred:1L ~total:2L ~part_number:multipart_part_number ()
+  in
+  ignore (progress.direction : Transfer.direction);
+  ignore (progress.phase : Transfer.phase);
+  ignore (progress.transferred : int64);
+  ignore (progress.total : int64 option);
+  ignore (progress.part_number : Multipart.Part_number.t option);
   ignore (None : Transfer.upload_result option);
   ignore (None : Transfer.download_result option);
   Alcotest.(check int64)

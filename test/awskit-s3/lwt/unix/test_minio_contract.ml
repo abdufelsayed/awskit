@@ -167,6 +167,10 @@ let get_string conn ~bucket ~key ?options ~max_bytes () =
 let remove_file path = try Sys.remove path with Sys_error _ -> ()
 let first = function [] -> None | value :: _ -> Some value
 
+let first_transferred progress =
+  first progress
+  |> Option.map (fun (event : Transfer.progress) -> event.transferred)
+
 let require_version label = function
   | Some version_id -> version_id
   | None -> Alcotest.failf "%s: expected version id" label
@@ -526,11 +530,11 @@ let test_path_transfer_streams () =
           Alcotest.(check (option int64))
             "upload final progress"
             (Some (Int64.of_int (String.length body)))
-            (first !upload_progress);
+            (first_transferred !upload_progress);
           Alcotest.(check (option int64))
             "download final progress"
             (Some (Int64.of_int (String.length body)))
-            (first !download_progress)))
+            (first_transferred !download_progress)))
 
 let test_multipart_path_transfer_resumes () =
   with_bucket "transfer-multipart" (fun conn ~bucket ->
@@ -586,7 +590,7 @@ let test_multipart_path_transfer_resumes () =
           Alcotest.(check (option int64))
             "resume final progress"
             (Some (Int64.of_int (String.length body)))
-            (first !progress)))
+            (first_transferred !progress)))
 
 let suite () =
   [

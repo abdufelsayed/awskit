@@ -86,7 +86,7 @@ module Object : sig
       bucket:Awskit_s3.Bucket_name.t ->
       key:Awskit_s3.Object_key.t ->
       ?options:Awskit_s3.Transfer.upload_options ->
-      ?on_progress:(int64 -> unit) ->
+      ?on_progress:(Awskit_s3.Transfer.progress -> unit) ->
       path:_ Eio.Path.t ->
       unit ->
       (Awskit_s3.Transfer.upload_result, Awskit_s3.Error.t) result
@@ -98,7 +98,7 @@ module Object : sig
       bucket:Awskit_s3.Bucket_name.t ->
       key:Awskit_s3.Object_key.t ->
       ?options:Awskit_s3.Transfer.download_options ->
-      ?on_progress:(int64 -> unit) ->
+      ?on_progress:(Awskit_s3.Transfer.progress -> unit) ->
       path:_ Eio.Path.t ->
       unit ->
       (Awskit_s3.Transfer.download_result, Awskit_s3.Error.t) result
@@ -110,7 +110,7 @@ module Object : sig
       bucket:Awskit_s3.Bucket_name.t ->
       key:Awskit_s3.Object_key.t ->
       ?options:Awskit_s3.Transfer.upload_options ->
-      ?on_progress:(int64 -> unit) ->
+      ?on_progress:(Awskit_s3.Transfer.progress -> unit) ->
       path:_ Eio.Path.t ->
       unit ->
       (Awskit_s3.Transfer.multipart_upload_result, Awskit_s3.Error.t) result
@@ -123,7 +123,7 @@ module Object : sig
       upload:
         Awskit_s3.Multipart.Upload.caller_owned Awskit_s3.Multipart.Upload.t ->
       ?options:Awskit_s3.Transfer.upload_options ->
-      ?on_progress:(int64 -> unit) ->
+      ?on_progress:(Awskit_s3.Transfer.progress -> unit) ->
       path:_ Eio.Path.t ->
       unit ->
       (Awskit_s3.Transfer.multipart_upload_result, Awskit_s3.Error.t) result

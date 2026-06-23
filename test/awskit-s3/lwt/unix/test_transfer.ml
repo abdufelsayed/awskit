@@ -34,6 +34,14 @@ let bucket = Awskit_s3.Bucket_name.of_string_exn "bucket"
 let key = Awskit_s3.Object_key.of_string_exn "key"
 let account_id = Awskit_s3.Account_id.of_string_exn
 
+let has_progress_event ~direction ~phase ?total ?part_number transferred
+    (progress : Awskit_s3.Transfer.progress) =
+  progress.direction = direction
+  && progress.phase = phase
+  && Int64.equal progress.transferred transferred
+  && progress.total = total
+  && progress.part_number = part_number
+
 module Runtime = struct
   type connection = {
     response_body : string;
@@ -914,6 +922,7 @@ let test_upload_file_uses_put_below_threshold () =
     ~finally:(fun () -> remove_file path)
     (fun () ->
       let conn = connection () in
+      let progress = ref [] in
       let options =
         {
           Awskit_s3.Transfer.default_upload_options with
@@ -921,7 +930,10 @@ let test_upload_file_uses_put_below_threshold () =
         }
       in
       match
-        Lwt_main.run (Transfer.upload_file conn ~bucket ~key ~options ~path ())
+        Lwt_main.run
+          (Transfer.upload_file conn ~bucket ~key ~options ~path
+             ~on_progress:(fun event -> progress := event :: !progress)
+             ())
       with
       | Error error ->
           Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
@@ -931,7 +943,14 @@ let test_upload_file_uses_put_below_threshold () =
             (Awskit_s3.Transfer.upload_strategy result = `Put);
           Alcotest.(check int) "put count" 1 conn.Runtime.put_count;
           Alcotest.(check int)
-            "multipart create count" 0 conn.Runtime.multipart_create_count)
+            "multipart create count" 0 conn.Runtime.multipart_create_count;
+          Alcotest.(check bool)
+            "progress" true
+            (Option.is_some
+               (List.find_opt
+                  (has_progress_event ~direction:Awskit_s3.Transfer.Upload
+                     ~phase:Awskit_s3.Transfer.Single_request ~total:5L 5L)
+                  !progress)))
 
 let test_upload_file_allows_put_checksum_below_threshold () =
   Runtime.reset_write_fault ();
@@ -976,6 +995,7 @@ let test_upload_file_uses_multipart_at_threshold () =
     ~finally:(fun () -> remove_file path)
     (fun () ->
       let conn = connection () in
+      let progress = ref [] in
       let options =
         {
           Awskit_s3.Transfer.default_upload_options with
@@ -984,7 +1004,10 @@ let test_upload_file_uses_multipart_at_threshold () =
         }
       in
       match
-        Lwt_main.run (Transfer.upload_file conn ~bucket ~key ~options ~path ())
+        Lwt_main.run
+          (Transfer.upload_file conn ~bucket ~key ~options ~path
+             ~on_progress:(fun event -> progress := event :: !progress)
+             ())
       with
       | Error error ->
           Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
@@ -997,7 +1020,17 @@ let test_upload_file_uses_multipart_at_threshold () =
             "multipart create count" 1 conn.Runtime.multipart_create_count;
           Alcotest.(check int)
             "upload part count" 1 conn.Runtime.upload_part_count;
-          Alcotest.(check int) "complete count" 1 conn.Runtime.complete_count)
+          Alcotest.(check int) "complete count" 1 conn.Runtime.complete_count;
+          Alcotest.(check bool)
+            "progress" true
+            (Option.is_some
+               (List.find_opt
+                  (has_progress_event ~direction:Awskit_s3.Transfer.Upload
+                     ~phase:Awskit_s3.Transfer.Part
+                     ~total:(Int64.of_int Awskit_s3.Transfer.min_part_size)
+                     ~part_number:(Awskit_s3.Multipart.Part_number.of_int_exn 1)
+                     (Int64.of_int Awskit_s3.Transfer.min_part_size))
+                  !progress)))
 
 let test_upload_file_rejects_invalid_options () =
   let path = Filename.temp_file "awskit-upload-invalid" ".bin" in
@@ -1225,7 +1258,7 @@ let test_multipart_upload_aborts_on_progress_exception () =
   Runtime.reset_write_fault ();
   let exception Progress_failed in
   let path = Filename.temp_file "awskit-upload-multipart-progress-exn" ".bin" in
-  write_file path (String.make Awskit_s3.Transfer.min_part_size 'p');
+  write_file path (String.make (Awskit_s3.Transfer.min_part_size * 2) 'p');
   Fun.protect
     ~finally:(fun () -> remove_file path)
     (fun () ->
@@ -1234,6 +1267,7 @@ let test_multipart_upload_aborts_on_progress_exception () =
         {
           Awskit_s3.Transfer.default_upload_options with
           part_size = Awskit_s3.Transfer.min_part_size;
+          concurrency = 2;
         }
       in
       match
@@ -1246,6 +1280,8 @@ let test_multipart_upload_aborts_on_progress_exception () =
       | Raised exn ->
           Alcotest.(check bool)
             "raised callback exception" true (exn == Progress_failed);
+          Alcotest.(check int)
+            "upload part count" 2 conn.Runtime.upload_part_count;
           Alcotest.(check int) "abort count" 1 conn.Runtime.abort_count;
           Alcotest.(check int) "complete count" 0 conn.Runtime.complete_count
       | Returned (Error error) ->
@@ -1294,6 +1330,7 @@ let test_download_file_uses_get_below_threshold () =
     (fun () ->
       let body = "small download" in
       let conn = connection ~response_body:body () in
+      let progress = ref [] in
       let options =
         {
           Awskit_s3.Transfer.default_download_options with
@@ -1302,7 +1339,9 @@ let test_download_file_uses_get_below_threshold () =
       in
       match
         Lwt_main.run
-          (Transfer.download_file conn ~bucket ~key ~options ~path ())
+          (Transfer.download_file conn ~bucket ~key ~options ~path
+             ~on_progress:(fun event -> progress := event :: !progress)
+             ())
       with
       | Error error ->
           Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
@@ -1315,7 +1354,16 @@ let test_download_file_uses_get_below_threshold () =
           Alcotest.(check int) "get count" 1 conn.Runtime.get_count;
           Alcotest.(check int)
             "range count" 0
-            (List.length conn.Runtime.get_ranges))
+            (List.length conn.Runtime.get_ranges);
+          Alcotest.(check bool)
+            "progress" true
+            (Option.is_some
+               (List.find_opt
+                  (has_progress_event ~direction:Awskit_s3.Transfer.Download
+                     ~phase:Awskit_s3.Transfer.Single_request
+                     ~total:(Int64.of_int (String.length body))
+                     (Int64.of_int (String.length body)))
+                  !progress)))
 
 let test_download_file_progress_exception_propagates () =
   let exception Progress_failed in
@@ -1439,9 +1487,16 @@ let test_download_file_uses_ranges_at_threshold () =
           Alcotest.(check (option int64))
             "final progress"
             (Some (Int64.of_int (String.length body)))
-            (List.find_opt
-               (fun transferred ->
-                 Int64.equal transferred (Int64.of_int (String.length body)))
+            (List.find_map
+               (fun progress ->
+                 if
+                   has_progress_event ~direction:Awskit_s3.Transfer.Download
+                     ~phase:Awskit_s3.Transfer.Ranged_get
+                     ~total:(Int64.of_int (String.length body))
+                     (Int64.of_int (String.length body))
+                     progress
+                 then Some progress.transferred
+                 else None)
                !progress))
 
 let test_download_file_ranges_use_head_version_id () =
@@ -1571,6 +1626,31 @@ let test_download_file_rejects_range_option () =
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "expected range validation")
 
+let test_download_file_rejects_existing_target_without_overwrite () =
+  let path = Filename.temp_file "awskit-download-no-overwrite" ".bin" in
+  write_file path "existing";
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection ~response_body:"new" () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          overwrite = Awskit_s3.Transfer.Error_if_exists;
+        }
+      in
+      match
+        Lwt_main.run
+          (Transfer.download_file conn ~bucket ~key ~options ~path ())
+      with
+      | Error error when is_validation_field "path" error ->
+          Alcotest.(check string) "preserved target" "existing" (read_file path);
+          Alcotest.(check int) "head count" 0 conn.Runtime.head_count;
+          Alcotest.(check int) "get count" 0 conn.Runtime.get_count
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "expected overwrite validation")
+
 let test_download_file_ranged_failure_preserves_target () =
   let path = Filename.temp_file "awskit-download-preserve" ".bin" in
   let original = "existing target" in
@@ -1657,6 +1737,8 @@ let suite () =
           test_download_file_allows_small_range_parts;
         Alcotest.test_case "download rejects range option" `Quick
           test_download_file_rejects_range_option;
+        Alcotest.test_case "download rejects existing target without overwrite"
+          `Quick test_download_file_rejects_existing_target_without_overwrite;
         Alcotest.test_case "download ranged failure preserves target" `Quick
           test_download_file_ranged_failure_preserves_target;
       ] );

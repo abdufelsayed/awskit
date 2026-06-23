@@ -70,7 +70,11 @@ let download_strategy_to_string = function
   | `Get -> "get-object"
   | `Ranged -> "ranged"
 
-let progress label bytes = Format.printf "%s %Ld bytes@." label bytes
+let progress label (event : Awskit_s3.Transfer.progress) =
+  match event.total with
+  | None -> Format.printf "%s %Ld bytes@." label event.transferred
+  | Some total ->
+      Format.printf "%s %Ld/%Ld bytes@." label event.transferred total
 
 let run stdenv =
   Eio.Switch.run @@ fun sw ->

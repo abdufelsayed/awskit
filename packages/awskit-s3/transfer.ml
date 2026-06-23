@@ -6,6 +6,17 @@ let default_multipart_threshold = Int64.mul 8L (Int64.mul 1024L 1024L)
 let default_concurrency = 4
 let max_parts = 10_000
 
+type direction = Upload | Download
+type phase = Single_request | Part | Ranged_get
+
+type progress = {
+  direction : direction;
+  phase : phase;
+  transferred : int64;
+  total : int64 option;
+  part_number : Multipart.Part_number.t option;
+}
+
 type upload_options = {
   multipart_threshold : int64;
   part_size : int;
@@ -18,10 +29,13 @@ type upload_options = {
   list_parts_options : Multipart.List_parts.options;
 }
 
+type overwrite = Replace | Error_if_exists
+
 type download_options = {
   multipart_threshold : int64;
   part_size : int;
   concurrency : int;
+  overwrite : overwrite;
   get_options : Object.Get.options;
 }
 
@@ -45,6 +59,9 @@ type download_result =
 let upload_strategy = function Put _ -> `Put | Multipart _ -> `Multipart
 let download_strategy = function Get _ -> `Get | Ranged _ -> `Ranged
 
+let progress ~direction ~phase ~transferred ?total ?part_number () =
+  { direction; phase; transferred; total; part_number }
+
 let default_upload_options =
   {
     multipart_threshold = default_multipart_threshold;
@@ -63,6 +80,7 @@ let default_download_options =
     multipart_threshold = default_multipart_threshold;
     part_size = default_part_size;
     concurrency = default_concurrency;
+    overwrite = Replace;
     get_options = Object.Get.default_options;
   }
 
@@ -83,6 +101,12 @@ let validate_download_part_size part_size =
   if part_size <= 0 then
     invalid ~field:"part_size" "download part_size must be positive"
   else Ok ()
+
+let planned_part_count ~content_length ~part_size =
+  if Int64.equal content_length 0L then 0L
+  else
+    let part_size64 = Int64.of_int part_size in
+    Int64.succ (Int64.div (Int64.pred content_length) part_size64)
 
 let validate_upload_options (options : upload_options) =
   let* () =
@@ -109,12 +133,12 @@ let validate_upload_options (options : upload_options) =
   else Ok ()
 
 let validate_multipart_part_count ~content_length ~part_size =
-  if Int64.equal content_length 0L then Ok ()
+  if Int64.compare content_length 0L < 0 then
+    invalid ~field:"content_length" "content_length must be non-negative"
+  else if part_size <= 0 then
+    invalid ~field:"part_size" "part_size must be positive"
   else
-    let part_size64 = Int64.of_int part_size in
-    let part_count =
-      Int64.div (Int64.add content_length (Int64.pred part_size64)) part_size64
-    in
+    let part_count = planned_part_count ~content_length ~part_size in
     if Int64.compare part_count (Int64.of_int max_parts) > 0 then
       invalid ~field:"part_count"
         "multipart file transfer would exceed 10000 parts"
@@ -127,6 +151,70 @@ let validate_upload_multipart_selection (options : upload_options) =
         "optimized multipart file upload cannot use a single object checksum"
   | None -> Ok ()
 
+module Plan = struct
+  type upload_part = {
+    part_number : Multipart.Part_number.t;
+    offset : int64;
+    length : int;
+  }
+
+  type download_range = {
+    index : int;
+    offset : int64;
+    length : int;
+    range : Range.t;
+  }
+
+  let validate_non_negative_content_length content_length =
+    if Int64.compare content_length 0L < 0 then
+      invalid ~field:"content_length" "content_length must be non-negative"
+    else Ok ()
+
+  let validate_part_count ~content_length ~part_size =
+    let count = planned_part_count ~content_length ~part_size in
+    if Int64.compare count (Int64.of_int max_parts) > 0 then
+      invalid ~field:"part_count" "file transfer would exceed 10000 parts"
+    else Ok ()
+
+  let build_parts ~content_length ~part_size ~make =
+    let part_size64 = Int64.of_int part_size in
+    let count = planned_part_count ~content_length ~part_size |> Int64.to_int in
+    let rec loop index offset acc =
+      if index > count then Ok (List.rev acc)
+      else
+        let remaining = Int64.sub content_length offset in
+        let length =
+          if Int64.compare remaining part_size64 > 0 then part_size
+          else Int64.to_int remaining
+        in
+        let* part = make ~index ~offset ~length in
+        loop (index + 1) (Int64.add offset (Int64.of_int length)) (part :: acc)
+    in
+    loop 1 0L []
+
+  let upload_parts ~content_length ~part_size =
+    let* () = validate_non_negative_content_length content_length in
+    if Int64.equal content_length 0L then
+      invalid ~field:"content_length"
+        "multipart upload planning requires a non-empty file"
+    else
+      let* () = validate_upload_part_size part_size in
+      let* () = validate_part_count ~content_length ~part_size in
+      build_parts ~content_length ~part_size
+        ~make:(fun ~index ~offset ~length ->
+          let* part_number = Multipart.Part_number.of_int index in
+          Ok { part_number; offset; length })
+
+  let download_ranges ~content_length ~part_size =
+    let* () = validate_non_negative_content_length content_length in
+    let* () = validate_download_part_size part_size in
+    let* () = validate_part_count ~content_length ~part_size in
+    build_parts ~content_length ~part_size ~make:(fun ~index ~offset ~length ->
+        let finish = Int64.add offset (Int64.of_int (length - 1)) in
+        let* range = Range.bytes ~start:offset ~finish in
+        Ok { index; offset; length; range })
+end
+
 let validate_download_options (options : download_options) =
   let* () =
     validate_common ~multipart_threshold:options.multipart_threshold
@@ -138,3 +226,75 @@ let validate_download_options (options : download_options) =
       invalid ~field:"get_options.range"
         "optimized download_file does not accept a caller-supplied range"
   | None -> Ok ()
+
+let upload_options ?(multipart_threshold = default_multipart_threshold)
+    ?(part_size = default_part_size) ?(concurrency = default_concurrency)
+    ?(put_options = Object.Put.default_options)
+    ?(create_options = Multipart.Create.default_options)
+    ?(upload_part_options = Multipart.Upload_part.default_options)
+    ?(complete_options = Multipart.Complete.default_options)
+    ?(abort_options = Multipart.Abort.default_options)
+    ?(list_parts_options = Multipart.List_parts.default_options) () =
+  let options =
+    {
+      multipart_threshold;
+      part_size;
+      concurrency;
+      put_options;
+      create_options;
+      upload_part_options;
+      complete_options;
+      abort_options;
+      list_parts_options;
+    }
+  in
+  let* () = validate_upload_options options in
+  Ok options
+
+let upload_options_exn ?multipart_threshold ?part_size ?concurrency ?put_options
+    ?create_options ?upload_part_options ?complete_options ?abort_options
+    ?list_parts_options () =
+  Awskit.Error.Internal.get_ok_exn
+    (upload_options ?multipart_threshold ?part_size ?concurrency ?put_options
+       ?create_options ?upload_part_options ?complete_options ?abort_options
+       ?list_parts_options ())
+
+let download_options ?(multipart_threshold = default_multipart_threshold)
+    ?(part_size = default_part_size) ?(concurrency = default_concurrency)
+    ?(overwrite = Replace) ?(get_options = Object.Get.default_options) () =
+  let options =
+    { multipart_threshold; part_size; concurrency; overwrite; get_options }
+  in
+  let* () = validate_download_options options in
+  Ok options
+
+let download_options_exn ?multipart_threshold ?part_size ?concurrency ?overwrite
+    ?get_options () =
+  Awskit.Error.Internal.get_ok_exn
+    (download_options ?multipart_threshold ?part_size ?concurrency ?get_options
+       ?overwrite ())
+
+let upload_multipart_threshold (options : upload_options) =
+  options.multipart_threshold
+
+let upload_part_size (options : upload_options) = options.part_size
+let upload_concurrency (options : upload_options) = options.concurrency
+let upload_put_options (options : upload_options) = options.put_options
+let upload_create_options (options : upload_options) = options.create_options
+let upload_part_options (options : upload_options) = options.upload_part_options
+
+let upload_complete_options (options : upload_options) =
+  options.complete_options
+
+let upload_abort_options (options : upload_options) = options.abort_options
+
+let upload_list_parts_options (options : upload_options) =
+  options.list_parts_options
+
+let download_multipart_threshold (options : download_options) =
+  options.multipart_threshold
+
+let download_part_size (options : download_options) = options.part_size
+let download_concurrency (options : download_options) = options.concurrency
+let download_overwrite (options : download_options) = options.overwrite
+let download_get_options (options : download_options) = options.get_options

@@ -9,7 +9,11 @@ exception Callback_raised of exn
 let notify_progress callback bytes =
   match callback with
   | None -> ()
-  | Some f -> ( try f bytes with exn -> raise (Callback_raised exn))
+  | Some f -> (
+      try f bytes with
+      | Lwt.Canceled -> raise Lwt.Canceled
+      | Callback_raised _ as exn -> raise exn
+      | exn -> raise (Callback_raised exn))
 
 let body_error_or_fail action path = function
   | Lwt.Canceled -> Lwt.fail Lwt.Canceled
@@ -45,6 +49,23 @@ let regular_file_length path =
                    (Fmt.str "expected regular file, got %s"
                       (file_kind_to_string kind)))))
     (body_error_or_raise_callback "stat upload" path)
+
+let reject_existing_download_target path =
+  Lwt.catch
+    (fun () ->
+      Lwt.bind (Lwt_unix.LargeFile.stat path) (fun _stat ->
+          Lwt.return_error
+            (Awskit.Error.Internal.validation ~field:"path"
+               "download target already exists")))
+    (function
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_ok ()
+      | exn -> body_error_or_raise_callback "stat download target" path exn)
+
+let validate_download_target path
+    (options : Awskit_s3.Transfer.download_options) =
+  match options.overwrite with
+  | Awskit_s3.Transfer.Replace -> Lwt.return_ok ()
+  | Awskit_s3.Transfer.Error_if_exists -> reject_existing_download_target path
 
 let temp_download_path path attempt =
   let dir = Filename.dirname path in
@@ -334,55 +355,31 @@ module Make
         (unit, Awskit_s3.Error.t) result Lwt.t
     end) =
 struct
-  type part_spec = { part_number : int; offset : int64; length : int }
-  type range_spec = { index : int; offset : int64; length : int }
-
   let ( let* ) result f =
     Lwt.bind result (function
       | Ok value -> f value
       | Error _ as error -> Lwt.return error)
 
-  let bounded_specs ~content_length ~part_size ~empty_error ~make =
-    if Int64.equal content_length 0L then
-      match empty_error with None -> Ok [] | Some error -> Error error
-    else
-      let rec loop index offset acc =
-        if Int64.compare offset content_length >= 0 then Ok (List.rev acc)
-        else
-          let remaining = Int64.sub content_length offset in
-          let length = min part_size (Int64.to_int remaining) in
-          loop (index + 1)
-            (Int64.add offset (Int64.of_int length))
-            (make index offset length :: acc)
-      in
-      loop 1 0L []
+  module Transfer = Awskit_s3.Transfer
+  module Plan = Transfer.Plan
 
-  let multipart_specs ~content_length ~part_size =
-    let empty_error =
-      Awskit.Error.Internal.validation ~field:"path"
-        "multipart file upload requires a non-empty file"
+  let notify_transfer_progress callback ~direction ~phase ?total ?part_number
+      transferred =
+    let progress =
+      Transfer.progress ~direction ~phase ~transferred ?total ?part_number ()
     in
-    match
-      Awskit_s3.Transfer.validate_multipart_part_count ~content_length
-        ~part_size
-    with
-    | Error _ as error -> error
-    | Ok () ->
-        bounded_specs ~content_length ~part_size ~empty_error:(Some empty_error)
-          ~make:(fun part_number offset length ->
-            { part_number; offset; length })
+    notify_progress callback progress
 
-  let range_specs ~content_length ~part_size =
-    match
-      Awskit_s3.Transfer.validate_multipart_part_count ~content_length
-        ~part_size
-    with
-    | Error _ as error -> error
-    | Ok () ->
-        bounded_specs ~content_length ~part_size ~empty_error:None
-          ~make:(fun index offset length -> { index; offset; length })
+  let byte_progress_callback callback ~direction ~phase ?total ?part_number () =
+    match callback with
+    | None -> None
+    | Some _ ->
+        Some
+          (fun transferred ->
+            notify_transfer_progress callback ~direction ~phase ?total
+              ?part_number transferred)
 
-  let range_body_of_path path (spec : part_spec) =
+  let range_body_of_path path (spec : Plan.upload_part) =
     let descriptor =
       {
         Awskit.Body.Request.content_length = Some (Int64.of_int spec.length);
@@ -411,7 +408,9 @@ struct
                                      (Fmt.str
                                         "unexpected end of file while reading \
                                          part %d from %S"
-                                        spec.part_number path))
+                                        (Awskit_s3.Multipart.Part_number.to_int
+                                           spec.part_number)
+                                        path))
                             | n ->
                                 let chunk = Bytes.sub_string bytes 0 n in
                                 Lwt.bind
@@ -450,32 +449,29 @@ struct
     in
     loop results
 
-  let upload_part_from_path conn ~upload ~options ~path (spec : part_spec) =
+  let upload_part_from_path conn ~upload ~options ~path
+      (spec : Plan.upload_part) =
     let body = range_body_of_path path spec in
-    match Awskit_s3.Multipart.Part_number.of_int spec.part_number with
-    | Error error -> Lwt.return_error error
-    | Ok part_number ->
-        Lwt.bind
-          (S3.Multipart.upload_part conn ~upload ~part_number ~body
-             ~options:options.Awskit_s3.Transfer.upload_part_options ())
-          (function
-          | Error _ as error -> Lwt.return error
-          | Ok uploaded -> Lwt.return_ok uploaded.part)
+    Lwt.bind
+      (S3.Multipart.upload_part conn ~upload ~part_number:spec.part_number ~body
+         ~options:options.Awskit_s3.Transfer.upload_part_options ()) (function
+      | Error _ as error -> Lwt.return error
+      | Ok uploaded -> Lwt.return_ok uploaded.part)
 
   let upload_missing_parts conn ~upload ~options ~path ?on_progress
-      ~initial_completed specs =
+      ~content_length specs =
     Lwt.catch
       (fun () ->
-        let completed = ref initial_completed in
-        if Int64.compare !completed 0L > 0 then
-          notify_progress on_progress !completed;
+        let completed = ref 0L in
         let upload_one spec =
           Lwt.bind (upload_part_from_path conn ~upload ~options ~path spec)
             (function
             | Error _ as error -> Lwt.return error
             | Ok part ->
                 completed := Int64.add !completed (Int64.of_int spec.length);
-                notify_progress on_progress !completed;
+                notify_transfer_progress on_progress ~direction:Transfer.Upload
+                  ~phase:Transfer.Part ~total:content_length
+                  ~part_number:spec.part_number !completed;
                 Lwt.return_ok part)
         in
         let rec loop acc specs =
@@ -538,12 +534,13 @@ struct
     in
     let* content_length = regular_file_length path in
     let* specs =
-      Lwt.return (multipart_specs ~content_length ~part_size:options.part_size)
+      Lwt.return
+        (Plan.upload_parts ~content_length ~part_size:options.part_size)
     in
     let* () = verify_resume_upload conn ~upload ~options in
     let* uploaded_now =
       upload_missing_parts conn ~upload ~options ~path ?on_progress
-        ~initial_completed:0L specs
+        ~content_length specs
     in
     complete_multipart conn ~upload ~options uploaded_now
 
@@ -558,7 +555,8 @@ struct
     in
     let* content_length = regular_file_length path in
     let* specs =
-      Lwt.return (multipart_specs ~content_length ~part_size:options.part_size)
+      Lwt.return
+        (Plan.upload_parts ~content_length ~part_size:options.part_size)
     in
     let* created =
       S3.Multipart.create_upload conn ~bucket ~key
@@ -591,7 +589,7 @@ struct
     let upload_and_complete () =
       Lwt.bind
         (upload_missing_parts conn ~upload:created.upload ~options ~path
-           ?on_progress ~initial_completed:0L specs) (function
+           ?on_progress ~content_length specs) (function
         | Error error -> abort_and_return error
         | Ok parts ->
             Lwt.bind
@@ -614,7 +612,11 @@ struct
           | Ok content_length -> (
               if Int64.compare content_length options.multipart_threshold < 0
               then
-                let* body = Body.of_path ?on_progress path in
+                let upload_progress =
+                  byte_progress_callback on_progress ~direction:Transfer.Upload
+                    ~phase:Transfer.Single_request ~total:content_length ()
+                in
+                let* body = Body.of_path ?on_progress:upload_progress path in
                 let* result =
                   S3.Object.put conn ~bucket ~key ~options:options.put_options
                     ~body ()
@@ -676,13 +678,9 @@ struct
             { get_options with preconditions })
 
   let download_range_to_fd conn ~bucket ~key ~options ~path ~fd ~write_mutex
-      ~completed ?on_progress spec =
-    let finish =
-      Int64.add spec.offset (Int64.of_int spec.length) |> Int64.pred
-    in
-    let range = Awskit_s3.Range.bytes_exn ~start:spec.offset ~finish in
+      ~completed ~content_length ?on_progress (spec : Plan.download_range) =
     let get_options =
-      { options.Awskit_s3.Transfer.get_options with range = Some range }
+      { options.Awskit_s3.Transfer.get_options with range = Some spec.range }
     in
     let consume reader =
       Lwt.catch
@@ -712,7 +710,10 @@ struct
                         | Error _ as error -> Lwt.return error
                         | Ok () ->
                             completed := Int64.add !completed (Int64.of_int n);
-                            notify_progress on_progress !completed;
+                            notify_transfer_progress on_progress
+                              ~direction:Transfer.Download
+                              ~phase:Transfer.Ranged_get ~total:content_length
+                              !completed;
                             loop
                               (Int64.add position (Int64.of_int n))
                               (remaining - n)))
@@ -726,12 +727,12 @@ struct
       | Ok { value = (); _ } -> Lwt.return_ok ())
 
   let ranged_download_to_fd conn ~bucket ~key ~options ?on_progress ~path ~fd
-      ranges =
+      ~content_length ranges =
     let completed = ref 0L in
     let write_mutex = Lwt_mutex.create () in
     let download_one spec =
       download_range_to_fd conn ~bucket ~key ~options ~path ~fd ~write_mutex
-        ~completed ?on_progress spec
+        ~completed ~content_length ?on_progress spec
     in
     let rec loop ranges =
       match ranges with
@@ -754,10 +755,15 @@ struct
     let* () =
       Lwt.return (Awskit_s3.Transfer.validate_download_options options)
     in
-    let download_with_get () =
+    let* () = validate_download_target path options in
+    let download_with_get ?total () =
+      let download_progress =
+        byte_progress_callback on_progress ~direction:Transfer.Download
+          ~phase:Transfer.Single_request ?total ()
+      in
       let* result =
         S3.Object.get conn ~bucket ~key ~options:options.get_options
-          ~consume:(Reader.to_path ?on_progress path)
+          ~consume:(Reader.to_path ?on_progress:download_progress path)
           ()
       in
       Lwt.return_ok (Awskit_s3.Transfer.Get (get_info result))
@@ -769,17 +775,18 @@ struct
     | Some content_length
       when Int64.compare content_length options.multipart_threshold < 0
            || Int64.equal content_length 0L ->
-        download_with_get ()
+        download_with_get ~total:content_length ()
     | Some content_length ->
         let* ranges =
-          Lwt.return (range_specs ~content_length ~part_size:options.part_size)
+          Lwt.return
+            (Plan.download_ranges ~content_length ~part_size:options.part_size)
         in
         let get_options = ranged_get_options_of_head info options.get_options in
         let options = { options with get_options } in
         with_temp_download path (fun temp_path fd ->
             let* () =
               ranged_download_to_fd conn ~bucket ~key ~options ?on_progress
-                ~path:temp_path ~fd ranges
+                ~path:temp_path ~fd ~content_length ranges
             in
             Lwt.return_ok
               (Awskit_s3.Transfer.Ranged { info; parts = List.length ranges }))

@@ -36,6 +36,20 @@ let check_multiple_error_text label error snippets =
 let bucket = Awskit_s3.Bucket_name.of_string_exn "bucket"
 let key = Awskit_s3.Object_key.of_string_exn "key"
 
+let has_progress_event ~direction ~phase ?total ?part_number transferred
+    (progress : Awskit_s3.Transfer.progress) =
+  progress.direction = direction
+  && progress.phase = phase
+  && Int64.equal progress.transferred transferred
+  && progress.total = total
+  && progress.part_number = part_number
+
+let find_progress_event ~direction ~phase ?total ?part_number transferred
+    progress =
+  List.find_opt
+    (has_progress_event ~direction ~phase ?total ?part_number transferred)
+    progress
+
 module Runtime = struct
   type connection = {
     response_body : string;
@@ -759,6 +773,7 @@ let test_upload_file_strategies env () =
       remove_file multipart_path)
     (fun () ->
       let small_conn = connection () in
+      let small_progress = ref [] in
       let small_options =
         {
           Awskit_s3.Transfer.default_upload_options with
@@ -767,6 +782,8 @@ let test_upload_file_strategies env () =
       in
       let small =
         Transfer.upload_file small_conn ~bucket ~key ~options:small_options
+          ~on_progress:(fun progress ->
+            small_progress := progress :: !small_progress)
           ~path:(path_of_native env small_path)
           ()
         |> Result.get_ok
@@ -775,7 +792,14 @@ let test_upload_file_strategies env () =
         "small strategy" true
         (Awskit_s3.Transfer.upload_strategy small = `Put);
       Alcotest.(check int) "small put count" 1 small_conn.Runtime.put_count;
+      Alcotest.(check bool)
+        "small progress" true
+        (Option.is_some
+           (find_progress_event ~direction:Awskit_s3.Transfer.Upload
+              ~phase:Awskit_s3.Transfer.Single_request ~total:5L 5L
+              !small_progress));
       let multipart_conn = connection () in
+      let multipart_progress = ref [] in
       let multipart_options =
         {
           Awskit_s3.Transfer.default_upload_options with
@@ -786,6 +810,8 @@ let test_upload_file_strategies env () =
       let multipart =
         Transfer.upload_file multipart_conn ~bucket ~key
           ~options:multipart_options
+          ~on_progress:(fun progress ->
+            multipart_progress := progress :: !multipart_progress)
           ~path:(path_of_native env multipart_path)
           ()
         |> Result.get_ok
@@ -794,7 +820,17 @@ let test_upload_file_strategies env () =
         "multipart strategy" true
         (Awskit_s3.Transfer.upload_strategy multipart = `Multipart);
       Alcotest.(check int)
-        "multipart part count" 1 multipart_conn.Runtime.upload_part_count)
+        "multipart part count" 1 multipart_conn.Runtime.upload_part_count;
+      let part_number = Awskit_s3.Multipart.Part_number.of_int_exn 1 in
+      Alcotest.(check bool)
+        "multipart progress" true
+        (Option.is_some
+           (find_progress_event ~direction:Awskit_s3.Transfer.Upload
+              ~phase:Awskit_s3.Transfer.Part
+              ~total:(Int64.of_int Awskit_s3.Transfer.min_part_size)
+              ~part_number
+              (Int64.of_int Awskit_s3.Transfer.min_part_size)
+              !multipart_progress)))
 
 let test_multipart_upload_file env () =
   let native_path = Filename.temp_file "awskit-eio-upload-multipart" ".bin" in
@@ -959,6 +995,7 @@ let test_download_file_uses_get_below_threshold env () =
     (fun () ->
       let payload = "small download" in
       let conn = connection ~response_body:payload () in
+      let progress = ref [] in
       let options =
         {
           Awskit_s3.Transfer.default_download_options with
@@ -967,6 +1004,7 @@ let test_download_file_uses_get_below_threshold env () =
       in
       match
         Transfer.download_file conn ~bucket ~key ~options
+          ~on_progress:(fun event -> progress := event :: !progress)
           ~path:(path_of_native env native_path)
           ()
       with
@@ -981,7 +1019,15 @@ let test_download_file_uses_get_below_threshold env () =
           Alcotest.(check int) "get count" 1 conn.Runtime.get_count;
           Alcotest.(check int)
             "range count" 0
-            (List.length conn.Runtime.get_ranges))
+            (List.length conn.Runtime.get_ranges);
+          Alcotest.(check bool)
+            "download progress" true
+            (Option.is_some
+               (find_progress_event ~direction:Awskit_s3.Transfer.Download
+                  ~phase:Awskit_s3.Transfer.Single_request
+                  ~total:(Int64.of_int (String.length payload))
+                  (Int64.of_int (String.length payload))
+                  !progress)))
 
 let test_download_file_ranges env () =
   let native_path = Filename.temp_file "awskit-eio-download" ".bin" in
@@ -992,6 +1038,7 @@ let test_download_file_ranges env () =
       let part_size = Awskit_s3.Transfer.min_part_size in
       let body = String.make part_size 'a' ^ "tail" in
       let conn = connection ~response_body:body () in
+      let progress = ref [] in
       let options =
         {
           Awskit_s3.Transfer.default_download_options with
@@ -1002,6 +1049,7 @@ let test_download_file_ranges env () =
       in
       let result =
         Transfer.download_file conn ~bucket ~key ~options
+          ~on_progress:(fun event -> progress := event :: !progress)
           ~path:(path_of_native env native_path)
           ()
         |> Result.get_ok
@@ -1016,7 +1064,53 @@ let test_download_file_ranges env () =
           Fmt.str "bytes=0-%d" (part_size - 1);
           Fmt.str "bytes=%d-%d" part_size (String.length body - 1);
         ]
-        conn.Runtime.get_ranges)
+        conn.Runtime.get_ranges;
+      Alcotest.(check bool)
+        "ranged progress" true
+        (Option.is_some
+           (find_progress_event ~direction:Awskit_s3.Transfer.Download
+              ~phase:Awskit_s3.Transfer.Ranged_get
+              ~total:(Int64.of_int (String.length body))
+              (Int64.of_int (String.length body))
+              !progress)))
+
+let test_download_file_ranged_progress_exception_propagates env () =
+  let exception Progress_failed in
+  let native_path =
+    Filename.temp_file "awskit-eio-download-ranged-progress-exn" ".bin"
+  in
+  remove_file native_path;
+  Fun.protect
+    ~finally:(fun () ->
+      remove_download_temps native_path;
+      remove_file native_path)
+    (fun () ->
+      let part_size = Awskit_s3.Transfer.min_part_size in
+      let body = String.make part_size 'a' ^ "tail" in
+      let conn = connection ~response_body:body () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          multipart_threshold = Int64.of_int part_size;
+          part_size;
+          concurrency = 2;
+        }
+      in
+      match
+        Transfer.download_file conn ~bucket ~key ~options
+          ~on_progress:(fun _event -> raise Progress_failed)
+          ~path:(path_of_native env native_path)
+          ()
+      with
+      | exception exn when exn == Progress_failed ->
+          Alcotest.(check int)
+            "temp files removed" 0
+            (List.length (download_temp_paths native_path))
+      | exception exn ->
+          Alcotest.failf "unexpected exception: %s" (Printexc.to_string exn)
+      | Error error ->
+          Alcotest.failf "callback returned error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "download succeeded despite callback exception")
 
 let test_download_file_ranges_use_head_version_id env () =
   let native_path = Filename.temp_file "awskit-eio-download-version" ".bin" in
@@ -1084,6 +1178,35 @@ let test_download_file_ranges_use_head_etag env () =
         [ Some "\"head-etag\""; Some "\"head-etag\"" ]
         conn.Runtime.ranged_get_if_matches)
 
+let test_download_file_rejects_existing_target_without_overwrite env () =
+  let native_path =
+    Filename.temp_file "awskit-eio-download-no-overwrite" ".bin"
+  in
+  write_file native_path "existing";
+  Fun.protect
+    ~finally:(fun () -> remove_file native_path)
+    (fun () ->
+      let conn = connection ~response_body:"new" () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_download_options with
+          overwrite = Awskit_s3.Transfer.Error_if_exists;
+        }
+      in
+      match
+        Transfer.download_file conn ~bucket ~key ~options
+          ~path:(path_of_native env native_path)
+          ()
+      with
+      | Error error when is_validation_field "path" error ->
+          Alcotest.(check string)
+            "preserved target" "existing" (read_file native_path);
+          Alcotest.(check int) "head count" 0 conn.Runtime.head_count;
+          Alcotest.(check int) "get count" 0 conn.Runtime.get_count
+      | Error error ->
+          Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
+      | Ok _ -> Alcotest.fail "expected overwrite validation")
+
 let suite env =
   [
     ( "transfer",
@@ -1120,9 +1243,15 @@ let suite env =
           (test_download_file_uses_get_below_threshold env);
         Alcotest.test_case "download ranges" `Quick
           (test_download_file_ranges env);
+        Alcotest.test_case "download ranged progress exception propagates"
+          `Quick
+          (test_download_file_ranged_progress_exception_propagates env);
         Alcotest.test_case "download ranges use head version id" `Quick
           (test_download_file_ranges_use_head_version_id env);
         Alcotest.test_case "download ranges use head etag" `Quick
           (test_download_file_ranges_use_head_etag env);
+        Alcotest.test_case "download rejects existing target without overwrite"
+          `Quick
+          (test_download_file_rejects_existing_target_without_overwrite env);
       ] );
   ]

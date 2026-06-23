@@ -38,4 +38,5 @@ let () =
          Test_retry.suite;
          Test_paginator.suite;
          Test_multipart_request.suite;
+         Test_transfer_plan.suite;
        ])
