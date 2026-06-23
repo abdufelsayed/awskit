@@ -103,6 +103,8 @@ release packaging.
 - Included paginator property coverage in the `@protocol-pbt` evidence alias so
   pagination PBT runs with the rest of the deterministic protocol checks.
   (3187e10)
+- Expanded the `@runtime-conformance` evidence alias to run the existing Lwt,
+  Eio, simulator, and recording-runtime law suites directly. (107a815)
 - Expanded public API documentation across core Awskit modules, S3 operations,
   adapter entrypoints, simulator APIs, and guide examples. (#3, 0e2021c)
 - Updated README and guide coverage for the v0.2.0 S3 streaming API, package
