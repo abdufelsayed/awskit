@@ -1,6 +1,7 @@
 #!/bin/sh
 
 AWSKIT_RELEASE_PACKAGES="${AWSKIT_RELEASE_PACKAGES:-awskit,awskit-unix,awskit-lwt,awskit-lwt-unix,awskit-eio,awskit-s3,awskit-s3-sim,awskit-s3-lwt,awskit-s3-lwt-unix,awskit-s3-eio}"
+AWSKIT_EXAMPLE_OPAM_PACKAGES="${AWSKIT_EXAMPLE_OPAM_PACKAGES:-eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng}"
 
 awskit_require_release_version() {
   if [ -n "${AWSKIT_RELEASE_VERSION:-}" ]; then

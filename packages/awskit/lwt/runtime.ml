@@ -230,12 +230,16 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     match Awskit.Timeout.span timeout_policy phase with
     | None -> promise
     | Some span ->
-        Lwt.pick
-          [
-            promise;
-            Lwt.bind (sleep span) (fun () ->
-                Lwt.return_error (timeout_error phase span));
-          ]
+        let timeout =
+          Lwt.bind (sleep span) (fun () ->
+              Lwt.return (`Timeout (timeout_error phase span)))
+        in
+        let result = Lwt.map (fun result -> `Result result) promise in
+        Lwt.bind
+          (Lwt.pick [ result; timeout ])
+          (function
+            | `Result result -> Lwt.return result
+            | `Timeout error -> Lwt.return_error error)
 
   let writer_for descriptor ~push ~close ~cancelled =
     {
@@ -336,16 +340,8 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
             (fun () ->
               let write_promise = write writer in
               let write_with_timeout =
-                match Awskit.Timeout.span conn.timeout_policy `Request_body with
-                | None -> write_promise
-                | Some span ->
-                    Lwt.pick
-                      [
-                        write_promise;
-                        Lwt.bind (conn.sleep span) (fun () ->
-                            Lwt.cancel write_promise;
-                            Lwt.return_error (timeout_error `Request_body span));
-                      ]
+                with_timeout_result ~sleep:conn.sleep conn.timeout_policy
+                  `Request_body write_promise
               in
               let write_or_cancelled =
                 Lwt.pick
@@ -407,16 +403,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let headers = Cohttp.Header.of_list request.headers in
     let bridge = body_to_cohttp conn request_body in
     let with_transport_timeout phase promise =
-      match Awskit.Timeout.span conn.timeout_policy phase with
-      | None -> promise
-      | Some span ->
-          Lwt.pick
-            [
-              promise;
-              Lwt.bind (conn.sleep span) (fun () ->
-                  bridge.cancel ();
-                  Lwt.return_error (timeout_error phase span));
-            ]
+      with_timeout_result ~sleep:conn.sleep conn.timeout_policy phase promise
     in
     let meth = to_cohttp_meth request.method_ in
     let successful_status status = status >= 200 && status < 300 in

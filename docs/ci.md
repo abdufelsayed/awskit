@@ -34,6 +34,8 @@ as release branch pushes, scheduled runs, and manual dispatches.
 
 - Runs on Ubuntu with the latest OCaml 5 compiler.
 - Installs test and documentation dependencies for all packages.
+- Installs Eio HTTPS example-only packages separately because they are not part
+  of the published package dependency graph.
 - Builds executable examples, odoc documentation, and docs content policy with
   `opam exec -- dune build @examples @doc @docs-content`.
 
