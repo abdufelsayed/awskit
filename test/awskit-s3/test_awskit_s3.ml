@@ -4,7 +4,10 @@ module Runtime_api_compile_check = Test_runtime_api
 let test_bounded_response_body_error_mentions_context () =
   let oversized_body = String.make 1_048_577 'x' in
   let conn = Recording_runtime.connect [ response 500 oversized_body ] in
-  match Recording_s3.Object.head conn ~bucket:"my-bucket" ~key:"file" () with
+  match
+    Recording_s3.Object.head conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file") ()
+  with
   | Ok _ -> Alcotest.fail "expected bounded response body error"
   | Error error ->
       let text = Awskit.Error.to_string_hum error in
@@ -23,6 +26,7 @@ let () =
                  `Quick test_bounded_response_body_error_mentions_context;
              ] );
          ];
+         Test_domain_types.suite;
          Test_api.suite;
          Test_endpoint.suite;
          Test_presigned.suite;

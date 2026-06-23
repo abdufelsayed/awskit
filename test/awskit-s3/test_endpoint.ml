@@ -4,7 +4,9 @@ open Awskit_s3_test
 let test_endpoint_resolution () =
   let result =
     Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"my-bucket" ~key:"dir/file.txt" ()
+      ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "dir/file.txt")
+      ()
     |> ok_or_fail "presigned default endpoint"
   in
   Alcotest.(check bool)
@@ -14,7 +16,7 @@ let test_endpoint_resolution () =
        (Presigned.reveal_url result));
   let dotted =
     Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"my.bucket" ~key:"file.txt" ()
+      ~bucket:(bucket_name "my.bucket") ~key:(object_key "file.txt") ()
     |> ok_or_fail "presigned dotted bucket"
   in
   Alcotest.(check bool)
@@ -32,8 +34,10 @@ let test_endpoint_resolution () =
   let result =
     Presigned.get_object_with_endpoint_config
       ~region:(Region.of_string_exn "us-east-1")
-      ~credentials:creds ~now:test_time ~endpoint_config ~bucket:"my-bucket"
-      ~key:"dir/file.txt" ()
+      ~credentials:creds ~now:test_time ~endpoint_config
+      ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "dir/file.txt")
+      ()
     |> ok_or_fail "presigned local endpoint"
   in
   Alcotest.(check bool)
@@ -44,7 +48,8 @@ let test_endpoint_resolution () =
 let test_endpoint_variants () =
   let dualstack =
     Presigned.get_object ~region:"eu-west-1" ~credentials:creds ~now:test_time
-      ~endpoint_variant:`Dualstack ~bucket:"bucket" ~key:"file.txt" ()
+      ~endpoint_variant:`Dualstack ~bucket:(bucket_name "bucket")
+      ~key:(object_key "file.txt") ()
     |> ok_or_fail "dualstack endpoint"
   in
   Alcotest.(check bool)
@@ -54,8 +59,8 @@ let test_endpoint_variants () =
        (Presigned.reveal_url dualstack));
   let accelerate =
     Presigned.get_object ~region:"us-west-2" ~credentials:creds ~now:test_time
-      ~endpoint_variant:`Accelerate_dualstack ~bucket:"bucket" ~key:"file.txt"
-      ()
+      ~endpoint_variant:`Accelerate_dualstack ~bucket:(bucket_name "bucket")
+      ~key:(object_key "file.txt") ()
     |> ok_or_fail "accelerate endpoint"
   in
   Alcotest.(check bool)
@@ -134,14 +139,14 @@ let test_endpoint_policy_validation () =
     (Result.is_error (Awskit.Endpoint.of_string "https://user@example.com"));
   let dotted_auto =
     Endpoint_resolver.resolve_object_request Endpoint_config.default ~region
-      ~bucket:"my.bucket" ~key:"file"
+      ~bucket:(bucket_name "my.bucket") ~key:(object_key "file")
     |> ok_or_fail "dotted auto"
   in
   Alcotest.(check bool) "dotted auto path-style" true (dotted_auto.style = `Path);
   let dotted_virtual =
     Endpoint_resolver.resolve_object_request
       (Endpoint_config.aws ~addressing_style:`Virtual_hosted ())
-      ~region ~bucket:"my.bucket" ~key:"file"
+      ~region ~bucket:(bucket_name "my.bucket") ~key:(object_key "file")
   in
   Alcotest.(check bool)
     "dotted virtual-hosted rejected" true

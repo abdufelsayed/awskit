@@ -1,0 +1,24 @@
+type t = string
+
+let invalid ~field message =
+  Error (Awskit.Error.Internal.validation ~field message)
+
+let has_ctl_or_del value =
+  String.exists
+    (fun c ->
+      let code = Char.code c in
+      code < 0x20 || code = 0x7F)
+    value
+
+let of_string ~field value =
+  if value = "" then invalid ~field (Fmt.str "%s must be non-empty" field)
+  else if has_ctl_or_del value then
+    invalid ~field (Fmt.str "%s contains control characters" field)
+  else Ok value
+
+let of_string_exn ~field value =
+  Awskit.Error.Internal.get_ok_exn (of_string ~field value)
+
+let to_string value = value
+let pp fmt value = Format.pp_print_string fmt value
+let equal = String.equal

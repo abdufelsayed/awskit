@@ -19,6 +19,9 @@ let unwrap label = function
   | Ok value -> value
   | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
+let bucket_name value = Awskit_s3.Bucket_name.of_string_exn value
+let object_key value = Awskit_s3.Object_key.of_string_exn value
+
 let or_fail_msg label = function
   | Ok value -> value
   | Error (`Msg message) -> fail "%s: %s" label message
@@ -54,21 +57,25 @@ let create_s3 stdenv sw =
   |> unwrap "create S3 client"
 
 let put_options =
-  {
-    Awskit_s3.Object.Put.default_options with
-    content_type = Some "text/plain";
-    metadata = [ ("source", "awskit-example"); ("kind", "metadata-demo") ];
-    tags =
-      [
-        { Awskit_s3.Tag.key = "project"; value = "awskit" };
-        { Awskit_s3.Tag.key = "example"; value = "object-metadata" };
-      ];
-  }
+  Awskit_s3.Object.Put.options_exn
+    ~content_type:(Awskit_s3.Content_type.of_string_exn "text/plain")
+    ~metadata:
+      (Awskit_s3.Metadata.of_list_exn
+         [ ("source", "awskit-example"); ("kind", "metadata-demo") ])
+    ~tags:
+      (Awskit_s3.Tag.Set.of_list_exn
+         [
+           Awskit_s3.Tag.create_exn ~key:"project" ~value:"awskit";
+           Awskit_s3.Tag.create_exn ~key:"example" ~value:"object-metadata";
+         ])
+    ()
 
 let run stdenv =
   Eio.Switch.run @@ fun sw ->
-  let bucket = env "AWSKIT_EXAMPLE_BUCKET" in
-  let key = env_default "AWSKIT_EXAMPLE_KEY" "awskit-examples/metadata.txt" in
+  let bucket = bucket_name (env "AWSKIT_EXAMPLE_BUCKET") in
+  let key =
+    object_key (env_default "AWSKIT_EXAMPLE_KEY" "awskit-examples/metadata.txt")
+  in
   let s3 = create_s3 stdenv sw in
   ignore
     (S3.Object.put s3 ~bucket ~key ~options:put_options
@@ -76,21 +83,24 @@ let run stdenv =
        ()
     |> unwrap "put object");
   let head = S3.Object.head s3 ~bucket ~key () |> unwrap "head object" in
-  Format.printf "s3://%s/%s@." bucket key;
+  Format.printf "s3://%a/%a@." Awskit_s3.Bucket_name.pp bucket
+    Awskit_s3.Object_key.pp key;
   Format.printf "content-type: %a@."
     (Format.pp_print_option Format.pp_print_string)
-    head.content_type;
+    (Option.map Awskit_s3.Content_type.to_string head.content_type);
   Format.printf "metadata:@.";
   List.iter
     (fun (name, value) -> Format.printf "  %s=%s@." name value)
-    head.metadata;
+    (Awskit_s3.Metadata.to_list head.metadata);
   let tags =
     S3.Object.Tagging.get s3 ~bucket ~key () |> unwrap "get object tags"
   in
   Format.printf "tags:@.";
   List.iter
-    (fun (tag : Awskit_s3.Tag.t) -> Format.printf "  %s=%s@." tag.key tag.value)
-    tags.tags
+    (fun tag ->
+      Format.printf "  %s=%s@." (Awskit_s3.Tag.key tag)
+        (Awskit_s3.Tag.value tag))
+    (Awskit_s3.Tag.Set.to_list tags.tags)
 
 let main stdenv =
   try

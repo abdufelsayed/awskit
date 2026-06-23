@@ -17,10 +17,15 @@ module Make (C : Request_context.S) = struct
 
   let owner_headers options =
     []
-    |> add_opt_header "x-amz-expected-bucket-owner"
+    |> add_opt_account_id_header "x-amz-expected-bucket-owner"
          options.Object.Tagging.expected_bucket_owner
 
+  let bucket_string = Bucket_name.to_string
+  let key_string = Object_key.to_string
+
   let get conn ~bucket ~key ?options () =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options =
       Option.value ~default:Object.Tagging.default_options options
     in
@@ -47,7 +52,9 @@ module Make (C : Request_context.S) = struct
                             (fun tags -> { Object.Tagging.tags; response })
                             (parse_tags body)))))
 
-  let put conn ~bucket ~key ?options tags =
+  let put conn ~bucket ~key ?options ~tags () =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options =
       Option.value ~default:Object.Tagging.default_options options
     in
@@ -85,6 +92,8 @@ module Make (C : Request_context.S) = struct
                        | Ok () -> return_ok response))))
 
   let delete conn ~bucket ~key ?options () =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options =
       Option.value ~default:Object.Tagging.default_options options
     in

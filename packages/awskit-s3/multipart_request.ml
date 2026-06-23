@@ -32,7 +32,12 @@ module Make (C : Request_context.S) = struct
     let* result = response in
     return_result return_error return_ok result
 
+  let bucket_string = Bucket_name.to_string
+  let key_string = Object_key.to_string
+
   let create_upload conn ~bucket ~key ?options () =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options =
       Option.value ~default:Create_multipart_upload.default_options options
     in
@@ -62,13 +67,14 @@ module Make (C : Request_context.S) = struct
                       @ checksum_type_header options.checksum_type
                       @ encryption_request_headers
                           options.server_side_encryption
-                      |> add_opt_header "content-type" options.content_type
+                      |> add_opt_content_type_header "content-type"
+                           options.content_type
                       |> add_opt_header "x-amz-storage-class"
                            (Option.map Storage_class.to_string
                               options.storage_class)
                       |> add_opt_header "x-amz-tagging"
                            (tags_header options.tags)
-                      |> add_opt_header "x-amz-expected-bucket-owner"
+                      |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                            options.expected_bucket_owner
                     in
                     match object_request conn ~bucket ~key with
@@ -114,6 +120,8 @@ module Make (C : Request_context.S) = struct
                                                  })))))))))
 
   let upload_part conn ~bucket ~key ~upload_id ~part_number ~body ?options () =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options = Option.value ~default:Upload_part.default_options options in
     let return_error =
       return_s3_error return_error ~operation:"UploadPart" ~bucket ~key
@@ -143,7 +151,8 @@ module Make (C : Request_context.S) = struct
                         let headers =
                           ("content-length", Int64.to_string content_length)
                           :: checksum_value_headers options.checksum
-                          |> add_opt_header "x-amz-expected-bucket-owner"
+                          |> add_opt_account_id_header
+                               "x-amz-expected-bucket-owner"
                                options.expected_bucket_owner
                         in
                         let query =
@@ -189,6 +198,8 @@ module Make (C : Request_context.S) = struct
                                                  })))))))))
 
   let complete_upload conn ~bucket ~key ~upload_id ?options parts =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options =
       Option.value ~default:Complete_multipart_upload.default_options options
     in
@@ -268,7 +279,8 @@ module Make (C : Request_context.S) = struct
                                 @ checksum_type_header options.checksum_type
                                 @ multipart_object_size_header
                                     options.multipart_object_size
-                               |> add_opt_header "x-amz-expected-bucket-owner"
+                               |> add_opt_account_id_header
+                                    "x-amz-expected-bucket-owner"
                                     options.expected_bucket_owner)
                              ~payload_hash:
                                (R.Request_body.descriptor upload).payload_hash
@@ -285,6 +297,8 @@ module Make (C : Request_context.S) = struct
                                    | Ok result -> return_ok result)))))))
 
   let abort_upload conn ~bucket ~key ~upload_id ?options () =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options =
       Option.value ~default:Abort_multipart_upload.default_options options
     in
@@ -304,7 +318,7 @@ module Make (C : Request_context.S) = struct
                    [ ("uploadId", [ Multipart.Upload_id.to_string upload_id ]) ]
                  ~headers:
                    ([]
-                   |> add_opt_header "x-amz-expected-bucket-owner"
+                   |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                         options.expected_bucket_owner)
                  ~f:(fun response body ->
                    let* discarded = discard_response_body body in
@@ -324,6 +338,8 @@ module Make (C : Request_context.S) = struct
         | _ -> Ok ())
 
   let list_parts conn ~bucket ~key ~upload_id ?options () =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options = Option.value ~default:List_parts.default_options options in
     let return_error =
       return_s3_error return_error ~operation:"ListParts" ~bucket ~key
@@ -350,7 +366,8 @@ module Make (C : Request_context.S) = struct
                   (with_empty_response conn ~method_:`GET ~request ~query
                      ~headers:
                        ([]
-                       |> add_opt_header "x-amz-expected-bucket-owner"
+                       |> add_opt_account_id_header
+                            "x-amz-expected-bucket-owner"
                             options.expected_bucket_owner)
                      ~f:(fun response body ->
                        let* body =
@@ -460,7 +477,8 @@ module Make (C : Request_context.S) = struct
     let fold_pages conn ~bucket ~key ~upload_id ?options ?max_pages ~init ~f ()
         =
       let return_context_error =
-        return_s3_error return_error ~operation:"ListParts" ~bucket ~key
+        return_s3_error return_error ~operation:"ListParts"
+          ~bucket:(bucket_string bucket) ~key:(key_string key)
       in
       match validate_max_pages max_pages with
       | Error error -> return_context_error error

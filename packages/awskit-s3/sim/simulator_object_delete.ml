@@ -93,6 +93,7 @@ let delete conn ~bucket ~key ?options () =
                           Ok (delete_result ()))))))
 
 let delete_objects conn ~bucket ~objects ?options:_ () =
+  let key_string key = Object_key.to_string key in
   match validate_bucket bucket with
   | Error error -> Error error
   | Ok () -> (
@@ -105,12 +106,12 @@ let delete_objects conn ~bucket ~objects ?options:_ () =
               let deleted, errors =
                 List.fold_right
                   (fun (object_ : Delete_objects.object_) (deleted, errors) ->
+                    let key = key_string object_.key in
                     let target =
                       match object_.version_id with
                       | Some version_id ->
-                          find_version bucket_state object_.key version_id
-                      | None ->
-                          Hashtbl.find_opt bucket_state.objects object_.key
+                          find_version bucket_state key version_id
+                      | None -> Hashtbl.find_opt bucket_state.objects key
                     in
                     if not (delete_objects_conditions_match object_ target) then
                       ( deleted,
@@ -122,7 +123,7 @@ let delete_objects conn ~bucket ~objects ?options:_ () =
                         match object_.version_id with
                         | Some version_id -> (
                             match
-                              delete_version bucket_state object_.key version_id
+                              delete_version bucket_state key version_id
                             with
                             | Some (Stored_delete_marker _) ->
                                 (Some true, Some version_id)
@@ -130,11 +131,11 @@ let delete_objects conn ~bucket ~objects ?options:_ () =
                                 (None, Some version_id))
                         | None when versioning_keeps_history bucket_state ->
                             let marker =
-                              store_delete_marker conn bucket_state object_.key
+                              store_delete_marker conn bucket_state key
                             in
                             (Some true, Some marker.version_id)
                         | None ->
-                            Hashtbl.remove bucket_state.objects object_.key;
+                            Hashtbl.remove bucket_state.objects key;
                             (None, None)
                       in
                       ( {

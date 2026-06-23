@@ -75,21 +75,36 @@ let storage_class response =
             (Awskit.Error.Internal.decode
                (Fmt.str "invalid storage class %s" value)))
 
+let response_content_type response =
+  match Awskit.Response.header response "content-type" with
+  | None -> Ok None
+  | Some value -> (
+      match Content_type.of_string value with
+      | Ok content_type -> Ok (Some content_type)
+      | Error error ->
+          Error
+            (decode_with_context ~what:"Content-Type response header"
+               (Awskit.Error.to_string_hum error)))
+
 let object_info response =
   let* etag = response_etag response in
   let* storage_class = storage_class response in
   let* content_length = Awskit.Response.header_int response "content-length" in
   let* version_id = response_version response in
+  let* content_type = response_content_type response in
+  let* metadata =
+    Metadata_headers.of_headers (Awskit.Response.headers response)
+  in
   Ok
     {
       Get_object.etag;
-      content_type = Awskit.Response.header response "content-type";
+      content_type;
       content_length = Option.map Int64.of_int content_length;
       last_modified =
         Option.bind
           (Awskit.Response.header response "last-modified")
           ptime_of_string;
-      metadata = Metadata_headers.of_headers (Awskit.Response.headers response);
+      metadata;
       storage_class;
       version_id;
       checksum = response_checksum response;

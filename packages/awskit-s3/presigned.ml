@@ -29,10 +29,10 @@ let reveal_url t = t.url
 module Put_object = struct
   type options = {
     expires_in : Ptime.Span.t option;
-    content_type : string option;
+    content_type : Content_type.t option;
     checksum : Object.Checksum.value option;
     server_side_encryption : Object.Encryption.request option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
     extra_signed_headers : (string * string) list;
   }
 
@@ -50,10 +50,10 @@ end
 module Get_object = struct
   type options = {
     expires_in : Ptime.Span.t option;
-    response_content_type : string option;
-    response_content_disposition : string option;
+    response_content_type : Content_type.t option;
+    response_content_disposition : Header_value.t option;
     version_id : Object.Version_id.t option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
     extra_signed_headers : (string * string) list;
   }
 
@@ -72,7 +72,7 @@ module Upload_part = struct
   type options = {
     expires_in : Ptime.Span.t option;
     checksum : Object.Checksum.value option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
     extra_signed_headers : (string * string) list;
   }
 
@@ -88,7 +88,7 @@ end
 module Delete_object = struct
   type options = {
     expires_in : Ptime.Span.t option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
     extra_signed_headers : (string * string) list;
   }
 
@@ -158,7 +158,14 @@ let canonical_headers_str headers =
   |> String.concat ""
 
 let option_header key = function None -> [] | Some value -> [ (key, value) ]
-let expected_owner_header = option_header "x-amz-expected-bucket-owner"
+
+let option_content_type_header key value =
+  option_header key (Option.map Content_type.to_string value)
+
+let expected_owner_header value =
+  option_header "x-amz-expected-bucket-owner"
+    (Option.map Account_id.to_string value)
+
 let validate_opt f = function None -> Ok () | Some value -> f value
 
 let expires_seconds span =
@@ -332,8 +339,10 @@ let get_query (options : Get_object.options) =
     match value with None -> acc | Some v -> (key, [ v ]) :: acc
   in
   []
-  |> add_opt "response-content-type" options.response_content_type
-  |> add_opt "response-content-disposition" options.response_content_disposition
+  |> add_opt "response-content-type"
+       (Option.map Content_type.to_string options.response_content_type)
+  |> add_opt "response-content-disposition"
+       (Option.map Header_value.to_string options.response_content_disposition)
   |> add_opt "versionId"
        (Option.map Object.Version_id.to_string options.version_id)
 
@@ -364,7 +373,7 @@ let put_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
   let options = Option.value ~default:Put_object.default_options options in
   let* () = validate_opt Headers.validate_checksum_value options.checksum in
   let headers =
-    option_header "content-type" options.content_type
+    option_content_type_header "content-type" options.content_type
     @ Headers.checksum_value_headers options.checksum
     @ Headers.encryption_request_headers options.server_side_encryption
     @ expected_owner_header options.expected_bucket_owner
@@ -434,7 +443,7 @@ let put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
   let options = Option.value ~default:Put_object.default_options options in
   let* () = validate_opt Headers.validate_checksum_value options.checksum in
   let headers =
-    option_header "content-type" options.content_type
+    option_content_type_header "content-type" options.content_type
     @ Headers.checksum_value_headers options.checksum
     @ Headers.encryption_request_headers options.server_side_encryption
     @ expected_owner_header options.expected_bucket_owner

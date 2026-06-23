@@ -21,6 +21,7 @@
   presigned_request
   request_context
   response
+  s3_utf8
   streaming
   tagging_xml)
  (libraries
@@ -30,6 +31,7 @@
   fmt
   yojson
   base64
+  uucp
   uri
   ezxmlm
   ppx_protocol_conv_xmlm

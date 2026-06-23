@@ -26,4 +26,4 @@ val info_of_object :
   ?content_length:int ->
   Awskit.Response.t ->
   Simulator_state.stored_object ->
-  Object.Get.result
+  Object.Get.info

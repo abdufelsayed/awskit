@@ -174,17 +174,17 @@ end
 
 module Put = struct
   type options = {
-    content_type : string option;
+    content_type : Content_type.t option;
     metadata : Metadata.t;
     storage_class : Storage_class.t option;
-    tags : Tag.t list;
-    cache_control : string option;
-    content_encoding : string option;
-    content_disposition : string option;
+    tags : Tag.Set.t;
+    cache_control : Header_value.t option;
+    content_encoding : Header_value.t option;
+    content_disposition : Header_value.t option;
     preconditions : Preconditions.Write.t;
     checksum : Checksum.value option;
     server_side_encryption : Encryption.request option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
   }
 
   type result = {
@@ -197,9 +197,9 @@ module Put = struct
   let default_options =
     {
       content_type = None;
-      metadata = [];
+      metadata = Metadata.empty;
       storage_class = None;
-      tags = [];
+      tags = Tag.Set.empty;
       cache_control = None;
       content_encoding = None;
       content_disposition = None;
@@ -208,6 +208,33 @@ module Put = struct
       server_side_encryption = None;
       expected_bucket_owner = None;
     }
+
+  let options ?content_type ?(metadata = Metadata.empty) ?storage_class
+      ?(tags = Tag.Set.empty) ?cache_control ?content_encoding
+      ?content_disposition ?(preconditions = Preconditions.Write.none) ?checksum
+      ?server_side_encryption ?expected_bucket_owner () =
+    Ok
+      {
+        content_type;
+        metadata;
+        storage_class;
+        tags;
+        cache_control;
+        content_encoding;
+        content_disposition;
+        preconditions;
+        checksum;
+        server_side_encryption;
+        expected_bucket_owner;
+      }
+
+  let options_exn ?content_type ?metadata ?storage_class ?tags ?cache_control
+      ?content_encoding ?content_disposition ?preconditions ?checksum
+      ?server_side_encryption ?expected_bucket_owner () =
+    Awskit.Error.Internal.get_ok_exn
+      (options ?content_type ?metadata ?storage_class ?tags ?cache_control
+         ?content_encoding ?content_disposition ?preconditions ?checksum
+         ?server_side_encryption ?expected_bucket_owner ())
 end
 
 module Get = struct
@@ -216,12 +243,12 @@ module Get = struct
     preconditions : Preconditions.Read.t;
     version_id : Version_id.t option;
     checksum_mode : Checksum.Mode.t option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
   }
 
-  type result = {
+  type info = {
     etag : Etag.t option;
-    content_type : string option;
+    content_type : Content_type.t option;
     content_length : int64 option;
     last_modified : Ptime.t option;
     metadata : Metadata.t;
@@ -232,7 +259,19 @@ module Get = struct
     response : Awskit.Response.t;
   }
 
-  type info = result
+  type 'a result = {
+    value : 'a;
+    etag : Etag.t option;
+    content_type : Content_type.t option;
+    content_length : int64 option;
+    last_modified : Ptime.t option;
+    metadata : Metadata.t;
+    storage_class : Storage_class.t option;
+    version_id : Version_id.t option;
+    checksum : Checksum.response;
+    server_side_encryption : Encryption.response option;
+    response : Awskit.Response.t;
+  }
 
   let default_options =
     {
@@ -242,6 +281,17 @@ module Get = struct
       checksum_mode = None;
       expected_bucket_owner = None;
     }
+
+  let options ?range ?(preconditions = Preconditions.Read.none) ?version_id
+      ?checksum_mode ?expected_bucket_owner () =
+    Ok
+      { range; preconditions; version_id; checksum_mode; expected_bucket_owner }
+
+  let options_exn ?range ?preconditions ?version_id ?checksum_mode
+      ?expected_bucket_owner () =
+    Awskit.Error.Internal.get_ok_exn
+      (options ?range ?preconditions ?version_id ?checksum_mode
+         ?expected_bucket_owner ())
 end
 
 module Head = struct
@@ -249,11 +299,10 @@ module Head = struct
     preconditions : Preconditions.Read.t;
     version_id : Version_id.t option;
     checksum_mode : Checksum.Mode.t option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
   }
 
-  type info = Get.result
-  type result = info
+  type result = Get.info
 
   let default_options =
     {
@@ -262,13 +311,23 @@ module Head = struct
       checksum_mode = None;
       expected_bucket_owner = None;
     }
+
+  let options ?(preconditions = Preconditions.Read.none) ?version_id
+      ?checksum_mode ?expected_bucket_owner () =
+    Ok { preconditions; version_id; checksum_mode; expected_bucket_owner }
+
+  let options_exn ?preconditions ?version_id ?checksum_mode
+      ?expected_bucket_owner () =
+    Awskit.Error.Internal.get_ok_exn
+      (options ?preconditions ?version_id ?checksum_mode ?expected_bucket_owner
+         ())
 end
 
 module Delete = struct
   type options = {
     preconditions : Preconditions.Delete.t;
     version_id : Version_id.t option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
   }
 
   type result = {
@@ -283,22 +342,38 @@ module Delete = struct
       version_id = None;
       expected_bucket_owner = None;
     }
+
+  let options ?(preconditions = Preconditions.Delete.none) ?version_id
+      ?expected_bucket_owner () =
+    Ok { preconditions; version_id; expected_bucket_owner }
+
+  let options_exn ?preconditions ?version_id ?expected_bucket_owner () =
+    Awskit.Error.Internal.get_ok_exn
+      (options ?preconditions ?version_id ?expected_bucket_owner ())
 end
 
 module Delete_many = struct
+  let max_objects = 1000
+
   type object_ = {
-    key : string;
+    key : Object_key.t;
     version_id : Version_id.t option;
     etag : Etag.t option;
   }
 
+  let object_ ~key ?version_id ?etag () = { key; version_id; etag }
+
   type deleted = {
-    key : string;
+    key : Object_key.t;
     version_id : Version_id.t option;
     delete_marker : bool option;
   }
 
-  type item_error = { key : string; code : string; message : string option }
+  type item_error = {
+    key : Object_key.t;
+    code : string;
+    message : string option;
+  }
 
   type result = {
     deleted : deleted list;
@@ -306,9 +381,13 @@ module Delete_many = struct
     response : Awskit.Response.t;
   }
 
-  type options = { expected_bucket_owner : string option }
+  type options = { expected_bucket_owner : Account_id.t option }
 
   let default_options = { expected_bucket_owner = None }
+  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options_exn ?expected_bucket_owner () =
+    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module Copy = struct
@@ -321,8 +400,8 @@ module Copy = struct
     storage_class : Storage_class.t option;
     checksum_algorithm : Checksum.Algorithm.t option;
     server_side_encryption : Encryption.request option;
-    expected_bucket_owner : string option;
-    source_expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
+    source_expected_bucket_owner : Account_id.t option;
   }
 
   type result = {
@@ -344,16 +423,41 @@ module Copy = struct
       expected_bucket_owner = None;
       source_expected_bucket_owner = None;
     }
+
+  let options ?source_version_id
+      ?(source_preconditions = Preconditions.Copy_source.none)
+      ?metadata_directive ?storage_class ?checksum_algorithm
+      ?server_side_encryption ?expected_bucket_owner
+      ?source_expected_bucket_owner () =
+    Ok
+      {
+        source_version_id;
+        source_preconditions;
+        metadata_directive;
+        storage_class;
+        checksum_algorithm;
+        server_side_encryption;
+        expected_bucket_owner;
+        source_expected_bucket_owner;
+      }
+
+  let options_exn ?source_version_id ?source_preconditions ?metadata_directive
+      ?storage_class ?checksum_algorithm ?server_side_encryption
+      ?expected_bucket_owner ?source_expected_bucket_owner () =
+    Awskit.Error.Internal.get_ok_exn
+      (options ?source_version_id ?source_preconditions ?metadata_directive
+         ?storage_class ?checksum_algorithm ?server_side_encryption
+         ?expected_bucket_owner ?source_expected_bucket_owner ())
 end
 
 module Versions = struct
   type options = {
-    prefix : string option;
-    delimiter : string option;
+    prefix : Object_key.Prefix.t option;
+    delimiter : Object_key.Delimiter.t option;
     max_keys : int option;
-    key_marker : string option;
+    key_marker : Object_key.t option;
     version_id_marker : Version_id.t option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
   }
 
   type object_version = {
@@ -400,16 +504,34 @@ module Versions = struct
       version_id_marker = None;
       expected_bucket_owner = None;
     }
+
+  let options ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
+      ?expected_bucket_owner () =
+    Ok
+      {
+        prefix;
+        delimiter;
+        max_keys;
+        key_marker;
+        version_id_marker;
+        expected_bucket_owner;
+      }
+
+  let options_exn ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
+      ?expected_bucket_owner () =
+    Awskit.Error.Internal.get_ok_exn
+      (options ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
+         ?expected_bucket_owner ())
 end
 
 module List = struct
   type options = {
-    prefix : string option;
-    delimiter : string option;
+    prefix : Object_key.Prefix.t option;
+    delimiter : Object_key.Delimiter.t option;
     max_keys : int option;
-    start_after : string option;
+    start_after : Object_key.t option;
     continuation_token : string option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
   }
 
   type object_summary = {
@@ -443,11 +565,33 @@ module List = struct
       continuation_token = None;
       expected_bucket_owner = None;
     }
+
+  let options ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
+      ?expected_bucket_owner () =
+    Ok
+      {
+        prefix;
+        delimiter;
+        max_keys;
+        start_after;
+        continuation_token;
+        expected_bucket_owner;
+      }
+
+  let options_exn ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
+      ?expected_bucket_owner () =
+    Awskit.Error.Internal.get_ok_exn
+      (options ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
+         ?expected_bucket_owner ())
 end
 
 module Tagging = struct
-  type options = { expected_bucket_owner : string option }
-  type result = { tags : Tag.t list; response : Awskit.Response.t }
+  type options = { expected_bucket_owner : Account_id.t option }
+  type result = { tags : Tag.Set.t; response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
+  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options_exn ?expected_bucket_owner () =
+    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
 end

@@ -33,6 +33,9 @@ let check_multiple_error_text label error snippets =
         snippets
   | _ -> Alcotest.failf "expected Multiple error, got %a" Awskit.Error.pp error
 
+let bucket = Awskit_s3.Bucket_name.of_string_exn "bucket"
+let key = Awskit_s3.Object_key.of_string_exn "key"
+
 module Runtime = struct
   type connection = {
     response_body : string;
@@ -279,18 +282,35 @@ let put_result () : Awskit_s3.Put_object.result =
     response = response 200;
   }
 
-let get_result ?etag ?version_id content_length : Awskit_s3.Get_object.result =
+let get_info ?etag ?version_id content_length : Awskit_s3.Get_object.info =
   {
     etag;
     content_type = None;
     content_length;
     last_modified = None;
-    metadata = [];
+    metadata = Awskit_s3.Metadata.empty;
     storage_class = None;
     version_id;
     checksum = empty_checksum;
     server_side_encryption = None;
     response = response 200;
+  }
+
+let get_result ?etag ?version_id content_length value :
+    _ Awskit_s3.Get_object.result =
+  let info = get_info ?etag ?version_id content_length in
+  {
+    Awskit_s3.Get_object.value;
+    etag = info.etag;
+    content_type = info.content_type;
+    content_length = info.content_length;
+    last_modified = info.last_modified;
+    metadata = info.metadata;
+    storage_class = info.storage_class;
+    version_id = info.version_id;
+    checksum = info.checksum;
+    server_side_encryption = info.server_side_encryption;
+    response = info.response;
   }
 
 let etag_condition_to_string = function
@@ -357,15 +377,15 @@ module S3 = struct
       let consumed = consume { Runtime.body; offset = 0 } in
       Result.map
         (fun value ->
-          ( get_result
-              (Some (Int64.of_int (String.length conn.Runtime.response_body))),
-            value ))
+          get_result
+            (Some (Int64.of_int (String.length conn.Runtime.response_body)))
+            value)
         consumed
 
     let head conn ~bucket:_ ~key:_ ?options:_ () =
       conn.Runtime.head_count <- conn.Runtime.head_count + 1;
       Ok
-        (get_result ?etag:conn.Runtime.head_etag
+        (get_info ?etag:conn.Runtime.head_etag
            ?version_id:conn.Runtime.head_version_id
            (Some (Int64.of_int (String.length conn.Runtime.response_body))))
 
@@ -425,7 +445,10 @@ module S3 = struct
         conn.Runtime.multipart_create_count + 1;
       let upload_id = Awskit_s3.Multipart.Upload_id.of_string_exn "upload-1" in
       let upload =
-        Awskit_s3.Multipart.Upload.create_exn ~bucket ~key ~upload_id
+        Awskit_s3.Multipart.Upload.create_exn
+          ~bucket:(Awskit_s3.Bucket_name.to_string bucket)
+          ~key:(Awskit_s3.Object_key.to_string key)
+          ~upload_id
       in
       Ok { Awskit_s3.Create_multipart_upload.upload; response = response 200 }
 
@@ -544,7 +567,7 @@ let test_body_of_flow_streams_flow _env () =
   check_body_descriptor "flow body"
     ~content_length:(Int64.of_int (String.length payload))
     ~replayable:false body;
-  match S3.Object.put conn ~bucket:"bucket" ~key:"key" ~body () with
+  match S3.Object.put conn ~bucket ~key ~body () with
   | Error error -> Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
   | Ok _ ->
       Alcotest.(check (option string))
@@ -573,7 +596,7 @@ let test_body_of_path_streams_file_body env () =
           check_body_descriptor "path body"
             ~content_length:(Int64.of_int (String.length payload))
             ~replayable:true body;
-          match S3.Object.put conn ~bucket:"bucket" ~key:"key" ~body () with
+          match S3.Object.put conn ~bucket ~key ~body () with
           | Error error ->
               Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
           | Ok _ ->
@@ -709,8 +732,7 @@ let test_upload_file_strategies env () =
         }
       in
       let small =
-        Transfer.upload_file small_conn ~bucket:"bucket" ~key:"key"
-          ~options:small_options
+        Transfer.upload_file small_conn ~bucket ~key ~options:small_options
           ~path:(path_of_native env small_path)
           ()
         |> Result.get_ok
@@ -728,7 +750,7 @@ let test_upload_file_strategies env () =
         }
       in
       let multipart =
-        Transfer.upload_file multipart_conn ~bucket:"bucket" ~key:"key"
+        Transfer.upload_file multipart_conn ~bucket ~key
           ~options:multipart_options
           ~path:(path_of_native env multipart_path)
           ()
@@ -754,7 +776,7 @@ let test_multipart_upload_file env () =
         }
       in
       match
-        Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key" ~options
+        Transfer.multipart_upload_file conn ~bucket ~key ~options
           ~path:(path_of_native env native_path)
           ()
       with
@@ -785,7 +807,7 @@ let test_multipart_upload_reports_abort_failure env () =
         }
       in
       match
-        Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key" ~options
+        Transfer.multipart_upload_file conn ~bucket ~key ~options
           ~path:(path_of_native env native_path)
           ()
       with
@@ -813,7 +835,7 @@ let test_multipart_upload_aborts_on_progress_exception env () =
         }
       in
       match
-        Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key" ~options
+        Transfer.multipart_upload_file conn ~bucket ~key ~options
           ~on_progress:(fun _transferred -> raise Progress_failed)
           ~path:(path_of_native env native_path)
           ()
@@ -844,7 +866,7 @@ let test_multipart_upload_aborts_on_progress_cancellation env () =
         }
       in
       match
-        Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key" ~options
+        Transfer.multipart_upload_file conn ~bucket ~key ~options
           ~on_progress:(fun _transferred -> raise (Eio.Cancel.Cancelled Exit))
           ~path:(path_of_native env native_path)
           ()
@@ -874,8 +896,8 @@ let test_resume_multipart_upload_file env () =
         }
       in
       match
-        Transfer.resume_multipart_upload_file conn ~bucket:"bucket" ~key:"key"
-          ~upload_id ~options
+        Transfer.resume_multipart_upload_file conn ~bucket ~key ~upload_id
+          ~options
           ~path:(path_of_native env native_path)
           ()
       with
@@ -901,7 +923,7 @@ let test_download_file_uses_get_below_threshold env () =
         }
       in
       match
-        Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+        Transfer.download_file conn ~bucket ~key ~options
           ~path:(path_of_native env native_path)
           ()
       with
@@ -936,7 +958,7 @@ let test_download_file_ranges env () =
         }
       in
       let result =
-        Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+        Transfer.download_file conn ~bucket ~key ~options
           ~path:(path_of_native env native_path)
           ()
         |> Result.get_ok
@@ -974,7 +996,7 @@ let test_download_file_ranges_use_head_version_id env () =
         }
       in
       let result =
-        Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+        Transfer.download_file conn ~bucket ~key ~options
           ~path:(path_of_native env native_path)
           ()
         |> Result.get_ok
@@ -1006,7 +1028,7 @@ let test_download_file_ranges_use_head_etag env () =
         }
       in
       let result =
-        Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+        Transfer.download_file conn ~bucket ~key ~options
           ~path:(path_of_native env native_path)
           ()
         |> Result.get_ok

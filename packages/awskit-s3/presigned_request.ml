@@ -15,11 +15,17 @@ module Make (C : Request_context.S) = struct
 
   let with_credentials conn ~operation ~bucket ~key f =
     let* credentials = credentials conn in
+    let bucket_context = Bucket_name.to_string bucket in
+    let key_context = Object_key.to_string key in
     match credentials with
     | Error error ->
-        return_error (with_s3_operation ~operation ~bucket ~key error)
+        return_error
+          (with_s3_operation ~operation ~bucket:bucket_context ~key:key_context
+             error)
     | Ok credentials ->
-        return (return_result ~operation ~bucket ~key (f credentials))
+        return
+          (return_result ~operation ~bucket:bucket_context ~key:key_context
+             (f credentials))
 
   let get_object conn ~bucket ~key ?options () =
     with_credentials conn ~operation:"GetObject" ~bucket ~key

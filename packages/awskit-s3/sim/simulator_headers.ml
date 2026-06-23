@@ -8,6 +8,12 @@ let etag_condition_header = function
 let add_opt_header name value headers =
   match value with None -> headers | Some value -> (name, value) :: headers
 
+let add_opt_account_id_header name value headers =
+  add_opt_header name (Option.map Account_id.to_string value) headers
+
+let add_opt_content_type_header name value headers =
+  add_opt_header name (Option.map Content_type.to_string value) headers
+
 let add_time_header name value headers =
   match value with
   | None -> headers
@@ -52,13 +58,13 @@ let validate_common_headers ?content_type ?cache_control ?content_encoding
   validate_opt "content-disposition" content_disposition
 
 let tags_header tags =
-  match tags with
+  match Tag.Set.to_list tags with
   | [] -> None
   | tags ->
       Some
         (tags
-        |> List.map (fun (tag : Tag.t) ->
-            Uri.pct_encode tag.key ^ "=" ^ Uri.pct_encode tag.value)
+        |> List.map (fun tag ->
+            Uri.pct_encode (Tag.key tag) ^ "=" ^ Uri.pct_encode (Tag.value tag))
         |> String.concat "&")
 
 let checksum_header_name = function

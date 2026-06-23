@@ -23,6 +23,21 @@ let object_read_info (obj : stored_object) ~status ~content_length
   in
   info_of_object ~content_length response obj
 
+let get_result (info : Get_object.info) value : _ Get_object.result =
+  {
+    Get_object.value;
+    etag = info.etag;
+    content_type = info.content_type;
+    content_length = info.content_length;
+    last_modified = info.last_modified;
+    metadata = info.metadata;
+    storage_class = info.storage_class;
+    version_id = info.version_id;
+    checksum = info.checksum;
+    server_side_encryption = info.server_side_encryption;
+    response = info.response;
+  }
+
 let read_object ?read_fault obj options ~consume =
   let* () = ensure_read_preconditions obj options.Get_object.preconditions in
   let* body, status, range_headers = ranged_body obj.body options.range in
@@ -30,8 +45,7 @@ let read_object ?read_fault obj options ~consume =
     object_read_info obj ~status ~content_length:(String.length body)
       ~range_headers
   in
-  Result.map
-    (fun value -> (info, value))
+  Result.map (get_result info)
     (Runtime.Response_body.with_reader
        (Runtime.response_body ?read_fault body)
        ~consume)
@@ -144,5 +158,18 @@ let get_as_string conn ~bucket ~key ~max_bytes ?options () =
 
 let get_as_bytes conn ~bucket ~key ~max_bytes ?options () =
   Result.map
-    (fun (info, body) -> (info, Bytes.of_string body))
+    (fun result ->
+      {
+        Get_object.value = Bytes.of_string result.Get_object.value;
+        etag = result.etag;
+        content_type = result.content_type;
+        content_length = result.content_length;
+        last_modified = result.last_modified;
+        metadata = result.metadata;
+        storage_class = result.storage_class;
+        version_id = result.version_id;
+        checksum = result.checksum;
+        server_side_encryption = result.server_side_encryption;
+        response = result.response;
+      })
     (get_as_string conn ~bucket ~key ~max_bytes ?options ())

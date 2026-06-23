@@ -20,8 +20,8 @@ let test_multipart_upload_part_checksum_headers () =
   in
   let options = { Upload_part.default_options with checksum = Some checksum } in
   let part =
-    Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket" ~key:"large.bin"
-      ~upload_id ~part_number:1
+    Recording_s3.Multipart.upload_part conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "large.bin") ~upload_id ~part_number:1
       ~body:(Recording_runtime.string_request_body "hello")
       ~options ()
     |> ok_or_fail "upload part checksum"
@@ -40,7 +40,7 @@ let test_multipart_upload_part_checksum_headers () =
     (List.assoc_opt "partNumber" call.request.target.query)
 
 let test_multipart_checksum_and_expected_owner_headers () =
-  let expected_owner = "123456789012" in
+  let expected_owner = account_id "123456789012" in
   let conn =
     Recording_runtime.connect
       [
@@ -63,8 +63,8 @@ let test_multipart_checksum_and_expected_owner_headers () =
     }
   in
   let upload =
-    Recording_s3.Multipart.create_upload conn ~bucket:"my-bucket"
-      ~key:"large.bin" ~options:create_options ()
+    Recording_s3.Multipart.create_upload conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "large.bin") ~options:create_options ()
     |> ok_or_fail "create multipart checksum"
   in
   let upload_id = upload.upload.upload_id in
@@ -81,8 +81,8 @@ let test_multipart_checksum_and_expected_owner_headers () =
     }
   in
   let part =
-    Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket" ~key:"large.bin"
-      ~upload_id ~part_number:1
+    Recording_s3.Multipart.upload_part conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "large.bin") ~upload_id ~part_number:1
       ~body:(Recording_runtime.string_request_body "hello")
       ~options:upload_options ()
     |> ok_or_fail "upload part checksum"
@@ -102,8 +102,9 @@ let test_multipart_checksum_and_expected_owner_headers () =
     }
   in
   let complete =
-    Recording_s3.Multipart.complete_upload conn ~bucket:"my-bucket"
-      ~key:"large.bin" ~upload_id ~options:complete_options [ part.part ]
+    Recording_s3.Multipart.complete_upload conn
+      ~bucket:(bucket_name "my-bucket") ~key:(object_key "large.bin") ~upload_id
+      ~options:complete_options [ part.part ]
     |> ok_or_fail "complete multipart checksum"
   in
   check_checksum "complete xml checksum" Object.Checksum.Algorithm.Sha256
@@ -138,7 +139,7 @@ let test_multipart_checksum_and_expected_owner_headers () =
         (fun (label, (call : Recording_runtime.call)) ->
           Alcotest.(check (option string))
             (label ^ " expected owner")
-            (Some expected_owner)
+            (Some (Account_id.to_string expected_owner))
             (header "x-amz-expected-bucket-owner" call.request.headers))
         [
           ("create", create);
@@ -163,8 +164,9 @@ let test_complete_multipart_embedded_error () =
       ()
   in
   match
-    Recording_s3.Multipart.complete_upload conn ~bucket:"my-bucket"
-      ~key:"large.bin" ~upload_id [ part ]
+    Recording_s3.Multipart.complete_upload conn
+      ~bucket:(bucket_name "my-bucket") ~key:(object_key "large.bin") ~upload_id
+      [ part ]
   with
   | Error error when Error.service_code error = Some "SlowDown" -> ()
   | Error error -> Alcotest.failf "unexpected complete error: %a" Error.pp error

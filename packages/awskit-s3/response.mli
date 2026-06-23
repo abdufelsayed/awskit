@@ -21,8 +21,11 @@ val response_checksum : Awskit.Response.t -> Object.Checksum.response
 val response_encryption : Awskit.Response.t -> Object.Encryption.response option
 (** Parse server-side encryption response headers. *)
 
-val object_info :
-  Awskit.Response.t -> (Object.Get.result, Awskit.Error.t) result
+val response_content_type :
+  Awskit.Response.t -> (Content_type.t option, Awskit.Error.t) result
+(** Parse the [Content-Type] response header. *)
+
+val object_info : Awskit.Response.t -> (Object.Get.info, Awskit.Error.t) result
 (** Build object metadata from [GetObject] or [HeadObject] response headers. *)
 
 val put_result : Awskit.Response.t -> (Object.Put.result, Awskit.Error.t) result

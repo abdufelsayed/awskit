@@ -51,7 +51,14 @@ let expect_validation label = function
       Alcotest.failf "%s: unexpected error: %a" label Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected validation error" label
 
-let tag key value = { Tag.key; value }
+let tag key value = Tag.create_exn ~key ~value
+let tag_set tags = Tag.Set.of_list_exn tags
+let tag_count tags = List.length (Tag.Set.to_list tags)
+let content_type value = Content_type.of_string_exn value
+let header_value ~field value = Header_value.of_string_exn ~field value
+let account_id value = Account_id.of_string_exn value
+let bucket_name value = Bucket_name.of_string_exn value
+let object_key value = Object_key.of_string_exn value
 
 module Recording_runtime = struct
   type response = {

@@ -15,10 +15,10 @@ let test_object_paginator_follows_tokens () =
           (list_page ~continuation_token:"token-1" ~truncated:false [ "b.txt" ]);
       ]
   in
-  let options = { List_objects_v2.default_options with max_keys = Some 1 } in
+  let options = List_objects_v2.options_exn ~max_keys:1 () in
   let keys =
-    Recording_s3.Object.List_objects_v2.keys conn ~bucket:"my-bucket" ~options
-      ()
+    Recording_s3.Object.List_objects_v2.keys conn
+      ~bucket:(bucket_name "my-bucket") ~options ()
     |> ok_or_fail "paginator keys"
   in
   Alcotest.(check (list string)) "keys" [ "a.txt"; "b.txt" ] keys;
@@ -42,8 +42,8 @@ let test_object_paginator_max_pages () =
       ]
   in
   let pages =
-    Recording_s3.Object.List_objects_v2.pages conn ~bucket:"my-bucket"
-      ~max_pages:1 ()
+    Recording_s3.Object.List_objects_v2.pages conn
+      ~bucket:(bucket_name "my-bucket") ~max_pages:1 ()
     |> ok_or_fail "paginator pages"
   in
   Alcotest.(check int) "page count" 1 (List.length pages);
@@ -60,8 +60,9 @@ let test_multipart_paginator_follows_markers () =
   in
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
   let parts =
-    Recording_s3.Multipart.List_parts.parts conn ~bucket:"my-bucket"
-      ~key:"large.bin" ~upload_id ()
+    Recording_s3.Multipart.List_parts.parts conn
+      ~bucket:(bucket_name "my-bucket") ~key:(object_key "large.bin") ~upload_id
+      ()
     |> ok_or_fail "multipart paginator parts"
   in
   Alcotest.(check (list int))
@@ -86,8 +87,9 @@ let test_multipart_list_parts_rejects_malformed_known_fields () =
   in
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
   match
-    Recording_s3.Multipart.List_parts.parts conn ~bucket:"my-bucket"
-      ~key:"large.bin" ~upload_id ()
+    Recording_s3.Multipart.List_parts.parts conn
+      ~bucket:(bucket_name "my-bucket") ~key:(object_key "large.bin") ~upload_id
+      ()
   with
   | Error error when is_decode_error error ->
       let text = Awskit.Error.to_string_hum error in
@@ -116,8 +118,9 @@ let test_multipart_list_parts_rejects_invalid_numeric_fields () =
     (fun (field, body) ->
       let conn = Recording_runtime.connect [ response 200 body ] in
       match
-        Recording_s3.Multipart.List_parts.parts conn ~bucket:"my-bucket"
-          ~key:"large.bin" ~upload_id ()
+        Recording_s3.Multipart.List_parts.parts conn
+          ~bucket:(bucket_name "my-bucket") ~key:(object_key "large.bin")
+          ~upload_id ()
       with
       | Error error when is_decode_error error ->
           let text = Awskit.Error.to_string_hum error in

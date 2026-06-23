@@ -39,19 +39,19 @@ let test_bucket_config_parse () =
       ]
   in
   let versioning =
-    Recording_s3.Bucket.Versioning.get conn ~bucket:"my-bucket" ()
+    Recording_s3.Bucket.Versioning.get conn ~bucket:(bucket_name "my-bucket") ()
     |> ok_or_fail "versioning"
   in
   Alcotest.(check bool)
     "versioning enabled" true
     (versioning.status = Some Bucket.Versioning.Status.Enabled);
   let tagging =
-    Recording_s3.Bucket.Tagging.get conn ~bucket:"my-bucket" ()
+    Recording_s3.Bucket.Tagging.get conn ~bucket:(bucket_name "my-bucket") ()
     |> ok_or_fail "tagging"
   in
-  Alcotest.(check int) "tag count" 1 (List.length tagging.tags);
+  Alcotest.(check int) "tag count" 1 (tag_count tagging.tags);
   let encryption =
-    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket" ()
+    Recording_s3.Bucket.Encryption.get conn ~bucket:(bucket_name "my-bucket") ()
     |> ok_or_fail "encryption"
   in
   (match encryption.config.rules with
@@ -67,18 +67,20 @@ let test_bucket_config_parse () =
         (List.length rule.blocked_encryption_types)
   | _ -> Alcotest.fail "expected one encryption rule");
   let cors =
-    Recording_s3.Bucket.Cors.get conn ~bucket:"my-bucket" ()
+    Recording_s3.Bucket.Cors.get conn ~bucket:(bucket_name "my-bucket") ()
     |> ok_or_fail "cors"
   in
   Alcotest.(check int) "cors rule count" 1 (List.length cors.config.rules);
   let public_access_block =
-    Recording_s3.Bucket.Public_access_block.get conn ~bucket:"my-bucket" ()
+    Recording_s3.Bucket.Public_access_block.get conn
+      ~bucket:(bucket_name "my-bucket") ()
     |> ok_or_fail "public access block"
   in
   Alcotest.(check bool)
     "block public policy" true public_access_block.config.block_public_policy;
   let ownership =
-    Recording_s3.Bucket.Ownership_controls.get conn ~bucket:"my-bucket" ()
+    Recording_s3.Bucket.Ownership_controls.get conn
+      ~bucket:(bucket_name "my-bucket") ()
     |> ok_or_fail "ownership"
   in
   Alcotest.(check string)
@@ -92,7 +94,7 @@ let test_bucket_encryption_extended_xml () =
   in
   let conn = Recording_runtime.connect [ response 200 body; response 200 "" ] in
   let parsed =
-    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket" ()
+    Recording_s3.Bucket.Encryption.get conn ~bucket:(bucket_name "my-bucket") ()
     |> ok_or_fail "extended encryption parse"
   in
   let config = parsed.config in
@@ -111,7 +113,8 @@ let test_bucket_encryption_extended_xml () =
         = [ Bucket.Encryption.Blocked_encryption_type.Sse_c ])
   | _ -> Alcotest.fail "expected one encryption rule");
   ignore
-    (Recording_s3.Bucket.Encryption.put conn ~bucket:"my-bucket" config
+    (Recording_s3.Bucket.Encryption.put conn ~bucket:(bucket_name "my-bucket")
+       ~config ()
     |> ok_or_fail "extended encryption serialize");
   let body = (Recording_runtime.last_call conn).body in
   Alcotest.(check bool)
@@ -130,7 +133,7 @@ let test_bucket_encryption_unknown_read_values () =
   in
   let conn = Recording_runtime.connect [ response 200 body ] in
   let result =
-    Recording_s3.Bucket.Encryption.get conn ~bucket:"my-bucket" ()
+    Recording_s3.Bucket.Encryption.get conn ~bucket:(bucket_name "my-bucket") ()
     |> ok_or_fail "unknown encryption parse"
   in
   match result.config.rules with
@@ -156,7 +159,10 @@ let test_bucket_encryption_unknown_write_rejected () =
     }
   in
   let conn = Recording_runtime.connect [ response 200 "" ] in
-  match Recording_s3.Bucket.Encryption.put conn ~bucket:"my-bucket" config with
+  match
+    Recording_s3.Bucket.Encryption.put conn ~bucket:(bucket_name "my-bucket")
+      ~config ()
+  with
   | Error error when is_validation_field "sse_algorithm" error -> ()
   | Error error ->
       Alcotest.failf "unexpected validation error: %a" Error.pp error
@@ -164,7 +170,9 @@ let test_bucket_encryption_unknown_write_rejected () =
 
 let test_decode_error_mentions_xml_document () =
   let conn = Recording_runtime.connect [ response 200 "<not xml" ] in
-  match Recording_s3.Bucket.get_location conn ~bucket:"my-bucket" () with
+  match
+    Recording_s3.Bucket.get_location conn ~bucket:(bucket_name "my-bucket") ()
+  with
   | Ok _ -> Alcotest.fail "expected decode error"
   | Error error ->
       let text = Awskit.Error.to_string_hum error in
@@ -179,7 +187,9 @@ let test_decode_root_rejects_wrong_root () =
         response 200 "<NotLocationConstraint>us-east-1</NotLocationConstraint>";
       ]
   in
-  match Recording_s3.Bucket.get_location conn ~bucket:"my-bucket" () with
+  match
+    Recording_s3.Bucket.get_location conn ~bucket:(bucket_name "my-bucket") ()
+  with
   | Error error when is_decode_error error ->
       let text = Awskit.Error.to_string_hum error in
       Alcotest.(check bool)
@@ -187,6 +197,22 @@ let test_decode_root_rejects_wrong_root () =
         (string_contains ~substring:"expected LocationConstraint" text)
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected wrong-root decode error"
+
+let test_bucket_tagging_rejects_invalid_tag_xml_as_decode_error () =
+  let body =
+    "<Tagging><TagSet><Tag><Key></Key><Value>prod</Value></Tag></TagSet></Tagging>"
+  in
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  match
+    Recording_s3.Bucket.Tagging.get conn ~bucket:(bucket_name "my-bucket") ()
+  with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions tag key" true
+        (string_contains text ~substring:"tag key")
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected invalid tag XML decode error"
 
 let suite =
   [
@@ -203,5 +229,7 @@ let suite =
           test_decode_error_mentions_xml_document;
         Alcotest.test_case "decode root rejects wrong root" `Quick
           test_decode_root_rejects_wrong_root;
+        Alcotest.test_case "bucket tagging rejects invalid tag xml as decode"
+          `Quick test_bucket_tagging_rejects_invalid_tag_xml_as_decode_error;
       ] );
   ]

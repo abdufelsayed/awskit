@@ -179,22 +179,24 @@ end
 
 module Put : sig
   type options = {
-    content_type : string option;  (** [Content-Type] header for the object. *)
+    content_type : Content_type.t option;
+        (** [Content-Type] header for the object. *)
     metadata : Metadata.t;  (** User metadata sent as [x-amz-meta-*] headers. *)
     storage_class : Storage_class.t option;
         (** Optional S3 storage class for the new object. *)
-    tags : Tag.t list;  (** Object tags sent with the write request. *)
-    cache_control : string option;  (** Optional [Cache-Control] header. *)
-    content_encoding : string option;
+    tags : Tag.Set.t;  (** Object tags sent with the write request. *)
+    cache_control : Header_value.t option;
+        (** Optional [Cache-Control] header. *)
+    content_encoding : Header_value.t option;
         (** Optional [Content-Encoding] header. *)
-    content_disposition : string option;
+    content_disposition : Header_value.t option;
         (** Optional [Content-Disposition] header. *)
     preconditions : Preconditions.Write.t;  (** Conditional write headers. *)
     checksum : Checksum.value option;
         (** Explicit checksum header for the request body. *)
     server_side_encryption : Encryption.request option;
         (** Server-side encryption headers for the new object. *)
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner], used to guard against bucket-owner
             confusion. *)
   }
@@ -213,6 +215,38 @@ module Put : sig
   val default_options : options
   (** Default [PutObject] options: no optional headers, tags, checksum, or
       preconditions. *)
+
+  val options :
+    ?content_type:Content_type.t ->
+    ?metadata:Metadata.t ->
+    ?storage_class:Storage_class.t ->
+    ?tags:Tag.Set.t ->
+    ?cache_control:Header_value.t ->
+    ?content_encoding:Header_value.t ->
+    ?content_disposition:Header_value.t ->
+    ?preconditions:Preconditions.Write.t ->
+    ?checksum:Checksum.value ->
+    ?server_side_encryption:Encryption.request ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [PutObject] options. *)
+
+  val options_exn :
+    ?content_type:Content_type.t ->
+    ?metadata:Metadata.t ->
+    ?storage_class:Storage_class.t ->
+    ?tags:Tag.Set.t ->
+    ?cache_control:Header_value.t ->
+    ?content_encoding:Header_value.t ->
+    ?content_disposition:Header_value.t ->
+    ?preconditions:Preconditions.Write.t ->
+    ?checksum:Checksum.value ->
+    ?server_side_encryption:Encryption.request ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Get : sig
@@ -223,13 +257,15 @@ module Get : sig
         (** Object version to read instead of the current version. *)
     checksum_mode : Checksum.Mode.t option;
         (** Request S3 checksum metadata in the response. *)
-    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
+    expected_bucket_owner : Account_id.t option;
+        (** [x-amz-expected-bucket-owner]. *)
   }
   (** [GetObject] request options. *)
 
-  type result = {
+  type info = {
     etag : Etag.t option;  (** Object ETag returned by S3. *)
-    content_type : string option;  (** Object [Content-Type] response header. *)
+    content_type : Content_type.t option;
+        (** Object [Content-Type] response header. *)
     content_length : int64 option;
         (** Number of response-body bytes when S3 supplied [Content-Length]. *)
     last_modified : Ptime.t option;
@@ -245,11 +281,53 @@ module Get : sig
     response : Awskit.Response.t;  (** Raw response metadata. *)
   }
   (** [GetObject] response metadata. The object body is consumed through the
-      selected runtime and is not stored in [result]. *)
+      selected runtime and is not stored in [info]. *)
+
+  type 'a result = {
+    value : 'a;  (** Value returned by the response-body consumer. *)
+    etag : Etag.t option;  (** Object ETag returned by S3. *)
+    content_type : Content_type.t option;
+        (** Object [Content-Type] response header. *)
+    content_length : int64 option;
+        (** Number of response-body bytes when S3 supplied [Content-Length]. *)
+    last_modified : Ptime.t option;
+        (** Last modified timestamp parsed from the response. *)
+    metadata : Metadata.t;
+        (** User metadata parsed from [x-amz-meta-*] headers. *)
+    storage_class : Storage_class.t option;
+        (** Storage class reported for the object, if present. *)
+    version_id : Version_id.t option;  (** Version id of the returned object. *)
+    checksum : Checksum.response;  (** Checksum response headers. *)
+    server_side_encryption : Encryption.response option;
+        (** Server-side encryption metadata reported by S3. *)
+    response : Awskit.Response.t;  (** Raw response metadata. *)
+  }
+  (** [GetObject] result containing response metadata and the caller's consumed
+      body value. *)
 
   val default_options : options
   (** Default [GetObject] options: full current object, no checksum mode, and no
       conditional headers. *)
+
+  val options :
+    ?range:Range.t ->
+    ?preconditions:Preconditions.Read.t ->
+    ?version_id:Version_id.t ->
+    ?checksum_mode:Checksum.Mode.t ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [GetObject] options. *)
+
+  val options_exn :
+    ?range:Range.t ->
+    ?preconditions:Preconditions.Read.t ->
+    ?version_id:Version_id.t ->
+    ?checksum_mode:Checksum.Mode.t ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Head : sig
@@ -260,15 +338,34 @@ module Head : sig
         (** Object version to inspect instead of the current version. *)
     checksum_mode : Checksum.Mode.t option;
         (** Request S3 checksum metadata in the response. *)
-    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
+    expected_bucket_owner : Account_id.t option;
+        (** [x-amz-expected-bucket-owner]. *)
   }
   (** [HeadObject] request options. *)
 
-  type result = Get.result
-  (** [HeadObject] metadata has the same shape as {!type:Get.result}; no object
+  type result = Get.info
+  (** [HeadObject] metadata has the same shape as {!type:Get.info}; no object
       body is returned. *)
 
   val default_options : options
+
+  val options :
+    ?preconditions:Preconditions.Read.t ->
+    ?version_id:Version_id.t ->
+    ?checksum_mode:Checksum.Mode.t ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [HeadObject] options. *)
+
+  val options_exn :
+    ?preconditions:Preconditions.Read.t ->
+    ?version_id:Version_id.t ->
+    ?checksum_mode:Checksum.Mode.t ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Delete : sig
@@ -276,7 +373,8 @@ module Delete : sig
     preconditions : Preconditions.Delete.t;  (** Conditional delete headers. *)
     version_id : Version_id.t option;
         (** Object version to delete instead of the current version. *)
-    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
+    expected_bucket_owner : Account_id.t option;
+        (** [x-amz-expected-bucket-owner]. *)
   }
   (** [DeleteObject] request options. *)
 
@@ -290,25 +388,56 @@ module Delete : sig
   (** [DeleteObject] result metadata. *)
 
   val default_options : options
+
+  val options :
+    ?preconditions:Preconditions.Delete.t ->
+    ?version_id:Version_id.t ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [DeleteObject] options. *)
+
+  val options_exn :
+    ?preconditions:Preconditions.Delete.t ->
+    ?version_id:Version_id.t ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Delete_many : sig
+  val max_objects : int
+  (** Maximum number of objects accepted by one [DeleteObjects] request. *)
+
   type object_ = {
-    key : string;  (** Object key to delete. *)
+    key : Object_key.t;  (** Object key to delete. *)
     version_id : Version_id.t option;  (** Optional version id to delete. *)
     etag : Etag.t option;
         (** Optional ETag condition for conditional delete support. *)
   }
   (** One [DeleteObjects] request member. *)
 
+  val object_ :
+    key:Object_key.t ->
+    ?version_id:Version_id.t ->
+    ?etag:Etag.t ->
+    unit ->
+    object_
+  (** Build one [DeleteObjects] request member. *)
+
   type deleted = {
-    key : string;  (** Deleted key reported by S3. *)
+    key : Object_key.t;  (** Deleted key reported by S3. *)
     version_id : Version_id.t option;  (** Deleted version id, when present. *)
     delete_marker : bool option;  (** Delete-marker flag reported by S3. *)
   }
   (** One successful [DeleteObjects] member result. *)
 
-  type item_error = { key : string; code : string; message : string option }
+  type item_error = {
+    key : Object_key.t;
+    code : string;
+    message : string option;
+  }
   (** Per-object [DeleteObjects] failure returned inside an otherwise decoded
       response. *)
 
@@ -320,10 +449,19 @@ module Delete_many : sig
   (** [DeleteObjects] result data. Check [errors] even when the operation itself
       returned [Ok]. *)
 
-  type options = { expected_bucket_owner : string option }
+  type options = { expected_bucket_owner : Account_id.t option }
   (** [DeleteObjects] request options. *)
 
   val default_options : options
+
+  val options :
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [DeleteObjects] options. *)
+
+  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Copy : sig
@@ -345,9 +483,9 @@ module Copy : sig
         (** Checksum algorithm S3 should use for the destination object. *)
     server_side_encryption : Encryption.request option;
         (** Server-side encryption for the destination object. *)
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
         (** Expected owner for the destination bucket. *)
-    source_expected_bucket_owner : string option;
+    source_expected_bucket_owner : Account_id.t option;
         (** Expected owner for the source bucket. *)
   }
   (** [CopyObject] request options. *)
@@ -364,23 +502,50 @@ module Copy : sig
   (** [CopyObject] result metadata. *)
 
   val default_options : options
+
+  val options :
+    ?source_version_id:Version_id.t ->
+    ?source_preconditions:Preconditions.Copy_source.t ->
+    ?metadata_directive:metadata_directive ->
+    ?storage_class:Storage_class.t ->
+    ?checksum_algorithm:Checksum.Algorithm.t ->
+    ?server_side_encryption:Encryption.request ->
+    ?expected_bucket_owner:Account_id.t ->
+    ?source_expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [CopyObject] options. *)
+
+  val options_exn :
+    ?source_version_id:Version_id.t ->
+    ?source_preconditions:Preconditions.Copy_source.t ->
+    ?metadata_directive:metadata_directive ->
+    ?storage_class:Storage_class.t ->
+    ?checksum_algorithm:Checksum.Algorithm.t ->
+    ?server_side_encryption:Encryption.request ->
+    ?expected_bucket_owner:Account_id.t ->
+    ?source_expected_bucket_owner:Account_id.t ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Versions : sig
   type options = {
-    prefix : string option;
+    prefix : Object_key.Prefix.t option;
         (** Return versions whose keys begin with this prefix. *)
-    delimiter : string option;
+    delimiter : Object_key.Delimiter.t option;
         (** Group keys using this delimiter, commonly ["/"]. *)
     max_keys : int option;
         (** Maximum number of keys/markers S3 should return in one page. *)
-    key_marker : string option;
+    key_marker : Object_key.t option;
         (** Pagination marker for keys. Usually supplied from the previous
             page's [next_key_marker]. *)
     version_id_marker : Version_id.t option;
         (** Pagination marker for versions. Usually supplied with [key_marker].
         *)
-    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
+    expected_bucket_owner : Account_id.t option;
+        (** [x-amz-expected-bucket-owner]. *)
   }
   (** [ListObjectVersions] request options. *)
 
@@ -429,20 +594,44 @@ module Versions : sig
   (** One [ListObjectVersions] page. *)
 
   val default_options : options
+
+  val options :
+    ?prefix:Object_key.Prefix.t ->
+    ?delimiter:Object_key.Delimiter.t ->
+    ?max_keys:int ->
+    ?key_marker:Object_key.t ->
+    ?version_id_marker:Version_id.t ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [ListObjectVersions] options. *)
+
+  val options_exn :
+    ?prefix:Object_key.Prefix.t ->
+    ?delimiter:Object_key.Delimiter.t ->
+    ?max_keys:int ->
+    ?key_marker:Object_key.t ->
+    ?version_id_marker:Version_id.t ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module List : sig
   type options = {
-    prefix : string option;  (** Return keys that begin with this prefix. *)
-    delimiter : string option;
+    prefix : Object_key.Prefix.t option;
+        (** Return keys that begin with this prefix. *)
+    delimiter : Object_key.Delimiter.t option;
         (** Group keys using this delimiter, commonly ["/"]. *)
     max_keys : int option;
         (** Maximum number of objects S3 should return in one page. *)
-    start_after : string option;
+    start_after : Object_key.t option;
         (** Start listing after this key for the first page. *)
     continuation_token : string option;
         (** Pagination token, usually supplied from a previous page. *)
-    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
+    expected_bucket_owner : Account_id.t option;
+        (** [x-amz-expected-bucket-owner]. *)
   }
   (** [ListObjectsV2] request options. *)
 
@@ -473,14 +662,45 @@ module List : sig
   (** One [ListObjectsV2] page. *)
 
   val default_options : options
+
+  val options :
+    ?prefix:Object_key.Prefix.t ->
+    ?delimiter:Object_key.Delimiter.t ->
+    ?max_keys:int ->
+    ?start_after:Object_key.t ->
+    ?continuation_token:string ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [ListObjectsV2] options. *)
+
+  val options_exn :
+    ?prefix:Object_key.Prefix.t ->
+    ?delimiter:Object_key.Delimiter.t ->
+    ?max_keys:int ->
+    ?start_after:Object_key.t ->
+    ?continuation_token:string ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Tagging : sig
-  type options = { expected_bucket_owner : string option }
+  type options = { expected_bucket_owner : Account_id.t option }
   (** Object tagging request options. *)
 
-  type result = { tags : Tag.t list; response : Awskit.Response.t }
+  type result = { tags : Tag.Set.t; response : Awskit.Response.t }
   (** Object tag set returned by [GetObjectTagging]. *)
 
   val default_options : options
+
+  val options :
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build object tagging request options. *)
+
+  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  (** Like {!val:options}, but raises on validation failure. *)
 end

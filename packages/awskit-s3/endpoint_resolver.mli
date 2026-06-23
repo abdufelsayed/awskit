@@ -45,7 +45,7 @@ val endpoint :
 val resolve_bucket_request :
   t ->
   region:Awskit.Region.t ->
-  bucket:string ->
+  bucket:Bucket_name.t ->
   suffix:string ->
   signing_suffix:string ->
   (Request.t, Awskit.Error.t) result
@@ -55,7 +55,7 @@ val resolve_bucket_request :
 val resolve_object_request :
   t ->
   region:Awskit.Region.t ->
-  bucket:string ->
-  key:string ->
+  bucket:Bucket_name.t ->
+  key:Object_key.t ->
   (Request.t, Awskit.Error.t) result
 (** Resolve endpoint, transport path, and signing path for an object request. *)

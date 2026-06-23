@@ -108,10 +108,10 @@ type object_metadata = {
 (** Inspectable metadata for the current version of an object. *)
 
 val object_metadata :
-  store -> bucket:string -> key:string -> object_metadata option
+  store -> bucket:Bucket_name.t -> key:Object_key.t -> object_metadata option
 (** Return metadata for the current object version, if present. *)
 
-val keys : store -> bucket:string -> string list
+val keys : store -> bucket:Bucket_name.t -> string list
 (** Return current object keys in a bucket. *)
 
 val history : store -> operation_record list
@@ -120,7 +120,7 @@ val history : store -> operation_record list
 val clear_history : store -> unit
 (** Clear recorded operation history. *)
 
-val objects_as_strings : store -> bucket:string -> (string * string) list
+val objects_as_strings : store -> bucket:Bucket_name.t -> (string * string) list
 (** Return current bucket objects whose bodies can be decoded as strings. *)
 
 module Object :

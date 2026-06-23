@@ -14,7 +14,8 @@ module Tagging : sig
     bucket:string ->
     key:string ->
     ?options:Object.Tagging.options ->
-    Tag.t list ->
+    tags:Tag.Set.t ->
+    unit ->
     (Awskit.Response.t, Awskit.Error.t) result
 
   val delete :

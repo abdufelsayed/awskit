@@ -1,5 +1,17 @@
 open Awskit_s3
 
+val add_opt_account_id_header :
+  string ->
+  Awskit_s3.Account_id.t option ->
+  (string * string) list ->
+  (string * string) list
+
+val add_opt_content_type_header :
+  string ->
+  Awskit_s3.Content_type.t option ->
+  (string * string) list ->
+  (string * string) list
+
 val write_precondition_headers :
   Awskit_s3.Object.Preconditions.Write.t -> (string * string) list
 
@@ -20,7 +32,7 @@ val validate_common_headers :
   unit ->
   (unit, Awskit.Error.t) result
 
-val tags_header : Awskit_s3.Tag.t list -> string option
+val tags_header : Awskit_s3.Tag.Set.t -> string option
 
 val checksum_header_name :
   Awskit_s3.Object.Checksum.Algorithm.t -> string option

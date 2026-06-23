@@ -8,8 +8,14 @@ module Delete_object = Awskit_s3.Delete_object
 module Delete_objects = Awskit_s3.Delete_objects
 module Copy_object = Awskit_s3.Copy_object
 module List_object_versions = Awskit_s3.List_object_versions
+module Object_key = Awskit_s3.Object_key
 module Range = Awskit_s3.Range
 module Transfer = Awskit_s3.Transfer
+
+let content_type value = Awskit_s3.Content_type.of_string_exn value
+let tag_set tags = Awskit_s3.Tag.Set.of_list_exn tags
+let bucket_of_string value = Awskit_s3.Bucket_name.of_string_exn value
+let object_key value = Awskit_s3.Object_key.of_string_exn value
 
 let getenv_default name default =
   match Sys.getenv_opt name with
@@ -72,6 +78,7 @@ let ok_or_fail label = function
   | Error error -> Alcotest.failf "%s: %a" label Awskit_s3.Error.pp error
 
 let await label promise = Lwt_main.run promise |> ok_or_fail label
+let await_get label promise = await label promise
 
 let expect_status label status result =
   match result with
@@ -80,13 +87,16 @@ let expect_status label status result =
       Alcotest.failf "%s: unexpected error: %a" label Awskit_s3.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected service status %d" label status
 
-let bucket_name suffix =
+let bucket_name_string suffix =
   Printf.sprintf "awskit-minio-%d-%s" (Unix.getpid ()) suffix
 
-let delete_object key = { Delete_objects.key; version_id = None; etag = None }
+let delete_object key = Delete_objects.object_ ~key:(object_key key) ()
 
 let delete_object_version key version_id =
-  { (delete_object key) with Delete_objects.version_id }
+  match version_id with
+  | Some version_id ->
+      Delete_objects.object_ ~key:(object_key key) ~version_id ()
+  | None -> delete_object key
 
 let cleanup_bucket conn ~bucket =
   let open Lwt.Syntax in
@@ -144,10 +154,11 @@ let read_file path =
       really_input_string channel length)
 
 let put_string conn ~bucket ~key ?options body =
-  S3.Object.put conn ~bucket ~key ?options ~body:(S3.Body.of_string body) ()
+  S3.Object.put conn ~bucket ~key:(object_key key) ?options
+    ~body:(S3.Body.of_string body) ()
 
 let get_string conn ~bucket ~key ?options ~max_bytes () =
-  S3.Object.get conn ~bucket ~key ?options
+  S3.Object.get conn ~bucket ~key:(object_key key) ?options
     ~consume:(S3.Reader.to_string ~max_bytes)
     ()
 
@@ -162,7 +173,7 @@ let version_string = Option.map Object.Version_id.to_string
 
 let with_bucket suffix f =
   let conn = connect () in
-  let bucket = bucket_name suffix in
+  let bucket = bucket_of_string (bucket_name_string suffix) in
   Lwt_main.run (cleanup_bucket conn ~bucket);
   ignore (await "create bucket" (S3.Bucket.create conn ~bucket ()));
   Fun.protect
@@ -174,8 +185,10 @@ let test_object_range_metadata_and_copy () =
       let put_options =
         {
           Put_object.default_options with
-          content_type = Some "text/plain";
-          metadata = [ ("origin", "minio"); ("mode", "copy") ];
+          content_type = Some (content_type "text/plain");
+          metadata =
+            Awskit_s3.Metadata.of_list_exn
+              [ ("origin", "minio"); ("mode", "copy") ];
         }
       in
       ignore
@@ -188,27 +201,27 @@ let test_object_range_metadata_and_copy () =
           range = Some (Range.bytes_exn ~start:2L ~finish:5L);
         }
       in
-      let info, body =
-        await "get range"
+      let result =
+        await_get "get range"
           (get_string conn ~bucket ~key:"range.txt" ~options:range_options
              ~max_bytes:16L ())
       in
-      Alcotest.(check string) "range body" "cdef" body;
+      Alcotest.(check string) "range body" "cdef" result.Get_object.value;
       Alcotest.(check int)
         "range status" 206
-        (Awskit.Response.status info.response);
+        (Awskit.Response.status result.response);
       Alcotest.(check (option string))
         "content-range" (Some "bytes 2-5/10")
-        (Awskit.Response.header info.response "content-range");
+        (Awskit.Response.header result.response "content-range");
       let suffix_options =
         { Get_object.default_options with range = Some (Range.suffix_exn 3L) }
       in
-      let _info, suffix =
-        await "get suffix"
+      let result =
+        await_get "get suffix"
           (get_string conn ~bucket ~key:"range.txt" ~options:suffix_options
              ~max_bytes:16L ())
       in
-      Alcotest.(check string) "suffix body" "hij" suffix;
+      Alcotest.(check string) "suffix body" "hij" result.Get_object.value;
       let invalid_range_options =
         { Get_object.default_options with range = Some (Range.from_exn 99L) }
       in
@@ -218,42 +231,48 @@ let test_object_range_metadata_and_copy () =
               ~options:invalid_range_options ~max_bytes:16L ()));
       ignore
         (await "copy object"
-           (S3.Object.copy conn ~source_bucket:bucket ~source_key:"range.txt"
-              ~destination_bucket:bucket ~destination_key:"copied.txt" ()));
+           (S3.Object.copy conn ~source_bucket:bucket
+              ~source_key:(object_key "range.txt") ~destination_bucket:bucket
+              ~destination_key:(object_key "copied.txt") ()));
       let copied =
-        await "head copied" (S3.Object.head conn ~bucket ~key:"copied.txt" ())
+        await "head copied"
+          (S3.Object.head conn ~bucket ~key:(object_key "copied.txt") ())
       in
       Alcotest.(check (option string))
         "copied metadata" (Some "minio")
-        (List.assoc_opt "origin" copied.metadata);
+        (List.assoc_opt "origin" (Awskit_s3.Metadata.to_list copied.metadata));
       let replace_options =
         {
           Copy_object.default_options with
-          metadata_directive = Some (`Replace [ ("origin", "replacement") ]);
+          metadata_directive =
+            Some
+              (`Replace
+                 (Awskit_s3.Metadata.of_list_exn [ ("origin", "replacement") ]));
         }
       in
       ignore
         (await "copy replace"
-           (S3.Object.copy conn ~source_bucket:bucket ~source_key:"range.txt"
-              ~destination_bucket:bucket ~destination_key:"replaced.txt"
+           (S3.Object.copy conn ~source_bucket:bucket
+              ~source_key:(object_key "range.txt") ~destination_bucket:bucket
+              ~destination_key:(object_key "replaced.txt")
               ~options:replace_options ()));
       let replaced =
         await "head replaced"
-          (S3.Object.head conn ~bucket ~key:"replaced.txt" ())
+          (S3.Object.head conn ~bucket ~key:(object_key "replaced.txt") ())
       in
       Alcotest.(check (option string))
         "replaced metadata" (Some "replacement")
-        (List.assoc_opt "origin" replaced.metadata);
+        (List.assoc_opt "origin" (Awskit_s3.Metadata.to_list replaced.metadata));
       Alcotest.(check (option string))
         "old metadata removed" None
-        (List.assoc_opt "mode" replaced.metadata))
+        (List.assoc_opt "mode" (Awskit_s3.Metadata.to_list replaced.metadata)))
 
 let test_object_versioning () =
   with_bucket "versioning" (fun conn ~bucket ->
       ignore
         (await "enable versioning"
            (S3.Bucket.Versioning.put conn ~bucket
-              Awskit_s3.Bucket.Versioning.Status.Enabled));
+              ~status:Awskit_s3.Bucket.Versioning.Status.Enabled ()));
       let put1 =
         await "put version one"
           (put_string conn ~bucket ~key:"versioned.txt" "one")
@@ -267,33 +286,37 @@ let test_object_versioning () =
       let previous_options =
         { Get_object.default_options with version_id = Some v1 }
       in
-      let _info, previous =
-        await "get previous version"
+      let result =
+        await_get "get previous version"
           (get_string conn ~bucket ~key:"versioned.txt"
              ~options:previous_options ~max_bytes:16L ())
       in
-      Alcotest.(check string) "previous version body" "one" previous;
+      Alcotest.(check string)
+        "previous version body" "one" result.Get_object.value;
       let copy_previous_options =
         { Copy_object.default_options with source_version_id = Some v1 }
       in
       let copied =
         await "copy previous version"
-          (S3.Object.copy conn ~source_bucket:bucket ~source_key:"versioned.txt"
-             ~destination_bucket:bucket ~destination_key:"copy-previous.txt"
+          (S3.Object.copy conn ~source_bucket:bucket
+             ~source_key:(object_key "versioned.txt")
+             ~destination_bucket:bucket
+             ~destination_key:(object_key "copy-previous.txt")
              ~options:copy_previous_options ())
       in
       Alcotest.(check (option string))
         "copy source version"
         (Some (Object.Version_id.to_string v1))
         (version_string copied.copy_source_version_id);
-      let _info, copied_body =
-        await "get copied previous"
+      let result =
+        await_get "get copied previous"
           (get_string conn ~bucket ~key:"copy-previous.txt" ~max_bytes:16L ())
       in
-      Alcotest.(check string) "copied previous body" "one" copied_body;
+      Alcotest.(check string)
+        "copied previous body" "one" result.Get_object.value;
       let deleted =
         await "delete current"
-          (S3.Object.delete conn ~bucket ~key:"versioned.txt" ())
+          (S3.Object.delete conn ~bucket ~key:(object_key "versioned.txt") ())
       in
       let marker = require_version "delete marker" deleted.version_id in
       Alcotest.(check (option bool))
@@ -301,13 +324,11 @@ let test_object_versioning () =
       Alcotest.(check bool)
         "delete marker hides current" false
         (await "exists after delete marker"
-           (S3.Object.exists conn ~bucket ~key:"versioned.txt"));
+           (S3.Object.exists conn ~bucket ~key:(object_key "versioned.txt")));
       let list_options =
-        {
-          List_object_versions.default_options with
-          prefix = Some "versioned.txt";
-          max_keys = Some 1;
-        }
+        List_object_versions.options_exn
+          ~prefix:(Object_key.Prefix.of_string_exn "versioned.txt")
+          ~max_keys:1 ()
       in
       let versions =
         await "list versions"
@@ -343,30 +364,33 @@ let test_object_versioning () =
       let version_two_options =
         { Get_object.default_options with version_id = Some v2 }
       in
-      let _info, hidden =
-        await "get hidden current"
+      let result =
+        await_get "get hidden current"
           (get_string conn ~bucket ~key:"versioned.txt"
              ~options:version_two_options ~max_bytes:16L ())
       in
-      Alcotest.(check string) "hidden version body" "two" hidden;
+      Alcotest.(check string)
+        "hidden version body" "two" result.Get_object.value;
       ignore
         (await "delete marker version"
-           (S3.Object.delete conn ~bucket ~key:"versioned.txt"
+           (S3.Object.delete conn ~bucket
+              ~key:(object_key "versioned.txt")
               ~options:
                 { Delete_object.default_options with version_id = Some marker }
               ()));
-      let _info, restored =
-        await "get restored current"
+      let result =
+        await_get "get restored current"
           (get_string conn ~bucket ~key:"versioned.txt" ~max_bytes:16L ())
       in
-      Alcotest.(check string) "restored current body" "two" restored)
+      Alcotest.(check string)
+        "restored current body" "two" result.Get_object.value)
 
 let test_bucket_config_roundtrip () =
   with_bucket "bucket-config" (fun conn ~bucket ->
       ignore
         (await "enable versioning"
            (S3.Bucket.Versioning.put conn ~bucket
-              Bucket.Versioning.Status.Enabled));
+              ~status:Bucket.Versioning.Status.Enabled ()));
       let versioning =
         await "get versioning" (S3.Bucket.Versioning.get conn ~bucket ())
       in
@@ -374,20 +398,23 @@ let test_bucket_config_roundtrip () =
         "versioning enabled" true
         (versioning.status = Some Bucket.Versioning.Status.Enabled);
       let tags =
-        [
-          { Awskit_s3.Tag.key = "env"; value = "test" };
-          { key = "suite"; value = "minio" };
-        ]
+        tag_set
+          [
+            Awskit_s3.Tag.create_exn ~key:"env" ~value:"test";
+            Awskit_s3.Tag.create_exn ~key:"suite" ~value:"minio";
+          ]
       in
-      ignore (await "put bucket tags" (S3.Bucket.Tagging.put conn ~bucket tags));
+      ignore
+        (await "put bucket tags" (S3.Bucket.Tagging.put conn ~bucket ~tags ()));
       let tagging =
         await "get bucket tags" (S3.Bucket.Tagging.get conn ~bucket ())
       in
       Alcotest.(check (list (pair string string)))
         "bucket tags"
         [ ("env", "test"); ("suite", "minio") ]
-        (tagging.tags
-        |> List.map (fun (tag : Awskit_s3.Tag.t) -> (tag.key, tag.value))
+        (Awskit_s3.Tag.Set.to_list tagging.tags
+        |> List.map (fun tag ->
+            (Awskit_s3.Tag.key tag, Awskit_s3.Tag.value tag))
         |> List.sort compare);
       ignore
         (await "delete bucket tags" (S3.Bucket.Tagging.delete conn ~bucket ())))
@@ -399,48 +426,50 @@ let test_multipart_edges () =
       let final_body = "second" in
       let upload =
         await "create multipart"
-          (S3.Multipart.create_upload conn ~bucket ~key:"edges.bin" ())
+          (S3.Multipart.create_upload conn ~bucket ~key:(object_key "edges.bin")
+             ())
       in
       let upload_id = upload.upload.upload_id in
       let first =
         await "upload first"
-          (S3.Multipart.upload_part conn ~bucket ~key:"edges.bin" ~upload_id
-             ~part_number:1
+          (S3.Multipart.upload_part conn ~bucket ~key:(object_key "edges.bin")
+             ~upload_id ~part_number:1
              ~body:(S3.Body.of_string first_body)
              ())
       in
       let second =
         await "upload second"
-          (S3.Multipart.upload_part conn ~bucket ~key:"edges.bin" ~upload_id
-             ~part_number:2
+          (S3.Multipart.upload_part conn ~bucket ~key:(object_key "edges.bin")
+             ~upload_id ~part_number:2
              ~body:(S3.Body.of_string final_body)
              ())
       in
       let overwritten =
         await "overwrite first"
-          (S3.Multipart.upload_part conn ~bucket ~key:"edges.bin" ~upload_id
-             ~part_number:1
+          (S3.Multipart.upload_part conn ~bucket ~key:(object_key "edges.bin")
+             ~upload_id ~part_number:1
              ~body:(S3.Body.of_string overwritten_body)
              ())
       in
       expect_status "complete stale etag" 400
         (Lwt_main.run
-           (S3.Multipart.complete_upload conn ~bucket ~key:"edges.bin"
-              ~upload_id
+           (S3.Multipart.complete_upload conn ~bucket
+              ~key:(object_key "edges.bin") ~upload_id
               [ first.part; second.part ]));
       ignore
         (await "complete overwritten"
-           (S3.Multipart.complete_upload conn ~bucket ~key:"edges.bin"
-              ~upload_id
+           (S3.Multipart.complete_upload conn ~bucket
+              ~key:(object_key "edges.bin") ~upload_id
               [ overwritten.part; second.part ]));
-      let _info, body =
-        await "get multipart"
+      let get_result =
+        await_get "get multipart"
           (get_string conn ~bucket ~key:"edges.bin"
              ~max_bytes:
                (Int64.of_int
                   (String.length overwritten_body + String.length final_body))
              ())
       in
+      let body = get_result.Get_object.value in
       Alcotest.(check int)
         "multipart body length"
         (String.length overwritten_body + String.length final_body)
@@ -453,8 +482,8 @@ let test_multipart_edges () =
            (String.length final_body));
       expect_status "complete missing upload" 404
         (Lwt_main.run
-           (S3.Multipart.complete_upload conn ~bucket ~key:"edges.bin"
-              ~upload_id
+           (S3.Multipart.complete_upload conn ~bucket
+              ~key:(object_key "edges.bin") ~upload_id
               [ overwritten.part; second.part ])))
 
 let test_path_transfer_streams () =
@@ -477,7 +506,8 @@ let test_path_transfer_streams () =
         (fun () ->
           ignore
             (await "upload path"
-               (S3.Object.Transfer.upload_file conn ~bucket ~key:"transfer.bin"
+               (S3.Object.Transfer.upload_file conn ~bucket
+                  ~key:(object_key "transfer.bin")
                   ~path:upload_path
                   ~on_progress:(fun transferred ->
                     upload_progress := transferred :: !upload_progress)
@@ -485,7 +515,8 @@ let test_path_transfer_streams () =
           ignore
             (await "download path"
                (S3.Object.Transfer.download_file conn ~bucket
-                  ~key:"transfer.bin" ~path:download_path
+                  ~key:(object_key "transfer.bin")
+                  ~path:download_path
                   ~on_progress:(fun transferred ->
                     download_progress := transferred :: !download_progress)
                   ()));
@@ -519,32 +550,34 @@ let test_multipart_path_transfer_resumes () =
         (fun () ->
           let created =
             await "create multipart for resume"
-              (S3.Multipart.create_upload conn ~bucket ~key:"resume.bin" ())
+              (S3.Multipart.create_upload conn ~bucket
+                 ~key:(object_key "resume.bin") ())
           in
           let upload_id = created.upload.upload_id in
           let first_part = String.sub body 0 part_size in
           ignore
             (await "upload resume seed"
-               (S3.Multipart.upload_part conn ~bucket ~key:"resume.bin"
-                  ~upload_id ~part_number:1
+               (S3.Multipart.upload_part conn ~bucket
+                  ~key:(object_key "resume.bin") ~upload_id ~part_number:1
                   ~body:(S3.Body.of_string first_part)
                   ()));
           let result =
             await "resume multipart path"
               (S3.Object.Transfer.resume_multipart_upload_file conn ~bucket
-                 ~key:"resume.bin" ~upload_id ~options ~path
+                 ~key:(object_key "resume.bin") ~upload_id ~options ~path
                  ~on_progress:(fun transferred ->
                    progress := transferred :: !progress)
                  ())
           in
           Alcotest.(check int) "completed parts" 3 (List.length result.parts);
-          let _info, downloaded =
-            await "get resumed multipart"
+          let get_result =
+            await_get "get resumed multipart"
               (get_string conn ~bucket ~key:"resume.bin"
                  ~max_bytes:(Int64.of_int (String.length body))
                  ())
           in
-          Alcotest.(check string) "resumed body" body downloaded;
+          Alcotest.(check string)
+            "resumed body" body get_result.Get_object.value;
           Alcotest.(check (option int64))
             "resume initial progress includes first part"
             (Some (Int64.of_int (String.length body)))

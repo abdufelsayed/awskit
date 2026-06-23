@@ -2,17 +2,85 @@ open Awskit_s3
 open Awskit_s3_test
 
 let test_public_operation_aliases () =
+  let owner = Account_id.of_string_exn "123456789012" in
+  let content_type = Content_type.of_string_exn "text/plain" in
+  let metadata = Metadata.of_list_exn [ ("source", "api") ] in
+  let tags =
+    Tag.Set.of_list_exn [ Tag.create_exn ~key:"project" ~value:"awskit" ]
+  in
   ignore (Put_object.default_options : Put_object.options);
+  ignore
+    (Put_object.options ~content_type ~metadata ~tags
+       ~expected_bucket_owner:owner ()
+      : (Put_object.options, Error.t) result);
+  ignore
+    (Put_object.options_exn ~content_type ~metadata ~tags
+       ~expected_bucket_owner:owner ()
+      : Put_object.options);
   ignore (Get_object.default_options : Get_object.options);
+  ignore
+    (Get_object.options ~expected_bucket_owner:owner ()
+      : (Get_object.options, Error.t) result);
+  ignore
+    (Get_object.options_exn ~expected_bucket_owner:owner ()
+      : Get_object.options);
   ignore (Head_object.default_options : Head_object.options);
+  ignore
+    (Head_object.options ~expected_bucket_owner:owner ()
+      : (Head_object.options, Error.t) result);
+  ignore
+    (Head_object.options_exn ~expected_bucket_owner:owner ()
+      : Head_object.options);
   ignore (Delete_object.default_options : Delete_object.options);
+  ignore
+    (Delete_object.options ~expected_bucket_owner:owner ()
+      : (Delete_object.options, Error.t) result);
+  ignore
+    (Delete_object.options_exn ~expected_bucket_owner:owner ()
+      : Delete_object.options);
   let delete_object : Delete_objects.object_ =
-    { key = "file.txt"; version_id = None; etag = None }
+    Delete_objects.object_ ~key:(object_key "file.txt") ()
   in
   ignore (delete_object : Delete_objects.object_);
-  ignore (None : Get_object.result option);
+  ignore (Delete_objects.max_objects : int);
+  ignore
+    (Delete_objects.options ~expected_bucket_owner:owner ()
+      : (Delete_objects.options, Error.t) result);
+  ignore
+    (Delete_objects.options_exn ~expected_bucket_owner:owner ()
+      : Delete_objects.options);
+  ignore (None : string Get_object.result option);
+  ignore (None : Get_object.info option);
   ignore (Copy_object.default_options : Copy_object.options);
+  ignore
+    (Copy_object.options ~expected_bucket_owner:owner
+       ~source_expected_bucket_owner:owner ()
+      : (Copy_object.options, Error.t) result);
+  ignore
+    (Copy_object.options_exn ~expected_bucket_owner:owner
+       ~source_expected_bucket_owner:owner ()
+      : Copy_object.options);
+  ignore
+    (Object.Tagging.options ~expected_bucket_owner:owner ()
+      : (Object.Tagging.options, Error.t) result);
+  ignore
+    (Object.Tagging.options_exn ~expected_bucket_owner:owner ()
+      : Object.Tagging.options);
   ignore (List_objects_v2.default_options : List_objects_v2.options);
+  ignore
+    (List_objects_v2.options
+       ~prefix:(Object_key.Prefix.of_string_exn "logs/")
+       ~delimiter:(Object_key.Delimiter.of_string_exn "/")
+       ~start_after:(object_key "logs/0001.txt")
+       ~max_keys:100 ~expected_bucket_owner:owner ()
+      : (List_objects_v2.options, Error.t) result);
+  ignore
+    (List_objects_v2.options_exn
+       ~prefix:(Object_key.Prefix.of_string_exn "logs/")
+       ~delimiter:(Object_key.Delimiter.of_string_exn "/")
+       ~start_after:(object_key "logs/0001.txt")
+       ~max_keys:100 ~expected_bucket_owner:owner ()
+      : List_objects_v2.options);
   let listed_object : List_objects_v2.object_summary =
     {
       key = "file.txt";
@@ -25,8 +93,32 @@ let test_public_operation_aliases () =
   in
   ignore (listed_object : List_objects_v2.object_summary);
   ignore (List_object_versions.default_options : List_object_versions.options);
+  ignore
+    (List_object_versions.options
+       ~prefix:(Object_key.Prefix.of_string_exn "logs/")
+       ~delimiter:(Object_key.Delimiter.of_string_exn "/")
+       ~key_marker:(object_key "logs/0001.txt")
+       ~max_keys:100 ~expected_bucket_owner:owner ()
+      : (List_object_versions.options, Error.t) result);
+  ignore
+    (List_object_versions.options_exn
+       ~prefix:(Object_key.Prefix.of_string_exn "logs/")
+       ~delimiter:(Object_key.Delimiter.of_string_exn "/")
+       ~key_marker:(object_key "logs/0001.txt")
+       ~max_keys:100 ~expected_bucket_owner:owner ()
+      : List_object_versions.options);
   ignore (Create_bucket.default_options : Create_bucket.options);
-  ignore ({ Create_bucket.region = Some "us-west-2" } : Create_bucket.options);
+  ignore
+    ({ Create_bucket.region = Some (Awskit.Region.of_string_exn "us-west-2") }
+      : Create_bucket.options);
+  ignore
+    (Create_bucket.options ~region:(Awskit.Region.of_string_exn "us-west-2") ()
+      : (Create_bucket.options, Error.t) result);
+  ignore
+    (Create_bucket.options_exn
+       ~region:(Awskit.Region.of_string_exn "us-west-2")
+       ()
+      : Create_bucket.options);
   ignore (Endpoint_config.aws () : endpoint_config);
   let local_endpoint =
     Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ()
@@ -43,9 +135,83 @@ let test_public_operation_aliases () =
   in
   ignore (local : endpoint_config);
   ignore (unsafe : endpoint_config);
+  ignore (Delete_bucket.default_options : Delete_bucket.options);
+  ignore
+    (Delete_bucket.options ~expected_bucket_owner:owner ()
+      : (Delete_bucket.options, Error.t) result);
+  ignore
+    (Delete_bucket.options_exn ~expected_bucket_owner:owner ()
+      : Delete_bucket.options);
+  ignore (Head_bucket.default_options : Head_bucket.options);
+  ignore
+    (Head_bucket.options ~expected_bucket_owner:owner ()
+      : (Head_bucket.options, Error.t) result);
+  ignore
+    (Head_bucket.options_exn ~expected_bucket_owner:owner ()
+      : Head_bucket.options);
+  ignore (Bucket.Policy.default_options : Bucket.Policy.options);
+  ignore
+    (Bucket.Policy.options ~expected_bucket_owner:owner ()
+      : (Bucket.Policy.options, Error.t) result);
+  ignore
+    (Bucket.Policy.options_exn ~expected_bucket_owner:owner ()
+      : Bucket.Policy.options);
+  ignore (Bucket.Versioning.default_options : Bucket.Versioning.options);
+  ignore
+    (Bucket.Versioning.options ~expected_bucket_owner:owner ()
+      : (Bucket.Versioning.options, Error.t) result);
+  ignore
+    (Bucket.Versioning.options_exn ~expected_bucket_owner:owner ()
+      : Bucket.Versioning.options);
+  ignore (Bucket.Tagging.default_options : Bucket.Tagging.options);
+  ignore
+    (Bucket.Tagging.options ~expected_bucket_owner:owner ()
+      : (Bucket.Tagging.options, Error.t) result);
+  ignore
+    (Bucket.Tagging.options_exn ~expected_bucket_owner:owner ()
+      : Bucket.Tagging.options);
+  ignore (Bucket.Encryption.default_options : Bucket.Encryption.options);
+  ignore
+    (Bucket.Encryption.options ~expected_bucket_owner:owner ()
+      : (Bucket.Encryption.options, Error.t) result);
+  ignore
+    (Bucket.Encryption.options_exn ~expected_bucket_owner:owner ()
+      : Bucket.Encryption.options);
+  ignore (Bucket.Cors.default_options : Bucket.Cors.options);
+  ignore
+    (Bucket.Cors.options ~expected_bucket_owner:owner ()
+      : (Bucket.Cors.options, Error.t) result);
+  ignore
+    (Bucket.Cors.options_exn ~expected_bucket_owner:owner ()
+      : Bucket.Cors.options);
+  ignore
+    (Bucket.Public_access_block.default_options
+      : Bucket.Public_access_block.options);
+  ignore
+    (Bucket.Public_access_block.options ~expected_bucket_owner:owner ()
+      : (Bucket.Public_access_block.options, Error.t) result);
+  ignore
+    (Bucket.Public_access_block.options_exn ~expected_bucket_owner:owner ()
+      : Bucket.Public_access_block.options);
+  ignore
+    (Bucket.Ownership_controls.default_options
+      : Bucket.Ownership_controls.options);
+  ignore
+    (Bucket.Ownership_controls.options ~expected_bucket_owner:owner ()
+      : (Bucket.Ownership_controls.options, Error.t) result);
+  ignore
+    (Bucket.Ownership_controls.options_exn ~expected_bucket_owner:owner ()
+      : Bucket.Ownership_controls.options);
   ignore (None : Delete_bucket.result option);
   ignore (None : Head_bucket.result option);
   ignore (None : List_buckets.result option);
+  ignore (Get_bucket_location.default_options : Get_bucket_location.options);
+  ignore
+    (Get_bucket_location.options ~expected_bucket_owner:owner ()
+      : (Get_bucket_location.options, Error.t) result);
+  ignore
+    (Get_bucket_location.options_exn ~expected_bucket_owner:owner ()
+      : Get_bucket_location.options);
   ignore (None : Get_bucket_location.result option);
   ignore
     (Create_multipart_upload.default_options : Create_multipart_upload.options);
@@ -97,20 +263,60 @@ let test_native_body_api_compiles () =
   ignore
     (S3.Object.find_metadata
       : S3.connection ->
-        bucket:string ->
-        key:string ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
         ?options:Head_object.options ->
         unit ->
         (Head_object.result option, Error.t) result);
   ignore
     (S3.Object.find
       : S3.connection ->
-        bucket:string ->
-        key:string ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
         ?options:Get_object.options ->
         consume:(S3.Reader.t -> ('a, Error.t) result) ->
         unit ->
-        ((Get_object.result * 'a) option, Error.t) result);
+        ('a Get_object.result option, Error.t) result);
+  ignore
+    (S3.Object.Tagging.put
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
+        ?options:Object.Tagging.options ->
+        tags:Tag.Set.t ->
+        unit ->
+        (Awskit.Response.t, Error.t) result);
+  ignore
+    (S3.Bucket.head
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        ?options:Head_bucket.options ->
+        unit ->
+        (Head_bucket.result, Error.t) result);
+  ignore
+    (S3.Bucket.Policy.put
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        ?options:Bucket.Policy.options ->
+        policy:Policy.t ->
+        unit ->
+        (Awskit.Response.t, Error.t) result);
+  ignore
+    (S3.Bucket.Versioning.put
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        ?options:Bucket.Versioning.options ->
+        status:Bucket.Versioning.Status.t ->
+        unit ->
+        (Awskit.Response.t, Error.t) result);
+  ignore
+    (S3.Bucket.Encryption.put
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        ?options:Bucket.Encryption.options ->
+        config:Bucket.Encryption.config ->
+        unit ->
+        (Awskit.Response.t, Error.t) result);
   ()
 
 let service_error ?code ?message status =

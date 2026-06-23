@@ -46,14 +46,14 @@ end
 
 module Create = struct
   type options = {
-    content_type : string option;
+    content_type : Content_type.t option;
     metadata : Metadata.t;
     storage_class : Storage_class.t option;
-    tags : Tag.t list;
+    tags : Tag.Set.t;
     checksum_algorithm : Object.Checksum.Algorithm.t option;
     checksum_type : Object.Checksum.Type.t option;
     server_side_encryption : Object.Encryption.request option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
   }
 
   type result = { upload : Upload.t; response : Awskit.Response.t }
@@ -61,9 +61,9 @@ module Create = struct
   let default_options =
     {
       content_type = None;
-      metadata = [];
+      metadata = Metadata.empty;
       storage_class = None;
-      tags = [];
+      tags = Tag.Set.empty;
       checksum_algorithm = None;
       checksum_type = None;
       server_side_encryption = None;
@@ -74,7 +74,7 @@ end
 module Upload_part = struct
   type options = {
     checksum : Object.Checksum.value option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
   }
 
   type result = {
@@ -88,7 +88,7 @@ end
 
 module Complete = struct
   type options = {
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
     checksum : Object.Checksum.value option;
     checksum_type : Object.Checksum.Type.t option;
     multipart_object_size : int64 option;
@@ -111,7 +111,7 @@ module Complete = struct
 end
 
 module Abort = struct
-  type options = { expected_bucket_owner : string option }
+  type options = { expected_bucket_owner : Account_id.t option }
   type result = Awskit.Response.t
 
   let default_options = { expected_bucket_owner = None }
@@ -121,7 +121,7 @@ module List_parts = struct
   type options = {
     max_parts : int option;
     part_number_marker : int option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
   }
 
   type part_info = {

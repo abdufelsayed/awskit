@@ -33,7 +33,8 @@ let test_retry_slow_down_then_success () =
     Recording_runtime.connect [ response 503 slow_down; response 200 "" ]
   in
   let result =
-    Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+    Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file")
       ~body:(Recording_s3.Body.of_string "body")
       ()
   in
@@ -50,7 +51,8 @@ let test_retry_exhaustion_adds_context () =
       [ response 503 slow_down; response 503 slow_down; response 503 slow_down ]
   in
   (match
-     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+     Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file")
        ~body:(Recording_s3.Body.of_string "body")
        ()
    with
@@ -74,7 +76,8 @@ let test_retry_fatal_error_not_retried () =
     Recording_runtime.connect [ response 403 denied; response 200 "" ]
   in
   (match
-     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+     Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file")
        ~body:(Recording_s3.Body.of_string "body")
        ()
    with
@@ -95,7 +98,8 @@ let test_retry_disabled_policy () =
       [ response 503 slow_down; response 200 "" ]
   in
   (match
-     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+     Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file")
        ~body:(Recording_s3.Body.of_string "body")
        ()
    with
@@ -118,7 +122,8 @@ let test_retry_budget_exhaustion_stops_before_sleep () =
       [ response 503 slow_down; response 200 "" ]
   in
   (match
-     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+     Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file")
        ~body:(Recording_s3.Body.of_string "body")
        ()
    with
@@ -149,7 +154,8 @@ let test_non_replayable_request_body_not_retried () =
         Recording_runtime.write_request_body_string writer "body")
   in
   (match
-     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~body ()
+     Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ~body ()
    with
   | Error error when Error.service_code error = Some "SlowDown" ->
       let text = Awskit.Error.to_string_hum error in
@@ -193,7 +199,8 @@ let test_runtime_stream_request_body_error_propagates () =
         | Ok () -> Error stream_error)
   in
   match
-    Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~body ()
+    Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file") ~body ()
   with
   | Error error when is_body_error error ->
       let text = Awskit.Error.to_string_hum error in
@@ -209,7 +216,8 @@ let test_runtime_stream_request_body_error_propagates () =
 let test_runtime_transport_error_adds_operation_context () =
   let conn = Recording_runtime.connect [] in
   match
-    Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+    Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file")
       ~body:(Recording_s3.Body.of_string "body")
       ()
   with
@@ -229,7 +237,8 @@ let test_expired_credentials_fail_before_transport () =
   in
   let conn = Recording_runtime.connect ~credentials [ response 200 "" ] in
   match
-    Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+    Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file")
       ~body:(Recording_s3.Body.of_string "body")
       ()
   with
@@ -248,7 +257,8 @@ let test_non_success_response_body_read_error_adds_operation_context () =
     Recording_runtime.connect [ response 503 ~read_error_after:0 slow_down ]
   in
   match
-    Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file"
+    Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file")
       ~body:(Recording_s3.Body.of_string "body")
       ()
   with
@@ -303,7 +313,8 @@ let test_request_body_descriptor_validation () =
       ~write:(fun _writer -> Ok ())
   in
   (match
-     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"file" ~body ()
+     Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ~body ()
    with
   | Error error when is_validation_field "content_length" error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
@@ -311,8 +322,8 @@ let test_request_body_descriptor_validation () =
   Alcotest.(check int) "object put not called" 0 (List.length conn.calls);
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
   (match
-     Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket"
-       ~key:"large.bin" ~upload_id ~part_number:1 ~body ()
+     Recording_s3.Multipart.upload_part conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "large.bin") ~upload_id ~part_number:1 ~body ()
    with
   | Error error when is_validation_field "content_length" error -> ()
   | Error error ->
@@ -333,15 +344,16 @@ let test_request_body_descriptor_validation () =
         Recording_runtime.write_request_body_string writer "body")
   in
   (match
-     Recording_s3.Object.put conn ~bucket:"my-bucket" ~key:"unknown" ~body ()
+     Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "unknown") ~body ()
    with
   | Error error when is_validation_field "content_length" error -> ()
   | Error error ->
       Alcotest.failf "unexpected unknown-length put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected unknown-length object validation failure");
   (match
-     Recording_s3.Multipart.upload_part conn ~bucket:"my-bucket"
-       ~key:"large.bin" ~upload_id ~part_number:1 ~body ()
+     Recording_s3.Multipart.upload_part conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "large.bin") ~upload_id ~part_number:1 ~body ()
    with
   | Error error when is_validation_field "content_length" error -> ()
   | Error error ->
@@ -369,12 +381,16 @@ let test_response_body_drain_errors () =
     | Ok read -> Ok (Bytes.sub_string bytes 0 read)
   in
   (match
-     Recording_s3.Object.get conn ~bucket:"my-bucket" ~key:"file" ~consume ()
+     Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ~consume ()
    with
   | Error error when is_body_error error -> ()
   | Error error -> Alcotest.failf "unexpected get error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected drain failure after successful consume");
-  (match Recording_s3.Object.head conn ~bucket:"my-bucket" ~key:"file" () with
+  (match
+     Recording_s3.Object.head conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ()
+   with
   | Error error when is_body_error error -> ()
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected discard failure after successful head");
@@ -391,7 +407,8 @@ let test_response_body_consumer_error_wins_over_drain_error () =
       ]
   in
   match
-    Recording_s3.Object.get conn ~bucket:"my-bucket" ~key:"file"
+    Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file")
       ~consume:(fun _reader -> Error consumer_error)
       ()
   with
@@ -413,7 +430,8 @@ let test_in_memory_helper_limit_error_uses_max_bytes () =
       ]
   in
   match
-    Recording_s3.Object.get conn ~bucket:"my-bucket" ~key:"file"
+    Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file")
       ~consume:(Recording_s3.Reader.to_string ~max_bytes:3L)
       ()
   with

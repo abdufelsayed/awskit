@@ -19,6 +19,9 @@ let unwrap label = function
   | Ok value -> value
   | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
+let bucket_name value = Awskit_s3.Bucket_name.of_string_exn value
+let object_key value = Awskit_s3.Object_key.of_string_exn value
+
 let or_fail_msg label = function
   | Ok value -> value
   | Error (`Msg message) -> fail "%s: %s" label message
@@ -55,23 +58,27 @@ let create_s3 stdenv sw =
 
 let run stdenv =
   Eio.Switch.run @@ fun sw ->
-  let bucket = env "AWSKIT_EXAMPLE_BUCKET" in
-  let key = env_default "AWSKIT_EXAMPLE_KEY" "awskit-examples/put-get.txt" in
+  let bucket = bucket_name (env "AWSKIT_EXAMPLE_BUCKET") in
+  let key =
+    object_key (env_default "AWSKIT_EXAMPLE_KEY" "awskit-examples/put-get.txt")
+  in
   let body = env_default "AWSKIT_EXAMPLE_BODY" "Hello from awskit live S3." in
   let s3 = create_s3 stdenv sw in
   let put =
     S3.Object.put s3 ~bucket ~key ~body:(S3.Body.of_string body) ()
     |> unwrap "put object"
   in
-  Format.printf "uploaded s3://%s/%s@." bucket key;
+  Format.printf "uploaded s3://%a/%a@." Awskit_s3.Bucket_name.pp bucket
+    Awskit_s3.Object_key.pp key;
   Format.printf "etag: %a@."
     (Format.pp_print_option Awskit_s3.Object.Etag.pp)
     put.etag;
-  let _info, downloaded =
+  let downloaded =
     S3.Object.get s3 ~bucket ~key
       ~consume:(S3.Reader.to_string ~max_bytes:1_048_576L)
       ()
     |> unwrap "get object"
+    |> fun result -> result.Awskit_s3.Get_object.value
   in
   Format.printf "downloaded: %S@." downloaded
 

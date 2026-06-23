@@ -160,10 +160,12 @@ let () =
   with
   | Error error -> Fmt.epr "S3 error: %a@." Awskit_s3.Error.pp error
   | Ok s3 -> (
+      let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
+      let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
       match
         Awskit_s3_eio.Object.put s3
-          ~bucket:"my-bucket"
-          ~key:"hello.txt"
+          ~bucket
+          ~key
           ~body:(Awskit_s3_eio.Body.of_string "Hello, S3!")
           ()
       with
@@ -198,15 +200,17 @@ let run () =
   match Awskit_s3_lwt_unix.create () with
   | Error error -> Lwt_io.eprintf "S3 error: %a\n" Awskit_s3.Error.pp error
   | Ok s3 ->
+      let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
+      let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
       let* result =
         Awskit_s3_lwt_unix.Object.get s3
-          ~bucket:"my-bucket"
-          ~key:"hello.txt"
+          ~bucket
+          ~key
           ~consume:(Awskit_s3_lwt_unix.Reader.to_string ~max_bytes:1_048_576L)
           ()
       in
       match result with
-      | Ok (_info, body) -> Lwt_io.printl body
+      | Ok result -> Lwt_io.printl result.value
       | Error error -> Lwt_io.eprintf "S3 error: %a\n" Awskit_s3.Error.pp error
 ```
 
@@ -281,11 +285,13 @@ in
 let clock = Awskit_s3_sim.Clock.create () in
 let store = Awskit_s3_sim.create_store ~clock () in
 let conn = Awskit_s3_sim.connect store ~credentials in
+let bucket = Awskit_s3.Bucket_name.of_string_exn "test" in
+let key = Awskit_s3.Object_key.of_string_exn "hello" in
 
-Awskit_s3_sim.Bucket.create conn ~bucket:"test" () |> ignore;
+Awskit_s3_sim.Bucket.create conn ~bucket () |> ignore;
 Awskit_s3_sim.Object.put conn
-  ~bucket:"test"
-  ~key:"hello"
+  ~bucket
+  ~key
   ~body:(Awskit_s3_sim.Body.of_string "world")
   ()
 |> ignore

@@ -7,7 +7,7 @@ val delete_result :
   Object.Delete.result
 
 val delete_objects_error :
-  string -> string -> string -> Object.Delete_many.item_error
+  Object_key.t -> string -> string -> Object.Delete_many.item_error
 
 val delete_objects_conditions_match :
   Object.Delete_many.object_ -> Simulator_state.stored_version option -> bool

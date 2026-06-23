@@ -73,7 +73,7 @@ type upload_result =
       (** High-level upload result, tagged by the strategy actually used. *)
 
 type download_result =
-  | Get of Object.Get.result
+  | Get of Object.Get.info
   | Ranged of { info : Object.Head.result; parts : int }
       (** High-level download result. Ranged downloads include the initial
           [HeadObject] metadata and the number of downloaded ranges. *)

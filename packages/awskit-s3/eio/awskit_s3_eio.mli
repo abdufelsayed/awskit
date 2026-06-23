@@ -83,8 +83,8 @@ module Object : sig
   module Transfer : sig
     val upload_file :
       t ->
-      bucket:string ->
-      key:string ->
+      bucket:Awskit_s3.Bucket_name.t ->
+      key:Awskit_s3.Object_key.t ->
       ?options:Awskit_s3.Transfer.upload_options ->
       ?on_progress:(int64 -> unit) ->
       path:_ Eio.Path.t ->
@@ -95,8 +95,8 @@ module Object : sig
 
     val download_file :
       t ->
-      bucket:string ->
-      key:string ->
+      bucket:Awskit_s3.Bucket_name.t ->
+      key:Awskit_s3.Object_key.t ->
       ?options:Awskit_s3.Transfer.download_options ->
       ?on_progress:(int64 -> unit) ->
       path:_ Eio.Path.t ->
@@ -107,8 +107,8 @@ module Object : sig
 
     val multipart_upload_file :
       t ->
-      bucket:string ->
-      key:string ->
+      bucket:Awskit_s3.Bucket_name.t ->
+      key:Awskit_s3.Object_key.t ->
       ?options:Awskit_s3.Transfer.upload_options ->
       ?on_progress:(int64 -> unit) ->
       path:_ Eio.Path.t ->
@@ -119,8 +119,8 @@ module Object : sig
 
     val resume_multipart_upload_file :
       t ->
-      bucket:string ->
-      key:string ->
+      bucket:Awskit_s3.Bucket_name.t ->
+      key:Awskit_s3.Object_key.t ->
       upload_id:Awskit_s3.Multipart.Upload_id.t ->
       ?options:Awskit_s3.Transfer.upload_options ->
       ?on_progress:(int64 -> unit) ->

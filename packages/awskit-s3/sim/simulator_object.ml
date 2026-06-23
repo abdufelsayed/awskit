@@ -78,13 +78,17 @@ module Object = struct
                 Ok
                   {
                     List_object_versions.bucket = Some bucket;
-                    prefix = options.prefix;
-                    delimiter = options.delimiter;
+                    prefix =
+                      Option.map Object_key.Prefix.to_string options.prefix;
+                    delimiter =
+                      Option.map Object_key.Delimiter.to_string
+                        options.delimiter;
                     versions;
                     delete_markers;
                     common_prefixes = [];
                     is_truncated;
-                    key_marker = options.key_marker;
+                    key_marker =
+                      Option.map Object_key.to_string options.key_marker;
                     version_id_marker = options.version_id_marker;
                     next_key_marker;
                     next_version_id_marker;
@@ -199,12 +203,19 @@ module Object = struct
           invalid ~field:"max_pages" "max_pages must be greater than zero"
 
     let options_for_page (base : List_object_versions.options) page =
-      {
-        base with
-        List_object_versions.key_marker =
-          page.List_object_versions.next_key_marker;
-        version_id_marker = page.next_version_id_marker;
-      }
+      let key_marker =
+        match page.List_object_versions.next_key_marker with
+        | None -> Ok None
+        | Some key -> Result.map Option.some (Object_key.of_string key)
+      in
+      Result.map
+        (fun key_marker ->
+          {
+            base with
+            List_object_versions.key_marker;
+            version_id_marker = page.next_version_id_marker;
+          })
+        key_marker
 
     let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
       match validate_max_pages max_pages with
@@ -227,8 +238,10 @@ module Object = struct
                       | Some max_pages when page_count >= max_pages -> Ok acc
                       | _ -> (
                           match page.next_key_marker with
-                          | Some _ ->
-                              loop (options_for_page base page) page_count acc
+                          | Some _ -> (
+                              match options_for_page base page with
+                              | Ok options -> loop options page_count acc
+                              | Error error -> Error error)
                           | None ->
                               Error
                                 (decode

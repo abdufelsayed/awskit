@@ -6,6 +6,6 @@ let make_simulator () =
   let store = Simulator.create_store ~clock () in
   let conn = Simulator.connect store ~credentials:creds in
   ignore
-    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    (Simulator.Bucket.create conn ~bucket:(bucket_name "test-bucket") ()
     |> ok_or_fail "bucket");
   conn

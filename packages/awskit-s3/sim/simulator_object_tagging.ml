@@ -9,7 +9,7 @@ module Tagging = struct
     | Error error -> Error error
     | Ok obj -> Ok { Object.Tagging.tags = obj.tags; response = response 200 }
 
-  let put conn ~bucket ~key ?options:_ tags =
+  let put conn ~bucket ~key ?options:_ ~tags () =
     match require_object conn bucket key with
     | Error error -> Error error
     | Ok obj -> (
@@ -23,6 +23,6 @@ module Tagging = struct
     match require_object conn bucket key with
     | Error error -> Error error
     | Ok obj ->
-        obj.tags <- [];
+        obj.tags <- Tag.Set.empty;
         Ok (response 204)
 end

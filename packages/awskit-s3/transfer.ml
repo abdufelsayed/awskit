@@ -39,7 +39,7 @@ type upload_result =
   | Multipart of multipart_upload_result
 
 type download_result =
-  | Get of Object.Get.result
+  | Get of Object.Get.info
   | Ranged of { info : Object.Head.result; parts : int }
 
 let upload_strategy = function Put _ -> `Put | Multipart _ -> `Multipart

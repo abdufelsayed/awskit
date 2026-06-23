@@ -21,10 +21,10 @@ type stored_object = {
   mutable body : string;
   mutable etag : Object.Etag.t;
   mutable version_id : Object.Version_id.t option;
-  mutable content_type : string option;
+  mutable content_type : Content_type.t option;
   mutable metadata : Metadata.t;
   mutable storage_class : Storage_class.t option;
-  mutable tags : Tag.t list;
+  mutable tags : Tag.Set.t;
   mutable checksum : Object.Checksum.response;
   mutable last_modified : Ptime.t;
 }
@@ -48,10 +48,10 @@ type stored_part = {
 
 type multipart_upload = {
   upload : Multipart.Upload.t;
-  content_type : string option;
+  content_type : Content_type.t option;
   metadata : Metadata.t;
   storage_class : Storage_class.t option;
-  tags : Tag.t list;
+  tags : Tag.Set.t;
   checksum_algorithm : Object.Checksum.Algorithm.t option;
   checksum_type : Object.Checksum.Type.t option;
   parts : (int, stored_part) Hashtbl.t;
@@ -64,7 +64,7 @@ type bucket_state = {
   versions : (string, stored_version list) Hashtbl.t;
   multipart_uploads : (string, multipart_upload) Hashtbl.t;
   mutable policy : Policy.t option;
-  mutable bucket_tags : Tag.t list;
+  mutable bucket_tags : Tag.Set.t;
   mutable versioning : Bucket.Versioning.Status.t option;
   mutable encryption : Bucket.Encryption.config option;
   mutable cors : Bucket.Cors.config option;

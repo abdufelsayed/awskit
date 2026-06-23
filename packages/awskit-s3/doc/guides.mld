@@ -12,6 +12,10 @@ Start with [Body.of_string] or [Body.of_bytes] for buffered uploads, and
 [Reader.to_string ~max_bytes] or [Reader.to_bytes ~max_bytes] for bounded
 buffered downloads.
 
+Snippets assume [bucket] is a {!type:Awskit_s3.Bucket_name.t} and [key] is an
+{!type:Awskit_s3.Object_key.t}; construct user input with
+[Bucket_name.of_string] and [Object_key.of_string].
+
 {2 Upload}
 
 {[
@@ -31,16 +35,17 @@ preconditions, checksum headers, and server-side encryption headers:
 
 {[
 let options =
-  {
-    Awskit_s3.Put_object.default_options with
-    content_type = Some "text/plain";
-    metadata = [ ("origin", "example") ];
-    tags = [ { Awskit_s3.Tag.key = "env"; value = "dev" } ];
-  }
+  Awskit_s3.Put_object.options_exn
+    ~content_type:(Awskit_s3.Content_type.of_string_exn "text/plain")
+    ~metadata:(Awskit_s3.Metadata.of_list_exn [ ("origin", "example") ])
+    ~tags:
+      (Awskit_s3.Tag.Set.of_list_exn
+         [ Awskit_s3.Tag.create_exn ~key:"env" ~value:"dev" ])
+    ()
 in
 Awskit_s3_eio.Object.put s3
-  ~bucket:"my-bucket"
-  ~key:"hello.txt"
+  ~bucket
+  ~key
   ~options
   ~body:(Awskit_s3_eio.Body.of_string "hello")
   ()
@@ -123,10 +128,11 @@ update only the continuation token between requests. Use [max_pages] to cap
 traversal:
 
 {[
+let prefix = Awskit_s3.Object_key.Prefix.of_string_exn "logs/" in
 let keys =
   Awskit_s3_eio.Object.List_objects_v2.keys s3
-    ~bucket:"my-bucket"
-    ~options:{ Awskit_s3.List_objects_v2.default_options with prefix = Some "logs/" }
+    ~bucket
+    ~options:(Awskit_s3.List_objects_v2.options_exn ~prefix ())
     ~max_pages:10
     ()
 ]}
@@ -146,13 +152,12 @@ options and page types:
 
 {[
 let options =
-  {
-    Awskit_s3.List_object_versions.default_options with
-    prefix = Some "logs/";
-  }
+  Awskit_s3.List_object_versions.options_exn
+    ~prefix:(Awskit_s3.Object_key.Prefix.of_string_exn "logs/")
+    ()
 in
 Awskit_s3_eio.Object.List_object_versions.object_versions s3
-  ~bucket:"my-bucket"
+  ~bucket
   ~options
   ()
 ]}
@@ -165,16 +170,16 @@ In-memory helpers live under the adapter [Body] and [Reader] modules. Use
 
 {[
 Awskit_s3_eio.Object.put s3
-  ~bucket:"my-bucket"
-  ~key:"hello.txt"
+  ~bucket
+  ~key
   ~body:(Awskit_s3_eio.Body.of_string "hello")
   ()
 ]}
 
 {[
 Awskit_s3_eio.Object.get s3
-  ~bucket:"my-bucket"
-  ~key:"hello.txt"
+  ~bucket
+  ~key
   ~consume:(Awskit_s3_eio.Reader.to_string ~max_bytes:1_048_576L)
   ()
 ]}
@@ -224,8 +229,8 @@ Lwt Unix adapters; they are not part of the runtime-agnostic [awskit-s3] core.
 
 {[
 Awskit_s3_eio.Object.Transfer.upload_file s3
-  ~bucket:"my-bucket"
-  ~key:"archive.tar"
+  ~bucket
+  ~key:(Awskit_s3.Object_key.of_string_exn "archive.tar")
   ~on_progress:(fun bytes -> Fmt.pr "uploaded %Ld bytes@." bytes)
   ~path
   ()
@@ -233,8 +238,8 @@ Awskit_s3_eio.Object.Transfer.upload_file s3
 
 {[
 Awskit_s3_eio.Object.Transfer.download_file s3
-  ~bucket:"my-bucket"
-  ~key:"archive.tar"
+  ~bucket
+  ~key:(Awskit_s3.Object_key.of_string_exn "archive.tar")
   ~on_progress:(fun bytes -> Fmt.pr "downloaded %Ld bytes@." bytes)
   ~path
   ()
@@ -245,8 +250,8 @@ Awskit_s3_eio.Object.Transfer.download_file s3
 {[
 let* result =
   Awskit_s3_lwt_unix.Object.Transfer.upload_file s3
-    ~bucket:"my-bucket"
-    ~key:"archive.tar"
+    ~bucket
+    ~key:(Awskit_s3.Object_key.of_string_exn "archive.tar")
     ~path:"/tmp/archive.tar"
     ()
 ]}
@@ -261,8 +266,8 @@ let options =
 in
 let* result =
   Awskit_s3_lwt_unix.Object.Transfer.multipart_upload_file s3
-    ~bucket:"my-bucket"
-    ~key:"large.tar"
+    ~bucket
+    ~key:(Awskit_s3.Object_key.of_string_exn "large.tar")
     ~options
     ~path:"/tmp/large.tar"
     ~on_progress:(fun bytes -> Fmt.pr "uploaded %Ld bytes@." bytes)
@@ -277,8 +282,8 @@ failure, so the same upload ID can be retried:
 {[
 let* result =
   Awskit_s3_lwt_unix.Object.Transfer.resume_multipart_upload_file s3
-    ~bucket:"my-bucket"
-    ~key:"large.tar"
+    ~bucket
+    ~key:(Awskit_s3.Object_key.of_string_exn "large.tar")
     ~upload_id
     ~path:"/tmp/large.tar"
     ()
@@ -400,11 +405,17 @@ subresources:
 access configuration. Applications can construct those documents with their own
 policy model and pass the serialized JSON to the client.
 
-Relevant bucket operations that target an existing bucket accept
-[expected_bucket_owner]. Awskit sends it as [x-amz-expected-bucket-owner] so AWS
-can reject calls that resolve to a bucket owned by a different account.
+Relevant bucket operations that target an existing bucket accept an operation
+[options] value with [expected_bucket_owner]. Awskit sends it as
+[x-amz-expected-bucket-owner] so AWS can reject calls that resolve to a bucket
+owned by a different account.
 
 {[
+let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
+let owner = Awskit_s3.Account_id.of_string_exn "123456789012" in
+let options = Awskit_s3.Bucket.Encryption.options_exn
+    ~expected_bucket_owner:owner ()
+in
 let encryption =
   {
     Awskit_s3.Bucket.Encryption.rules =
@@ -420,9 +431,10 @@ let encryption =
   }
 in
 Awskit_s3_eio.Bucket.Encryption.put s3
-  ~bucket:"my-bucket"
-  ~expected_bucket_owner:"123456789012"
-  encryption
+  ~bucket
+  ~options
+  ~config:encryption
+  ()
 ]}
 
 {1 Multipart Uploads}
@@ -483,8 +495,8 @@ request artifacts without an adapter connection.
 
 {[
 Awskit_s3_eio.Presigned.get_object s3
-  ~bucket:"my-bucket"
-  ~key:"public.txt"
+  ~bucket
+  ~key:(Awskit_s3.Object_key.of_string_exn "public.txt")
   ()
 ]}
 
@@ -502,8 +514,8 @@ Awskit_s3.Presigned.put_object_with_endpoint_config
   ~credentials
   ~now
   ~endpoint_config
-  ~bucket:"my-bucket"
-  ~key:"upload.txt"
+  ~bucket
+  ~key:(Awskit_s3.Object_key.of_string_exn "upload.txt")
   ()
 ]}
 
@@ -515,8 +527,8 @@ Awskit_s3.Presigned.upload_part
   ~region:"us-east-1"
   ~credentials
   ~now
-  ~bucket:"my-bucket"
-  ~key:"large.bin"
+  ~bucket
+  ~key:(Awskit_s3.Object_key.of_string_exn "large.bin")
   ~upload_id
   ~part_number:1
   ()

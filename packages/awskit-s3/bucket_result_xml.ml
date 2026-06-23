@@ -7,24 +7,23 @@ let create_config region =
 
 let parse_list body =
   let* nodes = Xml.decode_root body ~name:"ListAllMyBucketsResult" in
-  let buckets =
-    Xml.child "Buckets" nodes
-    |> Option.value ~default:[]
-    |> Xml.children "Bucket"
-    |> List.filter_map (fun nodes ->
-        match Xml.child_text "Name" nodes with
-        | None -> None
-        | Some name ->
-            Some
-              {
-                Bucket.name;
-                creation_date =
-                  Option.bind
-                    (Xml.child_text "CreationDate" nodes)
-                    ptime_of_string;
-              })
-  in
-  Ok buckets
+  Xml.child "Buckets" nodes
+  |> Option.value ~default:[]
+  |> Xml.children_result "Bucket" ~f:(fun index nodes ->
+      let path = Fmt.str "ListAllMyBucketsResult.Buckets.Bucket[%d]" index in
+      let* name = Xml.required_child_text ~path "Name" nodes in
+      let* name =
+        match Bucket_name.of_string name with
+        | Ok _ as result -> result
+        | Error error ->
+            Xml.decode_field_error ~path "%s" (Awskit.Error.to_string_hum error)
+      in
+      Ok
+        {
+          Bucket.name;
+          creation_date =
+            Option.bind (Xml.child_text "CreationDate" nodes) ptime_of_string;
+        })
 
 let parse_location body =
   let* nodes = Xml.decode_root body ~name:"LocationConstraint" in

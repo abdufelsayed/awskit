@@ -61,14 +61,14 @@ module Put_object : sig
     expires_in : Ptime.Span.t option;
         (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
             authentication. *)
-    content_type : string option;
+    content_type : Content_type.t option;
         (** Optional [Content-Type] header to sign. The uploader must send the
             same value. *)
     checksum : Object.Checksum.value option;
         (** Optional checksum header to sign. *)
     server_side_encryption : Object.Encryption.request option;
         (** Optional server-side encryption headers to sign. *)
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
         (** Additional headers to include in the signature. Callers must send
@@ -84,12 +84,12 @@ module Get_object : sig
     expires_in : Ptime.Span.t option;
         (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
             authentication. *)
-    response_content_type : string option;
+    response_content_type : Content_type.t option;
         (** Optional [response-content-type] query override. *)
-    response_content_disposition : string option;
+    response_content_disposition : Header_value.t option;
         (** Optional [response-content-disposition] query override. *)
     version_id : Object.Version_id.t option;  (** Object version to presign. *)
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
         (** Additional headers to include in the signature. *)
@@ -106,7 +106,7 @@ module Upload_part : sig
             authentication. *)
     checksum : Object.Checksum.value option;
         (** Optional checksum header to sign for the part body. *)
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
         (** Additional headers to include in the signature. *)
@@ -121,7 +121,7 @@ module Delete_object : sig
     expires_in : Ptime.Span.t option;
         (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
             authentication. *)
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
         (** Additional headers to include in the signature. *)
@@ -148,8 +148,8 @@ val get_object :
   now:Ptime.t ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
-  bucket:string ->
-  key:string ->
+  bucket:Bucket_name.t ->
+  key:Object_key.t ->
   ?options:Get_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -161,8 +161,8 @@ val put_object :
   now:Ptime.t ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
-  bucket:string ->
-  key:string ->
+  bucket:Bucket_name.t ->
+  key:Object_key.t ->
   ?options:Put_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -176,8 +176,8 @@ val head_object :
   now:Ptime.t ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
-  bucket:string ->
-  key:string ->
+  bucket:Bucket_name.t ->
+  key:Object_key.t ->
   ?options:Get_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -189,8 +189,8 @@ val delete_object :
   now:Ptime.t ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
-  bucket:string ->
-  key:string ->
+  bucket:Bucket_name.t ->
+  key:Object_key.t ->
   ?options:Delete_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -202,8 +202,8 @@ val upload_part :
   now:Ptime.t ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
-  bucket:string ->
-  key:string ->
+  bucket:Bucket_name.t ->
+  key:Object_key.t ->
   upload_id:Multipart.Upload_id.t ->
   part_number:int ->
   ?options:Upload_part.options ->
@@ -217,8 +217,8 @@ val get_object_with_endpoint_config :
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
-  bucket:string ->
-  key:string ->
+  bucket:Bucket_name.t ->
+  key:Object_key.t ->
   ?options:Get_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -229,8 +229,8 @@ val put_object_with_endpoint_config :
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
-  bucket:string ->
-  key:string ->
+  bucket:Bucket_name.t ->
+  key:Object_key.t ->
   ?options:Put_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -241,8 +241,8 @@ val head_object_with_endpoint_config :
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
-  bucket:string ->
-  key:string ->
+  bucket:Bucket_name.t ->
+  key:Object_key.t ->
   ?options:Get_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -253,8 +253,8 @@ val delete_object_with_endpoint_config :
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
-  bucket:string ->
-  key:string ->
+  bucket:Bucket_name.t ->
+  key:Object_key.t ->
   ?options:Delete_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -265,8 +265,8 @@ val upload_part_with_endpoint_config :
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
-  bucket:string ->
-  key:string ->
+  bucket:Bucket_name.t ->
+  key:Object_key.t ->
   upload_id:Multipart.Upload_id.t ->
   part_number:int ->
   ?options:Upload_part.options ->

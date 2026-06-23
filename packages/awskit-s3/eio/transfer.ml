@@ -232,8 +232,8 @@ module Make
       module Object : sig
         val put :
           Runtime.connection ->
-          bucket:string ->
-          key:string ->
+          bucket:Awskit_s3.Bucket_name.t ->
+          key:Awskit_s3.Object_key.t ->
           ?options:Awskit_s3.Put_object.options ->
           body:Runtime.request_body ->
           unit ->
@@ -241,18 +241,18 @@ module Make
 
         val get :
           Runtime.connection ->
-          bucket:string ->
-          key:string ->
+          bucket:Awskit_s3.Bucket_name.t ->
+          key:Awskit_s3.Object_key.t ->
           ?options:Awskit_s3.Get_object.options ->
           consume:
             (Runtime.response_body_reader -> ('a, Awskit_s3.Error.t) result) ->
           unit ->
-          (Awskit_s3.Get_object.result * 'a, Awskit_s3.Error.t) result
+          ('a Awskit_s3.Get_object.result, Awskit_s3.Error.t) result
 
         val head :
           Runtime.connection ->
-          bucket:string ->
-          key:string ->
+          bucket:Awskit_s3.Bucket_name.t ->
+          key:Awskit_s3.Object_key.t ->
           ?options:Awskit_s3.Head_object.options ->
           unit ->
           (Awskit_s3.Head_object.result, Awskit_s3.Error.t) result
@@ -500,7 +500,12 @@ struct
     let* () = Awskit_s3.Transfer.validate_upload_multipart_selection options in
     let* content_length = regular_file_length path in
     let* specs = multipart_specs ~content_length ~part_size:options.part_size in
-    let* upload = Awskit_s3.Multipart.Upload.create ~bucket ~key ~upload_id in
+    let* upload =
+      Awskit_s3.Multipart.Upload.create
+        ~bucket:(Awskit_s3.Bucket_name.to_string bucket)
+        ~key:(Awskit_s3.Object_key.to_string key)
+        ~upload_id
+    in
     let* uploaded_parts =
       matching_uploaded_parts conn ~bucket ~key ~upload_id ~options specs
     in
@@ -600,6 +605,21 @@ struct
       expected_bucket_owner = options.expected_bucket_owner;
     }
 
+  let get_info (result : _ Awskit_s3.Get_object.result) :
+      Awskit_s3.Get_object.info =
+    {
+      etag = result.etag;
+      content_type = result.content_type;
+      content_length = result.content_length;
+      last_modified = result.last_modified;
+      metadata = result.metadata;
+      storage_class = result.storage_class;
+      version_id = result.version_id;
+      checksum = result.checksum;
+      server_side_encryption = result.server_side_encryption;
+      response = result.response;
+    }
+
   let ranged_get_options_of_head (info : Awskit_s3.Head_object.result)
       (get_options : Awskit_s3.Get_object.options) :
       Awskit_s3.Get_object.options =
@@ -656,7 +676,7 @@ struct
     in
     match S3.Object.get conn ~bucket ~key ~options:get_options ~consume () with
     | Error _ as error -> error
-    | Ok (_, ()) -> Ok ()
+    | Ok { value = (); _ } -> Ok ()
 
   let ranged_download_to_file conn ~bucket ~key ~options ?on_progress ~path
       ~file ranges =
@@ -696,7 +716,7 @@ struct
           ~consume:(Reader.to_path ?on_progress path)
           ()
       in
-      Ok (Awskit_s3.Transfer.Get (fst result))
+      Ok (Awskit_s3.Transfer.Get (get_info result))
     in
     let head_options = head_options_of_get_options options.get_options in
     let* info = S3.Object.head conn ~bucket ~key ~options:head_options () in

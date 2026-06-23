@@ -9,7 +9,7 @@ val get :
     (Simulator_runtime.Runtime.response_body_reader ->
     ('a, Awskit.Error.t) result) ->
   unit ->
-  (Object.Get.result * 'a, Awskit.Error.t) result
+  ('a Object.Get.result, Awskit.Error.t) result
 
 val find :
   Simulator_state.t ->
@@ -20,7 +20,7 @@ val find :
     (Simulator_runtime.Runtime.response_body_reader ->
     ('a, Awskit.Error.t) result) ->
   unit ->
-  ((Object.Get.result * 'a) option, Awskit.Error.t) result
+  ('a Object.Get.result option, Awskit.Error.t) result
 
 val head :
   Simulator_state.t ->
@@ -43,7 +43,7 @@ val get_as_string :
   max_bytes:int64 ->
   ?options:Object.Get.options ->
   unit ->
-  (Object.Get.result * string, Awskit.Error.t) result
+  (string Object.Get.result, Awskit.Error.t) result
 
 val get_as_bytes :
   Simulator_state.t ->
@@ -52,4 +52,4 @@ val get_as_bytes :
   max_bytes:int64 ->
   ?options:Object.Get.options ->
   unit ->
-  (Object.Get.result * bytes, Awskit.Error.t) result
+  (bytes Object.Get.result, Awskit.Error.t) result

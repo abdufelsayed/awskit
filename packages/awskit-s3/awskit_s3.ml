@@ -3,6 +3,11 @@ module Credentials = Awskit.Credentials
 module Endpoint = Awskit.Endpoint
 module Region = Awskit.Region
 module Error = Common.Error
+module Bucket_name = Bucket_name
+module Object_key = Object_key
+module Account_id = Account_id
+module Content_type = Content_type
+module Header_value = Header_value
 module Metadata = Metadata
 module Storage_class = Storage_class
 module Tag = Tag
@@ -74,12 +79,21 @@ module Make (R : RUNTIME) = struct
     let credentials conn = R.Credentials.resolve conn
 
     let object_request conn ~bucket ~key =
-      Endpoint_resolver.resolve_object_request (endpoint_config conn)
-        ~region:(region conn) ~bucket ~key
+      match Bucket_name.of_string bucket with
+      | Error _ as error -> error
+      | Ok bucket -> (
+          match Object_key.of_string key with
+          | Error _ as error -> error
+          | Ok key ->
+              Endpoint_resolver.resolve_object_request (endpoint_config conn)
+                ~region:(region conn) ~bucket ~key)
 
     let bucket_request conn ~bucket ~suffix ~signing_suffix =
-      Endpoint_resolver.resolve_bucket_request (endpoint_config conn)
-        ~region:(region conn) ~bucket ~suffix ~signing_suffix
+      match Bucket_name.of_string bucket with
+      | Error _ as error -> error
+      | Ok bucket ->
+          Endpoint_resolver.resolve_bucket_request (endpoint_config conn)
+            ~region:(region conn) ~bucket ~suffix ~signing_suffix
 
     let root_request conn =
       match

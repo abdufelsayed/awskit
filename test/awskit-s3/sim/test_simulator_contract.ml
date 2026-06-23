@@ -69,11 +69,13 @@ let is_body_error error =
 let test_simulator_slow_down_fault () =
   let conn = Simulator_subject.fresh () in
   ignore
-    (Simulator.Bucket.create conn ~bucket:"contract-bucket" ()
+    (Simulator.Bucket.create conn ~bucket:(bucket_name "contract-bucket") ()
     |> ok_or_fail "create bucket");
   Simulator.inject_fault conn Simulator.Slow_down;
   (match
-     Simulator.Object.put conn ~bucket:"contract-bucket" ~key:"fault"
+     Simulator.Object.put conn
+       ~bucket:(bucket_name "contract-bucket")
+       ~key:(object_key "fault")
        ~body:(Simulator.Body.of_string "body")
        ()
    with
@@ -89,16 +91,20 @@ let test_simulator_slow_down_fault () =
 let test_simulator_response_lost_fault () =
   let conn = Simulator_subject.fresh () in
   ignore
-    (Simulator.Bucket.create conn ~bucket:"contract-bucket" ()
+    (Simulator.Bucket.create conn ~bucket:(bucket_name "contract-bucket") ()
     |> ok_or_fail "create bucket");
   ignore
-    (Simulator.Object.put conn ~bucket:"contract-bucket" ~key:"body"
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "contract-bucket")
+       ~key:(object_key "body")
        ~body:(Simulator.Body.of_string "abcdef")
        ()
     |> ok_or_fail "put body");
   Simulator.inject_fault conn Simulator.Response_lost;
   match
-    Simulator.Object.get conn ~bucket:"contract-bucket" ~key:"body"
+    Simulator.Object.get conn
+      ~bucket:(bucket_name "contract-bucket")
+      ~key:(object_key "body")
       ~consume:(Simulator.Reader.to_string ~max_bytes:16L)
       ()
   with
@@ -108,12 +114,22 @@ let test_simulator_response_lost_fault () =
 
 let test_s3_operation_context_for_validation_error () =
   let conn = Simulator_subject.fresh () in
-  match
-    Simulator.Object.put conn ~bucket:"ab" ~key:"k"
-      ~body:(Simulator.Body.of_string "body")
-      ()
-  with
-  | Ok _ -> Alcotest.fail "expected invalid bucket"
+  let bucket = bucket_name "test-bucket" in
+  let key = object_key "k" in
+  ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
+  let descriptor : Awskit.Body.Request.descriptor =
+    {
+      content_length = None;
+      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
+      replayable = false;
+    }
+  in
+  let body =
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        Simulator.Runtime.Request_body.write_string writer "body")
+  in
+  match Simulator.Object.put conn ~bucket ~key ~body () with
+  | Ok _ -> Alcotest.fail "expected content-length validation"
   | Error error ->
       let text = Awskit.Error.to_string_hum error in
       Alcotest.(check bool)
@@ -121,15 +137,17 @@ let test_s3_operation_context_for_validation_error () =
         (string_contains text ~substring:"PutObject");
       Alcotest.(check bool)
         "mentions resource" true
-        (string_contains text ~substring:"s3://ab/k")
+        (string_contains text ~substring:"s3://test-bucket/k")
 
 let test_find_metadata_missing_object_returns_none () =
   let conn = Simulator_subject.fresh () in
   ignore
-    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    (Simulator.Bucket.create conn ~bucket:(bucket_name "test-bucket") ()
     |> ok_or_fail "create bucket");
   match
-    Simulator.Object.find_metadata conn ~bucket:"test-bucket" ~key:"missing" ()
+    Simulator.Object.find_metadata conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "missing") ()
   with
   | Ok None -> ()
   | Ok (Some _) -> Alcotest.fail "expected None for missing object"
@@ -138,7 +156,9 @@ let test_find_metadata_missing_object_returns_none () =
 let test_find_metadata_missing_bucket_returns_error () =
   let conn = Simulator_subject.fresh () in
   match
-    Simulator.Object.find_metadata conn ~bucket:"missing-bucket" ~key:"file" ()
+    Simulator.Object.find_metadata conn
+      ~bucket:(bucket_name "missing-bucket")
+      ~key:(object_key "file") ()
   with
   | Error error when Error.is_no_such_bucket error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
@@ -148,10 +168,12 @@ let test_find_metadata_missing_bucket_returns_error () =
 let test_find_missing_object_returns_none () =
   let conn = Simulator_subject.fresh () in
   ignore
-    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    (Simulator.Bucket.create conn ~bucket:(bucket_name "test-bucket") ()
     |> ok_or_fail "create bucket");
   match
-    Simulator.Object.find conn ~bucket:"test-bucket" ~key:"missing"
+    Simulator.Object.find conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "missing")
       ~consume:(fun _reader -> Ok "unused")
       ()
   with
@@ -162,7 +184,9 @@ let test_find_missing_object_returns_none () =
 let test_find_missing_bucket_returns_error () =
   let conn = Simulator_subject.fresh () in
   match
-    Simulator.Object.find conn ~bucket:"missing-bucket" ~key:"file"
+    Simulator.Object.find conn
+      ~bucket:(bucket_name "missing-bucket")
+      ~key:(object_key "file")
       ~consume:(fun _reader -> Ok "unused")
       ()
   with
@@ -174,10 +198,12 @@ let test_find_missing_bucket_returns_error () =
 let test_find_preserves_consumer_not_found_error () =
   let conn = Simulator_subject.fresh () in
   ignore
-    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    (Simulator.Bucket.create conn ~bucket:(bucket_name "test-bucket") ()
     |> ok_or_fail "create bucket");
   ignore
-    (Simulator.Object.put conn ~bucket:"test-bucket" ~key:"present"
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "present")
        ~body:(Simulator.Body.of_string "body")
        ()
     |> ok_or_fail "put object");
@@ -186,7 +212,9 @@ let test_find_preserves_consumer_not_found_error () =
       ~message:"consumer-owned missing resource" ~headers:[] ()
   in
   match
-    Simulator.Object.find conn ~bucket:"test-bucket" ~key:"present"
+    Simulator.Object.find conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "present")
       ~consume:(fun _reader -> Error consumer_error)
       ()
   with

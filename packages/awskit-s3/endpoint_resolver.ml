@@ -43,7 +43,7 @@ let bucket_endpoint endpoint bucket =
 let path_style_path bucket suffix = "/" ^ bucket ^ suffix
 
 let resolve_bucket_request t ~region ~bucket ~suffix ~signing_suffix =
-  let* () = validate_bucket bucket in
+  let bucket = Bucket_name.to_string bucket in
   let* endpoint = endpoint t ~region in
   let* style = resolved_style t endpoint bucket in
   let signing_region = Endpoint_config.signing_region t ~client_region:region in
@@ -69,7 +69,7 @@ let resolve_bucket_request t ~region ~bucket ~suffix ~signing_suffix =
         }
 
 let resolve_object_request t ~region ~bucket ~key =
-  let* () = validate_bucket_key bucket key in
+  let key = Object_key.to_string key in
   let suffix = "/" ^ Awskit.Signing.uri_encode ~encode_slash:false key in
   let signing_suffix = "/" ^ key in
   resolve_bucket_request t ~region ~bucket ~suffix ~signing_suffix

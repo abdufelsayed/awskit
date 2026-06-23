@@ -10,6 +10,20 @@ val add_opt_header :
   string -> string option -> (string * string) list -> (string * string) list
 (** Add a header when the optional value is [Some]. *)
 
+val add_opt_account_id_header :
+  string ->
+  Account_id.t option ->
+  (string * string) list ->
+  (string * string) list
+(** Add a header from an optional account id. *)
+
+val add_opt_content_type_header :
+  string ->
+  Content_type.t option ->
+  (string * string) list ->
+  (string * string) list
+(** Add a header from an optional content type. *)
+
 val write_precondition_headers :
   Object.Preconditions.Write.t -> (string * string) list
 (** Render object write preconditions as request headers. *)
@@ -35,7 +49,7 @@ val validate_common_headers :
   (unit, Awskit.Error.t) result
 (** Validate common HTTP header values before they are sent to S3. *)
 
-val tags_header : Tag.t list -> string option
+val tags_header : Tag.Set.t -> string option
 (** Encode tags for the [x-amz-tagging] header. *)
 
 val checksum_header_name : Object.Checksum.Algorithm.t -> string option

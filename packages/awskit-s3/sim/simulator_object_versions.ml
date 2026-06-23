@@ -20,6 +20,7 @@ let version_entries_after_marker key_marker version_id_marker entries =
   match key_marker with
   | None -> entries
   | Some key_marker ->
+      let key_marker = Object_key.to_string key_marker in
       let rec drop = function
         | [] -> []
         | entry :: rest -> (
@@ -47,6 +48,9 @@ let version_entry_is_current bucket key version =
   | _ -> false
 
 let version_entries bucket (options : List_object_versions.options) =
+  let prefix =
+    Option.map Object_key.Prefix.to_string options.List_object_versions.prefix
+  in
   let from_version key version =
     let is_latest = Some (version_entry_is_current bucket key version) in
     match version with
@@ -87,9 +91,7 @@ let version_entries bucket (options : List_object_versions.options) =
   in
   versioned @ unversioned
   |> List.filter (fun (key, _) ->
-      match options.List_object_versions.prefix with
-      | None -> true
-      | Some prefix -> is_prefix ~prefix key)
+      match prefix with None -> true | Some prefix -> is_prefix ~prefix key)
   |> List.sort (fun (left_key, left_version) (right_key, right_version) ->
       match String.compare left_key right_key with
       | 0 ->

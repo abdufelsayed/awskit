@@ -4,10 +4,11 @@ open Simulator_state
 open Simulator_checksum
 
 let visible_objects bucket_state (options : List_objects_v2.options) =
+  let prefix = Option.map Object_key.Prefix.to_string options.prefix in
   Hashtbl.to_seq bucket_state.objects
   |> Seq.filter_map (function
     | key, Stored_object obj -> (
-        match options.prefix with
+        match prefix with
         | None -> Some (key, obj)
         | Some prefix -> if is_prefix ~prefix key then Some (key, obj) else None
         )
@@ -23,6 +24,7 @@ let after_start_marker objects (options : List_objects_v2.options) =
       match options.start_after with
       | None -> objects
       | Some start_after ->
+          let start_after = Object_key.to_string start_after in
           List.filter
             (fun (key, _) -> String.compare key start_after > 0)
             objects)
@@ -52,8 +54,8 @@ let page ~default_max_keys ~bucket bucket_state
   in
   {
     List_objects_v2.bucket = Some bucket;
-    prefix = options.prefix;
-    delimiter = options.delimiter;
+    prefix = Option.map Object_key.Prefix.to_string options.prefix;
+    delimiter = Option.map Object_key.Delimiter.to_string options.delimiter;
     objects;
     common_prefixes = [];
     key_count = Some (List.length objects);

@@ -20,24 +20,23 @@ let unwrap label = function
   | Ok value -> value
   | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
+let bucket_name value = Awskit_s3.Bucket_name.of_string_exn value
 let create_s3 () = S3.create () |> unwrap "create S3 client"
 
 let run () =
-  let bucket = env "AWSKIT_EXAMPLE_BUCKET" in
-  let prefix = env_default "AWSKIT_EXAMPLE_PREFIX" "awskit-examples/" in
-  let s3 = create_s3 () in
-  let options =
-    {
-      Awskit_s3.Object.List.default_options with
-      prefix = Some prefix;
-      max_keys = Some 25;
-    }
+  let bucket = bucket_name (env "AWSKIT_EXAMPLE_BUCKET") in
+  let prefix =
+    Awskit_s3.Object_key.Prefix.of_string_exn
+      (env_default "AWSKIT_EXAMPLE_PREFIX" "awskit-examples/")
   in
+  let s3 = create_s3 () in
+  let options = Awskit_s3.Object.List.options_exn ~prefix ~max_keys:25 () in
   let* objects =
     S3.Object.List_objects_v2.objects s3 ~bucket ~options ~max_pages:4 ()
   in
   let objects = unwrap "list objects" objects in
-  Format.printf "s3://%s/%s@." bucket prefix;
+  Format.printf "s3://%a/%s@." Awskit_s3.Bucket_name.pp bucket
+    (Awskit_s3.Object_key.Prefix.to_string prefix);
   List.iter
     (fun (object_ : Awskit_s3.Object.List.object_summary) ->
       Format.printf "- %s" object_.key;

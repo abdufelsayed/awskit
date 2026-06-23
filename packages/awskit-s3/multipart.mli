@@ -58,18 +58,19 @@ end
 
 module Create : sig
   type options = {
-    content_type : string option;  (** Final object's [Content-Type]. *)
+    content_type : Content_type.t option;  (** Final object's [Content-Type]. *)
     metadata : Metadata.t;  (** User metadata for the final object. *)
     storage_class : Storage_class.t option;
         (** Storage class for the final object. *)
-    tags : Tag.t list;  (** Tags for the final object. *)
+    tags : Tag.Set.t;  (** Tags for the final object. *)
     checksum_algorithm : Object.Checksum.Algorithm.t option;
         (** Checksum algorithm requested for the multipart upload. *)
     checksum_type : Object.Checksum.Type.t option;
         (** Whether S3 should treat checksums as full-object or composite. *)
     server_side_encryption : Object.Encryption.request option;
         (** Server-side encryption for the final object. *)
-    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
+    expected_bucket_owner : Account_id.t option;
+        (** [x-amz-expected-bucket-owner]. *)
   }
   (** [CreateMultipartUpload] request options. *)
 
@@ -84,7 +85,8 @@ module Upload_part : sig
   type options = {
     checksum : Object.Checksum.value option;
         (** Explicit checksum for this part body. *)
-    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
+    expected_bucket_owner : Account_id.t option;
+        (** [x-amz-expected-bucket-owner]. *)
   }
   (** [UploadPart] request options. *)
 
@@ -102,7 +104,7 @@ end
 
 module Complete : sig
   type options = {
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
     checksum : Object.Checksum.value option;
         (** Optional full-object checksum supplied at completion time. *)
@@ -127,7 +129,7 @@ module Complete : sig
 end
 
 module Abort : sig
-  type options = { expected_bucket_owner : string option }
+  type options = { expected_bucket_owner : Account_id.t option }
   (** [AbortMultipartUpload] request options. *)
 
   type result = Awskit.Response.t
@@ -142,7 +144,8 @@ module List_parts : sig
         (** Maximum number of parts S3 should return in one page. *)
     part_number_marker : int option;
         (** Pagination marker, usually from [next_part_number_marker]. *)
-    expected_bucket_owner : string option;  (** [x-amz-expected-bucket-owner]. *)
+    expected_bucket_owner : Account_id.t option;
+        (** [x-amz-expected-bucket-owner]. *)
   }
   (** [ListParts] request options. *)
 

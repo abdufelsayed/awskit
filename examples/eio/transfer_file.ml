@@ -21,6 +21,9 @@ let unwrap label = function
   | Ok value -> value
   | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
+let bucket_name value = Awskit_s3.Bucket_name.of_string_exn value
+let object_key value = Awskit_s3.Object_key.of_string_exn value
+
 let or_fail_msg label = function
   | Ok value -> value
   | Error (`Msg message) -> fail "%s: %s" label message
@@ -71,11 +74,12 @@ let progress label bytes = Format.printf "%s %Ld bytes@." label bytes
 
 let run stdenv =
   Eio.Switch.run @@ fun sw ->
-  let bucket = env "AWSKIT_EXAMPLE_BUCKET" in
+  let bucket = bucket_name (env "AWSKIT_EXAMPLE_BUCKET") in
   let upload_path = env_default "AWSKIT_EXAMPLE_FILE" "README.md" in
   let key =
-    env_default "AWSKIT_EXAMPLE_KEY"
-      ("awskit-examples/files/" ^ Filename.basename upload_path)
+    object_key
+      (env_default "AWSKIT_EXAMPLE_KEY"
+         ("awskit-examples/files/" ^ Filename.basename upload_path))
   in
   let download_path =
     env_default "AWSKIT_EXAMPLE_DOWNLOAD"
@@ -89,7 +93,8 @@ let run stdenv =
       ~on_progress:(progress "uploaded") ()
     |> unwrap "upload file"
   in
-  Format.printf "uploaded %s to s3://%s/%s with %s@." upload_path bucket key
+  Format.printf "uploaded %s to s3://%a/%a with %s@." upload_path
+    Awskit_s3.Bucket_name.pp bucket Awskit_s3.Object_key.pp key
     (Awskit_s3.Transfer.upload_strategy uploaded |> strategy_to_string);
   let downloaded =
     S3.Object.Transfer.download_file s3 ~bucket ~key ~path:download_file

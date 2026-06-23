@@ -15,11 +15,27 @@ module Make (C : Request_context.S) = struct
 
   let ( let* ) = bind
   let validate_opt f = function None -> Ok () | Some value -> f value
+  let header_value = Option.map Header_value.to_string
 
   type nonrec connection = connection
   type 'a io = 'a R.t
   type nonrec request_body = request_body
   type nonrec response_body_reader = response_body_reader
+
+  let get_result (info : Get_object.info) value : _ Get_object.result =
+    {
+      Get_object.value;
+      etag = info.etag;
+      content_type = info.content_type;
+      content_length = info.content_length;
+      last_modified = info.last_modified;
+      metadata = info.metadata;
+      storage_class = info.storage_class;
+      version_id = info.version_id;
+      checksum = info.checksum;
+      server_side_encryption = info.server_side_encryption;
+      response = info.response;
+    }
 
   let return_result return_error return_ok = function
     | Ok value -> return_ok value
@@ -35,10 +51,14 @@ module Make (C : Request_context.S) = struct
             match validate_opt validate_checksum_value options.checksum with
             | Error _ as error -> error
             | Ok () ->
-                validate_common_headers ?content_type:options.content_type
-                  ?cache_control:options.cache_control
-                  ?content_encoding:options.content_encoding
-                  ?content_disposition:options.content_disposition ()))
+                validate_common_headers
+                  ?content_type:
+                    (Option.map Content_type.to_string options.content_type)
+                  ?cache_control:(header_value options.cache_control)
+                  ?content_encoding:(header_value options.content_encoding)
+                  ?content_disposition:
+                    (header_value options.content_disposition)
+                  ()))
 
   let validate_copy_options (options : Copy_object.options) =
     match
@@ -50,7 +70,12 @@ module Make (C : Request_context.S) = struct
         | Some (`Replace metadata) -> validate_metadata metadata
         | Some `Copy | None -> Ok ())
 
+  let bucket_string = Bucket_name.to_string
+  let key_string = Object_key.to_string
+
   let put conn ~bucket ~key ?options ~body () =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options = Option.value ~default:Put_object.default_options options in
     let return_error =
       return_s3_error return_error ~operation:"PutObject" ~bucket ~key
@@ -79,18 +104,20 @@ module Make (C : Request_context.S) = struct
                       @ checksum_value_headers options.checksum
                       @ encryption_request_headers
                           options.server_side_encryption
-                      |> add_opt_header "content-type" options.content_type
-                      |> add_opt_header "cache-control" options.cache_control
+                      |> add_opt_content_type_header "content-type"
+                           options.content_type
+                      |> add_opt_header "cache-control"
+                           (header_value options.cache_control)
                       |> add_opt_header "content-encoding"
-                           options.content_encoding
+                           (header_value options.content_encoding)
                       |> add_opt_header "content-disposition"
-                           options.content_disposition
+                           (header_value options.content_disposition)
                       |> add_opt_header "x-amz-storage-class"
                            (Option.map Storage_class.to_string
                               options.storage_class)
                       |> add_opt_header "x-amz-tagging"
                            (tags_header options.tags)
-                      |> add_opt_header "x-amz-expected-bucket-owner"
+                      |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                            options.expected_bucket_owner
                     in
                     match object_request conn ~bucket ~key with
@@ -110,6 +137,8 @@ module Make (C : Request_context.S) = struct
                         return_result return_error return_ok result))))
 
   let get conn ~bucket ~key ?options ~consume () =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options = Option.value ~default:Get_object.default_options options in
     let return_error =
       return_s3_error return_error ~operation:"GetObject" ~bucket ~key
@@ -121,7 +150,7 @@ module Make (C : Request_context.S) = struct
           read_precondition_headers options.preconditions
           @ checksum_mode_header options.checksum_mode
           |> add_opt_header "range" (Option.map Range.to_header options.range)
-          |> add_opt_header "x-amz-expected-bucket-owner"
+          |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                options.expected_bucket_owner
         in
         let query =
@@ -143,11 +172,13 @@ module Make (C : Request_context.S) = struct
                         R.Response_body.with_reader body ~consume
                       in
                       return_result return_error return_ok
-                        (Result.map (fun value -> (info, value)) consumed))
+                        (Result.map (get_result info) consumed))
             in
             return_result return_error return_ok result)
 
   let find conn ~bucket ~key ?options ~consume () =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options = Option.value ~default:Get_object.default_options options in
     let return_error =
       return_s3_error return_error ~operation:"GetObject" ~bucket ~key
@@ -159,7 +190,7 @@ module Make (C : Request_context.S) = struct
           read_precondition_headers options.preconditions
           @ checksum_mode_header options.checksum_mode
           |> add_opt_header "range" (Option.map Range.to_header options.range)
-          |> add_opt_header "x-amz-expected-bucket-owner"
+          |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                options.expected_bucket_owner
         in
         let query =
@@ -180,8 +211,7 @@ module Make (C : Request_context.S) = struct
                       let* consumed =
                         R.Response_body.with_reader body ~consume
                       in
-                      return_ok
-                        (Result.map (fun value -> (info, value)) consumed))
+                      return_ok (Result.map (get_result info) consumed))
             in
             match result with
             | Ok (Ok value) -> return_ok (Some value)
@@ -190,6 +220,8 @@ module Make (C : Request_context.S) = struct
             | Error error -> return_error error))
 
   let head conn ~bucket ~key ?options () =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options = Option.value ~default:Head_object.default_options options in
     let return_error =
       return_s3_error return_error ~operation:"HeadObject" ~bucket ~key
@@ -200,7 +232,7 @@ module Make (C : Request_context.S) = struct
         let headers =
           read_precondition_headers options.preconditions
           @ checksum_mode_header options.checksum_mode
-          |> add_opt_header "x-amz-expected-bucket-owner"
+          |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                options.expected_bucket_owner
         in
         let query =
@@ -244,6 +276,8 @@ module Make (C : Request_context.S) = struct
     | Error error -> return_error error
 
   let delete conn ~bucket ~key ?options () =
+    let bucket = bucket_string bucket in
+    let key = key_string key in
     let options = Option.value ~default:Delete_object.default_options options in
     let return_error =
       return_s3_error return_error ~operation:"DeleteObject" ~bucket ~key
@@ -253,7 +287,7 @@ module Make (C : Request_context.S) = struct
     | Ok () -> (
         let headers =
           delete_precondition_headers options.preconditions
-          |> add_opt_header "x-amz-expected-bucket-owner"
+          |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                options.expected_bucket_owner
         in
         let query =
@@ -278,6 +312,7 @@ module Make (C : Request_context.S) = struct
             return_result return_error return_ok result)
 
   let delete_objects conn ~bucket ~objects ?options () =
+    let bucket = bucket_string bucket in
     let options =
       Option.value ~default:Delete_objects.default_options options
     in
@@ -296,7 +331,7 @@ module Make (C : Request_context.S) = struct
                 ("content-md5", content_md5 body);
                 ("content-type", "application/xml");
               ]
-              |> add_opt_header "x-amz-expected-bucket-owner"
+              |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                    options.expected_bucket_owner
             in
             let upload = R.Request_body.of_string body in
@@ -325,6 +360,10 @@ module Make (C : Request_context.S) = struct
 
   let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
       ?options () =
+    let source_bucket = bucket_string source_bucket in
+    let source_key = key_string source_key in
+    let destination_bucket = bucket_string destination_bucket in
+    let destination_key = key_string destination_key in
     let options = Option.value ~default:Copy_object.default_options options in
     let source_error =
       return_s3_error return_error ~operation:"CopyObject" ~bucket:source_bucket
@@ -376,9 +415,10 @@ module Make (C : Request_context.S) = struct
                   headers
                   |> add_opt_header "x-amz-storage-class"
                        (Option.map Storage_class.to_string options.storage_class)
-                  |> add_opt_header "x-amz-expected-bucket-owner"
+                  |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                        options.expected_bucket_owner
-                  |> add_opt_header "x-amz-source-expected-bucket-owner"
+                  |> add_opt_account_id_header
+                       "x-amz-source-expected-bucket-owner"
                        options.source_expected_bucket_owner
                 in
                 match
@@ -402,6 +442,7 @@ module Make (C : Request_context.S) = struct
                     return_result return_error return_ok result)))
 
   let list_versions conn ~bucket ?options () =
+    let bucket = bucket_string bucket in
     let options =
       Option.value ~default:List_object_versions.default_options options
     in
@@ -417,10 +458,12 @@ module Make (C : Request_context.S) = struct
         in
         let query =
           [ ("versions", []) ]
-          @ add "prefix" options.prefix
-          @ add "delimiter" options.delimiter
+          @ add "prefix" (Option.map Object_key.Prefix.to_string options.prefix)
+          @ add "delimiter"
+              (Option.map Object_key.Delimiter.to_string options.delimiter)
           @ add "max-keys" (Option.map string_of_int options.max_keys)
-          @ add "key-marker" options.key_marker
+          @ add "key-marker"
+              (Option.map Object_key.to_string options.key_marker)
           @ add "version-id-marker"
               (Option.map Object.Version_id.to_string options.version_id_marker)
         in
@@ -429,7 +472,7 @@ module Make (C : Request_context.S) = struct
         | Ok request ->
             let headers =
               []
-              |> add_opt_header "x-amz-expected-bucket-owner"
+              |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                    options.expected_bucket_owner
             in
             let* result =
@@ -445,6 +488,7 @@ module Make (C : Request_context.S) = struct
             return_result return_error return_ok result)
 
   let list conn ~bucket ?options () =
+    let bucket = bucket_string bucket in
     let options =
       Option.value ~default:List_objects_v2.default_options options
     in
@@ -460,10 +504,12 @@ module Make (C : Request_context.S) = struct
         in
         let query =
           [ ("list-type", [ "2" ]) ]
-          @ add "prefix" options.prefix
-          @ add "delimiter" options.delimiter
+          @ add "prefix" (Option.map Object_key.Prefix.to_string options.prefix)
+          @ add "delimiter"
+              (Option.map Object_key.Delimiter.to_string options.delimiter)
           @ add "max-keys" (Option.map string_of_int options.max_keys)
-          @ add "start-after" options.start_after
+          @ add "start-after"
+              (Option.map Object_key.to_string options.start_after)
           @ add "continuation-token" options.continuation_token
         in
         match bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/" with
@@ -471,7 +517,7 @@ module Make (C : Request_context.S) = struct
         | Ok request ->
             let headers =
               []
-              |> add_opt_header "x-amz-expected-bucket-owner"
+              |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                    options.expected_bucket_owner
             in
             let* result =
@@ -515,7 +561,8 @@ module Make (C : Request_context.S) = struct
 
     let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
       let return_context_error =
-        return_s3_error return_error ~operation:"ListObjectsV2" ~bucket
+        return_s3_error return_error ~operation:"ListObjectsV2"
+          ~bucket:(bucket_string bucket)
       in
       match validate_max_pages max_pages with
       | Error error -> return_context_error error
@@ -589,16 +636,24 @@ module Make (C : Request_context.S) = struct
           invalid ~field:"max_pages" "max_pages must be greater than zero"
 
     let options_for_page (base : List_object_versions.options) page =
-      {
-        base with
-        List_object_versions.key_marker =
-          page.List_object_versions.next_key_marker;
-        version_id_marker = page.next_version_id_marker;
-      }
+      let key_marker =
+        match page.List_object_versions.next_key_marker with
+        | None -> Ok None
+        | Some key -> Result.map Option.some (Object_key.of_string key)
+      in
+      Result.map
+        (fun key_marker ->
+          {
+            base with
+            List_object_versions.key_marker;
+            version_id_marker = page.next_version_id_marker;
+          })
+        key_marker
 
     let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
       let return_context_error =
-        return_s3_error return_error ~operation:"ListObjectVersions" ~bucket
+        return_s3_error return_error ~operation:"ListObjectVersions"
+          ~bucket:(bucket_string bucket)
       in
       match validate_max_pages max_pages with
       | Error error -> return_context_error error
@@ -623,8 +678,10 @@ module Make (C : Request_context.S) = struct
                           return_ok acc
                       | _ -> (
                           match page.next_key_marker with
-                          | Some _ ->
-                              loop (options_for_page base page) page_count acc
+                          | Some _ -> (
+                              match options_for_page base page with
+                              | Ok options -> loop options page_count acc
+                              | Error error -> return_context_error error)
                           | None ->
                               return_context_error
                                 (decode

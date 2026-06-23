@@ -30,6 +30,10 @@ let check_multiple_error_text label error snippets =
         snippets
   | _ -> Alcotest.failf "expected Multiple error, got %a" Awskit.Error.pp error
 
+let bucket = Awskit_s3.Bucket_name.of_string_exn "bucket"
+let key = Awskit_s3.Object_key.of_string_exn "key"
+let account_id = Awskit_s3.Account_id.of_string_exn
+
 module Runtime = struct
   type connection = {
     response_body : string;
@@ -49,7 +53,7 @@ module Runtime = struct
     mutable fail_ranged_get : bool;
     mutable fail_complete_upload : bool;
     mutable fail_abort_upload : bool;
-    mutable list_parts_expected_owner : string option;
+    mutable list_parts_expected_owner : Awskit_s3.Account_id.t option;
   }
 
   type 'a t = 'a Lwt.t
@@ -301,18 +305,35 @@ let put_result () : Awskit_s3.Put_object.result =
     response = response 200;
   }
 
-let get_result ?etag ?version_id content_length : Awskit_s3.Get_object.result =
+let get_info ?etag ?version_id content_length : Awskit_s3.Get_object.info =
   {
     etag;
     content_type = None;
     content_length;
     last_modified = None;
-    metadata = [];
+    metadata = Awskit_s3.Metadata.empty;
     storage_class = None;
     version_id;
     checksum = empty_checksum;
     server_side_encryption = None;
     response = response 200;
+  }
+
+let get_result ?etag ?version_id content_length value :
+    _ Awskit_s3.Get_object.result =
+  let info = get_info ?etag ?version_id content_length in
+  {
+    Awskit_s3.Get_object.value;
+    etag = info.etag;
+    content_type = info.content_type;
+    content_length = info.content_length;
+    last_modified = info.last_modified;
+    metadata = info.metadata;
+    storage_class = info.storage_class;
+    version_id = info.version_id;
+    checksum = info.checksum;
+    server_side_encryption = info.server_side_encryption;
+    response = info.response;
   }
 
 let etag_condition_to_string = function
@@ -388,16 +409,16 @@ module S3 = struct
             | Error _ as error -> Lwt.return error
             | Ok value ->
                 Lwt.return_ok
-                  ( get_result
-                      (Some
-                         (Int64.of_int
-                            (String.length conn.Runtime.response_body))),
-                    value ))
+                  (get_result
+                     (Some
+                        (Int64.of_int
+                           (String.length conn.Runtime.response_body)))
+                     value))
 
     let head conn ~bucket:_ ~key:_ ?options:_ () =
       conn.Runtime.head_count <- conn.Runtime.head_count + 1;
       Lwt.return_ok
-        (get_result ?etag:conn.Runtime.head_etag
+        (get_info ?etag:conn.Runtime.head_etag
            ?version_id:conn.Runtime.head_version_id
            (Some (Int64.of_int (String.length conn.Runtime.response_body))))
 
@@ -460,7 +481,10 @@ module S3 = struct
         conn.Runtime.multipart_create_count + 1;
       let upload_id = Awskit_s3.Multipart.Upload_id.of_string_exn "upload-1" in
       let upload =
-        Awskit_s3.Multipart.Upload.create_exn ~bucket ~key ~upload_id
+        Awskit_s3.Multipart.Upload.create_exn
+          ~bucket:(Awskit_s3.Bucket_name.to_string bucket)
+          ~key:(Awskit_s3.Object_key.to_string key)
+          ~upload_id
       in
       Lwt.return_ok
         { Awskit_s3.Create_multipart_upload.upload; response = response 200 }
@@ -592,9 +616,7 @@ let test_body_of_lwt_stream_streams_chunks () =
       (Lwt_stream.of_list [ "one"; "two"; "three" ])
   in
   check_body_descriptor "stream body" ~content_length:11L ~replayable:false body;
-  match
-    Lwt_main.run (S3.Object.put conn ~bucket:"bucket" ~key:"key" ~body ())
-  with
+  match Lwt_main.run (S3.Object.put conn ~bucket ~key ~body ()) with
   | Error error -> Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
   | Ok _ ->
       Alcotest.(check (option string))
@@ -606,8 +628,7 @@ let test_body_of_lwt_stream_propagates_cancellation () =
   let stream = Lwt_stream.from (fun () -> Lwt.fail Lwt.Canceled) in
   let body = Body.of_lwt_stream ~content_length:1L stream in
   match
-    Lwt_main.run
-      (observe_lwt (S3.Object.put conn ~bucket:"bucket" ~key:"key" ~body ()))
+    Lwt_main.run (observe_lwt (S3.Object.put conn ~bucket ~key ~body ()))
   with
   | Raised exn ->
       Alcotest.(check bool) "raised cancellation" true (exn == Lwt.Canceled)
@@ -638,7 +659,7 @@ let test_body_of_channel_streams_channel () =
                check_body_descriptor "channel body"
                  ~content_length:(Int64.of_int (String.length payload))
                  ~replayable:false body;
-               S3.Object.put conn ~bucket:"bucket" ~key:"key" ~body ()))
+               S3.Object.put conn ~bucket ~key ~body ()))
       with
       | Error error ->
           Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
@@ -673,8 +694,7 @@ let test_body_of_path_streams_file_body () =
                    check_body_descriptor "path body"
                      ~content_length:(Int64.of_int (String.length body))
                      ~replayable:true request_body;
-                   S3.Object.put conn ~bucket:"bucket" ~key:"key"
-                     ~body:request_body ()))
+                   S3.Object.put conn ~bucket ~key ~body:request_body ()))
       with
       | Error error ->
           Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
@@ -700,7 +720,7 @@ let test_body_of_path_returns_stream_write_error () =
         Lwt_main.run
           (Lwt.bind (Body.of_path path) (function
             | Error _ as error -> Lwt.return error
-            | Ok body -> S3.Object.put conn ~bucket:"bucket" ~key:"key" ~body ()))
+            | Ok body -> S3.Object.put conn ~bucket ~key ~body ()))
       with
       | Ok _ -> Alcotest.fail "upload succeeded despite write failure"
       | Error error ->
@@ -741,7 +761,7 @@ let test_upload_file_progress_exception_propagates () =
       match
         Lwt_main.run
           (observe_lwt
-             (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~options
+             (Transfer.upload_file conn ~bucket ~key ~options
                 ~on_progress:(fun _transferred -> raise Progress_failed)
                 ~path ()))
       with
@@ -864,9 +884,7 @@ let test_upload_file_uses_put_below_threshold () =
         }
       in
       match
-        Lwt_main.run
-          (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~options ~path
-             ())
+        Lwt_main.run (Transfer.upload_file conn ~bucket ~key ~options ~path ())
       with
       | Error error ->
           Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
@@ -900,9 +918,7 @@ let test_upload_file_allows_put_checksum_below_threshold () =
         }
       in
       match
-        Lwt_main.run
-          (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~options ~path
-             ())
+        Lwt_main.run (Transfer.upload_file conn ~bucket ~key ~options ~path ())
       with
       | Error error ->
           Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
@@ -931,9 +947,7 @@ let test_upload_file_uses_multipart_at_threshold () =
         }
       in
       match
-        Lwt_main.run
-          (Transfer.upload_file conn ~bucket:"bucket" ~key:"key" ~options ~path
-             ())
+        Lwt_main.run (Transfer.upload_file conn ~bucket ~key ~options ~path ())
       with
       | Error error ->
           Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
@@ -960,8 +974,8 @@ let test_upload_file_rejects_invalid_options () =
       in
       (match
          Lwt_main.run
-           (Transfer.upload_file conn ~bucket:"bucket" ~key:"key"
-              ~options:bad_concurrency ~path ())
+           (Transfer.upload_file conn ~bucket ~key ~options:bad_concurrency
+              ~path ())
        with
       | Error error when is_validation_field "concurrency" error -> ()
       | Error error ->
@@ -982,8 +996,8 @@ let test_upload_file_rejects_invalid_options () =
       in
       (match
          Lwt_main.run
-           (Transfer.upload_file conn ~bucket:"bucket" ~key:"key"
-              ~options:bad_put_checksum ~path ())
+           (Transfer.upload_file conn ~bucket ~key ~options:bad_put_checksum
+              ~path ())
        with
       | Error error when is_validation_field "put_options.checksum" error -> ()
       | Error error ->
@@ -991,7 +1005,7 @@ let test_upload_file_rejects_invalid_options () =
       | Ok _ -> Alcotest.fail "expected put checksum validation");
       (match
          Lwt_main.run
-           (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+           (Transfer.multipart_upload_file conn ~bucket ~key
               ~options:bad_put_checksum ~path ())
        with
       | Error error when is_validation_field "put_options.checksum" error -> ()
@@ -1009,7 +1023,7 @@ let test_upload_file_rejects_invalid_options () =
       in
       (match
          Lwt_main.run
-           (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+           (Transfer.multipart_upload_file conn ~bucket ~key
               ~options:bad_part_checksum ~path ())
        with
       | Error error
@@ -1029,7 +1043,7 @@ let test_upload_file_rejects_invalid_options () =
       in
       (match
          Lwt_main.run
-           (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+           (Transfer.multipart_upload_file conn ~bucket ~key
               ~options:bad_create_checksum ~path ())
        with
       | Error error
@@ -1049,7 +1063,7 @@ let test_upload_file_rejects_invalid_options () =
       in
       (match
          Lwt_main.run
-           (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+           (Transfer.multipart_upload_file conn ~bucket ~key
               ~options:bad_complete_checksum ~path ())
        with
       | Error error when is_validation_field "complete_options.checksum" error
@@ -1069,7 +1083,7 @@ let test_upload_file_rejects_invalid_options () =
       in
       (match
          Lwt_main.run
-           (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+           (Transfer.multipart_upload_file conn ~bucket ~key
               ~options:bad_create_checksum_type ~path ())
        with
       | Error error
@@ -1089,7 +1103,7 @@ let test_upload_file_rejects_invalid_options () =
       in
       match
         Lwt_main.run
-          (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
+          (Transfer.multipart_upload_file conn ~bucket ~key
              ~options:bad_complete_checksum_type ~path ())
       with
       | Error error
@@ -1110,7 +1124,7 @@ let test_resume_multipart_upload_file_uses_list_parts_options () =
       let list_parts_options =
         {
           Awskit_s3.List_parts.default_options with
-          expected_bucket_owner = Some "123456789012";
+          expected_bucket_owner = Some (account_id "123456789012");
         }
       in
       let options =
@@ -1118,14 +1132,18 @@ let test_resume_multipart_upload_file_uses_list_parts_options () =
       in
       match
         Lwt_main.run
-          (Transfer.resume_multipart_upload_file conn ~bucket:"bucket"
-             ~key:"key" ~upload_id ~options ~path ())
+          (Transfer.resume_multipart_upload_file conn ~bucket ~key ~upload_id
+             ~options ~path ())
       with
       | Error error ->
           Alcotest.failf "resume failed: %a" Awskit_s3.Error.pp error
       | Ok _ ->
-          Alcotest.(check (option string))
-            "list expected owner" (Some "123456789012")
+          Alcotest.(
+            check
+              (option
+                 (testable Awskit_s3.Account_id.pp Awskit_s3.Account_id.equal)))
+            "list expected owner"
+            (Some (account_id "123456789012"))
             conn.Runtime.list_parts_expected_owner)
 
 let test_multipart_upload_reports_abort_failure () =
@@ -1145,8 +1163,7 @@ let test_multipart_upload_reports_abort_failure () =
       in
       match
         Lwt_main.run
-          (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
-             ~options ~path ())
+          (Transfer.multipart_upload_file conn ~bucket ~key ~options ~path ())
       with
       | Ok _ -> Alcotest.fail "multipart upload succeeded despite failures"
       | Error error ->
@@ -1173,8 +1190,7 @@ let test_multipart_upload_aborts_on_progress_exception () =
       match
         Lwt_main.run
           (observe_lwt
-             (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
-                ~options
+             (Transfer.multipart_upload_file conn ~bucket ~key ~options
                 ~on_progress:(fun _transferred -> raise Progress_failed)
                 ~path ()))
       with
@@ -1207,8 +1223,7 @@ let test_multipart_upload_aborts_on_progress_cancellation () =
       match
         Lwt_main.run
           (observe_lwt
-             (Transfer.multipart_upload_file conn ~bucket:"bucket" ~key:"key"
-                ~options
+             (Transfer.multipart_upload_file conn ~bucket ~key ~options
                 ~on_progress:(fun _transferred -> raise Lwt.Canceled)
                 ~path ()))
       with
@@ -1238,8 +1253,7 @@ let test_download_file_uses_get_below_threshold () =
       in
       match
         Lwt_main.run
-          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
-             ~path ())
+          (Transfer.download_file conn ~bucket ~key ~options ~path ())
       with
       | Error error ->
           Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
@@ -1273,7 +1287,7 @@ let test_download_file_progress_exception_propagates () =
       match
         Lwt_main.run
           (observe_lwt
-             (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
+             (Transfer.download_file conn ~bucket ~key ~options
                 ~on_progress:(fun _transferred -> raise Progress_failed)
                 ~path ()))
       with
@@ -1311,8 +1325,7 @@ let test_download_file_ranged_progress_exception_propagates () =
              (fun () ->
                Lwt.map
                  (fun result -> Returned result)
-                 (Transfer.download_file conn ~bucket:"bucket" ~key:"key"
-                    ~options
+                 (Transfer.download_file conn ~bucket ~key ~options
                     ~on_progress:(fun _transferred -> raise Progress_failed)
                     ~path ()))
              (fun exn -> Lwt.return (Raised exn)))
@@ -1349,8 +1362,7 @@ let test_download_file_uses_ranges_at_threshold () =
       in
       match
         Lwt_main.run
-          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
-             ~path
+          (Transfer.download_file conn ~bucket ~key ~options ~path
              ~on_progress:(fun transferred ->
                progress := transferred :: !progress)
              ())
@@ -1405,8 +1417,7 @@ let test_download_file_ranges_use_head_version_id () =
       in
       match
         Lwt_main.run
-          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
-             ~path ())
+          (Transfer.download_file conn ~bucket ~key ~options ~path ())
       with
       | Error error ->
           Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
@@ -1439,8 +1450,7 @@ let test_download_file_ranges_use_head_etag () =
       in
       match
         Lwt_main.run
-          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
-             ~path ())
+          (Transfer.download_file conn ~bucket ~key ~options ~path ())
       with
       | Error error ->
           Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
@@ -1471,8 +1481,7 @@ let test_download_file_allows_small_range_parts () =
       in
       match
         Lwt_main.run
-          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
-             ~path ())
+          (Transfer.download_file conn ~bucket ~key ~options ~path ())
       with
       | Error error ->
           Alcotest.failf "download failed: %a" Awskit_s3.Error.pp error
@@ -1506,8 +1515,7 @@ let test_download_file_rejects_range_option () =
       in
       match
         Lwt_main.run
-          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
-             ~path ())
+          (Transfer.download_file conn ~bucket ~key ~options ~path ())
       with
       | Error error when is_validation_field "get_options.range" error -> ()
       | Error error ->
@@ -1533,8 +1541,7 @@ let test_download_file_ranged_failure_preserves_target () =
       in
       match
         Lwt_main.run
-          (Transfer.download_file conn ~bucket:"bucket" ~key:"key" ~options
-             ~path ())
+          (Transfer.download_file conn ~bucket ~key ~options ~path ())
       with
       | Ok _ -> Alcotest.fail "download succeeded despite ranged failure"
       | Error _ ->

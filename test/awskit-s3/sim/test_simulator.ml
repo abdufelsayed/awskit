@@ -15,7 +15,7 @@ let test_simulator_request_body_requires_known_length () =
   let store = Simulator.create_store ~clock () in
   let conn = Simulator.connect store ~credentials:creds in
   ignore
-    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    (Simulator.Bucket.create conn ~bucket:(bucket_name "test-bucket") ()
     |> ok_or_fail "bucket");
   let descriptor : Awskit.Body.Request.descriptor =
     {
@@ -29,26 +29,34 @@ let test_simulator_request_body_requires_known_length () =
         Simulator.Runtime.Request_body.write_string writer "body")
   in
   (match
-     Simulator.Object.put conn ~bucket:"test-bucket" ~key:"unknown" ~body ()
+     Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "unknown") ~body ()
    with
   | Error error when is_validation_field "content_length" error -> ()
   | Error error ->
       Alcotest.failf "unexpected simulator unknown-length put error: %a"
         Error.pp error
   | Ok _ -> Alcotest.fail "expected simulator unknown-length object failure");
-  (match Simulator.Object.head conn ~bucket:"test-bucket" ~key:"unknown" () with
+  (match
+     Simulator.Object.head conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "unknown") ()
+   with
   | Error error when Error.is_not_found error -> ()
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected unknown-length object to be absent");
   let created =
-    Simulator.Multipart.create_upload conn ~bucket:"test-bucket"
-      ~key:"large.bin" ()
+    Simulator.Multipart.create_upload conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "large.bin") ()
     |> ok_or_fail "create multipart upload"
   in
   let upload_id = created.upload.upload_id in
   (match
-     Simulator.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"large.bin"
-       ~upload_id ~part_number:1 ~body ()
+     Simulator.Multipart.upload_part conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "large.bin") ~upload_id ~part_number:1 ~body ()
    with
   | Error error when is_validation_field "content_length" error -> ()
   | Error error ->
@@ -56,11 +64,23 @@ let test_simulator_request_body_requires_known_length () =
         Error.pp error
   | Ok _ -> Alcotest.fail "expected simulator unknown-length multipart failure");
   let listed =
-    Simulator.Multipart.list_parts conn ~bucket:"test-bucket" ~key:"large.bin"
-      ~upload_id ()
+    Simulator.Multipart.list_parts conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "large.bin") ~upload_id ()
     |> ok_or_fail "list multipart parts"
   in
   Alcotest.(check int) "stored parts" 0 (List.length listed.parts)
+
+let test_simulator_bucket_validation_matches_core_rules () =
+  let invalid_names =
+    [ "001.002.003.004"; "xn--reserved"; "bucket--x-s3"; "bucket-s3alias" ]
+  in
+  List.iter
+    (fun bucket ->
+      match Bucket_name.of_string bucket with
+      | Ok _ -> Alcotest.failf "%s should be invalid in core validation" bucket
+      | Error _ -> ())
+    invalid_names
 
 let test_simulator_stream_request_body_error_propagates () =
   let credentials =
@@ -69,7 +89,7 @@ let test_simulator_stream_request_body_error_propagates () =
   let clock = Simulator.Clock.create ~now:test_time () in
   let store = Simulator.create_store ~clock () in
   let conn = Simulator.connect store ~credentials in
-  let bucket = "stream-error-bucket" in
+  let bucket = bucket_name "stream-error-bucket" in
   ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
   let stream_error =
     Awskit.Error.Internal.body "simulator stream request body failed"
@@ -87,7 +107,7 @@ let test_simulator_stream_request_body_error_propagates () =
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
-  (match Simulator.Object.put conn ~bucket ~key:"bad" ~body () with
+  (match Simulator.Object.put conn ~bucket ~key:(object_key "bad") ~body () with
   | Error error
     when is_body_error error
          && string_contains
@@ -96,7 +116,7 @@ let test_simulator_stream_request_body_error_propagates () =
       ()
   | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream request body error");
-  match Simulator.Object.head conn ~bucket ~key:"bad" () with
+  match Simulator.Object.head conn ~bucket ~key:(object_key "bad") () with
   | Error error when Error.is_not_found error -> ()
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream error object to be absent"
@@ -108,7 +128,7 @@ let test_simulator_stream_request_body_rejects_length_mismatch () =
   let clock = Simulator.Clock.create ~now:test_time () in
   let store = Simulator.create_store ~clock () in
   let conn = Simulator.connect store ~credentials in
-  let bucket = "stream-length-bucket" in
+  let bucket = bucket_name "stream-length-bucket" in
   ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
   let descriptor : Awskit.Body.Request.descriptor =
     {
@@ -121,7 +141,10 @@ let test_simulator_stream_request_body_rejects_length_mismatch () =
     Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
         Simulator.Runtime.Request_body.write_string writer "ab")
   in
-  (match Simulator.Object.put conn ~bucket ~key:"short" ~body:short_body () with
+  (match
+     Simulator.Object.put conn ~bucket ~key:(object_key "short")
+       ~body:short_body ()
+   with
   | Error error when is_body_error error -> ()
   | Error error ->
       Alcotest.failf "unexpected short put error: %a" Error.pp error
@@ -132,16 +155,19 @@ let test_simulator_stream_request_body_rejects_length_mismatch () =
         | Error _ as error -> error
         | Ok () -> Simulator.Runtime.Request_body.write_string writer "e")
   in
-  (match Simulator.Object.put conn ~bucket ~key:"long" ~body:long_body () with
+  (match
+     Simulator.Object.put conn ~bucket ~key:(object_key "long") ~body:long_body
+       ()
+   with
   | Error error when is_body_error error -> ()
   | Error error -> Alcotest.failf "unexpected long put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected long request body error");
-  (match Simulator.Object.head conn ~bucket ~key:"short" () with
+  (match Simulator.Object.head conn ~bucket ~key:(object_key "short") () with
   | Error error when Error.is_not_found error -> ()
   | Error error ->
       Alcotest.failf "unexpected short head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected short body object to be absent");
-  match Simulator.Object.head conn ~bucket ~key:"long" () with
+  match Simulator.Object.head conn ~bucket ~key:(object_key "long") () with
   | Error error when Error.is_not_found error -> ()
   | Error error ->
       Alcotest.failf "unexpected long head error: %a" Error.pp error
@@ -152,11 +178,12 @@ let test_simulator_multipart_upload_part_stream_error_does_not_store_part () =
   let store = Simulator.create_store ~clock () in
   let conn = Simulator.connect store ~credentials:creds in
   ignore
-    (Simulator.Bucket.create conn ~bucket:"test-bucket" ()
+    (Simulator.Bucket.create conn ~bucket:(bucket_name "test-bucket") ()
     |> ok_or_fail "bucket");
   let created =
-    Simulator.Multipart.create_upload conn ~bucket:"test-bucket"
-      ~key:"large.bin" ()
+    Simulator.Multipart.create_upload conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "large.bin") ()
     |> ok_or_fail "create multipart upload"
   in
   let upload_id = created.upload.upload_id in
@@ -177,16 +204,18 @@ let test_simulator_multipart_upload_part_stream_error_does_not_store_part () =
         | Ok () -> Error stream_error)
   in
   (match
-     Simulator.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"large.bin"
-       ~upload_id ~part_number:1 ~body ()
+     Simulator.Multipart.upload_part conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "large.bin") ~upload_id ~part_number:1 ~body ()
    with
   | Error error when Error.equal error stream_error -> ()
   | Error error ->
       Alcotest.failf "unexpected upload part error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream request body error");
   let listed =
-    Simulator.Multipart.list_parts conn ~bucket:"test-bucket" ~key:"large.bin"
-      ~upload_id ()
+    Simulator.Multipart.list_parts conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "large.bin") ~upload_id ()
     |> ok_or_fail "list multipart parts"
   in
   Alcotest.(check int) "stored parts" 0 (List.length listed.parts)
@@ -195,13 +224,17 @@ let test_simulator_public_surface () =
   let conn = make_simulator () in
   let store = Simulator.store conn in
   let put =
-    Simulator.Object.put conn ~bucket:"test-bucket" ~key:"ok.txt"
+    Simulator.Object.put conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "ok.txt")
       ~body:(Simulator.Body.of_string "hello")
       ()
     |> ok_or_fail "put ok"
   in
   (match
-     (Simulator.object_metadata store ~bucket:"test-bucket" ~key:"ok.txt"
+     (Simulator.object_metadata store
+        ~bucket:(bucket_name "test-bucket")
+        ~key:(object_key "ok.txt")
        : Simulator.object_metadata option)
    with
   | None -> Alcotest.fail "expected object metadata"
@@ -217,14 +250,18 @@ let test_simulator_public_surface () =
   Alcotest.(check (list (pair string string)))
     "objects as strings"
     [ ("ok.txt", "hello") ]
-    (Simulator.objects_as_strings store ~bucket:"test-bucket");
+    (Simulator.objects_as_strings store ~bucket:(bucket_name "test-bucket"));
   Alcotest.(check bool)
     "missing object metadata" true
     (Option.is_none
-       (Simulator.object_metadata store ~bucket:"test-bucket" ~key:"missing"));
+       (Simulator.object_metadata store
+          ~bucket:(bucket_name "test-bucket")
+          ~key:(object_key "missing")));
   Simulator.enable_random_faults conn ~seed:7 ~prob:1.0;
   (match
-     Simulator.Object.put conn ~bucket:"test-bucket" ~key:"faulted.txt"
+     Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "faulted.txt")
        ~body:(Simulator.Body.of_string "faulted")
        ()
    with
@@ -233,14 +270,16 @@ let test_simulator_public_surface () =
   | Ok _ -> Alcotest.fail "expected random fault");
   Simulator.disable_random_faults conn;
   ignore
-    (Simulator.Object.put conn ~bucket:"test-bucket" ~key:"after.txt"
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "after.txt")
        ~body:(Simulator.Body.of_string "after")
        ()
     |> ok_or_fail "put after disabling random faults");
   Alcotest.(check (list (pair string string)))
     "objects after random fault"
     [ ("after.txt", "after"); ("ok.txt", "hello") ]
-    (Simulator.objects_as_strings store ~bucket:"test-bucket")
+    (Simulator.objects_as_strings store ~bucket:(bucket_name "test-bucket"))
 
 let simulator_operation_name (_ : Simulator.operation_record) = function
   | `Put_object | `Get_object | `Head_object | `Delete_object | `List_objects_v2
@@ -252,7 +291,9 @@ let simulator_operation_name (_ : Simulator.operation_record) = function
 let test_simulator_history_uses_operation_names () =
   let conn = make_simulator () in
   ignore
-    (Simulator.Object.put conn ~bucket:"test-bucket" ~key:"history.txt"
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "history.txt")
        ~body:(Simulator.Body.of_string "history")
        ()
     |> ok_or_fail "put history");
@@ -269,11 +310,13 @@ let test_simulator_buffer_roundtrip () =
     }
   in
   let put =
-    Simulator.Object.put conn ~bucket:"test-bucket" ~key:"hello.txt"
+    Simulator.Object.put conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "hello.txt")
       ~options:
         {
           Put_object.default_options with
-          content_type = Some "text/plain";
+          content_type = Some (content_type "text/plain");
           checksum = Some checksum;
         }
       ~body:(Simulator.Body.of_string "hello")
@@ -283,25 +326,31 @@ let test_simulator_buffer_roundtrip () =
   Alcotest.(check bool) "etag" true (Option.is_some put.etag);
   check_checksum "put checksum" Object.Checksum.Algorithm.Sha256
     "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" put.checksum;
-  let info, body =
-    Simulator.Object.get conn ~bucket:"test-bucket" ~key:"hello.txt"
+  let result =
+    Simulator.Object.get conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "hello.txt")
       ~consume:(Simulator.Reader.to_string ~max_bytes:16L)
       ()
     |> ok_or_fail "get"
   in
+  let body = result.Get_object.value in
   Alcotest.(check string) "body" "hello" body;
   Alcotest.(check (option string))
-    "content-type" (Some "text/plain") info.content_type;
+    "content-type" (Some "text/plain")
+    (Option.map Content_type.to_string result.content_type);
   check_checksum "get checksum" Object.Checksum.Algorithm.Sha256
-    "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" info.checksum;
+    "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" result.checksum;
   let head =
-    Simulator.Object.head conn ~bucket:"test-bucket" ~key:"hello.txt" ()
+    Simulator.Object.head conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "hello.txt") ()
     |> ok_or_fail "head checksum"
   in
   check_checksum "head checksum" Object.Checksum.Algorithm.Sha256
     "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" head.checksum;
   let page =
-    Simulator.Object.list conn ~bucket:"test-bucket" ()
+    Simulator.Object.list conn ~bucket:(bucket_name "test-bucket") ()
     |> ok_or_fail "list checksum"
   in
   match page.objects with
@@ -325,7 +374,9 @@ let test_simulator_rejects_unknown_checksum_writes () =
     | Ok _ -> Alcotest.failf "%s: expected checksum validation" label
   in
   expect_checksum_validation "simulator put"
-    (Simulator.Object.put conn ~bucket:"test-bucket" ~key:"bad.txt"
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "bad.txt")
        ~options:{ Put_object.default_options with checksum = Some checksum }
        ~body:(Simulator.Body.of_string "body")
        ());
@@ -336,17 +387,22 @@ let test_simulator_rejects_unknown_checksum_writes () =
     }
   in
   ignore
-    (Simulator.Object.put conn ~bucket:"test-bucket" ~key:"source.txt"
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "source.txt")
        ~body:(Simulator.Body.of_string "body")
        ()
     |> ok_or_fail "source");
   expect_checksum_validation "simulator copy"
-    (Simulator.Object.copy conn ~source_bucket:"test-bucket"
-       ~source_key:"source.txt" ~destination_bucket:"test-bucket"
-       ~destination_key:"copy.txt" ~options:copy_options ());
+    (Simulator.Object.copy conn
+       ~source_bucket:(bucket_name "test-bucket")
+       ~source_key:(object_key "source.txt")
+       ~destination_bucket:(bucket_name "test-bucket")
+       ~destination_key:(object_key "copy.txt") ~options:copy_options ());
   let upload =
-    Simulator.Multipart.create_upload conn ~bucket:"test-bucket" ~key:"bad.bin"
-      ()
+    Simulator.Multipart.create_upload conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "bad.bin") ()
     |> ok_or_fail "create upload"
   in
   let upload_id = upload.upload.upload_id in
@@ -354,8 +410,9 @@ let test_simulator_rejects_unknown_checksum_writes () =
     { Upload_part.checksum = Some checksum; expected_bucket_owner = None }
   in
   expect_checksum_validation "simulator upload part"
-    (Simulator.Multipart.upload_part conn ~bucket:"test-bucket" ~key:"bad.bin"
-       ~upload_id ~part_number:1
+    (Simulator.Multipart.upload_part conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "bad.bin") ~upload_id ~part_number:1
        ~body:(Simulator.Body.of_string "body")
        ~options:upload_part_options ());
   let part =
@@ -372,8 +429,9 @@ let test_simulator_rejects_unknown_checksum_writes () =
     }
   in
   expect_checksum_validation "simulator complete checksum"
-    (Simulator.Multipart.complete_upload conn ~bucket:"test-bucket"
-       ~key:"bad.bin" ~upload_id ~options:complete_options [ part ]);
+    (Simulator.Multipart.complete_upload conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "bad.bin") ~upload_id ~options:complete_options [ part ]);
   let complete_options =
     {
       Complete_multipart_upload.default_options with
@@ -381,8 +439,9 @@ let test_simulator_rejects_unknown_checksum_writes () =
     }
   in
   match
-    Simulator.Multipart.complete_upload conn ~bucket:"test-bucket"
-      ~key:"bad.bin" ~upload_id ~options:complete_options [ part ]
+    Simulator.Multipart.complete_upload conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "bad.bin") ~upload_id ~options:complete_options [ part ]
   with
   | Error error when is_validation_field "checksum_type" error -> ()
   | Error error ->
@@ -394,7 +453,9 @@ let test_simulator_rejects_unknown_checksum_writes () =
 let test_simulator_streaming_get () =
   let conn = make_simulator () in
   ignore
-    (Simulator.Object.put conn ~bucket:"test-bucket" ~key:"stream"
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "stream")
        ~body:(Simulator.Body.of_string "abcdef")
        ()
     |> ok_or_fail "put");
@@ -404,21 +465,28 @@ let test_simulator_streaming_get () =
     | Error _ as error -> error
     | Ok read -> Ok (Bytes.sub_string bytes 0 read)
   in
-  let _info, body =
-    Simulator.Object.get conn ~bucket:"test-bucket" ~key:"stream" ~consume ()
+  let body =
+    Simulator.Object.get conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "stream") ~consume ()
     |> ok_or_fail "stream get"
+    |> fun result -> result.Get_object.value
   in
   Alcotest.(check string) "partial body" "abc" body
 
 let test_buffer_limit () =
   let conn = make_simulator () in
   ignore
-    (Simulator.Object.put conn ~bucket:"test-bucket" ~key:"large"
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "large")
        ~body:(Simulator.Body.of_string "abcdef")
        ()
     |> ok_or_fail "put");
   match
-    Simulator.Object.get conn ~bucket:"test-bucket" ~key:"large"
+    Simulator.Object.get conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "large")
       ~consume:(Simulator.Reader.to_string ~max_bytes:3L)
       ()
   with
@@ -429,29 +497,35 @@ let test_buffer_limit () =
 let test_simulator_paginator_keys () =
   let conn = make_simulator () in
   ignore
-    (Simulator.Object.put conn ~bucket:"test-bucket" ~key:"logs/a.txt"
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "logs/a.txt")
        ~body:(Simulator.Body.of_string "a")
        ()
     |> ok_or_fail "put a");
   ignore
-    (Simulator.Object.put conn ~bucket:"test-bucket" ~key:"logs/b.txt"
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "logs/b.txt")
        ~body:(Simulator.Body.of_string "b")
        ()
     |> ok_or_fail "put b");
   ignore
-    (Simulator.Object.put conn ~bucket:"test-bucket" ~key:"other.txt"
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "other.txt")
        ~body:(Simulator.Body.of_string "other")
        ()
     |> ok_or_fail "put other");
   let options =
-    {
-      List_objects_v2.default_options with
-      prefix = Some "logs/";
-      max_keys = Some 1;
-    }
+    List_objects_v2.options_exn
+      ~prefix:(Object_key.Prefix.of_string_exn "logs/")
+      ~max_keys:1 ()
   in
   let keys =
-    Simulator.Object.List_objects_v2.keys conn ~bucket:"test-bucket" ~options ()
+    Simulator.Object.List_objects_v2.keys conn
+      ~bucket:(bucket_name "test-bucket")
+      ~options ()
     |> ok_or_fail "simulator paginator keys"
   in
   Alcotest.(check (list string)) "keys" [ "logs/a.txt"; "logs/b.txt" ] keys
@@ -462,6 +536,8 @@ let suite =
       [
         Alcotest.test_case "simulator request body requires known length" `Quick
           test_simulator_request_body_requires_known_length;
+        Alcotest.test_case "simulator bucket validation matches core rules"
+          `Quick test_simulator_bucket_validation_matches_core_rules;
         Alcotest.test_case "simulator stream request body error propagates"
           `Quick test_simulator_stream_request_body_error_propagates;
         Alcotest.test_case

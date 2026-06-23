@@ -160,12 +160,15 @@
   yojson
   (base64
    (>= 3.5.2))
+  uucp
   uri
   ezxmlm
   ppx_protocol_conv_xmlm
   ppx_deriving
   ppx_yojson_conv
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-s3-sim)

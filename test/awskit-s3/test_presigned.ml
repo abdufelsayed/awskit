@@ -27,7 +27,7 @@ let temporary_credentials ?session_token expires_at =
 let test_presigned_result () =
   let result =
     Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"bucket" ~key:"file.txt" ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ()
     |> ok_or_fail "presigned get"
   in
   Alcotest.(check string)
@@ -57,16 +57,17 @@ let test_presigned_safe_artifact_redacts_bearer_material () =
   let options : Presigned.Get_object.options =
     {
       expires_in = Some expires_in;
-      response_content_type = Some "text/plain";
-      response_content_disposition = Some "attachment";
+      response_content_type = Some (content_type "text/plain");
+      response_content_disposition =
+        Some (header_value ~field:"response-content-disposition" "attachment");
       version_id = Some version_id;
-      expected_bucket_owner = Some "123456789012";
+      expected_bucket_owner = Some (account_id "123456789012");
       extra_signed_headers = [ ("x-user-secret", header_secret) ];
     }
   in
   let result =
     Presigned.get_object ~region:"us-east-1" ~credentials ~now:test_time
-      ~bucket:"bucket" ~key:"file.txt" ~options ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ~options ()
     |> ok_or_fail "presigned get safe artifact"
   in
   let raw_url = Presigned.reveal_url result in
@@ -135,7 +136,7 @@ let test_presigned_effective_expiry_is_capped_by_credentials () =
   in
   let result =
     Presigned.get_object ~region:"us-east-1" ~credentials ~now:test_time
-      ~bucket:"bucket" ~key:"file.txt" ~options ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ~options ()
     |> ok_or_fail "presigned get capped expiration"
   in
   Alcotest.(check int)
@@ -160,7 +161,7 @@ let test_presigned_rejects_expired_credentials () =
   in
   match
     Presigned.get_object ~region:"us-east-1" ~credentials ~now:test_time
-      ~bucket:"bucket" ~key:"file.txt" ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ()
   with
   | Error error when Awskit.Error.is_credentials error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
@@ -173,7 +174,7 @@ let test_presigned_expiry_validation_boundaries () =
     in
     match
       Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-        ~bucket:"bucket" ~key:"file.txt" ~options ()
+        ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ~options ()
     with
     | Error error when is_validation_field "expires_in" error -> ()
     | Error error ->
@@ -192,7 +193,8 @@ let test_presigned_expiry_validation_boundaries () =
   in
   let fractional =
     Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"bucket" ~key:"file.txt" ~options:fractional_options ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt")
+      ~options:fractional_options ()
     |> ok_or_fail "fractional expiry"
   in
   Alcotest.(check (float 0.000001))
@@ -217,7 +219,8 @@ let test_presigned_expiry_validation_boundaries () =
   in
   let max_result =
     Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"bucket" ~key:"file.txt" ~options:max_options ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt")
+      ~options:max_options ()
     |> ok_or_fail "max expiry"
   in
   Alcotest.(check int)
@@ -236,7 +239,7 @@ let test_presigned_put_checksum_headers () =
   in
   let result =
     Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"bucket" ~key:"file.txt" ~options ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ~options ()
     |> ok_or_fail "presigned put"
   in
   Alcotest.(check (option string))
@@ -251,7 +254,8 @@ let test_presigned_put_checksum_headers () =
     (List.mem "x-amz-checksum-sha1" signed_headers)
 
 let test_presigned_expected_bucket_owner_headers () =
-  let owner = "123456789012" in
+  let owner = account_id "123456789012" in
+  let owner_string = Account_id.to_string owner in
   let get_options =
     {
       Presigned.Get_object.default_options with
@@ -260,11 +264,12 @@ let test_presigned_expected_bucket_owner_headers () =
   in
   let get =
     Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"bucket" ~key:"file.txt" ~options:get_options ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt")
+      ~options:get_options ()
     |> ok_or_fail "presigned get expected owner"
   in
   Alcotest.(check (option string))
-    "get expected owner header" (Some owner)
+    "get expected owner header" (Some owner_string)
     (header "x-amz-expected-bucket-owner" (Presigned.signed_headers get));
   Alcotest.(check bool)
     "get signed expected owner" true
@@ -272,11 +277,12 @@ let test_presigned_expected_bucket_owner_headers () =
        (signed_headers_or_fail (Presigned.reveal_url get)));
   let head =
     Presigned.head_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"bucket" ~key:"file.txt" ~options:get_options ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt")
+      ~options:get_options ()
     |> ok_or_fail "presigned head expected owner"
   in
   Alcotest.(check (option string))
-    "head expected owner header" (Some owner)
+    "head expected owner header" (Some owner_string)
     (header "x-amz-expected-bucket-owner" (Presigned.signed_headers head));
   Alcotest.(check bool)
     "head signed expected owner" true
@@ -290,11 +296,12 @@ let test_presigned_expected_bucket_owner_headers () =
   in
   let put =
     Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"bucket" ~key:"file.txt" ~options:put_options ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt")
+      ~options:put_options ()
     |> ok_or_fail "presigned put expected owner"
   in
   Alcotest.(check (option string))
-    "put expected owner header" (Some owner)
+    "put expected owner header" (Some owner_string)
     (header "x-amz-expected-bucket-owner" (Presigned.signed_headers put));
   Alcotest.(check bool)
     "put signed expected owner" true
@@ -309,12 +316,12 @@ let test_presigned_expected_bucket_owner_headers () =
   in
   let upload_part =
     Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"bucket" ~key:"large.bin" ~upload_id ~part_number:1
-      ~options:upload_part_options ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "large.bin") ~upload_id
+      ~part_number:1 ~options:upload_part_options ()
     |> ok_or_fail "presigned upload-part expected owner"
   in
   Alcotest.(check (option string))
-    "upload-part expected owner header" (Some owner)
+    "upload-part expected owner header" (Some owner_string)
     (header "x-amz-expected-bucket-owner"
        (Presigned.signed_headers upload_part));
   Alcotest.(check bool)
@@ -329,11 +336,12 @@ let test_presigned_expected_bucket_owner_headers () =
   in
   let delete =
     Presigned.delete_object ~region:"us-east-1" ~credentials:creds
-      ~now:test_time ~bucket:"bucket" ~key:"file.txt" ~options:delete_options ()
+      ~now:test_time ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt")
+      ~options:delete_options ()
     |> ok_or_fail "presigned delete expected owner"
   in
   Alcotest.(check (option string))
-    "delete expected owner header" (Some owner)
+    "delete expected owner header" (Some owner_string)
     (header "x-amz-expected-bucket-owner" (Presigned.signed_headers delete));
   Alcotest.(check bool)
     "delete signed expected owner" true
@@ -353,7 +361,8 @@ let test_presigned_upload_part () =
   in
   let result =
     Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"bucket" ~key:"large.bin" ~upload_id ~part_number:7 ~options ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "large.bin") ~upload_id
+      ~part_number:7 ~options ()
     |> ok_or_fail "presigned upload part"
   in
   Alcotest.(check string)
@@ -378,7 +387,8 @@ let test_presigned_upload_part () =
     (List.mem "x-amz-checksum-sha256" signed_headers);
   match
     Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"bucket" ~key:"large.bin" ~upload_id ~part_number:0 ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "large.bin") ~upload_id
+      ~part_number:0 ()
   with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "expected invalid part number"
@@ -392,7 +402,7 @@ let test_presigned_rejects_header_newline () =
   in
   match
     Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"bucket" ~key:"file.txt" ~options ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ~options ()
   with
   | Error error when Awskit.Error.is_validation error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
@@ -410,7 +420,8 @@ let test_presigned_rejects_unknown_checksum () =
   in
   (match
      Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-       ~bucket:"bucket" ~key:"file.txt" ~options:put_options ()
+       ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt")
+       ~options:put_options ()
    with
   | Error error when is_validation_field "checksum_algorithm" error -> ()
   | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
@@ -421,28 +432,13 @@ let test_presigned_rejects_unknown_checksum () =
   in
   match
     Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:"bucket" ~key:"large.bin" ~upload_id ~part_number:1
-      ~options:upload_part_options ()
+      ~bucket:(bucket_name "bucket") ~key:(object_key "large.bin") ~upload_id
+      ~part_number:1 ~options:upload_part_options ()
   with
   | Error error when is_validation_field "checksum_algorithm" error -> ()
   | Error error ->
       Alcotest.failf "unexpected upload part error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected presigned upload-part checksum validation"
-
-let test_presigned_operation_context_for_validation_error () =
-  let conn = Recording_runtime.connect [] in
-  match
-    Recording_s3.Presigned.get_object conn ~bucket:"ab" ~key:"file.txt" ()
-  with
-  | Ok _ -> Alcotest.fail "expected invalid bucket"
-  | Error error ->
-      let text = Awskit.Error.to_string_hum error in
-      Alcotest.(check bool)
-        "mentions operation" true
-        (string_contains text ~substring:"GetObject");
-      Alcotest.(check bool)
-        "mentions resource" true
-        (string_contains text ~substring:"s3://ab/file.txt")
 
 let test_presigned_accepts_string_region_and_endpoint_config () =
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
@@ -463,33 +459,34 @@ let test_presigned_accepts_string_region_and_endpoint_config () =
   check_url "get string region endpoint"
     (Presigned.get_object_with_endpoint_config
        ~region:(Region.of_string_exn "us-east-1")
-       ~credentials:creds ~now:test_time ~endpoint_config ~bucket:"bucket"
-       ~key:"file.txt" ());
+       ~credentials:creds ~now:test_time ~endpoint_config
+       ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ());
   check_url "head string region endpoint"
     (Presigned.head_object_with_endpoint_config
        ~region:(Region.of_string_exn "us-east-1")
-       ~credentials:creds ~now:test_time ~endpoint_config ~bucket:"bucket"
-       ~key:"file.txt" ());
+       ~credentials:creds ~now:test_time ~endpoint_config
+       ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ());
   check_url "put string region endpoint"
     (Presigned.put_object_with_endpoint_config
        ~region:(Region.of_string_exn "us-east-1")
-       ~credentials:creds ~now:test_time ~endpoint_config ~bucket:"bucket"
-       ~key:"file.txt" ());
+       ~credentials:creds ~now:test_time ~endpoint_config
+       ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ());
   check_url "delete string region endpoint"
     (Presigned.delete_object_with_endpoint_config
        ~region:(Region.of_string_exn "us-east-1")
-       ~credentials:creds ~now:test_time ~endpoint_config ~bucket:"bucket"
-       ~key:"file.txt" ());
+       ~credentials:creds ~now:test_time ~endpoint_config
+       ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ());
   check_url "upload part string region endpoint"
     (Presigned.upload_part_with_endpoint_config
        ~region:(Region.of_string_exn "us-east-1")
-       ~credentials:creds ~now:test_time ~endpoint_config ~bucket:"bucket"
-       ~key:"large.bin" ~upload_id ~part_number:1 ())
+       ~credentials:creds ~now:test_time ~endpoint_config
+       ~bucket:(bucket_name "bucket") ~key:(object_key "large.bin") ~upload_id
+       ~part_number:1 ())
 
 let test_presigned_string_validation_errors () =
   (match
      Presigned.get_object ~region:" us-east-1" ~credentials:creds ~now:test_time
-       ~bucket:"bucket" ~key:"file.txt" ()
+       ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ()
    with
   | Error error when is_validation_field "region" error -> ()
   | Error error -> Alcotest.failf "unexpected region error: %a" Error.pp error
@@ -522,8 +519,6 @@ let suite =
           test_presigned_rejects_header_newline;
         Alcotest.test_case "presigned rejects unknown checksum" `Quick
           test_presigned_rejects_unknown_checksum;
-        Alcotest.test_case "presigned validation context" `Quick
-          test_presigned_operation_context_for_validation_error;
         Alcotest.test_case "presigned accepts string region endpoint config"
           `Quick test_presigned_accepts_string_region_and_endpoint_config;
         Alcotest.test_case "presigned string validation errors" `Quick
