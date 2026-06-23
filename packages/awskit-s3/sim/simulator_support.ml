@@ -5,10 +5,10 @@ let ( let* ) result f =
 
 let invalid ?field fmt =
   Fmt.kstr
-    (fun message -> Error (Awskit.Error.Internal.validation ?field message))
+    (fun message -> Error (Awskit.Error.Producer.validation ?field message))
     fmt
 
-let decode fmt = Fmt.kstr Awskit.Error.Internal.decode fmt
+let decode fmt = Fmt.kstr Awskit.Error.Producer.decode fmt
 
 let is_prefix ~prefix value =
   let prefix_len = String.length prefix in

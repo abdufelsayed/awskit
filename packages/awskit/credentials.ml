@@ -80,7 +80,7 @@ let has_ctl_or_del s =
       code < 0x20 || code = 0x7F)
 
 let invalid ~field message =
-  Error (Aws_error.Internal.validation ~field message)
+  Error (Aws_error.Producer.validation ~field message)
 
 let validate_required ~field value =
   if String.is_empty value then invalid ~field (Fmt.str "%s is empty" field)
@@ -117,7 +117,7 @@ let create ~access_key_id ~secret_access_key ?session_token ?source ?expires_at
 
 let create_exn ~access_key_id ~secret_access_key ?session_token ?source
     ?expires_at () =
-  Aws_error.Internal.get_ok_exn
+  Aws_error.Producer.get_ok_exn
     (create ~access_key_id ~secret_access_key ?session_token ?source ?expires_at
        ())
 
@@ -139,10 +139,10 @@ let is_expired ~now t =
 let validate_usable ~now ~operation t =
   if is_expired ~now t then
     Error
-      (Aws_error.Internal.credentials
+      (Aws_error.Producer.credentials
          ?source:(Option.map t.source ~f:source_label_of_source)
          "credentials expired before signing"
-      |> Aws_error.Internal.with_operation ~service:"aws" ~name:operation ())
+      |> Aws_error.Producer.with_operation ~service:"aws" ~name:operation ())
   else Ok ()
 
 let validate_fresh t ~now = validate_usable ~now ~operation:"SignRequest" t

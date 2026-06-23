@@ -1,7 +1,7 @@
 type analysis = { bytes : int; scalar_count : int; utf16_units : int }
 
 let invalid ~field message =
-  Error (Awskit.Error.Internal.validation ~field message)
+  Error (Awskit.Error.Producer.validation ~field message)
 
 let is_continuation byte = byte land 0xC0 = 0x80
 let byte value index = Char.code value.[index]

@@ -8,6 +8,6 @@ let of_json body =
     | `Assoc _ -> Ok body
     | _ -> invalid ~field:"policy" "policy must be a JSON object"
   with Yojson.Json_error message ->
-    Error (Awskit.Error.Internal.decode message)
+    Error (Awskit.Error.Producer.decode message)
 
 let to_json policy = policy

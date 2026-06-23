@@ -8,9 +8,10 @@
     Application code should treat this module as a consumer API: inspect,
     classify, and print errors returned by Awskit operations.
 
-    The {!module:Internal} submodule is an implementor API used by awskit core,
-    runtime adapters, service packages, simulators, and their tests. It is not
-    part of the application-facing contract. *)
+    The {!module:Producer} submodule is the producer-side API for custom runtime
+    authors, awskit service packages, runtime adapters, simulators, and tests
+    that need to construct the shared opaque error type. It is not part of the
+    application-facing consumer contract. *)
 
 type t
 
@@ -177,14 +178,13 @@ module Unsafe_diagnostics : sig
   val to_sexp_unredacted : t -> Base.Sexp.t
 end
 
-module Internal : sig
-  (** Implementor-only error constructors.
+module Producer : sig
+  (** Producer-side error constructors.
 
-      This submodule remains exposed because awskit service packages are
-      separate libraries that need to construct the shared opaque error type.
+      Custom runtimes, Awskit service packages, runtime adapters, simulators,
+      and tests use this module to construct the shared opaque error type.
       Application code should not construct {!type:t} values directly; inspect,
-      classify, and display returned errors instead. A future package split can
-      move these constructors into an implementation-only support library. *)
+      classify, and display returned errors instead. *)
 
   val validation : ?field:string -> string -> t
   val credentials : ?source:string -> string -> t

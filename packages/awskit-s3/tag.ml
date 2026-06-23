@@ -2,7 +2,7 @@ type t = { key : string; value : string }
 
 let invalid ?field fmt =
   Fmt.kstr
-    (fun message -> Error (Awskit.Error.Internal.validation ?field message))
+    (fun message -> Error (Awskit.Error.Producer.validation ?field message))
     fmt
 
 let max_key_chars = 128
@@ -68,7 +68,7 @@ let create ~key ~value =
               | Ok value -> Ok { key; value })))
 
 let create_exn ~key ~value =
-  Awskit.Error.Internal.get_ok_exn (create ~key ~value)
+  Awskit.Error.Producer.get_ok_exn (create ~key ~value)
 
 let key tag = tag.key
 let value tag = tag.value
@@ -96,6 +96,6 @@ module Set = struct
       in
       loop [] [] tags
 
-  let of_list_exn tags = Awskit.Error.Internal.get_ok_exn (of_list tags)
+  let of_list_exn tags = Awskit.Error.Producer.get_ok_exn (of_list tags)
   let to_list tags = tags
 end

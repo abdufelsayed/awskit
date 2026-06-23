@@ -239,7 +239,7 @@ let test_service_error_fixture () =
 
 let test_retry_decision_fixture () =
   let retry_error =
-    Awskit.Error.Internal.transport ~retryable:true "temporary"
+    Awskit.Error.Producer.transport ~retryable:true "temporary"
   in
   let policy =
     Awskit.Retry.create_exn ~max_attempts:4

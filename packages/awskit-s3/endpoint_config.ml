@@ -29,7 +29,7 @@ type compatible = {
 type t = Aws of aws | S3_compatible of compatible
 
 let invalid ?field message =
-  Error (Awskit.Error.Internal.validation ?field message)
+  Error (Awskit.Error.Producer.validation ?field message)
 
 let aws ?(addressing_style = `Auto) ?(endpoint_variant = `Regional) () =
   Aws { addressing_style; endpoint_variant }

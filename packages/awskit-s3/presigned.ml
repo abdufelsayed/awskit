@@ -186,7 +186,7 @@ let expires_seconds span =
 
 let credentials_expire_too_soon credentials =
   Error
-    (Awskit.Error.Internal.credentials
+    (Awskit.Error.Producer.credentials
        ?source:(Awskit.Credentials.source_label credentials)
        "credentials expire before presigned request can be used")
 

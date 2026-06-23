@@ -138,7 +138,7 @@ module Runtime = struct
     else
       match !read_error_after_bytes with
       | Some limit when reader.offset >= limit ->
-          Error (Awskit.Error.Internal.body "simulated response read failure")
+          Error (Awskit.Error.Producer.body "simulated response read failure")
       | _ -> (
           match !read_cancel_after_bytes with
           | Some limit when reader.offset >= limit ->
@@ -181,7 +181,7 @@ module Runtime = struct
 
     let next ?(chunk_size = 8192) reader =
       if chunk_size <= 0 then
-        Error (Awskit.Error.Internal.body "chunk_size must be positive")
+        Error (Awskit.Error.Producer.body "chunk_size must be positive")
       else
         let bytes = Bytes.create chunk_size in
         match read_response_body reader bytes ~off:0 ~len:chunk_size with
@@ -207,7 +207,7 @@ module Runtime = struct
     type nonrec response_body = response_body
 
     let with_response _ _ ~body:_ ~consume:_ =
-      Error (Awskit.Error.Internal.transport ~retryable:false "not implemented")
+      Error (Awskit.Error.Producer.transport ~retryable:false "not implemented")
   end
 
   module Clock = struct
@@ -516,7 +516,7 @@ module S3 = struct
             |> Awskit_s3.Object.Etag.to_string)
           parts;
       if conn.Runtime.fail_complete_upload then
-        Error (Awskit.Error.Internal.body "simulated complete failure")
+        Error (Awskit.Error.Producer.body "simulated complete failure")
       else
         Ok
           {
@@ -529,7 +529,7 @@ module S3 = struct
     let abort_upload conn ~upload:_ ?options:_ () =
       conn.Runtime.abort_count <- conn.Runtime.abort_count + 1;
       if conn.Runtime.fail_abort_upload then
-        Error (Awskit.Error.Internal.body "simulated abort failure")
+        Error (Awskit.Error.Producer.body "simulated abort failure")
       else Ok { Awskit_s3.Abort_multipart_upload.response = response 204 }
 
     let list_parts _ ~upload:_ ?options:_ () = assert false

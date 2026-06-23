@@ -148,7 +148,7 @@ module Object = struct
       else invalid ~field:"max_pages" "max_pages must be greater than zero"
 
     let max_pages_exceeded max_pages =
-      Awskit.Error.Internal.validation ~field:"max_pages"
+      Awskit.Error.Producer.validation ~field:"max_pages"
         (Fmt.str "ListObjectsV2 collection exceeded max_pages bound (%d)"
            max_pages)
 
@@ -267,7 +267,7 @@ module Object = struct
       else invalid ~field:"max_pages" "max_pages must be greater than zero"
 
     let max_pages_exceeded max_pages =
-      Awskit.Error.Internal.validation ~field:"max_pages"
+      Awskit.Error.Producer.validation ~field:"max_pages"
         (Fmt.str "ListObjectVersions collection exceeded max_pages bound (%d)"
            max_pages)
 

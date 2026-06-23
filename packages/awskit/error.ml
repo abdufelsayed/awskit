@@ -696,7 +696,7 @@ module Unsafe_diagnostics = struct
   let to_sexp_unredacted = sexp_of_t_unredacted
 end
 
-module Internal = struct
+module Producer = struct
   let validation = validation
   let credentials = credentials
   let signing = signing

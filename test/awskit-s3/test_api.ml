@@ -556,7 +556,7 @@ let test_presigned_api_compiles () =
   ()
 
 let service_error ?code ?message status =
-  Awskit.Error.Internal.service ~status ?code ?message ~headers:[] ()
+  Awskit.Error.Producer.service ~status ?code ?message ~headers:[] ()
 
 let test_error_classifiers () =
   let precondition = service_error ~code:"PreconditionFailed" 412 in

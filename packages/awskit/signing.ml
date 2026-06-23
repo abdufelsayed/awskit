@@ -80,14 +80,14 @@ let validate_host_header headers =
   match hosts with
   | [] ->
       Error
-        (Aws_error.Internal.validation ~field:"host"
+        (Aws_error.Producer.validation ~field:"host"
            "signing requires exactly one host header")
   | [ host ] when String.is_empty host ->
-      Error (Aws_error.Internal.validation ~field:"host" "host header is empty")
+      Error (Aws_error.Producer.validation ~field:"host" "host header is empty")
   | [ _host ] -> Ok ()
   | _ ->
       Error
-        (Aws_error.Internal.validation ~field:"host"
+        (Aws_error.Producer.validation ~field:"host"
            "signing requires exactly one host header")
 
 let sign_request_params ~credentials ~region ~service ~method_ ~path
@@ -170,7 +170,7 @@ let sign_request_params ~credentials ~region ~service ~method_ ~path
                   signed_headers_str;
                 }))
 
-let result_exn = Aws_error.Internal.get_ok_exn
+let result_exn = Aws_error.Producer.get_ok_exn
 
 let sign_request_params_exn ~credentials ~region ~service ~method_ ~path
     ~query_params ~headers ~payload_hash ~now =

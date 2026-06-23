@@ -44,7 +44,9 @@ Use role names consistently in public interfaces:
 
 `Internal` is not a supported extension role. Use private Dune modules for
 implementation details, or a role name such as `Runtime`, `Transport`, or
-`Provider` when the contract is intentionally public.
+`Provider` when the contract is intentionally public. Use
+`Awskit.Error.Producer` for runtime, service, and simulator code that
+intentionally constructs shared SDK errors.
 
 Advanced application APIs are normal SDK APIs with deeper control. They use the
 same client handle, domain values, options, result records, and

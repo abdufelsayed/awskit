@@ -341,7 +341,7 @@ let test_stream_request_body_emits_multiple_chunks env =
             "request body" (Some "abcdef") !request_body)
 
 let test_stream_request_body_error_propagates env =
-  let stream_error = Awskit.Error.Internal.body "stream request body failed" in
+  let stream_error = Awskit.Error.Producer.body "stream request body failed" in
   with_eio_early_response_server env ~status:200 ~response_body:"ok"
     ~read_request_body:false ~ignore_connection_errors:true (fun endpoint ->
       Eio.Switch.run @@ fun sw ->
@@ -570,7 +570,7 @@ let test_with_response_body_drain_enforces_limit env =
   |> expect_body_limit "scoped drain limit" 3L
 
 let test_with_response_body_preserves_consumer_error env =
-  let consumer_error = Awskit.Error.Internal.body "consumer failed" in
+  let consumer_error = Awskit.Error.Producer.body "consumer failed" in
   match
     with_eio_response_body env ~max_response_drain_bytes:3 "abcdef"
       ~f:(fun body ->

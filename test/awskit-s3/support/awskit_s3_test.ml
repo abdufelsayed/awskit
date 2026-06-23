@@ -144,7 +144,7 @@ module Recording_runtime = struct
           let length = Int64.of_int (String.length body) in
           match descriptor.Awskit.Body.Request.content_length with
           | Some declared when not (Stdlib.Int64.equal declared length) ->
-              Error (Awskit.Error.Internal.body "request body length mismatch")
+              Error (Awskit.Error.Producer.body "request body length mismatch")
           | _ -> Ok body)
       | Error _ as error -> error
     in
@@ -164,7 +164,7 @@ module Recording_runtime = struct
       | None -> false
     then
       Stdlib.Error
-        (Awskit.Error.Internal.body "simulated download read failure")
+        (Awskit.Error.Producer.body "simulated download read failure")
     else
       let remaining = String.length reader.body - reader.offset in
       if remaining <= 0 then Ok 0
@@ -223,7 +223,7 @@ module Recording_runtime = struct
 
     let next ?(chunk_size = 8192) reader =
       if chunk_size <= 0 then
-        Error (Awskit.Error.Internal.body "chunk_size must be positive")
+        Error (Awskit.Error.Producer.body "chunk_size must be positive")
       else
         let bytes = Bytes.create chunk_size in
         match read_response_body reader bytes ~off:0 ~len:chunk_size with
@@ -243,7 +243,7 @@ module Recording_runtime = struct
         match conn.responses with
         | [] ->
             Error
-              (Awskit.Error.Internal.transport ~retryable:false
+              (Awskit.Error.Producer.transport ~retryable:false
                  "no canned response")
         | response :: rest ->
             conn.responses <- rest;

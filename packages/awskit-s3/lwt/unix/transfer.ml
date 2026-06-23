@@ -1,7 +1,7 @@
 let buffer_size = 128 * 1024
 
 let body_error action path exn =
-  Awskit.Error.Internal.body
+  Awskit.Error.Producer.body
     (Fmt.str "failed to %s path %S: %s" action path (Printexc.to_string exn))
 
 exception Callback_raised of exn
@@ -45,7 +45,7 @@ let regular_file_length path =
           | Unix.S_REG -> Lwt.return_ok stat.st_size
           | kind ->
               Lwt.return_error
-                (Awskit.Error.Internal.validation ~field:"path"
+                (Awskit.Error.Producer.validation ~field:"path"
                    (Fmt.str "expected regular file, got %s"
                       (file_kind_to_string kind)))))
     (body_error_or_raise_callback "stat upload" path)
@@ -55,7 +55,7 @@ let reject_existing_download_target path =
     (fun () ->
       Lwt.bind (Lwt_unix.LargeFile.stat path) (fun _stat ->
           Lwt.return_error
-            (Awskit.Error.Internal.validation ~field:"path"
+            (Awskit.Error.Producer.validation ~field:"path"
                "download target already exists")))
     (function
       | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_ok ()
@@ -90,8 +90,8 @@ let cleanup_temp_download path error =
     | Ok () -> Lwt.return_error error
     | Error cleanup_error ->
         Lwt.return_error
-          (Awskit.Error.Internal.multiple [ error; cleanup_error ]
-          |> Awskit.Error.Internal.with_context
+          (Awskit.Error.Producer.multiple [ error; cleanup_error ]
+          |> Awskit.Error.Producer.with_context
                "download failed and temporary file cleanup also failed"))
 
 let write_all fd bytes offset length =
@@ -101,7 +101,7 @@ let write_all fd bytes offset length =
       Lwt.bind (Lwt_unix.write fd bytes offset remaining) (function
         | 0 ->
             Lwt.return_error
-              (Awskit.Error.Internal.body "download write made no progress")
+              (Awskit.Error.Producer.body "download write made no progress")
         | written -> loop (offset + written) (remaining - written))
   in
   loop offset length
@@ -110,7 +110,7 @@ let reserve_temp_download_file path =
   let rec loop attempt =
     if attempt >= 100 then
       Lwt.return_error
-        (Awskit.Error.Internal.body
+        (Awskit.Error.Producer.body
            (Fmt.str "failed to reserve temporary download path for %S" path))
     else
       let temp_path = temp_download_path path attempt in
@@ -404,7 +404,7 @@ struct
                           Lwt.bind (Lwt_unix.read fd bytes 0 len) (function
                             | 0 ->
                                 Lwt.return_error
-                                  (Awskit.Error.Internal.body
+                                  (Awskit.Error.Producer.body
                                      (Fmt.str
                                         "unexpected end of file while reading \
                                          part %d from %S"
@@ -569,8 +569,8 @@ struct
         | Ok _ -> Lwt.return_error error
         | Error cleanup_error ->
             Lwt.return_error
-              (Awskit.Error.Internal.multiple [ error; cleanup_error ]
-              |> Awskit.Error.Internal.with_context
+              (Awskit.Error.Producer.multiple [ error; cleanup_error ]
+              |> Awskit.Error.Producer.with_context
                    "multipart upload failed and abort also failed"))
     in
     let abort_cleanup_ignore_errors () =
@@ -695,7 +695,7 @@ struct
                 | Error _ as error -> Lwt.return error
                 | Ok 0 ->
                     Lwt.return_error
-                      (Awskit.Error.Internal.body
+                      (Awskit.Error.Producer.body
                          (Fmt.str
                             "unexpected end of response while downloading \
                              range %d"

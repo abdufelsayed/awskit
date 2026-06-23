@@ -61,7 +61,7 @@ let content_range response =
   | None -> None
   | Some value ->
       Some
-        (Awskit.Error.Internal.get_ok_exn (Range.Content_range.of_header value))
+        (Awskit.Error.Producer.get_ok_exn (Range.Content_range.of_header value))
 
 let info_of_object ?content_length response (obj : stored_object) :
     Get_object.info =

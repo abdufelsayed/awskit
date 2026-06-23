@@ -89,7 +89,7 @@ let test_simulator_stream_request_body_error_propagates () =
   let bucket = bucket_name "stream-error-bucket" in
   ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
   let stream_error =
-    Awskit.Error.Internal.body "simulator stream request body failed"
+    Awskit.Error.Producer.body "simulator stream request body failed"
   in
   let descriptor : Awskit.Body.Request.descriptor =
     {
@@ -184,7 +184,7 @@ let test_simulator_multipart_upload_part_stream_error_does_not_store_part () =
     |> ok_or_fail "create multipart upload"
   in
   let stream_error =
-    Awskit.Error.Internal.body "simulator multipart request body failed"
+    Awskit.Error.Producer.body "simulator multipart request body failed"
   in
   let descriptor : Awskit.Body.Request.descriptor =
     {

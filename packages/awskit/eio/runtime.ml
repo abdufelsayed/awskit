@@ -173,7 +173,7 @@ let make_uri (request : Awskit.Request.t) =
        (Awskit.Request.Target.path_and_query target))
 
 let missing_https_connector_error =
-  Awskit.Error.Internal.transport ~retryable:false
+  Awskit.Error.Producer.transport ~retryable:false
     "HTTPS endpoint requires an HTTPS connector. Pass ~https with a connector \
      compatible with Cohttp_eio.Client.make. For local HTTP endpoints, pass \
      ~https:Awskit_eio.http_only and an explicit http:// endpoint."
@@ -202,7 +202,7 @@ let request_body_descriptor = function
   | Source (descriptor, _) -> descriptor
   | Stream (descriptor, _) -> descriptor
 
-let body_error message = Awskit.Error.Internal.body message
+let body_error message = Awskit.Error.Producer.body message
 
 let timeout_phase_name = function
   | `Connect -> "connect"
@@ -214,7 +214,7 @@ let timeout_phase_name = function
 
 let timeout_error phase span =
   let phase_name = timeout_phase_name phase in
-  Awskit.Error.Internal.timeout ~operation:phase_name
+  Awskit.Error.Producer.timeout ~operation:phase_name
     (Fmt.str "%s timed out after %.3fs" phase_name (Ptime.Span.to_float_s span))
 
 let with_timeout_result (Time_clock clock) timeout_policy phase f =
@@ -225,7 +225,7 @@ let with_timeout_result (Time_clock clock) timeout_policy phase f =
       with Eio.Time.Timeout -> Error (timeout_error phase span))
 
 let drain_limit_error max_response_drain_bytes =
-  Awskit.Error.Internal.body
+  Awskit.Error.Producer.body
     ~limit:(Int64.of_int max_response_drain_bytes)
     "response body exceeded max_response_drain_bytes"
 
@@ -406,7 +406,7 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
             | _ ->
                 let message = Exn.to_string exn in
                 Log.warn (fun m -> m "HTTP call failed: %s" message);
-                Error (Awskit.Error.Internal.transport ~retryable:true message))
+                Error (Awskit.Error.Producer.transport ~retryable:true message))
       in
       with_timeout_result conn.time_clock conn.timeout_policy `Operation
         (fun () ->
@@ -452,18 +452,18 @@ let rec read_from_current reader bytes ~off ~len =
 
 let read_response_body reader bytes ~off ~len =
   if invalid_read_bounds bytes ~off ~len then
-    Error (Awskit.Error.Internal.body "invalid read bounds")
+    Error (Awskit.Error.Producer.body "invalid read bounds")
   else
     with_timeout_result reader.time_clock reader.timeout_policy `Response_body
       (fun () ->
         try read_from_current reader bytes ~off ~len with
         | End_of_file -> Ok 0
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Awskit.Error.Internal.body (Exn.to_string exn)))
+        | exn -> Error (Awskit.Error.Producer.body (Exn.to_string exn)))
 
 let next_response_body ?(chunk_size = 8192) reader =
   if chunk_size <= 0 then
-    Error (Awskit.Error.Internal.body "chunk_size must be positive")
+    Error (Awskit.Error.Producer.body "chunk_size must be positive")
   else
     let buffer = Bytes.create chunk_size in
     match read_response_body reader buffer ~off:0 ~len:chunk_size with

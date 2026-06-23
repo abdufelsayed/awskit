@@ -14,7 +14,7 @@ let is_validation_field field error =
   && Awskit.Error.validation_field error = Some field
 
 let service_error ?code ?message status =
-  Awskit.Error.Internal.service ~status ?code ?message ~headers:[] ()
+  Awskit.Error.Producer.service ~status ?code ?message ~headers:[] ()
 
 let no_such_key_body =
   {|<Error><Code>NoSuchKey</Code><Message>not found</Message></Error>|}

@@ -240,7 +240,7 @@ let test_find_preserves_consumer_not_found_error () =
        ()
     |> ok_or_fail "put object");
   let consumer_error =
-    Awskit.Error.Internal.service ~status:404 ~code:"NoSuchKey"
+    Awskit.Error.Producer.service ~status:404 ~code:"NoSuchKey"
       ~message:"consumer-owned missing resource" ~headers:[] ()
   in
   match

@@ -250,11 +250,11 @@ let test_response_header_parse_failures_are_decode_errors () =
 
 let test_error_context_and_sexp () =
   let error =
-    Awskit.Error.Internal.validation ~field:"bucket"
+    Awskit.Error.Producer.validation ~field:"bucket"
       "bucket must be 3-63 characters"
-    |> Awskit.Error.Internal.with_operation ~service:"s3" ~name:"CreateBucket"
+    |> Awskit.Error.Producer.with_operation ~service:"s3" ~name:"CreateBucket"
          ~resource:"s3://ab" ()
-    |> Awskit.Error.Internal.with_context "validating caller input"
+    |> Awskit.Error.Producer.with_context "validating caller input"
   in
   Alcotest.(check bool)
     "validation classifier" true
@@ -274,9 +274,9 @@ let test_error_context_and_sexp () =
     && String.is_substring human ~substring:"s3://ab")
 
 let test_error_multiple_preserves_all_failures () =
-  let primary = Awskit.Error.Internal.body "download failed" in
-  let cleanup = Awskit.Error.Internal.body "cleanup failed" in
-  let combined = Awskit.Error.Internal.multiple [ primary; cleanup ] in
+  let primary = Awskit.Error.Producer.body "download failed" in
+  let cleanup = Awskit.Error.Producer.body "cleanup failed" in
+  let combined = Awskit.Error.Producer.multiple [ primary; cleanup ] in
   let human = Awskit.Error.to_string_hum combined in
   Alcotest.(check bool)
     "mentions primary" true
@@ -318,7 +318,7 @@ let test_provider_chain_stops_on_invalid_configured_credentials () =
       [
         create (fun () ->
             Invalid
-              (Awskit.Error.Internal.validation ~field:"AWS_SECRET_ACCESS_KEY"
+              (Awskit.Error.Producer.validation ~field:"AWS_SECRET_ACCESS_KEY"
                  "missing secret"));
         static valid;
       ]
@@ -350,7 +350,7 @@ let test_provider_chain_reports_all_unavailable () =
   | Invalid _ | Failed _ -> Alcotest.fail "expected unavailable outcome"
 
 let make_service_error ~status ~code =
-  Awskit.Error.Internal.service ~status ?code ~headers:[] ()
+  Awskit.Error.Producer.service ~status ?code ~headers:[] ()
 
 let retry_class_to_string = function
   | Awskit.Error.Retryable -> "Retryable"
@@ -380,12 +380,12 @@ let check_retry_class name expected actual =
       (retry_class_to_string actual)
 
 let test_error_multiple_retry_policy () =
-  let validation_error = Awskit.Error.Internal.validation "bad caller input" in
+  let validation_error = Awskit.Error.Producer.validation "bad caller input" in
   let retryable_transport =
-    Awskit.Error.Internal.transport ~retryable:true "connection reset"
+    Awskit.Error.Producer.transport ~retryable:true "connection reset"
   in
   let retryable_over_fatal =
-    Awskit.Error.Internal.multiple [ validation_error; retryable_transport ]
+    Awskit.Error.Producer.multiple [ validation_error; retryable_transport ]
   in
   check_retry_class "retryable outranks fatal" Awskit.Error.Retryable
     (Awskit.Error.retry_class retryable_over_fatal);
@@ -396,14 +396,14 @@ let test_error_multiple_retry_policy () =
     make_service_error ~status:403 ~code:(Some "AccessDenied")
   in
   let auth_over_not_found =
-    Awskit.Error.Internal.multiple [ not_found_service; auth_service ]
+    Awskit.Error.Producer.multiple [ not_found_service; auth_service ]
   in
   check_retry_class "auth outranks not found" Awskit.Error.Auth
     (Awskit.Error.retry_class auth_over_not_found)
 
 let test_error_production_retry_classes () =
   let timeout_error =
-    Awskit.Error.Internal.timeout ~operation:"connect" "connection timed out"
+    Awskit.Error.Producer.timeout ~operation:"connect" "connection timed out"
   in
   let not_found_service =
     make_service_error ~status:404 ~code:(Some "NoSuchKey")
@@ -412,27 +412,27 @@ let test_error_production_retry_classes () =
     [
       ( "credentials are auth failures",
         Awskit.Error.Auth,
-        Awskit.Error.Internal.credentials ~source:"environment"
+        Awskit.Error.Producer.credentials ~source:"environment"
           "missing access key id" );
       ("timeouts are retryable", Awskit.Error.Retryable, timeout_error);
       ( "cancellation is fatal",
         Awskit.Error.Fatal,
-        Awskit.Error.Internal.cancelled ~reason:"caller cancelled" () );
+        Awskit.Error.Producer.cancelled ~reason:"caller cancelled" () );
       ( "not supported is fatal",
         Awskit.Error.Fatal,
-        Awskit.Error.Internal.not_supported ~feature:"s3-select"
+        Awskit.Error.Producer.not_supported ~feature:"s3-select"
           "S3 Select is not supported" );
       ( "retry exhaustion delegates to timeout",
         Awskit.Error.Retryable,
-        Awskit.Error.Internal.retry_exhausted ~attempts:3
+        Awskit.Error.Producer.retry_exhausted ~attempts:3
           ~last_error:timeout_error "retry policy exhausted" );
       ( "retry exhaustion delegates to terminal service error",
         Awskit.Error.Not_found,
-        Awskit.Error.Internal.retry_exhausted ~attempts:3
+        Awskit.Error.Producer.retry_exhausted ~attempts:3
           ~last_error:not_found_service "retry policy exhausted" );
       ( "retry exhaustion without terminal error is fatal",
         Awskit.Error.Fatal,
-        Awskit.Error.Internal.retry_exhausted ~attempts:3
+        Awskit.Error.Producer.retry_exhausted ~attempts:3
           "retry policy exhausted" );
     ]
   in
@@ -444,7 +444,7 @@ let test_retry_timeout_and_credential_timing_contracts () =
     "default retry has production jitter" true
     Float.(Awskit.Retry.jitter Awskit.Retry.default > 0.0);
   let retryable =
-    Awskit.Error.Internal.transport ~retryable:true "connection reset"
+    Awskit.Error.Producer.transport ~retryable:true "connection reset"
   in
   let policy =
     Awskit.Retry.create_exn ~max_attempts:2 ~jitter:1.0
@@ -530,14 +530,14 @@ let test_error_multiple_classifiers_recurse () =
   let service_error = make_service_error ~status:503 ~code:(Some "SlowDown") in
   let auth_error = make_service_error ~status:403 ~code:(Some "AccessDenied") in
   let combined =
-    Awskit.Error.Internal.multiple
+    Awskit.Error.Producer.multiple
       [
-        Awskit.Error.Internal.body "first error has no classifier data";
-        Awskit.Error.Internal.multiple
+        Awskit.Error.Producer.body "first error has no classifier data";
+        Awskit.Error.Producer.multiple
           [
-            Awskit.Error.Internal.validation "validation without field";
+            Awskit.Error.Producer.validation "validation without field";
             service_error;
-            Awskit.Error.Internal.validation ~field:"bucket" "bucket is invalid";
+            Awskit.Error.Producer.validation ~field:"bucket" "bucket is invalid";
           ];
         auth_error;
       ]
@@ -559,24 +559,24 @@ let test_error_multiple_classifiers_recurse () =
 
 let test_error_production_categories_and_classifiers () =
   let credentials_error =
-    Awskit.Error.Internal.credentials ~source:"environment"
+    Awskit.Error.Producer.credentials ~source:"environment"
       "missing access key id"
   in
   let endpoint_error =
-    Awskit.Error.Internal.endpoint ~uri:"https://s3.amazonaws.com"
+    Awskit.Error.Producer.endpoint ~uri:"https://s3.amazonaws.com"
       "endpoint host is invalid"
   in
   let timeout_error =
-    Awskit.Error.Internal.timeout ~operation:"connect" "connection timed out"
+    Awskit.Error.Producer.timeout ~operation:"connect" "connection timed out"
   in
   let cancelled_error =
-    Awskit.Error.Internal.cancelled ~reason:"caller requested cancellation" ()
+    Awskit.Error.Producer.cancelled ~reason:"caller requested cancellation" ()
   in
   let combined =
-    Awskit.Error.Internal.multiple
+    Awskit.Error.Producer.multiple
       [
-        Awskit.Error.Internal.body "stream failed";
-        Awskit.Error.Internal.multiple
+        Awskit.Error.Producer.body "stream failed";
+        Awskit.Error.Producer.multiple
           [ credentials_error; endpoint_error; timeout_error; cancelled_error ];
       ]
   in

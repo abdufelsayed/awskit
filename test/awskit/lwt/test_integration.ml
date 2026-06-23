@@ -364,7 +364,7 @@ let test_provider_chain_stops_on_invalid_configured_credentials () =
         create (fun () ->
             Lwt.return
               (Invalid
-                 (Awskit.Error.Internal.validation
+                 (Awskit.Error.Producer.validation
                     ~field:"AWS_SECRET_ACCESS_KEY" "missing secret")));
         static valid;
       ]
@@ -477,7 +477,7 @@ let test_stream_request_body_reaches_client () =
 
 let test_stream_request_body_error_propagates () =
   Request_body_client.request_body := None;
-  let stream_error = Awskit.Error.Internal.body "stream request body failed" in
+  let stream_error = Awskit.Error.Producer.body "stream request body failed" in
   let body =
     RequestAws.Runtime.Request_body.of_stream (stream_descriptor 4L)
       ~write:(fun writer ->
@@ -870,7 +870,7 @@ let test_with_response_body_drain_enforces_limit () =
   |> expect_body_limit "scoped drain limit" 3L
 
 let test_with_response_body_preserves_consumer_error () =
-  let consumer_error = Awskit.Error.Internal.body "consumer failed" in
+  let consumer_error = Awskit.Error.Producer.body "consumer failed" in
   with_limited_response ~max_response_drain_bytes:3 "abcdef" ~f:(fun body ->
       LimitedAws.Runtime.Response_body.with_reader body ~consume:(fun _ ->
           Lwt.return_error consumer_error))

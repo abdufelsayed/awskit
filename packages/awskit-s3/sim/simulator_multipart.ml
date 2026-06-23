@@ -89,7 +89,7 @@ module Multipart = struct
     match descriptor.content_length with
     | None ->
         Error
-          (Awskit.Error.Internal.validation ~field:"content_length"
+          (Awskit.Error.Producer.validation ~field:"content_length"
              "S3 multipart uploads require a known content length")
     | Some _ -> (
         match Awskit.Body.Request.validate_descriptor descriptor with
@@ -218,7 +218,7 @@ module Multipart = struct
     match parts with
     | [] ->
         Error
-          (Awskit.Error.Internal.validation ~field:"parts"
+          (Awskit.Error.Producer.validation ~field:"parts"
              "complete requires at least one part")
     | parts -> (
         match loop None 0L parts with

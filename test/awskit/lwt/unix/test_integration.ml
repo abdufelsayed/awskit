@@ -60,7 +60,7 @@ let provider_resolution_to_result resolution =
   | Resolved credentials -> Ok credentials
   | Unavailable { source; reason } ->
       Error
-        (Awskit.Error.Internal.credentials
+        (Awskit.Error.Producer.credentials
            ~source:(provider_source_to_string source)
            reason)
   | Invalid error | Failed error -> Error error
@@ -721,7 +721,7 @@ let test_instance_metadata_provider_uses_imdsv2 () =
           }
     | _ ->
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              ("unexpected request " ^ uri_string))
   in
   let provider =
@@ -766,7 +766,7 @@ let test_instance_metadata_missing_expiration_is_invalid () =
           }
     | _ ->
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected request")
   in
   let provider =
@@ -820,7 +820,7 @@ let test_instance_metadata_token_http_500_fails_provider () =
           { Awskit_lwt_unix.Credentials.status = 500; headers = []; body = "" }
     | _ ->
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected request")
   in
   let provider =
@@ -843,7 +843,7 @@ let test_instance_metadata_role_http_500_fails_provider () =
           { Awskit_lwt_unix.Credentials.status = 500; headers = []; body = "" }
     | _ ->
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected request")
   in
   let provider =
@@ -873,7 +873,7 @@ let test_instance_metadata_credentials_http_500_fails_provider () =
           { Awskit_lwt_unix.Credentials.status = 500; headers = []; body = "" }
     | _ ->
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected request")
   in
   let provider =
@@ -912,7 +912,7 @@ let test_instance_metadata_provider_falls_back_on_token_404 () =
           }
     | _ ->
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected request")
   in
   let provider =
@@ -936,11 +936,11 @@ let test_instance_metadata_provider_rejects_disabled_imdsv1_fallback () =
     | `GET, _ ->
         get_attempted := true;
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected IMDSv1 GET")
     | _ ->
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected request")
   in
   let provider =
@@ -963,11 +963,11 @@ let test_instance_metadata_provider_rejects_env_disabled_imdsv1_fallback () =
     | `GET, _ ->
         get_attempted := true;
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected IMDSv1 GET")
     | _ ->
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected request")
   in
   let provider =
@@ -989,11 +989,11 @@ let test_instance_metadata_provider_token_500_does_not_fallback () =
     | `GET, _ ->
         get_attempted := true;
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected IMDSv1 GET")
     | _ ->
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected request")
   in
   let provider =
@@ -1011,16 +1011,16 @@ let test_instance_metadata_provider_token_error_does_not_fallback () =
     match (meth, Uri.path uri) with
     | `PUT, "/latest/api/token" ->
         Lwt.return_error
-          (Awskit.Error.Internal.transport ~retryable:true
+          (Awskit.Error.Producer.transport ~retryable:true
              "metadata token failed")
     | `GET, _ ->
         get_attempted := true;
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected IMDSv1 GET")
     | _ ->
         Lwt.return_error
-          (Awskit.Error.Internal.validation ~field:"metadata"
+          (Awskit.Error.Producer.validation ~field:"metadata"
              "unexpected request")
   in
   let provider =

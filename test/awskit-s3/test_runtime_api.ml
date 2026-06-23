@@ -87,7 +87,7 @@ module Minimal_runtime : Awskit_s3.RUNTIME = struct
     type connection = unit
 
     let resolve () =
-      Error (Awskit.Error.Internal.credentials "test credentials unavailable")
+      Error (Awskit.Error.Producer.credentials "test credentials unavailable")
   end
 
   module Endpoint = struct

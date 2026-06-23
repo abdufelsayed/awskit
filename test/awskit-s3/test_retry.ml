@@ -170,9 +170,9 @@ let test_non_replayable_request_body_not_retried () =
 
 let test_retry_context_on_exhaustion () =
   let error =
-    Awskit.Error.Internal.service ~status:503 ~code:"SlowDown"
+    Awskit.Error.Producer.service ~status:503 ~code:"SlowDown"
       ~message:"reduce your request rate" ~request_id:"req-retry" ~headers:[] ()
-    |> Awskit.Error.Internal.with_retry ~attempt:3 ~max_attempts:3
+    |> Awskit.Error.Producer.with_retry ~attempt:3 ~max_attempts:3
          ~reason:"retry attempts exhausted"
   in
   let text = Awskit.Error.to_string_hum error in
@@ -189,7 +189,7 @@ let test_runtime_stream_request_body_error_propagates () =
     }
   in
   let stream_error =
-    Awskit.Error.Internal.body "runtime stream request body failed"
+    Awskit.Error.Producer.body "runtime stream request body failed"
   in
   let conn = Recording_runtime.connect [ response 200 "" ] in
   let body =
@@ -279,7 +279,7 @@ let test_retry_jitter_bounds () =
       ~jitter:0.5 ()
   in
   let error =
-    Awskit.Error.Internal.transport ~retryable:true
+    Awskit.Error.Producer.transport ~retryable:true
       "temporary transport failure"
   in
   let low =
@@ -403,7 +403,7 @@ let test_response_body_drain_errors () =
   Alcotest.(check int) "calls" 2 (List.length conn.calls)
 
 let test_response_body_consumer_error_wins_over_drain_error () =
-  let consumer_error = Awskit.Error.Internal.body "consumer failed" in
+  let consumer_error = Awskit.Error.Producer.body "consumer failed" in
   let conn =
     Recording_runtime.connect
       [

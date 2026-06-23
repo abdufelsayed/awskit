@@ -10,7 +10,7 @@ module Env = struct
     | None -> Ok None
     | Some value when String.is_empty value ->
         Error
-          (Awskit.Error.Internal.validation ~field:name
+          (Awskit.Error.Producer.validation ~field:name
              (Fmt.str "%s is empty" name))
     | Some value -> Ok (Some value)
 end
@@ -25,6 +25,6 @@ let from_env () =
       | Ok (Some region) -> Awskit.Region.of_string region
       | Ok None ->
           Error
-            (Awskit.Error.Internal.validation ~field:"region"
+            (Awskit.Error.Producer.validation ~field:"region"
                "AWS region not set; configure AWS_REGION or AWS_DEFAULT_REGION")
       )

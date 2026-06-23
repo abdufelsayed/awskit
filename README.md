@@ -96,8 +96,8 @@ Raw service diagnostics are available only through
 `Awskit.Error.Unsafe_diagnostics`.
 
 Application code should inspect, classify, and print errors returned by Awskit
-operations. Constructing `Awskit.Error.t` values is reserved for Awskit
-implementations under `Awskit.Error.Internal`.
+operations. Custom runtimes, Awskit runtime adapters, service packages, and
+simulators construct shared errors through `Awskit.Error.Producer`.
 
 Functions ending in `_exn` raise `Awskit.Error.Awskit_error` on SDK validation
 or construction failure. Prefer the result-returning form in libraries,

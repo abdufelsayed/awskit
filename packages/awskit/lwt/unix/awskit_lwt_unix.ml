@@ -29,7 +29,7 @@ module Credentials = struct
   let refresh_before = Ptime.Span.of_int_s (5 * 60)
 
   let validation ~field message =
-    Awskit.Error.Internal.validation ~field message
+    Awskit.Error.Producer.validation ~field message
 
   let trim value = String.trim value
 
@@ -54,11 +54,11 @@ module Credentials = struct
       (function
         | Lwt_unix.Timeout ->
             Lwt.return_error
-              (Awskit.Error.Internal.transport ~retryable:true
+              (Awskit.Error.Producer.transport ~retryable:true
                  "credential metadata request timed out")
         | exn ->
             Lwt.return_error
-              (Awskit.Error.Internal.transport ~retryable:true
+              (Awskit.Error.Producer.transport ~retryable:true
                  (Printexc.to_string exn)))
 
   let expect_success ~field response =

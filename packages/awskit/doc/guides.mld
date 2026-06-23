@@ -136,8 +136,9 @@ libraries and long-running services. Cancellation and user callback exceptions
 are not converted into SDK errors.
 
 Application code should inspect, classify, and print errors returned by Awskit
-operations. Constructing shared error values is reserved for Awskit package
-implementations under {!module:Awskit.Error.Internal}.
+operations. Custom runtimes, Awskit runtime adapters, service packages, and
+simulators construct shared error values through
+{!module:Awskit.Error.Producer}.
 
 The public kind and retry classifications are matchable variants. Error kind
 constructors are private, so application code can inspect returned errors but

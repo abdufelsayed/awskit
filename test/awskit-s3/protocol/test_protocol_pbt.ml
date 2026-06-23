@@ -139,7 +139,7 @@ let prop_download_ranges_cover_content_length =
           in
           total = content_length && contiguous 0 ranges)
 
-let retry_error = Awskit.Error.Internal.transport ~retryable:true "temporary"
+let retry_error = Awskit.Error.Producer.transport ~retryable:true "temporary"
 
 let prop_retry_jitter_stays_within_policy_bounds =
   let gen = QCheck.Gen.(pair (int_range 1 8) (int_range 0 1000)) in

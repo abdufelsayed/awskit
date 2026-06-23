@@ -5,7 +5,7 @@ let prefix = "x-amz-meta-"
 
 let invalid ?field fmt =
   Fmt.kstr
-    (fun message -> Error (Awskit.Error.Internal.validation ?field message))
+    (fun message -> Error (Awskit.Error.Producer.validation ?field message))
     fmt
 
 let has_ctl_or_del value =
@@ -46,7 +46,7 @@ let of_list entries =
   in
   loop [] [] entries
 
-let of_list_exn entries = Awskit.Error.Internal.get_ok_exn (of_list entries)
+let of_list_exn entries = Awskit.Error.Producer.get_ok_exn (of_list entries)
 
 let to_list metadata =
   List.map (fun { key; value } -> (key, Header_value.to_string value)) metadata

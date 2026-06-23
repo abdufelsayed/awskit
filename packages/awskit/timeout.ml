@@ -16,7 +16,7 @@ let positive_span ~field = function
       if Ptime.Span.to_float_s span > 0. then Ok ()
       else
         Error
-          (Error.Internal.validation ~field
+          (Error.Producer.validation ~field
              "timeout span must be strictly positive")
 
 let create ?connect ?attempt ?operation ?request_body ?response_body ?drain () =

@@ -10,7 +10,7 @@ module Create = struct
   let options ?region () = Ok { region }
 
   let options_exn ?region () =
-    Awskit.Error.Internal.get_ok_exn (options ?region ())
+    Awskit.Error.Producer.get_ok_exn (options ?region ())
 end
 
 module Delete = struct
@@ -21,7 +21,7 @@ module Delete = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module Head = struct
@@ -39,7 +39,7 @@ module Head = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module List_buckets = struct
@@ -58,7 +58,7 @@ module Get_location = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module Policy = struct
@@ -68,7 +68,7 @@ module Policy = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module Versioning = struct
@@ -91,7 +91,7 @@ module Versioning = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module Tagging = struct
@@ -102,7 +102,7 @@ module Tagging = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module Encryption = struct
@@ -154,7 +154,7 @@ module Encryption = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module Cors = struct
@@ -195,7 +195,7 @@ module Cors = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module Public_access_block = struct
@@ -222,7 +222,7 @@ module Public_access_block = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module Ownership_controls = struct
@@ -250,5 +250,5 @@ module Ownership_controls = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end

@@ -231,7 +231,7 @@ module Put = struct
   let options_exn ?content_type ?metadata ?storage_class ?tags ?cache_control
       ?content_encoding ?content_disposition ?preconditions ?checksum
       ?server_side_encryption ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn
+    Awskit.Error.Producer.get_ok_exn
       (options ?content_type ?metadata ?storage_class ?tags ?cache_control
          ?content_encoding ?content_disposition ?preconditions ?checksum
          ?server_side_encryption ?expected_bucket_owner ())
@@ -291,7 +291,7 @@ module Get = struct
 
   let options_exn ?range ?preconditions ?version_id ?checksum_mode
       ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn
+    Awskit.Error.Producer.get_ok_exn
       (options ?range ?preconditions ?version_id ?checksum_mode
          ?expected_bucket_owner ())
 end
@@ -320,7 +320,7 @@ module Head = struct
 
   let options_exn ?preconditions ?version_id ?checksum_mode
       ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn
+    Awskit.Error.Producer.get_ok_exn
       (options ?preconditions ?version_id ?checksum_mode ?expected_bucket_owner
          ())
 end
@@ -350,7 +350,7 @@ module Delete = struct
     Ok { preconditions; version_id; expected_bucket_owner }
 
   let options_exn ?preconditions ?version_id ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn
+    Awskit.Error.Producer.get_ok_exn
       (options ?preconditions ?version_id ?expected_bucket_owner ())
 end
 
@@ -390,7 +390,7 @@ module Delete_many = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module Copy = struct
@@ -447,7 +447,7 @@ module Copy = struct
   let options_exn ?source_version_id ?source_preconditions ?metadata_directive
       ?storage_class ?checksum_algorithm ?server_side_encryption
       ?expected_bucket_owner ?source_expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn
+    Awskit.Error.Producer.get_ok_exn
       (options ?source_version_id ?source_preconditions ?metadata_directive
          ?storage_class ?checksum_algorithm ?server_side_encryption
          ?expected_bucket_owner ?source_expected_bucket_owner ())
@@ -534,7 +534,7 @@ module Versions = struct
 
   let options_exn ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
       ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn
+    Awskit.Error.Producer.get_ok_exn
       (options ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
          ?expected_bucket_owner ())
 end
@@ -625,7 +625,7 @@ module List = struct
 
   let options_exn ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
       ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn
+    Awskit.Error.Producer.get_ok_exn
       (options ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
          ?expected_bucket_owner ())
 end
@@ -638,5 +638,5 @@ module Tagging = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Internal.get_ok_exn (options ?expected_bucket_owner ())
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end

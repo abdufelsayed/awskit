@@ -36,7 +36,7 @@ let response_body ?read_error_after body : R.response_body =
   { body; read_error_after }
 
 let test_response_consumer_error_wins_over_drain_error () =
-  let consumer_error = Awskit.Error.Internal.body "consumer failed" in
+  let consumer_error = Awskit.Error.Producer.body "consumer failed" in
   match
     R.Response_body.with_reader (response_body ~read_error_after:0 "abcdef")
       ~consume:(fun _ -> Error consumer_error)
@@ -77,7 +77,7 @@ let test_retry_timeout_random_and_sleep_capabilities () =
     (Awskit.Retry.max_attempts (R.Retry.policy conn));
   let delay =
     Awskit.Retry.delay (R.Retry.policy conn) ~attempt:1
-      ~error:(Awskit.Error.Internal.transport ~retryable:true "temporary")
+      ~error:(Awskit.Error.Producer.transport ~retryable:true "temporary")
       ~random_float:(R.Random.float conn)
     |> Option.get
   in

@@ -85,7 +85,7 @@ module Object = struct
   let validate_max_bytes max_bytes =
     if Int64.compare max_bytes 0L < 0 then
       Error
-        (Awskit.Error.Internal.validation ~field:"max_bytes"
+        (Awskit.Error.Producer.validation ~field:"max_bytes"
            (Fmt.str "max_bytes must be non-negative, got %Ld" max_bytes))
     else Ok ()
 

@@ -108,7 +108,7 @@ module Make (C : Request_context.S) = struct
             match descriptor.content_length with
             | None ->
                 return_error
-                  (Awskit.Error.Internal.validation ~field:"content_length"
+                  (Awskit.Error.Producer.validation ~field:"content_length"
                      "S3 uploads require a known content length before SigV4 \
                       chunked streaming")
             | Some content_length -> (
@@ -639,7 +639,7 @@ module Make (C : Request_context.S) = struct
       else invalid ~field:"max_pages" "max_pages must be greater than zero"
 
     let max_pages_exceeded max_pages =
-      Awskit.Error.Internal.validation ~field:"max_pages"
+      Awskit.Error.Producer.validation ~field:"max_pages"
         (Fmt.str "ListObjectsV2 collection exceeded max_pages bound (%d)"
            max_pages)
 
@@ -780,7 +780,7 @@ module Make (C : Request_context.S) = struct
       else invalid ~field:"max_pages" "max_pages must be greater than zero"
 
     let max_pages_exceeded max_pages =
-      Awskit.Error.Internal.validation ~field:"max_pages"
+      Awskit.Error.Producer.validation ~field:"max_pages"
         (Fmt.str "ListObjectVersions collection exceeded max_pages bound (%d)"
            max_pages)
 

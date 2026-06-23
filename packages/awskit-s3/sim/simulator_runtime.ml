@@ -40,7 +40,7 @@ module Runtime = struct
     { descriptor = descriptor_for_string value; body = Ok value }
 
   let bytes_request_body value = string_request_body (Bytes.to_string value)
-  let body_error message = Awskit.Error.Internal.body message
+  let body_error message = Awskit.Error.Producer.body message
 
   let writer_for descriptor =
     {
@@ -162,7 +162,7 @@ module Runtime = struct
 
     let next ?(chunk_size = 8192) reader =
       if chunk_size <= 0 then
-        Error (Awskit.Error.Internal.body "chunk_size must be positive")
+        Error (Awskit.Error.Producer.body "chunk_size must be positive")
       else
         let bytes = Bytes.create chunk_size in
         match read_response_body reader bytes ~off:0 ~len:chunk_size with
@@ -189,7 +189,7 @@ module Runtime = struct
 
     let with_response _ _ ~body:_ ~consume:_ =
       Error
-        (Awskit.Error.Internal.transport ~retryable:false
+        (Awskit.Error.Producer.transport ~retryable:false
            "Simulator.Runtime.with_response is not an HTTP transport")
   end
 

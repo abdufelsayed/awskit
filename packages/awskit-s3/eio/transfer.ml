@@ -5,12 +5,12 @@ let ( let* ) result f =
   match result with Ok value -> f value | Error _ as error -> error
 
 let body_error action path exn =
-  Awskit.Error.Internal.body
+  Awskit.Error.Producer.body
     (Fmt.str "failed to %s path %a: %s" action Eio.Path.pp path
        (Printexc.to_string exn))
 
 let target_error action target exn =
-  Awskit.Error.Internal.body
+  Awskit.Error.Producer.body
     (Fmt.str "failed to %s %s: %s" action target (Printexc.to_string exn))
 
 exception Callback_raised of exn
@@ -50,7 +50,7 @@ let regular_file_length path =
     | `Regular_file -> Ok (Optint.Int63.to_int64 stat.size)
     | kind ->
         Error
-          (Awskit.Error.Internal.validation ~field:"path"
+          (Awskit.Error.Producer.validation ~field:"path"
              (Fmt.str "expected regular file, got %a" Eio.File.Stat.pp_kind kind))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -60,7 +60,7 @@ let reject_existing_download_target path =
   try
     ignore (Eio.Path.stat ~follow:true path);
     Error
-      (Awskit.Error.Internal.validation ~field:"path"
+      (Awskit.Error.Producer.validation ~field:"path"
          "download target already exists")
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -89,7 +89,7 @@ let temp_download_path path attempt =
           dir / Fmt.str ".%s.awskit-download.%08x.%d.tmp" base id attempt)
   | None ->
       Error
-        (Awskit.Error.Internal.validation ~field:"path"
+        (Awskit.Error.Producer.validation ~field:"path"
            "could not derive temporary download path")
 
 let remove_temp_download path =
@@ -114,8 +114,8 @@ let cleanup_temp_download path error =
   | Ok () -> Error error
   | Error cleanup_error ->
       Error
-        (Awskit.Error.Internal.multiple [ error; cleanup_error ]
-        |> Awskit.Error.Internal.with_context
+        (Awskit.Error.Producer.multiple [ error; cleanup_error ]
+        |> Awskit.Error.Producer.with_context
              "download failed and temporary file cleanup also failed")
 
 let cleanup_temp_download_before_raise path exn =
@@ -132,7 +132,7 @@ let reserve_temp_download_file ~sw path =
   let rec loop attempt =
     if attempt >= 100 then
       Error
-        (Awskit.Error.Internal.body
+        (Awskit.Error.Producer.body
            (Fmt.str "failed to reserve temporary download path for %a"
               Eio.Path.pp path))
     else
@@ -367,7 +367,7 @@ struct
                     | Ok () -> loop (remaining - n))
                 | exception End_of_file ->
                     Error
-                      (Awskit.Error.Internal.body
+                      (Awskit.Error.Producer.body
                          (Fmt.str
                             "unexpected end of file while reading part %d from \
                              %a"
@@ -522,8 +522,8 @@ struct
       | Ok _ -> Error error
       | Error cleanup_error ->
           Error
-            (Awskit.Error.Internal.multiple [ error; cleanup_error ]
-            |> Awskit.Error.Internal.with_context
+            (Awskit.Error.Producer.multiple [ error; cleanup_error ]
+            |> Awskit.Error.Producer.with_context
                  "multipart upload failed and abort also failed")
     in
     let abort_cleanup_ignore_errors () =
@@ -640,7 +640,7 @@ struct
             | Error _ as error -> error
             | Ok 0 ->
                 Error
-                  (Awskit.Error.Internal.body
+                  (Awskit.Error.Producer.body
                      (Fmt.str
                         "unexpected end of response while downloading range %d"
                         spec.index))

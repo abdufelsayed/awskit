@@ -34,6 +34,7 @@
    Awskit_s3_eio))
  (runtime_api
   (Awskit.Runtime
+   Awskit.Error.Producer
    Awskit_unix
    Awskit_lwt
    Awskit_lwt_unix
@@ -48,6 +49,4 @@
    Awskit_s3.S
    Awskit_s3.Make))
  (simulator_api
-  (Awskit_s3_sim))
- (private_implementation_debt
-  (Awskit.Error.Internal)))
+  (Awskit_s3_sim)))

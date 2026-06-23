@@ -1,7 +1,7 @@
 type t = string
 
 let field = "bucket"
-let invalid message = Error (Awskit.Error.Internal.validation ~field message)
+let invalid message = Error (Awskit.Error.Producer.validation ~field message)
 
 (* General-purpose S3 bucket-name rules:
    https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html
@@ -93,7 +93,7 @@ let of_string bucket =
   | Some message -> invalid message
   | None -> Ok bucket
 
-let of_string_exn value = Awskit.Error.Internal.get_ok_exn (of_string value)
+let of_string_exn value = Awskit.Error.Producer.get_ok_exn (of_string value)
 let to_string value = value
 let pp fmt value = Format.pp_print_string fmt value
 let equal = String.equal

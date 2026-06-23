@@ -69,7 +69,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         Result.map (Awskit.Endpoint.of_string endpoint) ~f:Option.some
 
   let retry_capability_error ~field =
-    Awskit.Error.Internal.validation ~field
+    Awskit.Error.Producer.validation ~field
       "enabled retries require an explicit runtime sleep and random capability"
 
   let validate_retry_capabilities ~retry_policy ~sleep ~random_float =
@@ -81,7 +81,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       | Some _, None -> Error (retry_capability_error ~field:"random_float")
 
   let timeout_capability_error =
-    Awskit.Error.Internal.validation ~field:"timeout"
+    Awskit.Error.Producer.validation ~field:"timeout"
       "enabled timeouts require an explicit runtime sleep capability"
 
   let timeout_policy_has_spans policy =
@@ -210,7 +210,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     | Body (descriptor, _) -> descriptor
     | Stream (descriptor, _) -> descriptor
 
-  let body_error message = Awskit.Error.Internal.body message
+  let body_error message = Awskit.Error.Producer.body message
 
   let timeout_phase_name = function
     | `Connect -> "connect"
@@ -222,7 +222,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
   let timeout_error phase span =
     let phase_name = timeout_phase_name phase in
-    Awskit.Error.Internal.timeout ~operation:phase_name
+    Awskit.Error.Producer.timeout ~operation:phase_name
       (Fmt.str "%s timed out after %.3fs" phase_name
          (Ptime.Span.to_float_s span))
 
@@ -470,7 +470,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
               let message = Exn.to_string exn in
               Log.warn (fun m -> m "HTTP call failed: %s" message);
               Lwt.return_error
-                (Awskit.Error.Internal.transport ~retryable:true message))
+                (Awskit.Error.Producer.transport ~retryable:true message))
     in
     response
     |> with_transport_timeout `Attempt
@@ -545,7 +545,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
     let read_response_body reader bytes ~off ~len =
       if invalid_read_bounds bytes ~off ~len then
-        Lwt.return_error (Awskit.Error.Internal.body "invalid read bounds")
+        Lwt.return_error (Awskit.Error.Producer.body "invalid read bounds")
       else
         with_timeout_result ~sleep:reader.sleep reader.timeout_policy
           `Response_body
@@ -555,12 +555,12 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                | Lwt.Canceled -> Lwt.fail Lwt.Canceled
                | exn ->
                    Lwt.return_error
-                     (Awskit.Error.Internal.body (Exn.to_string exn))))
+                     (Awskit.Error.Producer.body (Exn.to_string exn))))
 
     let next_response_body ?(chunk_size = 8192) reader =
       if chunk_size <= 0 then
         Lwt.return_error
-          (Awskit.Error.Internal.body "chunk_size must be positive")
+          (Awskit.Error.Producer.body "chunk_size must be positive")
       else
         let buffer = Bytes.create chunk_size in
         Lwt.bind (read_response_body reader buffer ~off:0 ~len:chunk_size)
@@ -570,7 +570,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           | Ok n -> Lwt.return_ok (Some (Bytes.sub buffer ~pos:0 ~len:n)))
 
     let drain_limit_error max_response_drain_bytes =
-      Awskit.Error.Internal.body
+      Awskit.Error.Producer.body
         ~limit:(Int64.of_int max_response_drain_bytes)
         "response body exceeded max_response_drain_bytes"
 

@@ -72,7 +72,7 @@ let storage_class response =
       | Some value -> Ok (Some value)
       | None ->
           Error
-            (Awskit.Error.Internal.decode
+            (Awskit.Error.Producer.decode
                (Fmt.str "invalid storage class %s" value)))
 
 let response_content_type response =
@@ -142,7 +142,7 @@ let delete_result response =
     }
 
 let embedded_service_error response body =
-  Awskit.Error.Internal.service
+  Awskit.Error.Producer.service
     ~status:(Awskit.Response.status response)
     ?code:(Xml.service_code body) ?message:(Xml.service_message body)
     ?request_id:(Awskit.Response.request_id response)
@@ -175,5 +175,5 @@ let copy_result response body =
         }
   | Ok (actual, _) ->
       Error
-        (Awskit.Error.Internal.decode
+        (Awskit.Error.Producer.decode
            (Fmt.str "expected CopyObjectResult XML, got %s" actual))

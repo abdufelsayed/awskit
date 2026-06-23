@@ -14,10 +14,10 @@ let has_ctl_or_del s =
       code < 0x20 || code = 0x7F)
 
 let invalid ?field message =
-  Error (Aws_error.Internal.validation ?field message)
+  Error (Aws_error.Producer.validation ?field message)
 
-let decode message = Error (Aws_error.Internal.decode message)
-let result_exn = Aws_error.Internal.get_ok_exn
+let decode message = Error (Aws_error.Producer.decode message)
+let result_exn = Aws_error.Producer.get_ok_exn
 
 let validate_status status =
   if status >= 100 && status <= 599 then Ok ()

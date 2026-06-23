@@ -254,7 +254,7 @@ let upload_options ?(multipart_threshold = default_multipart_threshold)
 let upload_options_exn ?multipart_threshold ?part_size ?concurrency ?put_options
     ?create_options ?upload_part_options ?complete_options ?abort_options
     ?list_parts_options () =
-  Awskit.Error.Internal.get_ok_exn
+  Awskit.Error.Producer.get_ok_exn
     (upload_options ?multipart_threshold ?part_size ?concurrency ?put_options
        ?create_options ?upload_part_options ?complete_options ?abort_options
        ?list_parts_options ())
@@ -270,7 +270,7 @@ let download_options ?(multipart_threshold = default_multipart_threshold)
 
 let download_options_exn ?multipart_threshold ?part_size ?concurrency ?overwrite
     ?get_options () =
-  Awskit.Error.Internal.get_ok_exn
+  Awskit.Error.Producer.get_ok_exn
     (download_options ?multipart_threshold ?part_size ?concurrency ?get_options
        ?overwrite ())
 

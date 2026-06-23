@@ -75,5 +75,5 @@ let complete_result response body =
             })
   | Ok (actual, _) ->
       Error
-        (Awskit.Error.Internal.decode
+        (Awskit.Error.Producer.decode
            (Fmt.str "expected CompleteMultipartUploadResult XML, got %s" actual))

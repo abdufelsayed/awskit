@@ -9,9 +9,9 @@ let has_ctl_or_del s =
 let has_leading_or_trailing_ws s = not (String.equal s (String.strip s))
 
 let invalid ?field message =
-  Error (Aws_error.Internal.validation ?field message)
+  Error (Aws_error.Producer.validation ?field message)
 
-let result_exn = Aws_error.Internal.get_ok_exn
+let result_exn = Aws_error.Producer.get_ok_exn
 
 module Method = struct
   type t = [ `GET | `PUT | `POST | `DELETE | `HEAD | `PATCH ]

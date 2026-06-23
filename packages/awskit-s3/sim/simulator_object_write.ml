@@ -12,7 +12,7 @@ let validate_opt f = function None -> Ok () | Some value -> f value
 let s3_uri ~bucket ~key = Fmt.str "s3://%s/%s" bucket key
 
 let with_put_context ~bucket ~key error =
-  Awskit.Error.Internal.with_operation ~service:"S3" ~name:"PutObject"
+  Awskit.Error.Producer.with_operation ~service:"S3" ~name:"PutObject"
     ~resource:(s3_uri ~bucket ~key) () error
 
 let put conn ~bucket ~key ?options ~body () =

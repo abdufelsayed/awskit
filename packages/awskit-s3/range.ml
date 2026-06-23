@@ -2,9 +2,9 @@ type view = Bytes of int64 * int64 | From of int64 | Suffix of int64
 type t = view
 
 let invalid ?field message =
-  Error (Awskit.Error.Internal.validation ?field message)
+  Error (Awskit.Error.Producer.validation ?field message)
 
-let result_exn = Awskit.Error.Internal.get_ok_exn
+let result_exn = Awskit.Error.Producer.get_ok_exn
 let ( let* ) = Result.bind
 
 let non_negative ~field value =
@@ -53,7 +53,7 @@ let view = function
 module Content_range = struct
   type t = { start : int64; finish : int64; complete_length : int64 option }
 
-  let decode message = Error (Awskit.Error.Internal.decode message)
+  let decode message = Error (Awskit.Error.Producer.decode message)
 
   let decimal value =
     value <> ""

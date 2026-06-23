@@ -58,7 +58,7 @@ let provider_resolution_to_result resolution =
   | Resolved credentials -> Ok credentials
   | Unavailable { source; reason } ->
       Error
-        (Awskit.Error.Internal.credentials
+        (Awskit.Error.Producer.credentials
            ~source:(Awskit.Credentials.Provider.source_label source)
            reason)
   | Invalid error | Failed error -> Error error

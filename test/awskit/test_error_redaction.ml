@@ -54,7 +54,7 @@ let check_present label text =
         true (contains text sentinel))
 
 let make_service_error () =
-  Awskit.Error.Internal.service ~status:403 ~code:"AccessDenied"
+  Awskit.Error.Producer.service ~status:403 ~code:"AccessDenied"
     ~message:"Authorization: AWS4-HMAC-SHA256 failed" ~request_id:"request-1"
     ~host_id:"host-1" ~headers:raw_headers ~body:raw_body ()
 
@@ -62,18 +62,18 @@ let prefixed_raw_body =
   redacted ^ " SECRET X-Amz-Signature=abc X-Amz-Security-Token"
 
 let make_prefixed_body_error () =
-  Awskit.Error.Internal.service ~status:500 ~code:"InternalError"
+  Awskit.Error.Producer.service ~status:500 ~code:"InternalError"
     ~headers:[ ("x-safe-header", "safe-value") ]
     ~body:prefixed_raw_body ()
 
 let make_nested_error () =
-  Awskit.Error.Internal.multiple
+  Awskit.Error.Producer.multiple
     [
       make_service_error ();
-      Awskit.Error.Internal.validation ~field:"AWS_SECRET_ACCESS_KEY"
+      Awskit.Error.Producer.validation ~field:"AWS_SECRET_ACCESS_KEY"
         "missing configured secret"
-      |> Awskit.Error.Internal.with_context "context contains SESSION"
-      |> Awskit.Error.Internal.with_sexp_context
+      |> Awskit.Error.Producer.with_context "context contains SESSION"
+      |> Awskit.Error.Producer.with_sexp_context
            (Base.Sexp.List
               [
                 Base.Sexp.List
@@ -126,7 +126,7 @@ let test_public_diagnostics_redact_secret_material () =
   List.iter (Awskit.Error.context nested) ~f:(fun context ->
       check_absent "public context view" (context_text context));
   let exception_message =
-    try Awskit.Error.Internal.raise nested with exn -> Exn.to_string exn
+    try Awskit.Error.Producer.raise nested with exn -> Exn.to_string exn
   in
   check_absent "exception message" exception_message
 
@@ -179,10 +179,10 @@ let test_prefixed_raw_body_is_always_replaced () =
 
 let test_validation_field_redacts_secret_field_names () =
   let error =
-    Awskit.Error.Internal.multiple
+    Awskit.Error.Producer.multiple
       [
-        Awskit.Error.Internal.body "transport consumed response";
-        Awskit.Error.Internal.validation ~field:"AWS_SESSION_TOKEN"
+        Awskit.Error.Producer.body "transport consumed response";
+        Awskit.Error.Producer.validation ~field:"AWS_SESSION_TOKEN"
           "missing configured session token";
       ]
   in
