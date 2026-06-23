@@ -24,6 +24,11 @@ release packaging.
   `progress.transferred` for the previous byte count, and inspect `direction`,
   `phase`, `total`, and `part_number` for structured transfer context.
   (2ee158f)
+- High-level transfer results now use named records for `Put`, `Multipart`,
+  `Get`, and `Ranged` outcomes. Inspect the nested S3 result metadata through
+  fields such as `put`, `complete`, and `info`, and use
+  `upload_bytes_transferred` or `download_bytes_transferred` for streamed byte
+  counts. (1388651)
 - Eio callers now provide their own HTTPS policy when creating runtime and S3
   clients. (#8, c53921f)
 - Moved `Awskit.Error` constructors, context tagging, and exception bridge
@@ -87,6 +92,9 @@ release packaging.
   transfer progress callback exceptions and cancellation consistently after
   owned cleanup, and added pre-transport validation for
   `Error_if_exists` downloads. (2ee158f)
+- High-level file uploads now use `PutObject` for empty regular files even when
+  `multipart_threshold` is set to zero, avoiding an invalid empty multipart
+  plan. (1388651)
 - Hardened S3 wire-format and request validation, rejecting malformed modeled
   XML, invalid numeric fields, bad response headers, and invalid CopyObject
   replacement metadata while preserving supported S3-compatible marker and
