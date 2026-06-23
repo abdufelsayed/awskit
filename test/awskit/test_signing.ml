@@ -13,6 +13,13 @@ let fixed_time =
   Ptime.of_date_time ((2026, 1, 15), ((12, 0, 0), 0))
   |> Option.value ~default:Ptime.epoch
 
+let qcheck_seed = 0xA5110
+
+let to_alcotest test =
+  QCheck_alcotest.to_alcotest ~speed_level:`Quick
+    ~rand:(Random.State.make [| qcheck_seed |])
+    test
+
 (* ── uri_encode ──────────────────────────────────────────────────── *)
 
 let test_uri_encode_safe_chars_unchanged =
@@ -292,7 +299,7 @@ let test_ptime_amzdate_format =
 let suite =
   [
     ( "pbt:signing:uri-encode",
-      List.map QCheck_alcotest.to_alcotest
+      List.map to_alcotest
         [
           test_uri_encode_safe_chars_unchanged;
           test_uri_encode_output_is_safe;
@@ -300,14 +307,14 @@ let suite =
           test_uri_encode_no_double_encode;
         ] );
     ( "pbt:signing:canonical-query",
-      List.map QCheck_alcotest.to_alcotest
+      List.map to_alcotest
         [
           test_canonical_query_sorted;
           test_canonical_query_empty;
           test_canonical_query_preserves_pairs;
         ] );
     ( "pbt:signing:sign-request",
-      List.map QCheck_alcotest.to_alcotest
+      List.map to_alcotest
         [
           test_sign_deterministic;
           test_sign_has_required_headers;
@@ -322,6 +329,6 @@ let suite =
           test_sign_rejects_expired_credentials;
       ] );
     ( "pbt:signing:ptime",
-      List.map QCheck_alcotest.to_alcotest
+      List.map to_alcotest
         [ test_ptime_datestamp_format; test_ptime_amzdate_format ] );
   ]

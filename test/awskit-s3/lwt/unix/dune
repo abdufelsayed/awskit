@@ -31,6 +31,7 @@
   awskit-lwt-unix
   awskit-s3
   awskit-s3-lwt-unix
+  awskit_s3_test
   lwt
   lwt.unix
   ptime.clock.os

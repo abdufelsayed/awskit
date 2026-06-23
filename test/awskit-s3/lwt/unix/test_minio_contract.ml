@@ -186,6 +186,91 @@ let with_bucket suffix f =
     ~finally:(fun () -> Lwt_main.run (cleanup_bucket conn ~bucket))
     (fun () -> f conn ~bucket)
 
+module Minio_subject = struct
+  type connection = S3.t
+  type 'a io = 'a Lwt.t
+  type request_body = S3.Runtime.request_body
+  type response_body_reader = S3.Runtime.response_body_reader
+
+  module Runtime = S3.Runtime
+
+  module Body = struct
+    type 'a io = 'a Lwt.t
+
+    include S3.Body
+  end
+
+  module Reader = struct
+    type 'a io = 'a Lwt.t
+
+    include S3.Reader
+  end
+
+  module Object = struct
+    type connection = S3.t
+    type 'a io = 'a Lwt.t
+    type request_body = Body.t
+    type response_body_reader = Reader.t
+
+    include S3.Object
+  end
+
+  module Bucket = struct
+    type connection = S3.t
+    type 'a io = 'a Lwt.t
+
+    include S3.Bucket
+  end
+
+  module Multipart = struct
+    type connection = S3.t
+    type 'a io = 'a Lwt.t
+    type request_body = Body.t
+
+    include S3.Multipart
+  end
+
+  module Presigned = struct
+    type connection = S3.t
+    type 'a io = 'a Lwt.t
+
+    include S3.Presigned
+  end
+
+  let bucket = bucket_of_string (bucket_name_string "shared-contract")
+
+  (* MinIO supports the core S3 contract here, but not every AWS bucket-control
+     API or exact response echo used by the strict simulator profile. *)
+  let capabilities : S3_contract.capabilities =
+    {
+      S3_contract.exclusive_bucket_list = false;
+      exact_policy_json = false;
+      response_checksums = false;
+      copy_returns_current_source_version = false;
+      time_preconditions = false;
+      multipart_checksums = false;
+      deleted_bucket_tags = `Not_found;
+      missing_version_delete = `Invalid_argument;
+      delete_preconditions = false;
+      bucket_encryption = false;
+      bucket_cors = false;
+      bucket_public_access_block = false;
+      bucket_ownership_controls = false;
+      suspended_versioning_null = false;
+    }
+
+  let fresh () =
+    let conn = connect () in
+    Lwt_main.run (cleanup_bucket conn ~bucket);
+    conn
+
+  let cleanup conn = cleanup_bucket conn ~bucket
+  let run = Lwt_main.run
+  let read_response_body = S3.Reader.read
+end
+
+module Shared_contract = S3_contract.Make (Minio_subject)
+
 let test_object_range_metadata_and_copy () =
   with_bucket "objects" (fun conn ~bucket ->
       let put_options =
@@ -593,20 +678,23 @@ let test_multipart_path_transfer_resumes () =
             (first_transferred !progress)))
 
 let suite () =
-  [
-    ( "minio contract",
-      [
-        Alcotest.test_case "object range metadata copy" `Quick
-          test_object_range_metadata_and_copy;
-        Alcotest.test_case "object versioning" `Quick test_object_versioning;
-        Alcotest.test_case "bucket config roundtrip" `Quick
-          test_bucket_config_roundtrip;
-        Alcotest.test_case "multipart edges" `Quick test_multipart_edges;
-        Alcotest.test_case "path transfer streams" `Quick
-          test_path_transfer_streams;
-        Alcotest.test_case "multipart path transfer resumes" `Quick
-          test_multipart_path_transfer_resumes;
-      ] );
-  ]
+  List.map
+    (fun (name, cases) -> ("minio " ^ name, cases))
+    Shared_contract.suites
+  @ [
+      ( "minio contract",
+        [
+          Alcotest.test_case "object range metadata copy" `Quick
+            test_object_range_metadata_and_copy;
+          Alcotest.test_case "object versioning" `Quick test_object_versioning;
+          Alcotest.test_case "bucket config roundtrip" `Quick
+            test_bucket_config_roundtrip;
+          Alcotest.test_case "multipart edges" `Quick test_multipart_edges;
+          Alcotest.test_case "path transfer streams" `Quick
+            test_path_transfer_streams;
+          Alcotest.test_case "multipart path transfer resumes" `Quick
+            test_multipart_path_transfer_resumes;
+        ] );
+    ]
 
 let () = Alcotest.run "awskit-s3-minio-contract" (suite ())

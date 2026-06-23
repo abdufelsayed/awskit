@@ -4,6 +4,7 @@ open Support
 
 module Simulator_subject = struct
   type connection = Simulator.t
+  type 'a io = 'a
   type request_body = Simulator.Body.t
   type response_body_reader = Simulator.Reader.t
 
@@ -52,11 +53,16 @@ module Simulator_subject = struct
     include Simulator.Presigned
   end
 
+  let bucket = bucket_name "contract-bucket"
+  let capabilities = S3_contract.strict_capabilities
+
   let fresh () =
     let clock = Simulator.Clock.create ~now:test_time () in
     let store = Simulator.create_store ~clock () in
     Simulator.connect store ~credentials
 
+  let cleanup _conn = ()
+  let run value = value
   let read_response_body = Simulator.Reader.read
 end
 
@@ -250,28 +256,30 @@ let test_find_preserves_consumer_not_found_error () =
   | Ok (Some _) -> Alcotest.fail "expected consumer error"
 
 let suite =
-  [
-    ("simulator contract", Simulator_contract.cases);
-    ( "simulator faults",
-      [
-        Alcotest.test_case "slow down" `Quick test_simulator_slow_down_fault;
-        Alcotest.test_case "response lost" `Quick
-          test_simulator_response_lost_fault;
-        Alcotest.test_case "operation context for validation" `Quick
-          test_s3_operation_context_for_validation_error;
-        Alcotest.test_case "find metadata missing object returns none" `Quick
-          test_find_metadata_missing_object_returns_none;
-        Alcotest.test_case "find metadata missing bucket returns error" `Quick
-          test_find_metadata_missing_bucket_returns_error;
-        Alcotest.test_case "exists missing object returns false" `Quick
-          test_exists_missing_object_returns_false;
-        Alcotest.test_case "exists missing bucket returns error" `Quick
-          test_exists_missing_bucket_returns_error;
-        Alcotest.test_case "find missing object returns none" `Quick
-          test_find_missing_object_returns_none;
-        Alcotest.test_case "find missing bucket returns error" `Quick
-          test_find_missing_bucket_returns_error;
-        Alcotest.test_case "find preserves consumer not found error" `Quick
-          test_find_preserves_consumer_not_found_error;
-      ] );
-  ]
+  List.map
+    (fun (name, cases) -> ("simulator " ^ name, cases))
+    Simulator_contract.suites
+  @ [
+      ( "simulator faults",
+        [
+          Alcotest.test_case "slow down" `Quick test_simulator_slow_down_fault;
+          Alcotest.test_case "response lost" `Quick
+            test_simulator_response_lost_fault;
+          Alcotest.test_case "operation context for validation" `Quick
+            test_s3_operation_context_for_validation_error;
+          Alcotest.test_case "find metadata missing object returns none" `Quick
+            test_find_metadata_missing_object_returns_none;
+          Alcotest.test_case "find metadata missing bucket returns error" `Quick
+            test_find_metadata_missing_bucket_returns_error;
+          Alcotest.test_case "exists missing object returns false" `Quick
+            test_exists_missing_object_returns_false;
+          Alcotest.test_case "exists missing bucket returns error" `Quick
+            test_exists_missing_bucket_returns_error;
+          Alcotest.test_case "find missing object returns none" `Quick
+            test_find_missing_object_returns_none;
+          Alcotest.test_case "find missing bucket returns error" `Quick
+            test_find_missing_bucket_returns_error;
+          Alcotest.test_case "find preserves consumer not found error" `Quick
+            test_find_preserves_consumer_not_found_error;
+        ] );
+    ]

@@ -1,0 +1,73 @@
+(library
+ (name awskit_s3_protocol_test_support)
+ (modules fixture_diff)
+ (wrapped false)
+ (libraries alcotest fmt uri))
+
+(test
+ (name test_protocol_fixtures)
+ (package awskit-s3)
+ (modules test_protocol_fixtures)
+ (deps
+  (source_tree ../fixtures/protocol))
+ (libraries
+  awskit
+  awskit-s3
+  awskit_s3_test
+  awskit_s3_protocol_test_support
+  alcotest
+  ptime
+  fmt
+  uri))
+
+(rule
+ (alias protocol-fixtures)
+ (deps
+  test_protocol_fixtures.exe
+  (source_tree ../fixtures/protocol))
+ (action
+  (run ./test_protocol_fixtures.exe)))
+
+(test
+ (name test_protocol_pbt)
+ (package awskit-s3)
+ (modules test_protocol_pbt)
+ (libraries
+  awskit
+  awskit-s3
+  awskit_s3_test
+  awskit_s3_protocol_test_support
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  ptime
+  fmt))
+
+(rule
+ (alias protocol-pbt)
+ (deps test_protocol_pbt.exe)
+ (action
+  (run ./test_protocol_pbt.exe)))
+
+(test
+ (name test_fuzz_replay)
+ (package awskit-s3)
+ (modules test_fuzz_replay)
+ (deps
+  (source_tree ../fixtures/protocol/fuzz-replay))
+ (libraries
+  awskit
+  awskit-s3
+  awskit_s3_test
+  awskit_s3_protocol_test_support
+  alcotest
+  ptime
+  fmt))
+
+(rule
+ (alias fuzz-replay)
+ (deps
+  test_fuzz_replay.exe
+  (source_tree ../fixtures/protocol/fuzz-replay))
+ (action
+  (run ./test_fuzz_replay.exe)))

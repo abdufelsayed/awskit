@@ -1,35 +1,101 @@
 open Awskit_s3
 open Awskit_s3_test
 
-module type SUBJECT = sig
-  include S with type 'a io := 'a
+type capabilities = {
+  exclusive_bucket_list : bool;
+  exact_policy_json : bool;
+  response_checksums : bool;
+  copy_returns_current_source_version : bool;
+  time_preconditions : bool;
+  multipart_checksums : bool;
+  deleted_bucket_tags : [ `Empty_set | `Not_found ];
+  missing_version_delete : [ `Succeeds | `Invalid_argument ];
+  delete_preconditions : bool;
+  bucket_encryption : bool;
+  bucket_cors : bool;
+  bucket_public_access_block : bool;
+  bucket_ownership_controls : bool;
+  suspended_versioning_null : bool;
+}
 
+let strict_capabilities =
+  {
+    exclusive_bucket_list = true;
+    exact_policy_json = true;
+    response_checksums = true;
+    copy_returns_current_source_version = true;
+    time_preconditions = true;
+    multipart_checksums = true;
+    deleted_bucket_tags = `Empty_set;
+    missing_version_delete = `Succeeds;
+    delete_preconditions = true;
+    bucket_encryption = true;
+    bucket_cors = true;
+    bucket_public_access_block = true;
+    bucket_ownership_controls = true;
+    suspended_versioning_null = true;
+  }
+
+module type SUBJECT = sig
+  include S
+
+  val bucket : Bucket_name.t
+  val capabilities : capabilities
   val fresh : unit -> connection
+  val cleanup : connection -> unit io
+  val run : 'a io -> 'a
 
   val read_response_body :
-    Reader.t -> bytes -> off:int -> len:int -> (int, Error.t) result
+    Reader.t -> bytes -> off:int -> len:int -> (int, Error.t) result io
 end
 
 module Make (Client : SUBJECT) = struct
-  let bucket = bucket_name "contract-bucket"
+  let bucket = Client.bucket
   let bucket_string = Bucket_name.to_string bucket
+  let return = Client.Runtime.IO.return
+  let ( let* ) = Client.Runtime.IO.bind
+
+  let with_fresh test =
+    let conn = Client.fresh () in
+    Fun.protect
+      ~finally:(fun () -> Client.run (Client.cleanup conn))
+      (fun () -> test conn)
+
+  let test_case name speed test =
+    Alcotest.test_case name speed (fun () -> with_fresh test)
+
+  let run_result label io = Client.run io |> ok_or_fail label
+  let run_expect_not_found label io = Client.run io |> expect_not_found label
+
+  let run_expect_status label status io =
+    Client.run io |> expect_status label status
+
+  let run_expect_precondition_failed label io =
+    Client.run io |> expect_precondition_failed label
+
+  let run_expect_not_modified label io =
+    Client.run io |> expect_not_modified label
+
+  let run_expect_validation label io = Client.run io |> expect_validation label
 
   let is_body_error error =
     let open Awskit.Error in
     match kind error with Body _ -> true | _ -> false
 
   let create_bucket conn =
-    ignore (Client.Bucket.create conn ~bucket () |> ok_or_fail "create bucket")
+    ignore (Client.Bucket.create conn ~bucket () |> run_result "create bucket")
 
   let put_object_string conn ~bucket ~key ?options value =
     Client.Object.put conn ~bucket ~key ?options
       ~body:(Client.Body.of_string value)
       ()
+    |> Client.run
 
   let get_object_as_string conn ~bucket ~key ?options ~max_bytes () =
     Client.Object.get conn ~bucket ~key ?options
       ~consume:(Client.Reader.to_string ~max_bytes)
       ()
+    |> Client.run
 
   let ok_get_or_fail label result = ok_or_fail label result
 
@@ -45,38 +111,42 @@ module Make (Client : SUBJECT) = struct
 
   let version_string = Option.map Object.Version_id.to_string
 
-  let test_bucket_lifecycle () =
-    let conn = Client.fresh () in
+  let test_bucket_lifecycle conn =
     Alcotest.(check bool)
       "missing bucket" false
-      (Client.Bucket.exists conn ~bucket () |> ok_or_fail "exists missing");
+      (Client.Bucket.exists conn ~bucket () |> run_result "exists missing");
     create_bucket conn;
-    let head = Client.Bucket.head conn ~bucket () |> ok_or_fail "head bucket" in
+    let head = Client.Bucket.head conn ~bucket () |> run_result "head bucket" in
     Alcotest.(check string)
       "bucket name" bucket_string
       (Bucket_name.to_string head.name);
     Alcotest.(check bool)
       "created bucket" true
-      (Client.Bucket.exists conn ~bucket () |> ok_or_fail "exists present");
-    let list_result = Client.Bucket.list conn |> ok_or_fail "list buckets" in
-    Alcotest.(check (list string))
-      "bucket list" [ bucket_string ]
-      (List.map
-         (fun (info : Bucket.info) -> Bucket_name.to_string info.name)
-         list_result.buckets);
+      (Client.Bucket.exists conn ~bucket () |> run_result "exists present");
+    let list_result = Client.Bucket.list conn |> run_result "list buckets" in
+    let buckets =
+      List.map
+        (fun (info : Bucket.info) -> Bucket_name.to_string info.name)
+        list_result.buckets
+    in
+    if Client.capabilities.exclusive_bucket_list then
+      Alcotest.(check (list string)) "bucket list" [ bucket_string ] buckets
+    else
+      Alcotest.(check bool)
+        "bucket appears in list" true
+        (List.mem bucket_string buckets);
     let location =
-      Client.Bucket.get_location conn ~bucket () |> ok_or_fail "location"
+      Client.Bucket.get_location conn ~bucket () |> run_result "location"
     in
     Alcotest.(check (option string))
       "location" (Some "us-east-1")
       (Option.map Region.to_string location.region);
-    ignore (Client.Bucket.delete conn ~bucket () |> ok_or_fail "delete bucket");
+    ignore (Client.Bucket.delete conn ~bucket () |> run_result "delete bucket");
     Alcotest.(check bool)
       "deleted bucket" false
-      (Client.Bucket.exists conn ~bucket () |> ok_or_fail "exists deleted")
+      (Client.Bucket.exists conn ~bucket () |> run_result "exists deleted")
 
-  let test_object_buffer_lifecycle () =
-    let conn = Client.fresh () in
+  let test_object_buffer_lifecycle conn =
     create_bucket conn;
     let options =
       {
@@ -112,50 +182,51 @@ module Make (Client : SUBJECT) = struct
     Alcotest.(check (option string))
       "metadata" (Some "contract")
       (List.assoc_opt "origin" (Metadata.to_list result.metadata));
-    check_checksum "get checksum" Object.Checksum.Algorithm.Sha256
-      "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" result.checksum;
+    if Client.capabilities.response_checksums then
+      check_checksum "get checksum" Object.Checksum.Algorithm.Sha256
+        "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" result.checksum;
     let head =
       Client.Object.head conn ~bucket ~key:(object_key "hello.txt") ()
-      |> ok_or_fail "head"
+      |> run_result "head"
     in
     Alcotest.(check (option int64))
       "content length" (Some 5L) head.content_length;
-    check_checksum "head checksum" Object.Checksum.Algorithm.Sha256
-      "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" head.checksum;
+    if Client.capabilities.response_checksums then
+      check_checksum "head checksum" Object.Checksum.Algorithm.Sha256
+        "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" head.checksum;
     Alcotest.(check bool)
       "object exists" true
       (Client.Object.exists conn ~bucket ~key:(object_key "hello.txt")
-      |> ok_or_fail "exists");
+      |> run_result "exists");
     ignore
       (Client.Object.delete conn ~bucket ~key:(object_key "hello.txt") ()
-      |> ok_or_fail "delete");
+      |> run_result "delete");
     Alcotest.(check bool)
       "object deleted" false
       (Client.Object.exists conn ~bucket ~key:(object_key "hello.txt")
-      |> ok_or_fail "exists deleted")
+      |> run_result "exists deleted")
 
-  let test_streaming_get () =
-    let conn = Client.fresh () in
+  let test_streaming_get conn =
     create_bucket conn;
     ignore
       (Client.Object.put conn ~bucket ~key:(object_key "stream.txt")
          ~body:(Client.Body.of_string "abcdef")
          ()
-      |> ok_or_fail "put streaming");
+      |> run_result "put streaming");
     let consume reader =
       let bytes = Bytes.create 4 in
-      match Client.read_response_body reader bytes ~off:0 ~len:4 with
-      | Error _ as error -> error
-      | Ok read -> Ok (Bytes.sub_string bytes 0 read)
+      let* result = Client.read_response_body reader bytes ~off:0 ~len:4 in
+      match result with
+      | Error _ as error -> return error
+      | Ok read -> return (Ok (Bytes.sub_string bytes 0 read))
     in
     let result =
       Client.Object.get conn ~bucket ~key:(object_key "stream.txt") ~consume ()
-      |> ok_get_or_fail "get streaming"
+      |> run_result "get streaming"
     in
     Alcotest.(check string) "partial body" "abcd" result.Get_object.value
 
-  let test_large_streaming_roundtrip () =
-    let conn = Client.fresh () in
+  let test_large_streaming_roundtrip conn =
     create_bucket conn;
     let chunk = String.make 8192 'x' in
     let chunks = 320 in
@@ -165,16 +236,17 @@ module Make (Client : SUBJECT) = struct
          ~key:(object_key "large-stream.bin")
          ~body:(Client.Body.of_string body)
          ()
-      |> ok_or_fail "put large stream");
+      |> run_result "put large stream");
     let consume reader =
       let bytes = Bytes.create 16384 in
       let rec loop total first last =
-        match
+        let* result =
           Client.read_response_body reader bytes ~off:0
             ~len:(Bytes.length bytes)
-        with
-        | Error _ as error -> error
-        | Ok 0 -> Ok (total, first, last)
+        in
+        match result with
+        | Error _ as error -> return error
+        | Ok 0 -> return (Ok (total, first, last))
         | Ok read ->
             let first =
               match first with
@@ -190,7 +262,7 @@ module Make (Client : SUBJECT) = struct
       Client.Object.get conn ~bucket
         ~key:(object_key "large-stream.bin")
         ~consume ()
-      |> ok_get_or_fail "get large stream"
+      |> run_result "get large stream"
     in
     let length, first, last = result.Get_object.value in
     Alcotest.(check int) "large stream bytes" (String.length body) length;
@@ -201,8 +273,7 @@ module Make (Client : SUBJECT) = struct
       (Some (Int64.of_int (String.length body)))
       result.content_length
 
-  let test_range_reads_and_metadata_copy () =
-    let conn = Client.fresh () in
+  let test_range_reads_and_metadata_copy conn =
     create_bucket conn;
     let put_options =
       {
@@ -262,10 +333,10 @@ module Make (Client : SUBJECT) = struct
       (Client.Object.copy conn ~source_bucket:bucket
          ~source_key:(object_key "range.txt") ~destination_bucket:bucket
          ~destination_key:(object_key "copied.txt") ()
-      |> ok_or_fail "copy metadata");
+      |> run_result "copy metadata");
     let copied =
       Client.Object.head conn ~bucket ~key:(object_key "copied.txt") ()
-      |> ok_or_fail "head copied"
+      |> run_result "head copied"
     in
     Alcotest.(check (option string))
       "copied metadata" (Some "source")
@@ -282,10 +353,10 @@ module Make (Client : SUBJECT) = struct
          ~source_key:(object_key "range.txt") ~destination_bucket:bucket
          ~destination_key:(object_key "replaced.txt")
          ~options:replace_options ()
-      |> ok_or_fail "copy replace metadata");
+      |> run_result "copy replace metadata");
     let replaced =
       Client.Object.head conn ~bucket ~key:(object_key "replaced.txt") ()
-      |> ok_or_fail "head replaced"
+      |> run_result "head replaced"
     in
     Alcotest.(check (option string))
       "replaced metadata" (Some "replacement")
@@ -294,8 +365,7 @@ module Make (Client : SUBJECT) = struct
       "removed copied metadata" None
       (List.assoc_opt "mode" (Metadata.to_list replaced.metadata))
 
-  let test_list_copy_delete_objects () =
-    let conn = Client.fresh () in
+  let test_list_copy_delete_objects conn =
     create_bucket conn;
     put_string conn "logs/a.txt" "a";
     put_string conn "logs/b.txt" "b";
@@ -304,7 +374,7 @@ module Make (Client : SUBJECT) = struct
       (Client.Object.copy conn ~source_bucket:bucket
          ~source_key:(object_key "logs/a.txt") ~destination_bucket:bucket
          ~destination_key:(object_key "copy/a.txt") ()
-      |> ok_or_fail "copy");
+      |> run_result "copy");
     let list_options =
       List_objects_v2.options_exn
         ~prefix:(Object_key.Prefix.of_string_exn "logs/")
@@ -312,7 +382,7 @@ module Make (Client : SUBJECT) = struct
     in
     let page =
       Client.Object.list conn ~bucket ~options:list_options ()
-      |> ok_or_fail "list"
+      |> run_result "list"
     in
     Alcotest.(check int) "listed count" 1 (List.length page.objects);
     Alcotest.(check bool) "truncated" true page.is_truncated;
@@ -321,10 +391,10 @@ module Make (Client : SUBJECT) = struct
       (Client.Object.delete_objects conn ~bucket
          ~objects:[ delete_object "logs/a.txt"; delete_object "logs/b.txt" ]
          ()
-      |> ok_or_fail "delete objects");
+      |> run_result "delete objects");
     let keys =
       Client.Object.List.keys conn ~bucket ~max_pages:10 ()
-      |> ok_or_fail "keys"
+      |> run_result "keys"
       |> List.map Object_key.to_string
     in
     Alcotest.(check (list string))
@@ -332,37 +402,35 @@ module Make (Client : SUBJECT) = struct
       [ "copy/a.txt"; "other.txt" ]
       keys
 
-  let test_object_tagging () =
-    let conn = Client.fresh () in
+  let test_object_tagging conn =
     create_bucket conn;
     put_string conn "tagged.txt" "body";
     let tags = tag_set [ tag "env" "dev"; tag "owner" "sdk" ] in
     ignore
       (Client.Object.Tagging.put conn ~bucket ~key:(object_key "tagged.txt")
          ~tags ()
-      |> ok_or_fail "put object tags");
+      |> run_result "put object tags");
     let result =
       Client.Object.Tagging.get conn ~bucket ~key:(object_key "tagged.txt") ()
-      |> ok_or_fail "get object tags"
+      |> run_result "get object tags"
     in
     Alcotest.(check int) "tag count" 2 (tag_count result.tags);
     ignore
       (Client.Object.Tagging.delete conn ~bucket ~key:(object_key "tagged.txt")
          ()
-      |> ok_or_fail "delete object tags");
+      |> run_result "delete object tags");
     let result =
       Client.Object.Tagging.get conn ~bucket ~key:(object_key "tagged.txt") ()
-      |> ok_or_fail "get deleted tags"
+      |> run_result "get deleted tags"
     in
     Alcotest.(check int) "deleted tag count" 0 (tag_count result.tags)
 
-  let test_object_versioning () =
-    let conn = Client.fresh () in
+  let test_object_versioning conn =
     create_bucket conn;
     ignore
       (Client.Bucket.Versioning.put conn ~bucket
          ~status:Bucket.Versioning.Status.Enabled ()
-      |> ok_or_fail "enable versioning");
+      |> run_result "enable versioning");
     let put1 =
       put_object_string conn ~bucket ~key:(object_key "versioned.txt") "one"
       |> ok_or_fail "put version one"
@@ -405,7 +473,7 @@ module Make (Client : SUBJECT) = struct
       Client.Object.head conn ~bucket
         ~key:(object_key "versioned.txt")
         ~options:head_options ()
-      |> ok_or_fail "head previous version"
+      |> run_result "head previous version"
     in
     Alcotest.(check (option int64))
       "previous length" (Some 3L) head.content_length;
@@ -417,13 +485,14 @@ module Make (Client : SUBJECT) = struct
       Client.Object.copy conn ~source_bucket:bucket
         ~source_key:(object_key "versioned.txt")
         ~destination_bucket:bucket ~destination_key:(object_key "copy.txt") ()
-      |> ok_or_fail "copy versioned object"
+      |> run_result "copy versioned object"
     in
     ignore (require_version "copy destination version" copy.version_id);
-    Alcotest.(check (option string))
-      "copy source version"
-      (Some (Object.Version_id.to_string v2))
-      (version_string copy.copy_source_version_id);
+    if Client.capabilities.copy_returns_current_source_version then
+      Alcotest.(check (option string))
+        "copy source version"
+        (Some (Object.Version_id.to_string v2))
+        (version_string copy.copy_source_version_id);
     let copy_previous_options =
       { Copy_object.default_options with source_version_id = Some v1 }
     in
@@ -433,7 +502,7 @@ module Make (Client : SUBJECT) = struct
         ~destination_bucket:bucket
         ~destination_key:(object_key "copy-previous.txt")
         ~options:copy_previous_options ()
-      |> ok_or_fail "copy previous version"
+      |> run_result "copy previous version"
     in
     Alcotest.(check (option string))
       "copy previous source version"
@@ -450,24 +519,24 @@ module Make (Client : SUBJECT) = struct
       Client.Multipart.create_upload conn ~bucket
         ~key:(object_key "multi-versioned.txt")
         ()
-      |> ok_or_fail "create versioned multipart"
+      |> run_result "create versioned multipart"
     in
     let part =
       Client.Multipart.upload_part conn ~upload:upload.upload
         ~part_number:(Multipart.Part_number.of_int_exn 1)
         ~body:(Client.Body.of_string "multipart")
         ()
-      |> ok_or_fail "upload versioned part"
+      |> run_result "upload versioned part"
     in
     let complete =
       Client.Multipart.complete_upload conn ~upload:upload.upload
         ~parts:[ part.part ] ()
-      |> ok_or_fail "complete versioned multipart"
+      |> run_result "complete versioned multipart"
     in
     ignore (require_version "complete multipart version" complete.version_id);
     let deleted =
       Client.Object.delete conn ~bucket ~key:(object_key "versioned.txt") ()
-      |> ok_or_fail "delete current version"
+      |> run_result "delete current version"
     in
     let marker = require_version "delete marker version" deleted.version_id in
     Alcotest.(check (option bool))
@@ -475,7 +544,7 @@ module Make (Client : SUBJECT) = struct
     Alcotest.(check bool)
       "delete marker hides current" false
       (Client.Object.exists conn ~bucket ~key:(object_key "versioned.txt")
-      |> ok_or_fail "exists after delete marker");
+      |> run_result "exists after delete marker");
     let marker_get_options =
       { Get_object.default_options with version_id = Some marker }
     in
@@ -490,7 +559,7 @@ module Make (Client : SUBJECT) = struct
     in
     let first_versions_page =
       Client.Object.list_versions conn ~bucket ~options:versions_options ()
-      |> ok_or_fail "list object versions page"
+      |> run_result "list object versions page"
     in
     Alcotest.(check bool)
       "version page truncated" true first_versions_page.is_truncated;
@@ -501,7 +570,7 @@ module Make (Client : SUBJECT) = struct
     let all_versions =
       Client.Object.Versions.object_versions conn ~bucket
         ~options:versions_options ~max_pages:10 ()
-      |> ok_or_fail "paginate object versions"
+      |> run_result "paginate object versions"
     in
     Alcotest.(check (list string))
       "listed object versions"
@@ -513,7 +582,7 @@ module Make (Client : SUBJECT) = struct
     let all_markers =
       Client.Object.Versions.delete_markers conn ~bucket
         ~options:versions_options ~max_pages:10 ()
-      |> ok_or_fail "paginate delete markers"
+      |> run_result "paginate delete markers"
     in
     Alcotest.(check (list string))
       "listed delete markers"
@@ -528,15 +597,22 @@ module Make (Client : SUBJECT) = struct
         version_id = Some (Object.Version_id.of_string_exn "missing-version");
       }
     in
-    ignore
-      (Client.Object.delete conn ~bucket
-         ~key:(object_key "versioned.txt")
-         ~options:missing_version_options ()
-      |> ok_or_fail "delete missing version id");
-    Alcotest.(check bool)
-      "missing version delete keeps marker" false
-      (Client.Object.exists conn ~bucket ~key:(object_key "versioned.txt")
-      |> ok_or_fail "exists after missing version delete");
+    (match Client.capabilities.missing_version_delete with
+    | `Succeeds ->
+        ignore
+          (Client.Object.delete conn ~bucket
+             ~key:(object_key "versioned.txt")
+             ~options:missing_version_options ()
+          |> run_result "delete missing version id");
+        Alcotest.(check bool)
+          "missing version delete keeps marker" false
+          (Client.Object.exists conn ~bucket ~key:(object_key "versioned.txt")
+          |> run_result "exists after missing version delete")
+    | `Invalid_argument ->
+        run_expect_status "delete missing version id" 400
+          (Client.Object.delete conn ~bucket
+             ~key:(object_key "versioned.txt")
+             ~options:missing_version_options ()));
     let version_two_options =
       { Get_object.default_options with version_id = Some v2 }
     in
@@ -554,7 +630,7 @@ module Make (Client : SUBJECT) = struct
       (Client.Object.delete conn ~bucket
          ~key:(object_key "versioned.txt")
          ~options:delete_marker_options ()
-      |> ok_or_fail "delete delete marker");
+      |> run_result "delete delete marker");
     let result =
       get_object_as_string conn ~bucket
         ~key:(object_key "versioned.txt")
@@ -569,7 +645,7 @@ module Make (Client : SUBJECT) = struct
       (Client.Object.delete conn ~bucket
          ~key:(object_key "versioned.txt")
          ~options:delete_v2_options ()
-      |> ok_or_fail "delete version two");
+      |> run_result "delete version two");
     let result =
       get_object_as_string conn ~bucket
         ~key:(object_key "versioned.txt")
@@ -577,29 +653,30 @@ module Make (Client : SUBJECT) = struct
       |> ok_get_or_fail "get remaining version"
     in
     Alcotest.(check string) "remaining current" "one" result.Get_object.value;
-    let wrong_delete =
-      Delete_objects.object_
-        ~key:(object_key "versioned.txt")
-        ~version_id:v1
-        ~etag:(Object.Etag.of_string_exn "\"wrong\"")
-        ()
-    in
-    let failed_many =
-      Client.Object.delete_objects conn ~bucket ~objects:[ wrong_delete ] ()
-      |> ok_or_fail "delete objects wrong etag"
-    in
-    Alcotest.(check int)
-      "delete objects precondition errors" 1
-      (List.length failed_many.errors);
-    Alcotest.(check int)
-      "delete objects failed deleted" 0
-      (List.length failed_many.deleted);
+    if Client.capabilities.delete_preconditions then (
+      let wrong_delete =
+        Delete_objects.object_
+          ~key:(object_key "versioned.txt")
+          ~version_id:v1
+          ~etag:(Object.Etag.of_string_exn "\"wrong\"")
+          ()
+      in
+      let failed_many =
+        Client.Object.delete_objects conn ~bucket ~objects:[ wrong_delete ] ()
+        |> run_result "delete objects wrong etag"
+      in
+      Alcotest.(check int)
+        "delete objects precondition errors" 1
+        (List.length failed_many.errors);
+      Alcotest.(check int)
+        "delete objects failed deleted" 0
+        (List.length failed_many.deleted));
     let correct_delete =
       Delete_objects.object_ ~key:(object_key "versioned.txt") ~version_id:v1 ()
     in
     let deleted_many =
       Client.Object.delete_objects conn ~bucket ~objects:[ correct_delete ] ()
-      |> ok_or_fail "delete objects version"
+      |> run_result "delete objects version"
     in
     Alcotest.(check int)
       "delete objects deleted version" 1
@@ -607,98 +684,101 @@ module Make (Client : SUBJECT) = struct
     Alcotest.(check bool)
       "all versions removed" false
       (Client.Object.exists conn ~bucket ~key:(object_key "versioned.txt")
-      |> ok_or_fail "exists after delete objects version");
-    let enabled_put =
-      put_object_string conn ~bucket ~key:(object_key "suspended.txt") "enabled"
-      |> ok_or_fail "put before suspend"
-    in
-    let enabled_version =
-      require_version "put before suspend" enabled_put.version_id
-    in
-    ignore
-      (Client.Bucket.Versioning.put conn ~bucket
-         ~status:Bucket.Versioning.Status.Suspended ()
-      |> ok_or_fail "suspend versioning");
-    let suspended_put =
-      put_object_string conn ~bucket
-        ~key:(object_key "suspended.txt")
-        "suspended"
-      |> ok_or_fail "put while suspended"
-    in
-    Alcotest.(check (option string))
-      "suspended put version" (Some "null")
-      (version_string suspended_put.version_id);
-    let result =
-      get_object_as_string conn ~bucket
-        ~key:(object_key "suspended.txt")
-        ~max_bytes:16L ()
-      |> ok_get_or_fail "get suspended current"
-    in
-    Alcotest.(check string)
-      "suspended current body" "suspended" result.Get_object.value;
-    let enabled_options =
-      { Get_object.default_options with version_id = Some enabled_version }
-    in
-    let result =
-      get_object_as_string conn ~bucket
-        ~key:(object_key "suspended.txt")
-        ~max_bytes:16L ~options:enabled_options ()
-      |> ok_get_or_fail "get enabled version after suspend"
-    in
-    Alcotest.(check string)
-      "enabled version body" "enabled" result.Get_object.value;
-    let suspended_versions =
-      Client.Object.Versions.object_versions conn ~bucket
-        ~options:
-          (List_object_versions.options_exn
-             ~prefix:(Object_key.Prefix.of_string_exn "suspended.txt")
-             ())
-        ~max_pages:10 ()
-      |> ok_or_fail "list suspended versions"
-    in
-    Alcotest.(check bool)
-      "listed null object version" true
-      (List.exists
-         (fun (version : List_object_versions.object_version) ->
-           version_string version.version_id = Some "null")
-         suspended_versions);
-    Alcotest.(check bool)
-      "listed enabled object version" true
-      (List.exists
-         (fun (version : List_object_versions.object_version) ->
-           version_string version.version_id
-           = Some (Object.Version_id.to_string enabled_version))
-         suspended_versions);
-    let suspended_delete =
-      Client.Object.delete conn ~bucket ~key:(object_key "suspended.txt") ()
-      |> ok_or_fail "delete while suspended"
-    in
-    Alcotest.(check (option bool))
-      "suspended delete marker" (Some true) suspended_delete.delete_marker;
-    Alcotest.(check (option string))
-      "suspended delete marker version" (Some "null")
-      (version_string suspended_delete.version_id);
-    Alcotest.(check bool)
-      "suspended marker hides current" false
-      (Client.Object.exists conn ~bucket ~key:(object_key "suspended.txt")
-      |> ok_or_fail "exists after suspended delete");
-    let null_version = Object.Version_id.of_string_exn "null" in
-    let null_marker_options =
-      { Delete_object.default_options with version_id = Some null_version }
-    in
-    ignore
-      (Client.Object.delete conn ~bucket
-         ~key:(object_key "suspended.txt")
-         ~options:null_marker_options ()
-      |> ok_or_fail "delete suspended marker");
-    let result =
-      get_object_as_string conn ~bucket
-        ~key:(object_key "suspended.txt")
-        ~max_bytes:16L ()
-      |> ok_get_or_fail "get restored enabled version"
-    in
-    Alcotest.(check string)
-      "restored enabled body" "enabled" result.Get_object.value
+      |> run_result "exists after delete objects version");
+    if Client.capabilities.suspended_versioning_null then (
+      let enabled_put =
+        put_object_string conn ~bucket
+          ~key:(object_key "suspended.txt")
+          "enabled"
+        |> ok_or_fail "put before suspend"
+      in
+      let enabled_version =
+        require_version "put before suspend" enabled_put.version_id
+      in
+      ignore
+        (Client.Bucket.Versioning.put conn ~bucket
+           ~status:Bucket.Versioning.Status.Suspended ()
+        |> run_result "suspend versioning");
+      let suspended_put =
+        put_object_string conn ~bucket
+          ~key:(object_key "suspended.txt")
+          "suspended"
+        |> ok_or_fail "put while suspended"
+      in
+      Alcotest.(check (option string))
+        "suspended put version" (Some "null")
+        (version_string suspended_put.version_id);
+      let result =
+        get_object_as_string conn ~bucket
+          ~key:(object_key "suspended.txt")
+          ~max_bytes:16L ()
+        |> ok_get_or_fail "get suspended current"
+      in
+      Alcotest.(check string)
+        "suspended current body" "suspended" result.Get_object.value;
+      let enabled_options =
+        { Get_object.default_options with version_id = Some enabled_version }
+      in
+      let result =
+        get_object_as_string conn ~bucket
+          ~key:(object_key "suspended.txt")
+          ~max_bytes:16L ~options:enabled_options ()
+        |> ok_get_or_fail "get enabled version after suspend"
+      in
+      Alcotest.(check string)
+        "enabled version body" "enabled" result.Get_object.value;
+      let suspended_versions =
+        Client.Object.Versions.object_versions conn ~bucket
+          ~options:
+            (List_object_versions.options_exn
+               ~prefix:(Object_key.Prefix.of_string_exn "suspended.txt")
+               ())
+          ~max_pages:10 ()
+        |> run_result "list suspended versions"
+      in
+      Alcotest.(check bool)
+        "listed null object version" true
+        (List.exists
+           (fun (version : List_object_versions.object_version) ->
+             version_string version.version_id = Some "null")
+           suspended_versions);
+      Alcotest.(check bool)
+        "listed enabled object version" true
+        (List.exists
+           (fun (version : List_object_versions.object_version) ->
+             version_string version.version_id
+             = Some (Object.Version_id.to_string enabled_version))
+           suspended_versions);
+      let suspended_delete =
+        Client.Object.delete conn ~bucket ~key:(object_key "suspended.txt") ()
+        |> run_result "delete while suspended"
+      in
+      Alcotest.(check (option bool))
+        "suspended delete marker" (Some true) suspended_delete.delete_marker;
+      Alcotest.(check (option string))
+        "suspended delete marker version" (Some "null")
+        (version_string suspended_delete.version_id);
+      Alcotest.(check bool)
+        "suspended marker hides current" false
+        (Client.Object.exists conn ~bucket ~key:(object_key "suspended.txt")
+        |> run_result "exists after suspended delete");
+      let null_version = Object.Version_id.of_string_exn "null" in
+      let null_marker_options =
+        { Delete_object.default_options with version_id = Some null_version }
+      in
+      ignore
+        (Client.Object.delete conn ~bucket
+           ~key:(object_key "suspended.txt")
+           ~options:null_marker_options ()
+        |> run_result "delete suspended marker");
+      let result =
+        get_object_as_string conn ~bucket
+          ~key:(object_key "suspended.txt")
+          ~max_bytes:16L ()
+        |> ok_get_or_fail "get restored enabled version"
+      in
+      Alcotest.(check string)
+        "restored enabled body" "enabled" result.Get_object.value)
 
   let sample_policy_json =
     Fmt.str
@@ -707,26 +787,32 @@ module Make (Client : SUBJECT) = struct
 
   let sample_policy = Policy.of_json sample_policy_json |> ok_or_fail "policy"
 
-  let test_bucket_config_roundtrips () =
-    let conn = Client.fresh () in
+  let test_bucket_config_roundtrips conn =
     create_bucket conn;
     ignore
       (Client.Bucket.Policy.put conn ~bucket ~policy:sample_policy ()
-      |> ok_or_fail "put policy");
+      |> run_result "put policy");
     let policy =
-      Client.Bucket.Policy.get conn ~bucket () |> ok_or_fail "policy"
+      Client.Bucket.Policy.get conn ~bucket () |> run_result "policy"
     in
-    Alcotest.(check string) "policy" sample_policy_json (Policy.to_json policy);
+    if Client.capabilities.exact_policy_json then
+      Alcotest.(check string)
+        "policy" sample_policy_json (Policy.to_json policy)
+    else
+      Alcotest.(check bool)
+        "policy response JSON" true
+        (String.length (Policy.to_json policy) > 0);
     ignore
-      (Client.Bucket.Policy.delete conn ~bucket () |> ok_or_fail "delete policy");
-    expect_not_found "deleted policy" (Client.Bucket.Policy.get conn ~bucket ());
+      (Client.Bucket.Policy.delete conn ~bucket () |> run_result "delete policy");
+    run_expect_not_found "deleted policy"
+      (Client.Bucket.Policy.get conn ~bucket ());
     ignore
       (Client.Bucket.Versioning.put conn ~bucket
          ~status:Bucket.Versioning.Status.Enabled ()
-      |> ok_or_fail "put versioning");
+      |> run_result "put versioning");
     let versioning =
       Client.Bucket.Versioning.get conn ~bucket ()
-      |> ok_or_fail "get versioning"
+      |> run_result "get versioning"
     in
     Alcotest.(check bool)
       "versioning enabled" true
@@ -734,120 +820,131 @@ module Make (Client : SUBJECT) = struct
     let bucket_tags = tag_set [ tag "team" "storage" ] in
     ignore
       (Client.Bucket.Tagging.put conn ~bucket ~tags:bucket_tags ()
-      |> ok_or_fail "put bucket tags");
+      |> run_result "put bucket tags");
     let result =
-      Client.Bucket.Tagging.get conn ~bucket () |> ok_or_fail "get bucket tags"
+      Client.Bucket.Tagging.get conn ~bucket () |> run_result "get bucket tags"
     in
     Alcotest.(check int) "bucket tag count" 1 (tag_count result.tags);
     ignore
       (Client.Bucket.Tagging.delete conn ~bucket ()
-      |> ok_or_fail "delete bucket tags");
-    let result =
-      Client.Bucket.Tagging.get conn ~bucket () |> ok_or_fail "get deleted tags"
-    in
-    Alcotest.(check int) "deleted bucket tag count" 0 (tag_count result.tags);
-    let encryption =
-      {
-        Bucket.Encryption.rules =
-          [
-            {
-              Bucket.Encryption.Rule.sse_algorithm =
-                Some Bucket.Encryption.Algorithm.Aes256;
-              kms_master_key_id = None;
-              bucket_key_enabled = None;
-              blocked_encryption_types = [];
-            };
-          ];
-      }
-    in
-    ignore
-      (Client.Bucket.Encryption.put conn ~bucket ~config:encryption ()
-      |> ok_or_fail "put encryption");
-    let result =
-      Client.Bucket.Encryption.get conn ~bucket ()
-      |> ok_or_fail "get encryption"
-    in
-    Alcotest.(check int)
-      "encryption rule count" 1
-      (List.length result.config.rules);
-    ignore
-      (Client.Bucket.Encryption.delete conn ~bucket ()
-      |> ok_or_fail "delete encryption");
-    expect_not_found "deleted encryption"
-      (Client.Bucket.Encryption.get conn ~bucket ());
-    let cors =
-      {
-        Bucket.Cors.rules =
-          [
-            {
-              Bucket.Cors.id = Some "web";
-              allowed_origins = [ "https://example.com" ];
-              allowed_methods = [ Bucket.Cors.Method.Get ];
-              allowed_headers = [ "*" ];
-              expose_headers = [ "etag" ];
-              max_age_seconds = Some 300;
-            };
-          ];
-      }
-    in
-    ignore
-      (Client.Bucket.Cors.put conn ~bucket ~config:cors ()
-      |> ok_or_fail "put cors");
-    let result =
-      Client.Bucket.Cors.get conn ~bucket () |> ok_or_fail "get cors"
-    in
-    Alcotest.(check int) "cors rule count" 1 (List.length result.config.rules);
-    ignore
-      (Client.Bucket.Cors.delete conn ~bucket () |> ok_or_fail "delete cors");
-    expect_not_found "deleted cors" (Client.Bucket.Cors.get conn ~bucket ());
-    let public_access_block =
-      {
-        Bucket.Public_access_block.block_public_acls = true;
-        ignore_public_acls = false;
-        block_public_policy = true;
-        restrict_public_buckets = false;
-      }
-    in
-    ignore
-      (Client.Bucket.Public_access_block.put conn ~bucket
-         ~config:public_access_block ()
-      |> ok_or_fail "put public access block");
-    let result =
-      Client.Bucket.Public_access_block.get conn ~bucket ()
-      |> ok_or_fail "get public access block"
-    in
-    Alcotest.(check bool)
-      "block public acls" true result.config.block_public_acls;
-    ignore
-      (Client.Bucket.Public_access_block.delete conn ~bucket ()
-      |> ok_or_fail "delete public access block");
-    expect_not_found "deleted public access block"
-      (Client.Bucket.Public_access_block.get conn ~bucket ());
-    let ownership =
-      {
-        Bucket.Ownership_controls.object_ownership =
-          Bucket.Ownership_controls.Object_ownership.Bucket_owner_enforced;
-      }
-    in
-    ignore
-      (Client.Bucket.Ownership_controls.put conn ~bucket ~config:ownership ()
-      |> ok_or_fail "put ownership");
-    let result =
-      Client.Bucket.Ownership_controls.get conn ~bucket ()
-      |> ok_or_fail "get ownership"
-    in
-    Alcotest.(check string)
-      "ownership" "BucketOwnerEnforced"
-      (Bucket.Ownership_controls.Object_ownership.to_string
-         result.config.object_ownership);
-    ignore
-      (Client.Bucket.Ownership_controls.delete conn ~bucket ()
-      |> ok_or_fail "delete ownership");
-    expect_not_found "deleted ownership"
-      (Client.Bucket.Ownership_controls.get conn ~bucket ())
+      |> run_result "delete bucket tags");
+    (match Client.capabilities.deleted_bucket_tags with
+    | `Empty_set ->
+        let result =
+          Client.Bucket.Tagging.get conn ~bucket ()
+          |> run_result "get deleted tags"
+        in
+        Alcotest.(check int)
+          "deleted bucket tag count" 0 (tag_count result.tags)
+    | `Not_found ->
+        run_expect_not_found "deleted bucket tags"
+          (Client.Bucket.Tagging.get conn ~bucket ()));
+    if Client.capabilities.bucket_encryption then (
+      let encryption =
+        {
+          Bucket.Encryption.rules =
+            [
+              {
+                Bucket.Encryption.Rule.sse_algorithm =
+                  Some Bucket.Encryption.Algorithm.Aes256;
+                kms_master_key_id = None;
+                bucket_key_enabled = None;
+                blocked_encryption_types = [];
+              };
+            ];
+        }
+      in
+      ignore
+        (Client.Bucket.Encryption.put conn ~bucket ~config:encryption ()
+        |> run_result "put encryption");
+      let result =
+        Client.Bucket.Encryption.get conn ~bucket ()
+        |> run_result "get encryption"
+      in
+      Alcotest.(check int)
+        "encryption rule count" 1
+        (List.length result.config.rules);
+      ignore
+        (Client.Bucket.Encryption.delete conn ~bucket ()
+        |> run_result "delete encryption");
+      run_expect_not_found "deleted encryption"
+        (Client.Bucket.Encryption.get conn ~bucket ()));
+    if Client.capabilities.bucket_cors then (
+      let cors =
+        {
+          Bucket.Cors.rules =
+            [
+              {
+                Bucket.Cors.id = Some "web";
+                allowed_origins = [ "https://example.com" ];
+                allowed_methods = [ Bucket.Cors.Method.Get ];
+                allowed_headers = [ "*" ];
+                expose_headers = [ "etag" ];
+                max_age_seconds = Some 300;
+              };
+            ];
+        }
+      in
+      ignore
+        (Client.Bucket.Cors.put conn ~bucket ~config:cors ()
+        |> run_result "put cors");
+      let result =
+        Client.Bucket.Cors.get conn ~bucket () |> run_result "get cors"
+      in
+      Alcotest.(check int) "cors rule count" 1 (List.length result.config.rules);
+      ignore
+        (Client.Bucket.Cors.delete conn ~bucket () |> run_result "delete cors");
+      run_expect_not_found "deleted cors"
+        (Client.Bucket.Cors.get conn ~bucket ()));
+    if Client.capabilities.bucket_public_access_block then (
+      let public_access_block =
+        {
+          Bucket.Public_access_block.block_public_acls = true;
+          ignore_public_acls = false;
+          block_public_policy = true;
+          restrict_public_buckets = false;
+        }
+      in
+      ignore
+        (Client.Bucket.Public_access_block.put conn ~bucket
+           ~config:public_access_block ()
+        |> run_result "put public access block");
+      let result =
+        Client.Bucket.Public_access_block.get conn ~bucket ()
+        |> run_result "get public access block"
+      in
+      Alcotest.(check bool)
+        "block public acls" true result.config.block_public_acls;
+      ignore
+        (Client.Bucket.Public_access_block.delete conn ~bucket ()
+        |> run_result "delete public access block");
+      run_expect_not_found "deleted public access block"
+        (Client.Bucket.Public_access_block.get conn ~bucket ()));
+    if Client.capabilities.bucket_ownership_controls then (
+      let ownership =
+        {
+          Bucket.Ownership_controls.object_ownership =
+            Bucket.Ownership_controls.Object_ownership.Bucket_owner_enforced;
+        }
+      in
+      ignore
+        (Client.Bucket.Ownership_controls.put conn ~bucket ~config:ownership ()
+        |> run_result "put ownership");
+      let result =
+        Client.Bucket.Ownership_controls.get conn ~bucket ()
+        |> run_result "get ownership"
+      in
+      Alcotest.(check string)
+        "ownership" "BucketOwnerEnforced"
+        (Bucket.Ownership_controls.Object_ownership.to_string
+           result.config.object_ownership);
+      ignore
+        (Client.Bucket.Ownership_controls.delete conn ~bucket ()
+        |> run_result "delete ownership");
+      run_expect_not_found "deleted ownership"
+        (Client.Bucket.Ownership_controls.get conn ~bucket ()))
 
-  let test_buffer_limit () =
-    let conn = Client.fresh () in
+  let test_buffer_limit conn =
     create_bucket conn;
     put_string conn "large.txt" "abcdef";
     match
@@ -858,8 +955,7 @@ module Make (Client : SUBJECT) = struct
     | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
     | Ok _ -> Alcotest.fail "expected max_bytes failure"
 
-  let test_object_preconditions () =
-    let conn = Client.fresh () in
+  let test_object_preconditions conn =
     create_bucket conn;
     let put =
       put_object_string conn ~bucket ~key:(object_key "conditional.txt") "body"
@@ -929,10 +1025,11 @@ module Make (Client : SUBJECT) = struct
           };
       }
     in
-    expect_not_modified "head if modified since same time"
-      (Client.Object.head conn ~bucket
-         ~key:(object_key "conditional.txt")
-         ~options:head_not_modified_options ());
+    if Client.capabilities.time_preconditions then
+      run_expect_not_modified "head if modified since same time"
+        (Client.Object.head conn ~bucket
+           ~key:(object_key "conditional.txt")
+           ~options:head_not_modified_options ());
     let stale_options =
       {
         Head_object.default_options with
@@ -943,10 +1040,11 @@ module Make (Client : SUBJECT) = struct
           };
       }
     in
-    expect_precondition_failed "head if unmodified since stale"
-      (Client.Object.head conn ~bucket
-         ~key:(object_key "conditional.txt")
-         ~options:stale_options ());
+    if Client.capabilities.time_preconditions then
+      run_expect_precondition_failed "head if unmodified since stale"
+        (Client.Object.head conn ~bucket
+           ~key:(object_key "conditional.txt")
+           ~options:stale_options ());
     let copy_options =
       {
         Copy_object.default_options with
@@ -963,7 +1061,7 @@ module Make (Client : SUBJECT) = struct
          ~destination_bucket:bucket
          ~destination_key:(object_key "conditional-copy.txt")
          ~options:copy_options ()
-      |> ok_or_fail "copy if match etag");
+      |> run_result "copy if match etag");
     let copy_fail_options =
       {
         Copy_object.default_options with
@@ -974,7 +1072,7 @@ module Make (Client : SUBJECT) = struct
           };
       }
     in
-    expect_precondition_failed "copy if none match etag"
+    run_expect_precondition_failed "copy if none match etag"
       (Client.Object.copy conn ~source_bucket:bucket
          ~source_key:(object_key "conditional.txt")
          ~destination_bucket:bucket
@@ -1003,7 +1101,7 @@ module Make (Client : SUBJECT) = struct
     ignore
       (Client.Object.delete conn ~bucket ~key:delete_key ~options:delete_options
          ()
-      |> ok_or_fail "delete preconditions");
+      |> run_result "delete preconditions");
     let delete_fail_key_name = "delete-conditional-fail.txt" in
     let delete_fail_key = object_key delete_fail_key_name in
     put_string conn delete_fail_key_name "abc";
@@ -1019,73 +1117,85 @@ module Make (Client : SUBJECT) = struct
           };
       }
     in
-    expect_precondition_failed "delete if match mismatch"
-      (Client.Object.delete conn ~bucket ~key:delete_fail_key
-         ~options:delete_fail_options ());
-    expect_precondition_failed "delete missing with precondition"
-      (Client.Object.delete conn ~bucket
-         ~key:(object_key "missing-delete-conditional.txt")
-         ~options:delete_options ())
+    if Client.capabilities.delete_preconditions then (
+      run_expect_precondition_failed "delete if match mismatch"
+        (Client.Object.delete conn ~bucket ~key:delete_fail_key
+           ~options:delete_fail_options ());
+      run_expect_precondition_failed "delete missing with precondition"
+        (Client.Object.delete conn ~bucket
+           ~key:(object_key "missing-delete-conditional.txt")
+           ~options:delete_options ()))
 
-  let test_multipart_lifecycle () =
-    let conn = Client.fresh () in
+  let test_multipart_lifecycle conn =
     create_bucket conn;
     let part1_body = String.make Transfer.min_part_size 'h' in
     let part2_body = "world" in
     let completed_size = String.length part1_body + String.length part2_body in
-    let upload_options =
-      {
-        Create_multipart_upload.default_options with
-        checksum_algorithm = Some Object.Checksum.Algorithm.Sha256;
-      }
-    in
     let upload =
-      Client.Multipart.create_upload conn ~bucket ~key:(object_key "multi.bin")
-        ~options:upload_options ()
-      |> ok_or_fail "create multipart"
+      (if Client.capabilities.multipart_checksums then
+         let options =
+           {
+             Create_multipart_upload.default_options with
+             checksum_algorithm = Some Object.Checksum.Algorithm.Sha256;
+           }
+         in
+         Client.Multipart.create_upload conn ~bucket
+           ~key:(object_key "multi.bin") ~options ()
+       else
+         Client.Multipart.create_upload conn ~bucket
+           ~key:(object_key "multi.bin") ())
+      |> run_result "create multipart"
     in
-    let part_options =
-      {
-        Upload_part.default_options with
-        checksum =
-          Some
-            {
-              Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
-              value = "provided-sha256";
-            };
-      }
+    let upload_part part_number body label =
+      (if Client.capabilities.multipart_checksums then
+         let options =
+           {
+             Upload_part.default_options with
+             checksum =
+               Some
+                 {
+                   Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
+                   value = "provided-sha256";
+                 };
+           }
+         in
+         Client.Multipart.upload_part conn ~upload:upload.upload ~part_number
+           ~body:(Client.Body.of_string body)
+           ~options ()
+       else
+         Client.Multipart.upload_part conn ~upload:upload.upload ~part_number
+           ~body:(Client.Body.of_string body)
+           ())
+      |> run_result label
     in
     let part1 =
-      Client.Multipart.upload_part conn ~upload:upload.upload
-        ~part_number:(Multipart.Part_number.of_int_exn 1)
-        ~body:(Client.Body.of_string part1_body)
-        ~options:part_options ()
-      |> ok_or_fail "upload part 1"
+      upload_part
+        (Multipart.Part_number.of_int_exn 1)
+        part1_body "upload part 1"
     in
     let part2 =
-      Client.Multipart.upload_part conn ~upload:upload.upload
-        ~part_number:(Multipart.Part_number.of_int_exn 2)
-        ~body:(Client.Body.of_string part2_body)
-        ~options:part_options ()
-      |> ok_or_fail "upload part 2"
+      upload_part
+        (Multipart.Part_number.of_int_exn 2)
+        part2_body "upload part 2"
     in
     let list_options = List_parts.options_exn ~max_parts:1 () in
     let page =
       Client.Multipart.list_parts conn ~upload:upload.upload
         ~options:list_options ()
-      |> ok_or_fail "list multipart parts"
+      |> run_result "list multipart parts"
     in
     Alcotest.(check int) "first page count" 1 (List.length page.parts);
     Alcotest.(check bool) "parts truncated" true page.is_truncated;
     (match page.parts with
-    | [ part ] ->
+    | [ part ] when Client.capabilities.multipart_checksums ->
         check_checksum "listed part checksum" Object.Checksum.Algorithm.Sha256
           "provided-sha256" part.checksum
+    | [ _ ] -> ()
     | _ -> Alcotest.fail "expected first multipart page");
     let parts =
       Client.Multipart.List_parts.parts conn ~upload:upload.upload
         ~options:list_options ()
-      |> ok_or_fail "paginate multipart parts"
+      |> run_result "paginate multipart parts"
     in
     Alcotest.(check (list int))
       "part numbers" [ 1; 2 ]
@@ -1096,11 +1206,12 @@ module Make (Client : SUBJECT) = struct
     let complete =
       Client.Multipart.complete_upload conn ~upload:upload.upload
         ~parts:[ part1.part; part2.part ] ()
-      |> ok_or_fail "complete multipart"
+      |> run_result "complete multipart"
     in
     Alcotest.(check bool) "complete etag" true (Option.is_some complete.etag);
-    check_checksum "complete checksum" Object.Checksum.Algorithm.Sha256
-      "pvs7IaTrOkof6IZmHexkX/ojbcQuYLNipUgSmw1ws7k=" complete.checksum;
+    if Client.capabilities.multipart_checksums then
+      check_checksum "complete checksum" Object.Checksum.Algorithm.Sha256
+        "pvs7IaTrOkof6IZmHexkX/ojbcQuYLNipUgSmw1ws7k=" complete.checksum;
     let result =
       get_object_as_string conn ~bucket ~key:(object_key "multi.bin")
         ~max_bytes:(Int64.of_int completed_size)
@@ -1116,30 +1227,33 @@ module Make (Client : SUBJECT) = struct
       (String.sub result.Get_object.value
          (String.length result.Get_object.value - String.length part2_body)
          (String.length part2_body));
-    check_checksum "completed object checksum" Object.Checksum.Algorithm.Sha256
-      "pvs7IaTrOkof6IZmHexkX/ojbcQuYLNipUgSmw1ws7k=" result.checksum;
+    if Client.capabilities.multipart_checksums then
+      check_checksum "completed object checksum"
+        Object.Checksum.Algorithm.Sha256
+        "pvs7IaTrOkof6IZmHexkX/ojbcQuYLNipUgSmw1ws7k=" result.checksum;
     let aborted =
       Client.Multipart.create_upload conn ~bucket ~key:(object_key "abort.bin")
         ()
-      |> ok_or_fail "create abort multipart"
+      |> run_result "create abort multipart"
     in
     ignore
       (Client.Multipart.upload_part conn ~upload:aborted.upload
          ~part_number:(Multipart.Part_number.of_int_exn 1)
          ~body:(Client.Body.of_string "discarded")
          ()
-      |> ok_or_fail "upload aborted part");
+      |> run_result "upload aborted part");
     ignore
       (Client.Multipart.abort_upload conn ~upload:aborted.upload ()
-      |> ok_or_fail "abort multipart");
-    match Client.Multipart.list_parts conn ~upload:aborted.upload () with
+      |> run_result "abort multipart");
+    match
+      Client.run (Client.Multipart.list_parts conn ~upload:aborted.upload ())
+    with
     | Error error when Error.service_code error = Some "NoSuchUpload" -> ()
     | Error error ->
         Alcotest.failf "unexpected abort list error: %a" Error.pp error
     | Ok _ -> Alcotest.fail "expected aborted upload to be unavailable"
 
-  let test_multipart_completion_edges () =
-    let conn = Client.fresh () in
+  let test_multipart_completion_edges conn =
     create_bucket conn;
     let first_body = String.make Transfer.min_part_size 'f' in
     let second_body = "second" in
@@ -1150,34 +1264,34 @@ module Make (Client : SUBJECT) = struct
     let upload =
       Client.Multipart.create_upload conn ~bucket ~key:(object_key "edges.bin")
         ()
-      |> ok_or_fail "create edge multipart"
+      |> run_result "create edge multipart"
     in
     let first =
       Client.Multipart.upload_part conn ~upload:upload.upload
         ~part_number:(Multipart.Part_number.of_int_exn 1)
         ~body:(Client.Body.of_string first_body)
         ()
-      |> ok_or_fail "upload first part"
+      |> run_result "upload first part"
     in
     let second =
       Client.Multipart.upload_part conn ~upload:upload.upload
         ~part_number:(Multipart.Part_number.of_int_exn 2)
         ~body:(Client.Body.of_string second_body)
         ()
-      |> ok_or_fail "upload second part"
+      |> run_result "upload second part"
     in
     let overwritten =
       Client.Multipart.upload_part conn ~upload:upload.upload
         ~part_number:(Multipart.Part_number.of_int_exn 1)
         ~body:(Client.Body.of_string overwritten_body)
         ()
-      |> ok_or_fail "overwrite first part"
+      |> run_result "overwrite first part"
     in
-    expect_status "complete with stale part etag" 400
+    run_expect_status "complete with stale part etag" 400
       (Client.Multipart.complete_upload conn ~upload:upload.upload
          ~parts:[ first.part; second.part ]
          ());
-    expect_validation "complete with unsorted parts"
+    run_expect_validation "complete with unsorted parts"
       (Client.Multipart.complete_upload conn ~upload:upload.upload
          ~parts:[ second.part; overwritten.part ]
          ());
@@ -1185,7 +1299,7 @@ module Make (Client : SUBJECT) = struct
       (Client.Multipart.complete_upload conn ~upload:upload.upload
          ~parts:[ overwritten.part; second.part ]
          ()
-      |> ok_or_fail "complete overwritten parts");
+      |> run_result "complete overwritten parts");
     let result =
       get_object_as_string conn ~bucket ~key:(object_key "edges.bin")
         ~max_bytes:(Int64.of_int completed_size)
@@ -1203,31 +1317,50 @@ module Make (Client : SUBJECT) = struct
       (String.sub result.Get_object.value
          (String.length result.Get_object.value - String.length second_body)
          (String.length second_body));
-    expect_status "complete already completed upload" 404
+    run_expect_status "complete already completed upload" 404
       (Client.Multipart.complete_upload conn ~upload:upload.upload
          ~parts:[ overwritten.part; second.part ]
          ())
 
-  let cases =
+  let bucket_cases =
     [
-      Alcotest.test_case "bucket lifecycle" `Quick test_bucket_lifecycle;
-      Alcotest.test_case "object in-memory lifecycle" `Quick
-        test_object_buffer_lifecycle;
-      Alcotest.test_case "streaming get" `Quick test_streaming_get;
-      Alcotest.test_case "large streaming roundtrip" `Quick
+      test_case "bucket lifecycle" `Quick test_bucket_lifecycle;
+      test_case "bucket config roundtrips" `Quick test_bucket_config_roundtrips;
+    ]
+
+  let object_cases =
+    [
+      test_case "object in-memory lifecycle" `Quick test_object_buffer_lifecycle;
+      test_case "streaming get" `Quick test_streaming_get;
+      test_case "large streaming roundtrip" `Quick
         test_large_streaming_roundtrip;
-      Alcotest.test_case "range reads and metadata copy" `Quick
+      test_case "range reads and metadata copy" `Quick
         test_range_reads_and_metadata_copy;
-      Alcotest.test_case "list copy delete objects" `Quick
-        test_list_copy_delete_objects;
-      Alcotest.test_case "object tagging" `Quick test_object_tagging;
-      Alcotest.test_case "object versioning" `Quick test_object_versioning;
-      Alcotest.test_case "bucket config roundtrips" `Quick
-        test_bucket_config_roundtrips;
-      Alcotest.test_case "in-memory helper limit" `Quick test_buffer_limit;
-      Alcotest.test_case "object preconditions" `Quick test_object_preconditions;
-      Alcotest.test_case "multipart lifecycle" `Quick test_multipart_lifecycle;
-      Alcotest.test_case "multipart completion edges" `Quick
+      test_case "object tagging" `Quick test_object_tagging;
+      test_case "object versioning" `Quick test_object_versioning;
+      test_case "in-memory helper limit" `Quick test_buffer_limit;
+      test_case "object preconditions" `Quick test_object_preconditions;
+    ]
+
+  let listing_cases =
+    [
+      test_case "list copy delete objects" `Quick test_list_copy_delete_objects;
+    ]
+
+  let multipart_cases =
+    [
+      test_case "multipart lifecycle" `Quick test_multipart_lifecycle;
+      test_case "multipart completion edges" `Quick
         test_multipart_completion_edges;
     ]
+
+  let suites =
+    [
+      ("contract:bucket", bucket_cases);
+      ("contract:object", object_cases);
+      ("contract:listing", listing_cases);
+      ("contract:multipart", multipart_cases);
+    ]
+
+  let cases = List.concat_map (fun (_name, cases) -> cases) suites
 end

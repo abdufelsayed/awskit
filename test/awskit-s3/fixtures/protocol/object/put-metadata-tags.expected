@@ -1,0 +1,8 @@
+method=PUT
+path=/file.txt
+query=
+content-type=text/plain
+x-amz-meta-origin=fixture
+x-amz-meta-trace=abc-123
+x-amz-tagging=env=test&owner=sdk
+body=body

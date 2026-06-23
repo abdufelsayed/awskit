@@ -2,6 +2,54 @@
 
 This document defines how Awskit changes should be tested and validated.
 
+## Evidence Layers
+
+Use the narrowest evidence layer that proves the behavior, then broaden when a
+change affects public APIs, wire formats, runtime behavior, package metadata,
+docs, or releases.
+
+| Evidence layer | Use for | Narrow check |
+| --- | --- | --- |
+| Deterministic examples | Named regressions, common workflows, and resource/lifecycle stories whose expected behavior is clearest as a short scenario. | `opam exec -- dune runtest <dir>` |
+| Compile-only API tests | Public call shape, module roles, and migration-sensitive ergonomic examples. Do not add tombstone tests for removed APIs. | `opam exec -- dune build @api-compile` |
+| Unit tests | Pure validation, option builders, error classification, request construction, and focused parser failures. | package or directory `runtest` |
+| Property tests | Parsers, formatters, validators, endpoint policy, canonical query/header normalization, pagination, retry jitter bounds, and transfer planning. Keep seeds fixed in CI and print generated cases clearly. | `opam exec -- dune build @protocol-pbt` |
+| Golden fixtures | Exact protocol artifacts that reviewers should inspect: presigned artifacts, endpoint resolution, XML decode/encode bodies, pagination, multipart XML, service errors, and normalized wire summaries. | `opam exec -- dune build @protocol-fixtures` |
+| Fuzz replay | Minimized failures found by manual or mutation fuzzing. Commit the reduced input and replay it as an ordinary deterministic test before treating the bug as fixed. | `opam exec -- dune build @fuzz-replay` |
+| Simulator contracts | No-network S3 behavior, model-oracle state, fault injection, and docs/test backend behavior. The simulator is not an AWS wire authority. | `opam exec -- dune build @simulator-contract` |
+| Runtime conformance | Runtime authoring laws: request/response body ownership, retry sleep/random/timeout capability, scoped readers, drains, and error precedence. | `opam exec -- dune build @runtime-conformance` |
+| MinIO contracts | Explicitly supported local S3-compatible behavior through the Lwt Unix adapter. Requires Docker and cleanup. | `opam exec -- dune build --force @minio-contract` |
+| Examples/docs | Extracted examples, odoc pages, and future MDX/docs checks. Examples should compile, and simulator-backed examples should execute when practical. | `opam exec -- dune build @examples @doc` |
+| Release gates | The composed local evidence plus opam/install/archive/docs checks and external-service lifecycle. | `scripts/release-check.sh` |
+
+For protocol behavior, prefer structured assertions or fixture comparisons over
+one-off string containment. String containment is acceptable only when the
+contract is truly the presence of a fragment, such as a human diagnostic
+mentioning a field name.
+
+## Evidence Aliases
+
+| Alias | Purpose | External service |
+| --- | --- | --- |
+| `@check-fast` | Local `runtest`, API compile checks, and examples. | No |
+| `@check-protocol` | Protocol PBT, protocol fixtures, fuzz replay, simulator contract, and runtime conformance. | No |
+| `@protocol-pbt` | Fast deterministic protocol property tests. | No |
+| `@protocol-fixtures` | Fixture-backed protocol artifact tests with normalized comparisons. | No |
+| `@fuzz-replay` | Deterministic replay of committed minimized parser/validator failures. | No |
+| `@simulator-contract` | Simulator contract and simulator-specific fault/lifecycle tests. | No |
+| `@runtime-conformance` | Runtime capability and lifecycle conformance checks. | No |
+| `@minio-contract` | MinIO-backed S3-compatible contract tests. | Local Docker |
+| `@examples` | Build example executables. | No |
+
+Long-running mutation fuzzing, live AWS account tests, and broader provider
+compatibility tests are opt-in unless a support policy explicitly promotes them
+to release gates.
+
+Shared S3 contract suites should name backend capability differences explicitly
+instead of weakening assertions globally. For example, the simulator can run the
+strict profile while MinIO uses a documented S3-compatible profile for APIs it
+actually supports.
+
 ## Test Current Behavior
 
 Tests should protect the current supported contract. When removing old
@@ -72,6 +120,8 @@ Common commands:
 opam exec -- dune fmt
 opam exec -- dune build
 opam exec -- dune test
+opam exec -- dune build @check-fast
+opam exec -- dune build @check-protocol
 opam exec -- dune build @doc
 opam exec -- dune build @opam
 git diff --check

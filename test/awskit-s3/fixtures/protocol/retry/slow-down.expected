@@ -1,0 +1,4 @@
+attempt=1 delay=0.5
+attempt=2 delay=1.0
+attempt=3 delay=2.0
+attempt=4 stop

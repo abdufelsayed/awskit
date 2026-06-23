@@ -1,0 +1,15 @@
+(alias
+ (name check-fast)
+ (deps
+  (alias_rec runtest)
+  (alias_rec api-compile)
+  (alias_rec examples)))
+
+(alias
+ (name check-protocol)
+ (deps
+  (alias_rec protocol-pbt)
+  (alias_rec protocol-fixtures)
+  (alias_rec fuzz-replay)
+  (alias_rec simulator-contract)
+  (alias_rec runtime-conformance)))
