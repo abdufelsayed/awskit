@@ -447,7 +447,8 @@ Addressing styles:
   {li [`Virtual_hosted] puts the bucket in the host name.}
   {li [`Path] puts the bucket in the path.}
   {li [`Auto] uses virtual-hosted style when valid and falls back to path-style
-    for dotted bucket names over HTTPS.}
+    for dotted bucket names over HTTPS, except for Transfer Acceleration where
+    path-style requests are not valid.}
 }
 
 Transfer Acceleration requires virtual-hosted-style-compatible bucket names and
@@ -610,13 +611,16 @@ Awskit_s3.Presigned.upload_part
 Presigned request artifacts use [UNSIGNED-PAYLOAD] and the same
 endpoint/addressing options as regular operations. Use
 [Awskit_s3.Presigned.method_], [Awskit_s3.Presigned.safe_uri],
-[Awskit_s3.Presigned.signed_headers], and the expiry accessors for diagnostics
-and user-facing output. [Awskit_s3.Presigned.reveal_url] is the explicit
-bearer-token handoff boundary for the component that will execute the request.
-Use [extra_signed_headers] only for additional headers that must be included in
-the signature. Presigned [PUT] and [UploadPart] helpers sign explicit checksum
-value headers when configured, and object presigning options support
-[expected_bucket_owner] guard rails.
+[Awskit_s3.Presigned.signed_headers], [Awskit_s3.Presigned.request_headers],
+and the expiry accessors for diagnostics and user-facing output.
+[Awskit_s3.Presigned.signed_headers] includes the canonical [host] header;
+[Awskit_s3.Presigned.request_headers] contains the non-host headers to pass
+explicitly when executing the request. [Awskit_s3.Presigned.reveal_url] is the
+explicit bearer-token handoff boundary for the component that will execute the
+request. Use [extra_signed_headers] only for additional headers that must be
+included in the signature. Presigned [PUT] and [UploadPart] helpers sign
+explicit checksum value headers when configured, and object presigning options
+support [expected_bucket_owner] guard rails.
 
 A typical direct-upload multipart flow is:
 

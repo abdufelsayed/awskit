@@ -54,6 +54,11 @@ release packaging.
   domain modules such as `Awskit_s3.Object.Put`, `Object.Get`, `Object.List`,
   `Object.Versions`, `Bucket.Create`, `Bucket.Head`,
   `Multipart.Create`, and `Multipart.Upload_part`. (138ab16)
+- Presigned `HEAD Object` helpers now use `Presigned.Head_object.options`
+  instead of `Presigned.Get_object.options`. Presigned artifacts now expose
+  `request_headers` for the non-host headers callers should pass explicitly,
+  while `signed_headers` returns the full canonical signed-header set,
+  including `host`.
 - Request builders, XML parsers, runtime internals, and adapter transfer helper
   modules are now private implementation modules. Use the public `Awskit`,
   `Awskit_s3`, and adapter APIs. (fc67929)
@@ -105,6 +110,10 @@ release packaging.
   XML, invalid numeric fields, bad response headers, and invalid CopyObject
   replacement metadata while preserving supported S3-compatible marker and
   payload-hash forms. (6213acd, fa14e23, e83d337, 3732f9a)
+- Presigned requests now reject duplicate canonical signed-header names, S3
+  Transfer Acceleration endpoint resolution rejects path-style and dotted-bucket
+  combinations, and bracketed IPv6 loopback endpoints render valid URL
+  authorities.
 - Preserved Lwt timeout errors over request-body cleanup cancellation races.
   (d804565)
 

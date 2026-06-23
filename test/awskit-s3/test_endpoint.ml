@@ -90,6 +90,23 @@ let test_endpoint_policy_validation () =
     (Awskit.Endpoint.to_url_prefix
        (Endpoint_resolver.endpoint local_config ~region
        |> ok_or_fail "local endpoint"));
+  let ipv6_local_endpoint =
+    Awskit.Endpoint.of_string "http://[::1]:9000"
+    |> ok_or_fail "IPv6 loopback endpoint"
+  in
+  let ipv6_local_config =
+    Endpoint_config.local_plaintext ~endpoint:ipv6_local_endpoint
+      ~signing_region:region ~addressing_style:`Path ()
+    |> ok_or_fail "IPv6 loopback local plaintext"
+  in
+  Alcotest.(check string)
+    "IPv6 local endpoint" "http://[::1]:9000"
+    (Awskit.Endpoint.to_url_prefix
+       (Endpoint_resolver.endpoint ipv6_local_config ~region
+       |> ok_or_fail "IPv6 local endpoint"));
+  Alcotest.(check bool)
+    "unbracketed IPv6 rejected" true
+    (Result.is_error (Awskit.Endpoint.of_string "http://::1:9000"));
   let public_http =
     Endpoint_config.local_plaintext
       ~endpoint:(Awskit.Endpoint.http_exn ~host:"minio.internal" ~port:9000 ())
@@ -151,6 +168,23 @@ let test_endpoint_policy_validation () =
   Alcotest.(check bool)
     "dotted virtual-hosted rejected" true
     (Result.is_error dotted_virtual);
+  let accelerate_path =
+    Endpoint_resolver.resolve_object_request
+      (Endpoint_config.aws ~addressing_style:`Path ~endpoint_variant:`Accelerate
+         ())
+      ~region ~bucket:(bucket_name "bucket") ~key:(object_key "file")
+  in
+  Alcotest.(check bool)
+    "accelerate path-style rejected" true
+    (Result.is_error accelerate_path);
+  let accelerate_dotted =
+    Endpoint_resolver.resolve_object_request
+      (Endpoint_config.aws ~endpoint_variant:`Accelerate ())
+      ~region ~bucket:(bucket_name "my.bucket") ~key:(object_key "file")
+  in
+  Alcotest.(check bool)
+    "accelerate dotted bucket rejected" true
+    (Result.is_error accelerate_dotted);
   let compatible =
     Endpoint_config.s3_compatible
       ~endpoint:(Awskit.Endpoint.https_exn ~host:"minio.internal" ())

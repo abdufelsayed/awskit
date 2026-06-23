@@ -13,6 +13,7 @@ type result = {
   method_ : method_;
   safe_uri : Uri.t;
   signed_headers : (string * string) list;
+  request_headers : (string * string) list;
   requested_expires_in : Ptime.Span.t;
   effective_expires_in : Ptime.Span.t;
   expires_at : Ptime.t option;
@@ -21,6 +22,7 @@ type result = {
 let method_ t = t.method_
 let safe_uri t = t.safe_uri
 let signed_headers t = t.signed_headers
+let request_headers t = t.request_headers
 let requested_expires_in t = t.requested_expires_in
 let effective_expires_in t = t.effective_expires_in
 let expires_at t = t.expires_at
@@ -48,6 +50,27 @@ module Put_object = struct
 end
 
 module Get_object = struct
+  type options = {
+    expires_in : Ptime.Span.t option;
+    response_content_type : Content_type.t option;
+    response_content_disposition : Header_value.t option;
+    version_id : Object.Version_id.t option;
+    expected_bucket_owner : Account_id.t option;
+    extra_signed_headers : (string * string) list;
+  }
+
+  let default_options =
+    {
+      expires_in = None;
+      response_content_type = None;
+      response_content_disposition = None;
+      version_id = None;
+      expected_bucket_owner = None;
+      extra_signed_headers = [];
+    }
+end
+
+module Head_object = struct
   type options = {
     expires_in : Ptime.Span.t option;
     response_content_type : Content_type.t option;
@@ -157,6 +180,16 @@ let canonical_headers_str headers =
   |> List.map (fun (key, value) -> key ^ ":" ^ value ^ "\n")
   |> String.concat ""
 
+let validate_unique_header_names headers =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (name, _) :: rest ->
+        if List.exists (String.equal name) seen then
+          invalid ~field:"header" "duplicate signed header: %s" name
+        else loop (name :: seen) rest
+  in
+  loop [] headers
+
 let option_header key = function None -> [] | Some value -> [ (key, value) ]
 
 let option_content_type_header key value =
@@ -259,11 +292,13 @@ let generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
   let credential =
     Fmt.str "%s/%s" (Awskit.Credentials.access_key_id credentials) scope
   in
+  let request_headers = canonical_headers signed_headers in
   let signed_header_values =
-    ("host", Awskit.Endpoint.authority request.endpoint) :: signed_headers
+    canonical_headers
+      (("host", Awskit.Endpoint.authority request.endpoint) :: signed_headers)
   in
   let* () = Awskit.Request.validate_headers signed_header_values in
-  let signed_header_values = canonical_headers signed_header_values in
+  let* () = validate_unique_header_names signed_header_values in
   let signed_headers_param = signed_headers_str signed_header_values in
   let query =
     [
@@ -319,7 +354,8 @@ let generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
       url;
       method_;
       safe_uri;
-      signed_headers;
+      signed_headers = signed_header_values;
+      request_headers;
       requested_expires_in;
       effective_expires_in;
       expires_at = Ptime.add_span now effective_expires_in;
@@ -334,17 +370,27 @@ let generate ~region ~credentials ~now ?addressing_style ?endpoint_variant
   generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ~method_ ~signed_headers ~query ?expires_in ()
 
-let get_query (options : Get_object.options) =
+let object_read_query ~response_content_type ~response_content_disposition
+    ~version_id =
   let add_opt key value acc =
     match value with None -> acc | Some v -> (key, [ v ]) :: acc
   in
   []
   |> add_opt "response-content-type"
-       (Option.map Content_type.to_string options.response_content_type)
+       (Option.map Content_type.to_string response_content_type)
   |> add_opt "response-content-disposition"
-       (Option.map Header_value.to_string options.response_content_disposition)
-  |> add_opt "versionId"
-       (Option.map Object.Version_id.to_string options.version_id)
+       (Option.map Header_value.to_string response_content_disposition)
+  |> add_opt "versionId" (Option.map Object.Version_id.to_string version_id)
+
+let get_query (options : Get_object.options) =
+  object_read_query ~response_content_type:options.response_content_type
+    ~response_content_disposition:options.response_content_disposition
+    ~version_id:options.version_id
+
+let head_query (options : Head_object.options) =
+  object_read_query ~response_content_type:options.response_content_type
+    ~response_content_disposition:options.response_content_disposition
+    ~version_id:options.version_id
 
 let get_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
     ~bucket ~key ?options () =
@@ -359,13 +405,13 @@ let get_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
 
 let head_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
     ~bucket ~key ?options () =
-  let options = Option.value ~default:Get_object.default_options options in
+  let options = Option.value ~default:Head_object.default_options options in
   let signed_headers =
     expected_owner_header options.expected_bucket_owner
     @ options.extra_signed_headers
   in
   generate ~region ~credentials ~now ?addressing_style ?endpoint_variant ~bucket
-    ~key ~method_:`HEAD ~signed_headers ~query:(get_query options)
+    ~key ~method_:`HEAD ~signed_headers ~query:(head_query options)
     ?expires_in:options.expires_in ()
 
 let put_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
@@ -431,13 +477,13 @@ let get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
 
 let head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
-  let options = Option.value ~default:Get_object.default_options options in
+  let options = Option.value ~default:Head_object.default_options options in
   let signed_headers =
     expected_owner_header options.expected_bucket_owner
     @ options.extra_signed_headers
   in
   generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_:`HEAD ~signed_headers ~query:(get_query options)
+    ~bucket ~key ~method_:`HEAD ~signed_headers ~query:(head_query options)
     ?expires_in:options.expires_in ()
 
 let put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config

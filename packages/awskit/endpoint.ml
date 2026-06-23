@@ -10,12 +10,17 @@ end
 
 type t = { scheme : Scheme.t; host : string; port : int option } [@@deriving eq]
 
+let bracket_ipv6_host host =
+  if String.contains host ':' then Fmt.str "[%s]" host else host
+
+let authority_host_port ~host ~port =
+  let host = bracket_ipv6_host host in
+  match port with None -> host | Some port -> Fmt.str "%s:%d" host port
+
 let pp fmt t =
   Format.fprintf fmt "%s://%s"
     (Scheme.to_string t.scheme)
-    (match t.port with
-    | None -> t.host
-    | Some port -> Fmt.str "%s:%d" t.host port)
+    (authority_host_port ~host:t.host ~port:t.port)
 
 let has_ctl_or_del s =
   String.exists s ~f:(fun c ->
@@ -38,6 +43,9 @@ let validate_host host =
       | '/' | '?' | '#' | '@' -> true
       | _ -> false)
   then invalid ~field:"host" "host must be a bare hostname or IP"
+  else if String.exists host ~f:(function '[' | ']' -> true | _ -> false) then
+    invalid ~field:"host"
+      "host must not include IPv6 brackets; brackets are URL syntax"
   else Ok ()
 
 let validate_port = function
@@ -75,15 +83,35 @@ let split_scheme input =
       in
       Result.map scheme ~f:(fun scheme -> (scheme, rest))
 
+let split_ipv6_authority authority =
+  match String.substr_index authority ~pattern:"]" with
+  | None -> invalid ~field:"endpoint" "bracketed IPv6 endpoint is missing ']'"
+  | Some close_index ->
+      let host = String.sub authority ~pos:1 ~len:(close_index - 1) in
+      let rest = String.drop_prefix authority (close_index + 1) in
+      if String.is_empty rest then Ok (host, None)
+      else if String.is_prefix rest ~prefix:":" then
+        let port_string = String.drop_prefix rest 1 in
+        match Int.of_string_opt port_string with
+        | Some port -> Ok (host, Some port)
+        | None ->
+            invalid ~field:"port"
+              (Fmt.str "invalid endpoint port: %s" port_string)
+      else invalid ~field:"endpoint" "invalid bracketed IPv6 endpoint authority"
+
 let split_host_port authority =
-  match String.rsplit2 authority ~on:':' with
-  | None -> Ok (authority, None)
-  | Some (host, port_string) -> (
-      match Int.of_string_opt port_string with
-      | Some port -> Ok (host, Some port)
-      | None ->
-          invalid ~field:"port"
-            (Fmt.str "invalid endpoint port: %s" port_string))
+  if String.is_prefix authority ~prefix:"[" then split_ipv6_authority authority
+  else
+    match String.rsplit2 authority ~on:':' with
+    | None -> Ok (authority, None)
+    | Some (host, port_string) when String.contains host ':' ->
+        invalid ~field:"endpoint" "IPv6 endpoint hosts must use brackets"
+    | Some (host, port_string) -> (
+        match Int.of_string_opt port_string with
+        | Some port -> Ok (host, Some port)
+        | None ->
+            invalid ~field:"port"
+              (Fmt.str "invalid endpoint port: %s" port_string))
 
 let of_string input =
   if String.is_empty input then
@@ -115,9 +143,7 @@ let https_exn ~host ?port () = result_exn (https ~host ?port ())
 let scheme t = t.scheme
 let host t = t.host
 let port t = t.port
-
-let authority t =
-  match t.port with None -> t.host | Some port -> Fmt.str "%s:%d" t.host port
+let authority t = authority_host_port ~host:t.host ~port:t.port
 
 let to_url_prefix t =
   Fmt.str "%s://%s" (Scheme.to_string t.scheme) (authority t)

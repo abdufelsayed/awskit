@@ -601,6 +601,8 @@ let test_presigned_api_compiles () =
   ignore (Presigned.method_ : Presigned.result -> Presigned.method_);
   ignore (Presigned.safe_uri : Presigned.result -> Uri.t);
   ignore (Presigned.signed_headers : Presigned.result -> (string * string) list);
+  ignore
+    (Presigned.request_headers : Presigned.result -> (string * string) list);
   ignore (Presigned.reveal_url : Presigned.result -> string);
   ignore
     (S3.Presigned.get_object
@@ -623,7 +625,7 @@ let test_presigned_api_compiles () =
       : S3.connection ->
         bucket:Bucket_name.t ->
         key:Object_key.t ->
-        ?options:Presigned.Get_object.options ->
+        ?options:Presigned.Head_object.options ->
         unit ->
         (Presigned.result, Error.t) result);
   ignore

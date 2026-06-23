@@ -116,8 +116,12 @@ let test_presigned_safe_artifact_redacts_bearer_material () =
     (string_contains rendered ~substring:safe_text);
   Alcotest.(check (list string))
     "signed header names"
-    [ "x-amz-expected-bucket-owner"; "x-user-secret" ]
+    [ "host"; "x-amz-expected-bucket-owner"; "x-user-secret" ]
     (Presigned.signed_headers result |> List.map fst);
+  Alcotest.(check (list string))
+    "explicit request header names"
+    [ "x-amz-expected-bucket-owner"; "x-user-secret" ]
+    (Presigned.request_headers result |> List.map fst);
   Alcotest.(check int)
     "requested expiry" 900
     (span_seconds "requested" (Presigned.requested_expires_in result));
@@ -181,8 +185,12 @@ let test_client_bound_presigned_uses_runtime_model () =
     (Uri.query (Presigned.safe_uri result) |> List.assoc_opt "X-Amz-Signature");
   Alcotest.(check (list string))
     "signed header names"
-    [ "x-amz-expected-bucket-owner"; "x-client-context" ]
+    [ "host"; "x-amz-expected-bucket-owner"; "x-client-context" ]
     (Presigned.signed_headers result |> List.map fst);
+  Alcotest.(check (list string))
+    "explicit request header names"
+    [ "x-amz-expected-bucket-owner"; "x-client-context" ]
+    (Presigned.request_headers result |> List.map fst);
   Alcotest.(check int)
     "requested expiry" 600
     (span_seconds "requested" (Presigned.requested_expires_in result));
@@ -196,6 +204,49 @@ let test_client_bound_presigned_uses_runtime_model () =
        |> Ptime.to_rfc3339))
     (Presigned.expires_at result |> Option.map Ptime.to_rfc3339);
   Alcotest.(check int) "transport calls" 0 (List.length conn.calls)
+
+let test_presigned_head_uses_dedicated_options () =
+  let options : Presigned.Head_object.options =
+    {
+      expires_in = Some (Ptime.Span.of_int_s 300);
+      response_content_type = Some (content_type "text/plain");
+      response_content_disposition =
+        Some (header_value ~field:"response-content-disposition" "attachment");
+      version_id = Some (Object.Version_id.of_string_exn "head-version");
+      expected_bucket_owner = Some (account_id "123456789012");
+      extra_signed_headers = [ ("x-head-context", "present") ];
+    }
+  in
+  let result =
+    Presigned.head_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ~options ()
+    |> ok_or_fail "presigned head dedicated options"
+  in
+  Alcotest.(check string)
+    "method" "HEAD"
+    (Awskit.Request.Method.to_string
+       (Presigned.method_ result :> Awskit.Request.Method.t));
+  Alcotest.(check (option (list string)))
+    "head response content type override" (Some [ "text/plain" ])
+    (query_param "response-content-type" (Presigned.reveal_url result));
+  Alcotest.(check (option (list string)))
+    "head response content disposition override" (Some [ "attachment" ])
+    (query_param "response-content-disposition" (Presigned.reveal_url result));
+  Alcotest.(check (option (list string)))
+    "head version id" (Some [ "head-version" ])
+    (query_param "versionId" (Presigned.reveal_url result));
+  Alcotest.(check (list string))
+    "signed header names"
+    [ "host"; "x-amz-expected-bucket-owner"; "x-head-context" ]
+    (Presigned.signed_headers result |> List.map fst);
+  Alcotest.(check (list string))
+    "explicit request header names"
+    [ "x-amz-expected-bucket-owner"; "x-head-context" ]
+    (Presigned.request_headers result |> List.map fst);
+  Alcotest.(check (option (list string)))
+    "head signed URL includes host header"
+    (Some [ "host;x-amz-expected-bucket-owner;x-head-context" ])
+    (query_param "X-Amz-SignedHeaders" (Presigned.reveal_url result))
 
 let test_presigned_effective_expiry_is_capped_by_credentials () =
   let requested = Ptime.Span.of_int_s 3600 in
@@ -348,10 +399,16 @@ let test_presigned_expected_bucket_owner_headers () =
     "get signed expected owner" true
     (List.mem "x-amz-expected-bucket-owner"
        (signed_headers_or_fail (Presigned.reveal_url get)));
+  let head_options =
+    {
+      Presigned.Head_object.default_options with
+      expected_bucket_owner = Some owner;
+    }
+  in
   let head =
     Presigned.head_object ~region:"us-east-1" ~credentials:creds ~now:test_time
       ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt")
-      ~options:get_options ()
+      ~options:head_options ()
     |> ok_or_fail "presigned head expected owner"
   in
   Alcotest.(check (option string))
@@ -460,6 +517,25 @@ let test_presigned_upload_part () =
   Alcotest.(check bool)
     "signed checksum value" true
     (List.mem "x-amz-checksum-sha256" signed_headers)
+
+let test_presigned_rejects_duplicate_signed_headers () =
+  let options =
+    {
+      Presigned.Put_object.default_options with
+      content_type = Some (content_type "text/plain");
+      extra_signed_headers =
+        [
+          ("content-type", "application/octet-stream"); ("host", "example.com");
+        ];
+    }
+  in
+  match
+    Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ~options ()
+  with
+  | Error error when is_validation_field "header" error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected duplicate signed header validation error"
 
 let test_presigned_rejects_header_newline () =
   let options =
@@ -574,6 +650,8 @@ let suite =
           `Quick test_presigned_safe_artifact_redacts_bearer_material;
         Alcotest.test_case "client-bound presigned uses runtime model" `Quick
           test_client_bound_presigned_uses_runtime_model;
+        Alcotest.test_case "presigned head uses dedicated options" `Quick
+          test_presigned_head_uses_dedicated_options;
         Alcotest.test_case "presigned caps expiry at credential expiration"
           `Quick test_presigned_effective_expiry_is_capped_by_credentials;
         Alcotest.test_case "presigned rejects expired credentials" `Quick
@@ -586,6 +664,8 @@ let suite =
           test_presigned_expected_bucket_owner_headers;
         Alcotest.test_case "presigned multipart upload part" `Quick
           test_presigned_upload_part;
+        Alcotest.test_case "presigned rejects duplicate signed headers" `Quick
+          test_presigned_rejects_duplicate_signed_headers;
         Alcotest.test_case "presigned rejects header newline" `Quick
           test_presigned_rejects_header_newline;
         Alcotest.test_case "presigned rejects unknown checksum" `Quick

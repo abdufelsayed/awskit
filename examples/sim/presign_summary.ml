@@ -26,10 +26,10 @@ let print_presigned label result =
   | None -> ()
   | Some expires_at ->
       Format.printf "expires at: %s@." (Ptime.to_rfc3339 expires_at));
-  (match Awskit_s3.Presigned.signed_headers result with
+  (match Awskit_s3.Presigned.request_headers result with
   | [] -> ()
   | headers ->
-      Format.printf "signed header names:@.";
+      Format.printf "request header names:@.";
       List.iter (fun (name, _) -> Format.printf "  %s@." name) headers);
   Format.printf
     "raw bearer URL intentionally omitted; reveal it only at the HTTP handoff@.";

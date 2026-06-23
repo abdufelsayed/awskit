@@ -22,18 +22,37 @@ let endpoint_variant = Endpoint_config.endpoint_variant
 let endpoint = Endpoint_config.endpoint
 let bucket_has_dot bucket = String.contains bucket '.'
 
+let is_accelerate_variant = function
+  | Some (`Accelerate | `Accelerate_dualstack) -> true
+  | Some (`Regional | `Dualstack | `Fips | `Fips_dualstack) | None -> false
+
 let resolved_style t endpoint bucket =
-  match Endpoint_config.addressing_style t with
-  | `Path -> Ok `Path
-  | `Virtual_hosted
-    when Endpoint.scheme endpoint = `Https && bucket_has_dot bucket ->
-      invalid ~field:"addressing_style"
-        "virtual-hosted HTTPS endpoints cannot be used with dotted bucket names"
-  | `Virtual_hosted -> Ok `Virtual_hosted
-  | `Auto ->
-      if Endpoint.scheme endpoint = `Https && bucket_has_dot bucket then
-        Ok `Path
-      else Ok `Virtual_hosted
+  match
+    ( is_accelerate_variant (Endpoint_config.endpoint_variant t),
+      bucket_has_dot bucket )
+  with
+  | true, true ->
+      invalid ~field:"bucket"
+        "S3 Transfer Acceleration cannot be used with dotted bucket names"
+  | true, false -> (
+      match Endpoint_config.addressing_style t with
+      | `Path ->
+          invalid ~field:"addressing_style"
+            "S3 Transfer Acceleration requires virtual-hosted addressing"
+      | `Auto | `Virtual_hosted -> Ok `Virtual_hosted)
+  | false, _ -> (
+      match Endpoint_config.addressing_style t with
+      | `Path -> Ok `Path
+      | `Virtual_hosted
+        when Endpoint.scheme endpoint = `Https && bucket_has_dot bucket ->
+          invalid ~field:"addressing_style"
+            "virtual-hosted HTTPS endpoints cannot be used with dotted bucket \
+             names"
+      | `Virtual_hosted -> Ok `Virtual_hosted
+      | `Auto ->
+          if Endpoint.scheme endpoint = `Https && bucket_has_dot bucket then
+            Ok `Path
+          else Ok `Virtual_hosted)
 
 let bucket_endpoint endpoint bucket =
   Endpoint.create ~scheme:(Endpoint.scheme endpoint)

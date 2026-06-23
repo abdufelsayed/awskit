@@ -14,10 +14,10 @@ type result
 
     Presigned URLs are bearer tokens. The raw URL is intentionally hidden behind
     {!val:reveal_url}; use {!val:safe_uri}, {!val:method_},
-    {!val:signed_headers}, and the expiry accessors for logs, diagnostics, and
-    user-facing output. Consumers that execute the request must use
-    {!val:reveal_url}, {!val:method_}, and all {!val:signed_headers} exactly as
-    returned. *)
+    {!val:signed_headers}, {!val:request_headers}, and the expiry accessors for
+    logs, diagnostics, and user-facing output. Consumers that execute the
+    request must use {!val:reveal_url}, {!val:method_}, and all
+    {!val:request_headers} exactly as returned. *)
 
 val method_ : result -> method_
 (** HTTP method the caller must use. *)
@@ -29,9 +29,18 @@ val safe_uri : result -> Uri.t
     [partNumber], and [uploadId] are preserved. *)
 
 val signed_headers : result -> (string * string) list
-(** Headers that were part of the signature and must be sent with exactly the
-    same names/values. Do not log header values unless the caller has made an
-    explicit application-level decision that they are safe. *)
+(** All canonical headers that were part of the signature, including [host].
+
+    Do not log header values unless the caller has made an explicit
+    application-level decision that they are safe. *)
+
+val request_headers : result -> (string * string) list
+(** Signed headers the caller must explicitly send with the eventual request.
+
+    The [host] header is omitted because it is derived from the revealed URL's
+    authority and is normally set by the HTTP client. Do not log header values
+    unless the caller has made an explicit application-level decision that they
+    are safe. *)
 
 val requested_expires_in : result -> Ptime.Span.t
 (** Lifetime requested by the caller, or the default when omitted. *)
@@ -94,7 +103,27 @@ module Get_object : sig
     extra_signed_headers : (string * string) list;
         (** Additional headers to include in the signature. *)
   }
-  (** Presigned [GET Object] and [HEAD Object] options. *)
+  (** Presigned [GET Object] options. *)
+
+  val default_options : options
+end
+
+module Head_object : sig
+  type options = {
+    expires_in : Ptime.Span.t option;
+        (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
+            authentication. *)
+    response_content_type : Content_type.t option;
+        (** Optional [response-content-type] query override. *)
+    response_content_disposition : Header_value.t option;
+        (** Optional [response-content-disposition] query override. *)
+    version_id : Object.Version_id.t option;  (** Object version to presign. *)
+    expected_bucket_owner : Account_id.t option;
+        (** [x-amz-expected-bucket-owner] header to sign. *)
+    extra_signed_headers : (string * string) list;
+        (** Additional headers to include in the signature. *)
+  }
+  (** Presigned [HEAD Object] options. *)
 
   val default_options : options
 end
@@ -178,7 +207,7 @@ val head_object :
   ?endpoint_variant:endpoint_variant ->
   bucket:Bucket_name.t ->
   key:Object_key.t ->
-  ?options:Get_object.options ->
+  ?options:Head_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
 (** Generate a presigned [HEAD Object] request artifact. *)
@@ -241,7 +270,7 @@ val head_object_with_endpoint_config :
   endpoint_config:endpoint_config ->
   bucket:Bucket_name.t ->
   key:Object_key.t ->
-  ?options:Get_object.options ->
+  ?options:Head_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
 (** Like {!val:head_object}, using a prebuilt endpoint configuration. *)

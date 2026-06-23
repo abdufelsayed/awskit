@@ -824,7 +824,7 @@ module type PRESIGNED = sig
     connection ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
-    ?options:Presigned.Get_object.options ->
+    ?options:Presigned.Head_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
   (** Generate a presigned [HEAD Object] request artifact. *)
