@@ -2,6 +2,7 @@
  (name awskit_s3)
  (public_name awskit-s3)
  (private_modules
+  awskit_s3_intf
   bucket_access_xml
   bucket_cors_xml
   bucket_encryption_xml

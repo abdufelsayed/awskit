@@ -13,7 +13,6 @@ awskit-s3-sim/awskit_s3_sim__.cmi
 awskit-s3/awskit_s3.cmi
 awskit-s3/awskit_s3__.cmi
 awskit-s3/awskit_s3__Account_id.cmi
-awskit-s3/awskit_s3__Awskit_s3_intf.cmi
 awskit-s3/awskit_s3__Bucket.cmi
 awskit-s3/awskit_s3__Bucket_name.cmi
 awskit-s3/awskit_s3__Content_type.cmi

@@ -50,5 +50,4 @@
  (simulator_api
   (Awskit_s3_sim))
  (private_implementation_debt
-  (Awskit.Error.Internal
-   Awskit_s3.Awskit_s3_intf)))
+  (Awskit.Error.Internal)))
