@@ -85,7 +85,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
     let of_lwt_stream ~content_length stream =
       let open Lwt.Infix in
-      of_stream ~content_length ~write:(fun writer ->
+      of_stream ~content_length ~replayable:false ~write:(fun writer ->
           let rec loop () =
             Lwt_stream.get stream >>= function
             | None -> Lwt.return_ok ()

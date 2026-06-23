@@ -78,9 +78,8 @@ let run stdenv =
   in
   let s3 = create_s3 stdenv sw in
   ignore
-    (S3.Object.put s3 ~bucket ~key ~options:put_options
-       ~body:(S3.Body.of_string "object metadata example")
-       ()
+    (S3.Object.put_string s3 ~bucket ~key ~options:put_options
+       ~contents:"object metadata example" ()
     |> unwrap "put object");
   let head = S3.Object.head s3 ~bucket ~key () |> unwrap "head object" in
   Format.printf "s3://%a/%a@." Awskit_s3.Bucket_name.pp bucket

@@ -27,7 +27,7 @@ let test_object_get_uses_scoped_reader () =
 Bad:
 
 ```ocaml
-let test_object_get_string_no_longer_exists () =
+let test_removed_legacy_object_api_no_longer_exists () =
   (* Tombstone tests for removed symbols do not belong in the suite. *)
   ()
 ```

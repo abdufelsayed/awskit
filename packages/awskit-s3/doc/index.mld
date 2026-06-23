@@ -38,16 +38,22 @@ construction and response handling.
 Object APIs are split into explicit layers:
 
 {ul
-  {li core object operations under [Object]}
-  {li upload body constructors under adapter [Body] modules}
-  {li download consumers under adapter [Reader] modules}
+  {li core object operations and bounded string/bytes conveniences under
+    [Object]}
+  {li upload body constructors under adapter [Body] modules for custom or
+    streaming request bodies}
+  {li download consumers under adapter [Reader] modules for scoped streaming
+    reads}
   {li managed local-file transfer helpers under [Object.Transfer] in
     Unix-capable adapter packages}
 }
 
-Typical uploads pass [Body] values to [Object.put]. Typical downloads pass
-[Reader] consumers to [Object.get]. Direct [Runtime] access remains available
-for advanced integrations that need the raw runtime body layer.
+Small buffered object workflows can start with [Object.put_string],
+[Object.put_bytes], [Object.get_string], [Object.get_bytes],
+[Object.find_string], and [Object.find_bytes]. Larger or custom workflows pass
+[Body] values to [Object.put] and scoped [Reader] consumers to [Object.get].
+Direct [Runtime] access remains available for integrations and runtime authors
+that need the raw runtime body layer.
 
 {1 Libraries}
 
@@ -147,10 +153,10 @@ let run env =
 	      let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
 	      let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
 	      match
-	        Awskit_s3_eio.Object.put s3
+	        Awskit_s3_eio.Object.put_string s3
 	          ~bucket
 	          ~key
-	          ~body:(Awskit_s3_eio.Body.of_string "Hello, S3!")
+	          ~contents:"Hello, S3!"
 	          ()
       with
       | Ok _ -> ()
@@ -169,10 +175,10 @@ let run () =
 	      let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
 	      let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
 	      let* result =
-	        Awskit_s3_lwt_unix.Object.get s3
+	        Awskit_s3_lwt_unix.Object.get_string s3
 	          ~bucket
 	          ~key
-	          ~consume:(Awskit_s3_lwt_unix.Reader.to_string ~max_bytes:1_048_576L)
+	          ~max_bytes:1_048_576L
 	          ()
 	      in
 	      match result with

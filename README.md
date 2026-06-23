@@ -163,10 +163,10 @@ let () =
       let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
       let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
       match
-        Awskit_s3_eio.Object.put s3
+        Awskit_s3_eio.Object.put_string s3
           ~bucket
           ~key
-          ~body:(Awskit_s3_eio.Body.of_string "Hello, S3!")
+          ~contents:"Hello, S3!"
           ()
       with
       | Ok uploaded ->
@@ -203,10 +203,10 @@ let run () =
       let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
       let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
       let* result =
-        Awskit_s3_lwt_unix.Object.get s3
+        Awskit_s3_lwt_unix.Object.get_string s3
           ~bucket
           ~key
-          ~consume:(Awskit_s3_lwt_unix.Reader.to_string ~max_bytes:1_048_576L)
+          ~max_bytes:1_048_576L
           ()
       in
       match result with
@@ -289,10 +289,10 @@ let bucket = Awskit_s3.Bucket_name.of_string_exn "test" in
 let key = Awskit_s3.Object_key.of_string_exn "hello" in
 
 Awskit_s3_sim.Bucket.create conn ~bucket () |> ignore;
-Awskit_s3_sim.Object.put conn
+Awskit_s3_sim.Object.put_string conn
   ~bucket
   ~key
-  ~body:(Awskit_s3_sim.Body.of_string "world")
+  ~contents:"world"
   ()
 |> ignore
 ```
@@ -336,6 +336,36 @@ Response bodies are streaming and scoped to the runtime response callback.
 Runtime adapters expose `with_response`; inside that callback, consume bodies
 through `Response_body.with_reader` or S3 helper APIs such as
 `Object.get ~consume:(Reader.to_string ~max_bytes)`.
+
+For custom streaming uploads, build a `Body` with an exact length and an honest
+replayability flag, then pass it to the same `Object.put` operation:
+
+```ocaml
+module S3 = Awskit_s3_eio
+
+let upload_chunk s3 ~bucket ~key ~content_length chunk =
+  match
+    S3.Body.of_stream ~content_length ~replayable:false
+      ~write:(fun writer -> S3.Body.Writer.write_string writer chunk)
+  with
+  | Error error -> Error error
+  | Ok body -> S3.Object.put s3 ~bucket ~key ~body ()
+```
+
+For large downloads, keep processing inside the scoped `consume` callback:
+
+```ocaml
+module S3 = Awskit_s3_eio
+
+let process chunk =
+  output_string stdout (Bytes.to_string chunk);
+  Ok ()
+
+let download_stream s3 ~bucket ~key =
+  S3.Object.get s3 ~bucket ~key
+    ~consume:(S3.Reader.iter ~f:process)
+    ()
+```
 
 ## Development
 

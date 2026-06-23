@@ -361,6 +361,78 @@ let test_simulator_buffer_roundtrip () =
       Alcotest.(check (option int64)) "listed size" (Some 5L) object_.size
   | _ -> Alcotest.fail "expected one listed object"
 
+let test_simulator_convenience_roundtrip () =
+  let conn = make_simulator () in
+  ignore
+    (Simulator.Object.put_string conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "hello.txt") ~contents:"hello" ()
+    |> ok_or_fail "put string");
+  let result =
+    Simulator.Object.get_string conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "hello.txt") ~max_bytes:16L ()
+    |> ok_or_fail "get string"
+  in
+  Alcotest.(check string) "string body" "hello" result.value;
+  let payload = Bytes.of_string "\000\255bytes" in
+  ignore
+    (Simulator.Object.put_bytes conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "blob.bin") ~contents:payload ()
+    |> ok_or_fail "put bytes");
+  let found =
+    Simulator.Object.find_bytes conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "blob.bin") ~max_bytes:16L ()
+    |> ok_or_fail "find bytes"
+  in
+  match found with
+  | Some result ->
+      Alcotest.(check string)
+        "bytes body" (Bytes.to_string payload)
+        (Bytes.to_string result.value)
+  | None -> Alcotest.fail "expected bytes object"
+
+let test_simulator_conveniences_validate_max_bytes_before_lookup () =
+  let conn = make_simulator () in
+  let store = Simulator.store conn in
+  let expect_max_bytes label result =
+    match result with
+    | Error error when is_validation_field "max_bytes" error -> ()
+    | Error error ->
+        Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+    | Ok _ -> Alcotest.failf "%s: expected max_bytes validation" label
+  in
+  expect_max_bytes "get string"
+    (Simulator.Object.get_string conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "missing.txt") ~max_bytes:(-1L) ());
+  Alcotest.(check int)
+    "history after get string" 0
+    (List.length (Simulator.history store));
+  expect_max_bytes "find string"
+    (Simulator.Object.find_string conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "missing.txt") ~max_bytes:(-1L) ());
+  Alcotest.(check int)
+    "history after find string" 0
+    (List.length (Simulator.history store));
+  expect_max_bytes "get bytes"
+    (Simulator.Object.get_bytes conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "missing.txt") ~max_bytes:(-1L) ());
+  Alcotest.(check int)
+    "history after get bytes" 0
+    (List.length (Simulator.history store));
+  expect_max_bytes "find bytes"
+    (Simulator.Object.find_bytes conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "missing.txt") ~max_bytes:(-1L) ());
+  Alcotest.(check int)
+    "history after find bytes" 0
+    (List.length (Simulator.history store))
+
 let test_simulator_rejects_unknown_checksum_writes () =
   let conn = make_simulator () in
   let checksum : Object.Checksum.value =
@@ -653,6 +725,11 @@ let suite =
           test_simulator_history_uses_operation_names;
         Alcotest.test_case "simulator in-memory roundtrip" `Quick
           test_simulator_buffer_roundtrip;
+        Alcotest.test_case "simulator convenience roundtrip" `Quick
+          test_simulator_convenience_roundtrip;
+        Alcotest.test_case
+          "simulator convenience max_bytes preflight validation" `Quick
+          test_simulator_conveniences_validate_max_bytes_before_lookup;
         Alcotest.test_case "simulator rejects unknown checksum writes" `Quick
           test_simulator_rejects_unknown_checksum_writes;
         Alcotest.test_case "simulator streaming get" `Quick

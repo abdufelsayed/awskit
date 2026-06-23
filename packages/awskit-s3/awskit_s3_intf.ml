@@ -26,10 +26,17 @@ module type BODY = sig
 
   val of_stream :
     content_length:int64 ->
+    replayable:bool ->
     write:(writer -> (unit, Awskit.Error.t) result io) ->
-    t
+    (t, Awskit.Error.t) result
+  (** Build a streaming request body with a known [content_length].
+
+      [replayable] must be [true] only when retrying the request can recreate
+      the same bytes by invoking [write] again. Negative content lengths are
+      rejected before a request is sent. *)
 
   val content_length : t -> int64 option
+  val replayable : t -> bool
 
   module Writer : sig
     type t = writer
@@ -60,14 +67,11 @@ module type READER = sig
     (unit, Awskit.Error.t) result io
 
   val to_bytes :
-    ?chunk_size:int ->
-    ?max_bytes:int64 ->
-    t ->
-    (bytes, Awskit.Error.t) result io
+    ?chunk_size:int -> max_bytes:int64 -> t -> (bytes, Awskit.Error.t) result io
 
   val to_string :
     ?chunk_size:int ->
-    ?max_bytes:int64 ->
+    max_bytes:int64 ->
     t ->
     (string, Awskit.Error.t) result io
 end
@@ -101,6 +105,28 @@ module type OBJECT = sig
       a known content length in this library; runtime helpers such as
       [Runtime.Request_body.of_string] and [of_bytes] satisfy that contract. *)
 
+  val put_string :
+    connection ->
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    ?options:Object.Put.options ->
+    contents:string ->
+    unit ->
+    (Object.Put.result, Awskit.Error.t) result io
+  (** Upload an in-memory string using the same [PutObject] operation model as
+      {!val:put}. *)
+
+  val put_bytes :
+    connection ->
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    ?options:Object.Put.options ->
+    contents:bytes ->
+    unit ->
+    (Object.Put.result, Awskit.Error.t) result io
+  (** Upload in-memory bytes using the same [PutObject] operation model as
+      {!val:put}. *)
+
   val get :
     connection ->
     bucket:Bucket_name.t ->
@@ -113,6 +139,29 @@ module type OBJECT = sig
 
       The response-body reader is scoped to the callback and must not escape it.
       The returned record contains response metadata and the callback result. *)
+
+  val get_string :
+    connection ->
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    ?options:Object.Get.options ->
+    max_bytes:int64 ->
+    unit ->
+    (string Object.Get.result, Awskit.Error.t) result io
+  (** Fetch an object into memory as a string.
+
+      [max_bytes] is required so callers choose an explicit memory bound. Use
+      {!val:get} with a streaming [consume] callback for large objects. *)
+
+  val get_bytes :
+    connection ->
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    ?options:Object.Get.options ->
+    max_bytes:int64 ->
+    unit ->
+    (bytes Object.Get.result, Awskit.Error.t) result io
+  (** Fetch an object into memory as bytes, bounded by [max_bytes]. *)
 
   val find :
     connection ->
@@ -128,6 +177,28 @@ module type OBJECT = sig
       not-found errors; other service, auth, transport, and decode failures
       remain [Error]. Use {!val:get} when callers need the raw GetObject service
       behavior. *)
+
+  val find_string :
+    connection ->
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    ?options:Object.Get.options ->
+    max_bytes:int64 ->
+    unit ->
+    (string Object.Get.result option, Awskit.Error.t) result io
+  (** Return and consume an object as a bounded in-memory string when it is
+      present. *)
+
+  val find_bytes :
+    connection ->
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    ?options:Object.Get.options ->
+    max_bytes:int64 ->
+    unit ->
+    (bytes Object.Get.result option, Awskit.Error.t) result io
+  (** Return and consume an object as bounded in-memory bytes when it is
+      present. *)
 
   val head :
     connection ->

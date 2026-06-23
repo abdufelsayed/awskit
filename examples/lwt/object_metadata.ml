@@ -45,9 +45,8 @@ let run () =
   in
   let s3 = create_s3 () in
   let* put =
-    S3.Object.put s3 ~bucket ~key ~options:put_options
-      ~body:(S3.Body.of_string "object metadata example")
-      ()
+    S3.Object.put_string s3 ~bucket ~key ~options:put_options
+      ~contents:"object metadata example" ()
   in
   ignore (unwrap "put object" put);
   let* head = S3.Object.head s3 ~bucket ~key () in

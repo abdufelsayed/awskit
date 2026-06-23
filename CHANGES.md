@@ -9,10 +9,12 @@ release packaging.
   response bodies, transport, clock, sleep, random, credentials, endpoint,
   retry, and timeout. Custom runtimes should implement the grouped capability
   modules accepted by `Awskit_s3.Make`. (6cce011)
-- Replaced object-specific string and file shortcuts with adapter `Body` and
-  `Reader` helpers for uploads and downloads. Use `Object.put` with `Body`
-  helpers, `Object.get ~consume` with scoped readers, and transfer helpers for
-  larger file workflows. (#5, 53a7642)
+- Reworked object body APIs around adapter `Body` and `Reader` modules with
+  explicit stream replayability and bounded reads. Use `Object.put_string`,
+  `put_bytes`, `get_string`, `get_bytes`, `find_string`, and `find_bytes` for
+  bounded in-memory workflows; use `Object.put` with `Body`,
+  `Object.get ~consume` with scoped readers, and transfer helpers for larger
+  file workflows. (#5, 53a7642; 5815ba4; 73ef68f)
 - Eio callers now provide their own HTTPS policy when creating runtime and S3
   clients. (#8, c53921f)
 - Moved `Awskit.Error` constructors, context tagging, and exception bridge
@@ -41,7 +43,8 @@ release packaging.
 - Added `Awskit.Timeout` policies and explicit retry budgets with runtime
   supplied jitter randomness. (6cce011)
 - Added native streaming S3 upload and download APIs with adapter-level `Body`
-  and `Reader` modules, plus unified multipart body handling. (#5, 53a7642)
+  and `Reader` modules, first-class bounded string/bytes object helpers, plus
+  unified multipart body handling. (#5, 53a7642; 5815ba4; 73ef68f)
 - Added live S3 SDK examples for put/get, listing, presigning, file transfer,
   and object metadata workflows. (#6, 088b1ea)
 - Added structured SDK errors with operation, retry, decode, body, and S3

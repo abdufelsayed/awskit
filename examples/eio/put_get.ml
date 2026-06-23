@@ -65,7 +65,7 @@ let run stdenv =
   let body = env_default "AWSKIT_EXAMPLE_BODY" "Hello from awskit live S3." in
   let s3 = create_s3 stdenv sw in
   let put =
-    S3.Object.put s3 ~bucket ~key ~body:(S3.Body.of_string body) ()
+    S3.Object.put_string s3 ~bucket ~key ~contents:body ()
     |> unwrap "put object"
   in
   Format.printf "uploaded s3://%a/%a@." Awskit_s3.Bucket_name.pp bucket
@@ -74,9 +74,7 @@ let run stdenv =
     (Format.pp_print_option Awskit_s3.Object.Etag.pp)
     put.etag;
   let downloaded =
-    S3.Object.get s3 ~bucket ~key
-      ~consume:(S3.Reader.to_string ~max_bytes:1_048_576L)
-      ()
+    S3.Object.get_string s3 ~bucket ~key ~max_bytes:1_048_576L ()
     |> unwrap "get object"
     |> fun result -> result.Awskit_s3.Get_object.value
   in

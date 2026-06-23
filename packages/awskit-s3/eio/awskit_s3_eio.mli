@@ -38,7 +38,7 @@ module Body : sig
     content_length:int64 ->
     ?on_progress:(int64 -> unit) ->
     'flow Eio.Flow.source ->
-    t
+    (t, Awskit_s3.Error.t) result
   (** Build a non-replayable request body from an existing Eio source flow.
       [content_length] must match the produced bytes, and the flow must remain
       valid until the request finishes. *)

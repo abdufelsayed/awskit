@@ -5,6 +5,10 @@ let is_decode_error error =
   let open Awskit.Error in
   match kind error with Decode _ -> true | _ -> false
 
+let body_details error =
+  let open Awskit.Error in
+  match kind error with Body body -> Some body | _ -> None
+
 let is_validation_field field error =
   Awskit.Error.is_validation error
   && Awskit.Error.validation_field error = Some field
@@ -271,6 +275,139 @@ let test_object_get_range_header () =
     "single range header"
     [ ("range", "bytes=2-5") ]
     range_headers
+
+let test_object_string_conveniences_share_operation_model () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 ~headers:[ ("etag", "\"put\"") ] "";
+        response 200
+          ~headers:[ ("etag", "\"get\""); ("content-length", "5") ]
+          "hello";
+      ]
+  in
+  let put_options =
+    Put_object.options_exn ~content_type:(content_type "text/plain") ()
+  in
+  let put =
+    Recording_s3.Object.put_string conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file.txt") ~options:put_options ~contents:"hello" ()
+    |> ok_or_fail "put string"
+  in
+  Alcotest.(check (option string))
+    "put etag" (Some "\"put\"")
+    (Option.map Object.Etag.to_string put.etag);
+  let get_options =
+    Get_object.options_exn ~expected_bucket_owner:(account_id "123456789012") ()
+  in
+  let get =
+    Recording_s3.Object.get_string conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file.txt") ~options:get_options ~max_bytes:16L ()
+    |> ok_or_fail "get string"
+  in
+  Alcotest.(check string) "get value" "hello" get.value;
+  Alcotest.(check (option string))
+    "get etag" (Some "\"get\"")
+    (Option.map Object.Etag.to_string get.etag);
+  match List.rev conn.calls with
+  | [ put_call; get_call ] ->
+      check_method "put method" "PUT" put_call.request;
+      Alcotest.(check string) "put body" "hello" put_call.body;
+      Alcotest.(check (option string))
+        "put content type" (Some "text/plain")
+        (header "content-type" put_call.request.headers);
+      check_method "get method" "GET" get_call.request;
+      Alcotest.(check (option string))
+        "get expected owner" (Some "123456789012")
+        (header "x-amz-expected-bucket-owner" get_call.request.headers)
+  | _ -> Alcotest.fail "expected put and get calls"
+
+let test_object_bytes_conveniences_preserve_binary_data () =
+  let payload = "\000\255bytes" in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 ~headers:[ ("etag", "\"put\"") ] "";
+        response 200
+          ~headers:
+            [
+              ("etag", "\"get\"");
+              ("content-length", string_of_int (String.length payload));
+            ]
+          payload;
+      ]
+  in
+  ignore
+    (Recording_s3.Object.put_bytes conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "blob.bin") ~contents:(Bytes.of_string payload) ()
+    |> ok_or_fail "put bytes");
+  let get =
+    Recording_s3.Object.get_bytes conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "blob.bin")
+      ~max_bytes:(Int64.of_int (String.length payload))
+      ()
+    |> ok_or_fail "get bytes"
+  in
+  Alcotest.(check string) "get bytes" payload (Bytes.to_string get.value);
+  match List.rev conn.calls with
+  | [ put_call; _get_call ] ->
+      Alcotest.(check string) "put bytes" payload put_call.body
+  | _ -> Alcotest.fail "expected put and get calls"
+
+let test_object_find_conveniences_return_options () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:[ ("etag", "\"get\""); ("content-length", "5") ]
+          "hello";
+        response 404 no_such_key_body;
+      ]
+  in
+  let found =
+    Recording_s3.Object.find_string conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "present.txt") ~max_bytes:16L ()
+    |> ok_or_fail "find string"
+  in
+  (match found with
+  | Some result -> Alcotest.(check string) "found value" "hello" result.value
+  | None -> Alcotest.fail "expected found object");
+  let missing =
+    Recording_s3.Object.find_bytes conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "missing.txt") ~max_bytes:16L ()
+    |> ok_or_fail "find bytes missing"
+  in
+  Alcotest.(check bool) "missing" true (Option.is_none missing)
+
+let test_object_convenience_get_validates_max_bytes () =
+  let conn = Recording_runtime.connect [ response 200 "should-not-read" ] in
+  (match
+     Recording_s3.Object.get_string conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file.txt") ~max_bytes:(-1L) ()
+   with
+  | Error error when is_validation_field "max_bytes" error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected max_bytes validation error");
+  Alcotest.(check int) "transport not called" 0 (List.length conn.calls);
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:[ ("etag", "\"get\""); ("content-length", "6") ]
+          "abcdef";
+      ]
+  in
+  match
+    Recording_s3.Object.get_bytes conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file.txt") ~max_bytes:3L ()
+  with
+  | Error error -> (
+      match body_details error with
+      | Some { message; limit = Some 3L } ->
+          Alcotest.(check string)
+            "message" "response body exceeded max_bytes" message
+      | _ -> Alcotest.failf "unexpected error: %a" Error.pp error)
+  | Ok _ -> Alcotest.fail "expected body limit error"
 
 let test_object_get_rejects_malformed_content_range () =
   let conn =
@@ -1242,6 +1379,14 @@ let suite =
           test_object_precondition_headers;
         Alcotest.test_case "object get range header" `Quick
           test_object_get_range_header;
+        Alcotest.test_case "object string conveniences share operation model"
+          `Quick test_object_string_conveniences_share_operation_model;
+        Alcotest.test_case "object bytes conveniences preserve binary data"
+          `Quick test_object_bytes_conveniences_preserve_binary_data;
+        Alcotest.test_case "object find conveniences return options" `Quick
+          test_object_find_conveniences_return_options;
+        Alcotest.test_case "object convenience get validates max bytes" `Quick
+          test_object_convenience_get_validates_max_bytes;
         Alcotest.test_case "object get rejects malformed content range" `Quick
           test_object_get_rejects_malformed_content_range;
         Alcotest.test_case "delete objects request body" `Quick

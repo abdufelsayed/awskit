@@ -158,7 +158,7 @@ struct
         | 0 -> Ok ()
         | n -> (
             let chunk = Cstruct.to_string (Cstruct.sub cstruct 0 n) in
-            match Runtime.Request_body.write_string writer chunk with
+            match Writer.write_string writer chunk with
             | Error _ as error -> error
             | Ok () ->
                 let transferred = Int64.add transferred (Int64.of_int n) in
@@ -174,9 +174,7 @@ struct
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (target_error "read upload flow" "<flow>" exn)
       in
-      Runtime.Request_body.of_stream
-        (descriptor ~content_length ~replayable:false)
-        ~write
+      of_stream ~content_length ~replayable:false ~write
 
     let of_path ?on_progress path =
       let* content_length = regular_file_length path in
@@ -188,10 +186,7 @@ struct
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (body_error "read upload" path exn)
       in
-      Ok
-        (Runtime.Request_body.of_stream
-           (descriptor ~content_length ~replayable:true)
-           ~write)
+      of_stream ~content_length ~replayable:true ~write
   end
 
   module Reader = struct

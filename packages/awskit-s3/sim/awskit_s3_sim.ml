@@ -72,13 +72,52 @@ module Object = struct
     Raw.put conn ~bucket:(bucket_to_string bucket) ~key:(key_to_string key)
       ?options ~body ()
 
+  let put_string conn ~bucket ~key ?options ~contents () =
+    put conn ~bucket ~key ?options ~body:(Body.of_string contents) ()
+
+  let put_bytes conn ~bucket ~key ?options ~contents () =
+    put conn ~bucket ~key ?options ~body:(Body.of_bytes contents) ()
+
   let get conn ~bucket ~key ?options ~consume () =
     Raw.get conn ~bucket:(bucket_to_string bucket) ~key:(key_to_string key)
       ?options ~consume ()
 
+  let validate_max_bytes max_bytes =
+    if Int64.compare max_bytes 0L < 0 then
+      Error
+        (Awskit.Error.Internal.validation ~field:"max_bytes"
+           (Fmt.str "max_bytes must be non-negative, got %Ld" max_bytes))
+    else Ok ()
+
+  let get_string conn ~bucket ~key ?options ~max_bytes () =
+    match validate_max_bytes max_bytes with
+    | Error _ as error -> error
+    | Ok () ->
+        get conn ~bucket ~key ?options ~consume:(Reader.to_string ~max_bytes) ()
+
+  let get_bytes conn ~bucket ~key ?options ~max_bytes () =
+    match validate_max_bytes max_bytes with
+    | Error _ as error -> error
+    | Ok () ->
+        get conn ~bucket ~key ?options ~consume:(Reader.to_bytes ~max_bytes) ()
+
   let find conn ~bucket ~key ?options ~consume () =
     Raw.find conn ~bucket:(bucket_to_string bucket) ~key:(key_to_string key)
       ?options ~consume ()
+
+  let find_string conn ~bucket ~key ?options ~max_bytes () =
+    match validate_max_bytes max_bytes with
+    | Error _ as error -> error
+    | Ok () ->
+        find conn ~bucket ~key ?options
+          ~consume:(Reader.to_string ~max_bytes)
+          ()
+
+  let find_bytes conn ~bucket ~key ?options ~max_bytes () =
+    match validate_max_bytes max_bytes with
+    | Error _ as error -> error
+    | Ok () ->
+        find conn ~bucket ~key ?options ~consume:(Reader.to_bytes ~max_bytes) ()
 
   let head conn ~bucket ~key ?options () =
     Raw.head conn ~bucket:(bucket_to_string bucket) ~key:(key_to_string key)

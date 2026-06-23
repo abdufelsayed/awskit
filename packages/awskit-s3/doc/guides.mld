@@ -6,11 +6,11 @@ applications can make memory use, retries, and error handling explicit.
 
 {1 Object Operations}
 
-Object operations live under [Object]. Upload data is supplied by the adapter
-[Body] module, and download data is consumed by the adapter [Reader] module.
-Start with [Body.of_string] or [Body.of_bytes] for buffered uploads, and
-[Reader.to_string ~max_bytes] or [Reader.to_bytes ~max_bytes] for bounded
-buffered downloads.
+Object operations live under [Object]. Small buffered workflows can start with
+[Object.put_string], [Object.put_bytes], [Object.get_string],
+[Object.get_bytes], [Object.find_string], and [Object.find_bytes]. Streaming
+and custom body workflows use the adapter [Body] and [Reader] modules through
+[Object.put] and [Object.get].
 
 Snippets assume [bucket] is a {!type:Awskit_s3.Bucket_name.t} and [key] is an
 {!type:Awskit_s3.Object_key.t}; construct user input with
@@ -21,14 +21,14 @@ Snippets assume [bucket] is a {!type:Awskit_s3.Bucket_name.t} and [key] is an
 {[
 module S3 = Awskit_s3_eio
 
-S3.Object.put s3 ~bucket ~key
-  ~body:(S3.Body.of_string "hello")
+S3.Object.put_string s3 ~bucket ~key
+  ~contents:"hello"
   ()
 ]}
 
-[Body.of_string] and [Body.of_bytes] are the usual in-memory upload helpers.
-They build replayable request bodies with known content lengths, which lets S3
-sign and retry the request safely.
+[Object.put_string] and [Object.put_bytes] build replayable request bodies with
+known content lengths, which lets S3 sign and retry the request safely. Use
+[Object.put] with [Body] values when the body is custom or should be streamed.
 
 Options carry object metadata, content type, storage class, tags,
 preconditions, checksum headers, and server-side encryption headers:
@@ -43,11 +43,11 @@ let options =
          [ Awskit_s3.Tag.create_exn ~key:"env" ~value:"dev" ])
     ()
 in
-Awskit_s3_eio.Object.put s3
+Awskit_s3_eio.Object.put_string s3
   ~bucket
   ~key
   ~options
-  ~body:(Awskit_s3_eio.Body.of_string "hello")
+  ~contents:"hello"
   ()
 ]}
 
@@ -73,17 +73,21 @@ S3 conditional delete headers.
 
 {2 Download}
 
-[Object.get] scopes the response body to the [consume] callback. Do not store
-the reader outside that callback. [Reader.to_string] and [Reader.to_bytes] keep
-response-size limits explicit when buffering is intentional.
+Use [Object.get_string] and [Object.get_bytes] for bounded in-memory downloads.
+The [max_bytes] argument is required so memory use stays explicit.
 
 {[
 module S3 = Awskit_s3_eio
 
-S3.Object.get s3 ~bucket ~key
-  ~consume:(S3.Reader.to_string ~max_bytes:1_048_576L)
+S3.Object.get_string s3 ~bucket ~key
+  ~max_bytes:1_048_576L
   ()
 ]}
+
+[Object.get] scopes the response body to the [consume] callback for streaming
+downloads. Do not store the reader outside that callback. [Reader.to_string
+~max_bytes] and [Reader.to_bytes ~max_bytes] keep response-size limits explicit
+when buffering is intentional.
 
 Use [Object.head] when only metadata is needed. Use [Object.exists] for boolean
 existence checks. Use [Object.find_metadata] and [Object.find] when a missing
@@ -104,6 +108,17 @@ match S3.Object.find_metadata s3 ~bucket ~key () with
     Fmt.epr "bucket is absent: %a@." Awskit.Error.pp error
 | Error error ->
     Fmt.epr "S3 request failed: %a@." Awskit.Error.pp error
+]}
+
+For bounded optional reads, use [Object.find_string] or [Object.find_bytes]:
+
+{[
+module S3 = Awskit_s3_eio
+
+match S3.Object.find_string s3 ~bucket ~key ~max_bytes:1_048_576L () with
+| Ok (Some result) -> use_body result.value
+| Ok None -> handle_absent_object ()
+| Error error -> log_error error
 ]}
 
 {2 Copy, Delete, List, Tagging}
@@ -166,9 +181,16 @@ Awskit_s3_eio.Object.Versions.object_versions s3
 
 {1 Body And Reader Helpers}
 
-In-memory helpers live under the adapter [Body] and [Reader] modules. Use
-[Body.of_string] or [Body.of_bytes] for buffered uploads. Use
-[Reader.to_string] or [Reader.to_bytes] for bounded buffered downloads.
+First-class [Object.put_string], [Object.put_bytes], [Object.get_string],
+[Object.get_bytes], [Object.find_string], and [Object.find_bytes] cover
+ordinary bounded in-memory object workflows. Adapter [Body] and [Reader]
+modules remain public when callers need explicit request bodies, scoped
+streaming downloads, or custom producer and consumer callbacks.
+
+Use [Body.of_string] or [Body.of_bytes] when constructing a reusable request
+body separately from the object call. Use [Reader.to_string ~max_bytes] or
+[Reader.to_bytes ~max_bytes] for bounded buffered downloads inside
+[Object.get ~consume].
 
 {[
 Awskit_s3_eio.Object.put s3
@@ -211,6 +233,32 @@ module S3 = Awskit_s3_eio
 
 S3.Object.get s3 ~bucket ~key
   ~consume:(S3.Reader.to_path path)
+  ()
+]}
+
+{2 Large Or Streaming Objects}
+
+Custom stream uploads declare an exact content length and whether the producer
+can replay the bytes for retries:
+
+{[
+module S3 = Awskit_s3_eio
+
+match
+  S3.Body.of_stream ~content_length ~replayable:false
+    ~write:(fun writer -> S3.Body.Writer.write_string writer chunk)
+with
+| Error error -> Error error
+| Ok body -> S3.Object.put s3 ~bucket ~key ~body ()
+]}
+
+Large downloads can process chunks incrementally while the reader is in scope:
+
+{[
+module S3 = Awskit_s3_eio
+
+S3.Object.get s3 ~bucket ~key
+  ~consume:(S3.Reader.iter ~f:(fun chunk -> process chunk))
   ()
 ]}
 

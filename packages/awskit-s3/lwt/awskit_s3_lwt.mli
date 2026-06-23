@@ -40,7 +40,8 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
         with type 'a io := 'a Lwt.t
          and type t = Runtime.request_body
 
-    val of_lwt_stream : content_length:int64 -> string Lwt_stream.t -> t
+    val of_lwt_stream :
+      content_length:int64 -> string Lwt_stream.t -> (t, Awskit.Error.t) result
   end
 
   module Reader :

@@ -43,10 +43,9 @@ ignore
    |> Result.get_ok);
 
 ignore
-  (Awskit_s3_sim.Object.put conn
+  (Awskit_s3_sim.Object.put_string conn
      ~bucket
      ~key
-     ~body:(Awskit_s3_sim.Body.of_string "hello")
-     ()
+     ~contents:"hello" ()
    |> Result.get_ok)
 ]}

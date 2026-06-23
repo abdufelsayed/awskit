@@ -124,6 +124,74 @@ let test_presigned_safe_artifact_redacts_bearer_material () =
     (Some (add_span "result expiration" test_time expires_in |> Ptime.to_rfc3339))
     (Presigned.expires_at result |> Option.map Ptime.to_rfc3339)
 
+let test_client_bound_presigned_uses_runtime_model () =
+  let endpoint_config =
+    Endpoint_config.local_plaintext
+      ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
+      ~signing_region:(Awskit.Region.of_string_exn "eu-west-1")
+      ~addressing_style:`Path ()
+    |> ok_or_fail "client-bound endpoint config"
+  in
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AKIA_CLIENT_BOUND"
+      ~secret_access_key:"client-bound-secret" ()
+  in
+  let conn =
+    Recording_runtime.connect ~endpoint_config
+      ~region:(Awskit.Region.of_string_exn "ap-southeast-2")
+      ~credentials []
+  in
+  let expires_in = Ptime.Span.of_int_s 600 in
+  let options : Presigned.Get_object.options =
+    {
+      Presigned.Get_object.default_options with
+      expires_in = Some expires_in;
+      expected_bucket_owner = Some (account_id "123456789012");
+      extra_signed_headers = [ ("x-client-context", "present") ];
+    }
+  in
+  let result =
+    Recording_s3.Presigned.get_object conn ~bucket:(bucket_name "bucket")
+      ~key:(object_key "file.txt") ~options ()
+    |> ok_or_fail "client-bound presigned get"
+  in
+  Alcotest.(check string)
+    "method" "GET"
+    (Awskit.Request.Method.to_string
+       (Presigned.method_ result :> Awskit.Request.Method.t));
+  Alcotest.(check bool)
+    "raw URL has bearer signature" true
+    (query_param "X-Amz-Signature" (Presigned.reveal_url result) <> None);
+  Alcotest.(check bool)
+    "uses connection endpoint" true
+    (String.starts_with ~prefix:"http://127.0.0.1:9000/bucket/file.txt"
+       (Presigned.reveal_url result));
+  let datestamp, _amz_date = Awskit.Signing.ptime_to_date_time test_time in
+  Alcotest.(check (option (list string)))
+    "uses connection credentials and signing region"
+    (Some [ Fmt.str "AKIA_CLIENT_BOUND/%s/eu-west-1/s3/aws4_request" datestamp ])
+    (query_param "X-Amz-Credential" (Presigned.reveal_url result));
+  Alcotest.(check (option (list string)))
+    "safe uri omits signature" None
+    (Uri.query (Presigned.safe_uri result) |> List.assoc_opt "X-Amz-Signature");
+  Alcotest.(check (list string))
+    "signed header names"
+    [ "x-amz-expected-bucket-owner"; "x-client-context" ]
+    (Presigned.signed_headers result |> List.map fst);
+  Alcotest.(check int)
+    "requested expiry" 600
+    (span_seconds "requested" (Presigned.requested_expires_in result));
+  Alcotest.(check int)
+    "effective expiry" 600
+    (span_seconds "effective" (Presigned.effective_expires_in result));
+  Alcotest.(check (option string))
+    "expiration timestamp"
+    (Some
+       (add_span "client-bound expiration" test_time expires_in
+       |> Ptime.to_rfc3339))
+    (Presigned.expires_at result |> Option.map Ptime.to_rfc3339);
+  Alcotest.(check int) "transport calls" 0 (List.length conn.calls)
+
 let test_presigned_effective_expiry_is_capped_by_credentials () =
   let requested = Ptime.Span.of_int_s 3600 in
   let credential_lifetime = Ptime.Span.of_int_s 600 in
@@ -503,6 +571,8 @@ let suite =
         Alcotest.test_case "presigned result" `Quick test_presigned_result;
         Alcotest.test_case "presigned safe artifact redacts bearer material"
           `Quick test_presigned_safe_artifact_redacts_bearer_material;
+        Alcotest.test_case "client-bound presigned uses runtime model" `Quick
+          test_client_bound_presigned_uses_runtime_model;
         Alcotest.test_case "presigned caps expiry at credential expiration"
           `Quick test_presigned_effective_expiry_is_capped_by_credentials;
         Alcotest.test_case "presigned rejects expired credentials" `Quick

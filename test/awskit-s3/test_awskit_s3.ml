@@ -31,6 +31,7 @@ let () =
          Test_listing_api.suite;
          Test_endpoint.suite;
          Test_presigned.suite;
+         Test_streaming.suite;
          Test_bucket_request.suite;
          Test_bucket_xml.suite;
          Test_object_request.suite;

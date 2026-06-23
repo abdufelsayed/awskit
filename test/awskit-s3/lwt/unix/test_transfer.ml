@@ -616,6 +616,10 @@ let check_body_descriptor label ~content_length ~replayable body =
     (Some content_length) descriptor.content_length;
   Alcotest.(check bool) (label ^ " replayable") replayable descriptor.replayable
 
+let body_or_fail label = function
+  | Ok body -> body
+  | Error error -> Alcotest.failf "%s: %a" label Awskit_s3.Error.pp error
+
 let checksum_value : Awskit_s3.Object.Checksum.value =
   { algorithm = Awskit_s3.Object.Checksum.Algorithm.Sha256; value = "checksum" }
 
@@ -625,6 +629,7 @@ let test_body_of_lwt_stream_streams_chunks () =
   let body =
     Body.of_lwt_stream ~content_length:11L
       (Lwt_stream.of_list [ "one"; "two"; "three" ])
+    |> body_or_fail "stream body"
   in
   check_body_descriptor "stream body" ~content_length:11L ~replayable:false body;
   match Lwt_main.run (S3.Object.put conn ~bucket ~key ~body ()) with
@@ -637,7 +642,9 @@ let test_body_of_lwt_stream_propagates_cancellation () =
   Runtime.reset_write_fault ();
   let conn = connection () in
   let stream = Lwt_stream.from (fun () -> Lwt.fail Lwt.Canceled) in
-  let body = Body.of_lwt_stream ~content_length:1L stream in
+  let body =
+    Body.of_lwt_stream ~content_length:1L stream |> body_or_fail "stream body"
+  in
   match
     Lwt_main.run (observe_lwt (S3.Object.put conn ~bucket ~key ~body ()))
   with
@@ -666,6 +673,7 @@ let test_body_of_channel_streams_channel () =
                    ~on_progress:(fun transferred ->
                      progress := transferred :: !progress)
                    channel
+                 |> body_or_fail "channel body"
                in
                check_body_descriptor "channel body"
                  ~content_length:(Int64.of_int (String.length payload))

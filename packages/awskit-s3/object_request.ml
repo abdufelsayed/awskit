@@ -85,6 +85,12 @@ module Make (C : Request_context.S) = struct
   let validate_list_versions_options (options : List_object_versions.options) =
     validate_list_max_keys options.max_keys
 
+  let validate_max_bytes max_bytes =
+    if Int64.compare max_bytes 0L < 0 then
+      invalid ~field:"max_bytes" "max_bytes must be non-negative, got %Ld"
+        max_bytes
+    else Ok ()
+
   let put conn ~bucket ~key ?options ~body () =
     let bucket = bucket_string bucket in
     let key = key_string key in
@@ -148,6 +154,12 @@ module Make (C : Request_context.S) = struct
                         in
                         return_result return_error return_ok result))))
 
+  let put_string conn ~bucket ~key ?options ~contents () =
+    put conn ~bucket ~key ?options ~body:(R.Request_body.of_string contents) ()
+
+  let put_bytes conn ~bucket ~key ?options ~contents () =
+    put conn ~bucket ~key ?options ~body:(R.Request_body.of_bytes contents) ()
+
   let get conn ~bucket ~key ?options ~consume () =
     let bucket = bucket_string bucket in
     let key = key_string key in
@@ -187,6 +199,34 @@ module Make (C : Request_context.S) = struct
                         (Result.map (get_result info) consumed))
             in
             return_result return_error return_ok result)
+
+  let read_string ~max_bytes reader = read_body reader ~max_size:max_bytes
+
+  let read_bytes ~max_bytes reader =
+    let* result = read_body reader ~max_size:max_bytes in
+    match result with
+    | Error _ as error -> return error
+    | Ok body -> return_ok (Bytes.of_string body)
+
+  let get_string conn ~bucket ~key ?options ~max_bytes () =
+    let return_error =
+      return_s3_error return_error ~operation:"GetObject"
+        ~bucket:(bucket_string bucket) ~key:(key_string key)
+    in
+    match validate_max_bytes max_bytes with
+    | Error error -> return_error error
+    | Ok () ->
+        get conn ~bucket ~key ?options ~consume:(read_string ~max_bytes) ()
+
+  let get_bytes conn ~bucket ~key ?options ~max_bytes () =
+    let return_error =
+      return_s3_error return_error ~operation:"GetObject"
+        ~bucket:(bucket_string bucket) ~key:(key_string key)
+    in
+    match validate_max_bytes max_bytes with
+    | Error error -> return_error error
+    | Ok () ->
+        get conn ~bucket ~key ?options ~consume:(read_bytes ~max_bytes) ()
 
   let find conn ~bucket ~key ?options ~consume () =
     let bucket = bucket_string bucket in
@@ -230,6 +270,26 @@ module Make (C : Request_context.S) = struct
             | Ok (Error error) -> return_error error
             | Error error when Error.is_no_such_key error -> return_ok None
             | Error error -> return_error error))
+
+  let find_string conn ~bucket ~key ?options ~max_bytes () =
+    let return_error =
+      return_s3_error return_error ~operation:"GetObject"
+        ~bucket:(bucket_string bucket) ~key:(key_string key)
+    in
+    match validate_max_bytes max_bytes with
+    | Error error -> return_error error
+    | Ok () ->
+        find conn ~bucket ~key ?options ~consume:(read_string ~max_bytes) ()
+
+  let find_bytes conn ~bucket ~key ?options ~max_bytes () =
+    let return_error =
+      return_s3_error return_error ~operation:"GetObject"
+        ~bucket:(bucket_string bucket) ~key:(key_string key)
+    in
+    match validate_max_bytes max_bytes with
+    | Error error -> return_error error
+    | Ok () ->
+        find conn ~bucket ~key ?options ~consume:(read_bytes ~max_bytes) ()
 
   let head conn ~bucket ~key ?options () =
     let bucket = bucket_string bucket in

@@ -565,6 +565,10 @@ let check_body_descriptor label ~content_length ~replayable body =
     (Some content_length) descriptor.content_length;
   Alcotest.(check bool) (label ^ " replayable") replayable descriptor.replayable
 
+let body_or_fail label = function
+  | Ok body -> body
+  | Error error -> Alcotest.failf "%s: %a" label Awskit_s3.Error.pp error
+
 let test_body_of_flow_streams_flow _env () =
   let conn = connection () in
   let progress = ref [] in
@@ -574,6 +578,7 @@ let test_body_of_flow_streams_flow _env () =
       ~content_length:(Int64.of_int (String.length payload))
       ~on_progress:(fun transferred -> progress := transferred :: !progress)
       (Eio.Flow.string_source payload)
+    |> body_or_fail "flow body"
   in
   check_body_descriptor "flow body"
     ~content_length:(Int64.of_int (String.length payload))

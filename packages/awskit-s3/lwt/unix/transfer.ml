@@ -179,8 +179,7 @@ struct
           | 0 -> Lwt.return_ok ()
           | n ->
               let chunk = Bytes.sub_string bytes 0 n in
-              Lwt.bind (Runtime.Request_body.write_string writer chunk)
-                (function
+              Lwt.bind (Writer.write_string writer chunk) (function
                 | Error _ as error -> Lwt.return error
                 | Ok () ->
                     let transferred = Int64.add transferred (Int64.of_int n) in
@@ -197,17 +196,14 @@ struct
               Lwt.bind (Lwt_stream.get stream) (function
                 | None -> Lwt.return_ok ()
                 | Some chunk ->
-                    Lwt.bind (Runtime.Request_body.write_string writer chunk)
-                      (function
+                    Lwt.bind (Writer.write_string writer chunk) (function
                       | Error _ as error -> Lwt.return error
                       | Ok () -> loop ()))
             in
             loop ())
           (body_error_or_raise_callback "read upload stream" "<stream>")
       in
-      Runtime.Request_body.of_stream
-        (descriptor ~content_length ~replayable:false)
-        ~write
+      of_stream ~content_length ~replayable:false ~write
 
     let of_channel ~content_length ?on_progress channel =
       let write writer =
@@ -215,9 +211,7 @@ struct
           (fun () -> copy_channel_to_writer ?on_progress channel writer)
           (body_error_or_raise_callback "read upload channel" "<channel>")
       in
-      Runtime.Request_body.of_stream
-        (descriptor ~content_length ~replayable:false)
-        ~write
+      of_stream ~content_length ~replayable:false ~write
 
     let of_path ?on_progress path =
       Lwt.bind (regular_file_length path) (function
@@ -230,10 +224,7 @@ struct
                       copy_channel_to_writer ?on_progress channel writer))
                 (body_error_or_raise_callback "read upload" path)
             in
-            Lwt.return_ok
-              (Runtime.Request_body.of_stream
-                 (descriptor ~content_length ~replayable:true)
-                 ~write))
+            Lwt.return (of_stream ~content_length ~replayable:true ~write))
   end
 
   module Reader = struct

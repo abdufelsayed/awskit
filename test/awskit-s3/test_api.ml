@@ -251,11 +251,15 @@ let test_native_body_api_compiles () =
   let _string_body : S3.Body.t = S3.Body.of_string "hello" in
   let _bytes_body : S3.Body.t = S3.Body.of_bytes (Bytes.of_string "hello") in
   let _stream_body : S3.Body.t =
-    S3.Body.of_stream ~content_length:11L ~write:(fun writer ->
+    S3.Body.of_stream ~content_length:11L ~replayable:false
+      ~write:(fun writer ->
         match S3.Body.Writer.write_string writer "hello " with
         | Error _ as error -> error
         | Ok () -> S3.Body.Writer.write_bytes writer (Bytes.of_string "world"))
+    |> ok_or_fail "stream body"
   in
+  ignore (S3.Body.content_length _stream_body : int64 option);
+  ignore (S3.Body.replayable _stream_body : bool);
   let consume (reader : S3.Reader.t) =
     S3.Reader.to_bytes ~max_bytes:1_048_576L reader
   in
@@ -277,6 +281,60 @@ let test_native_body_api_compiles () =
         consume:(S3.Reader.t -> ('a, Error.t) result) ->
         unit ->
         ('a Get_object.result option, Error.t) result);
+  ignore
+    (S3.Object.put_string
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
+        ?options:Put_object.options ->
+        contents:string ->
+        unit ->
+        (Put_object.result, Error.t) result);
+  ignore
+    (S3.Object.put_bytes
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
+        ?options:Put_object.options ->
+        contents:bytes ->
+        unit ->
+        (Put_object.result, Error.t) result);
+  ignore
+    (S3.Object.get_string
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
+        ?options:Get_object.options ->
+        max_bytes:int64 ->
+        unit ->
+        (string Get_object.result, Error.t) result);
+  ignore
+    (S3.Object.get_bytes
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
+        ?options:Get_object.options ->
+        max_bytes:int64 ->
+        unit ->
+        (bytes Get_object.result, Error.t) result);
+  ignore
+    (S3.Object.find_string
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
+        ?options:Get_object.options ->
+        max_bytes:int64 ->
+        unit ->
+        (string Get_object.result option, Error.t) result);
+  ignore
+    (S3.Object.find_bytes
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
+        ?options:Get_object.options ->
+        max_bytes:int64 ->
+        unit ->
+        (bytes Get_object.result option, Error.t) result);
   ignore
     (S3.Object.Tagging.put
       : S3.connection ->
@@ -319,6 +377,56 @@ let test_native_body_api_compiles () =
         (Awskit.Response.t, Error.t) result);
   ()
 
+let test_presigned_api_compiles () =
+  let module S3 = Recording_s3 in
+  ignore (Presigned.method_ : Presigned.result -> Presigned.method_);
+  ignore (Presigned.safe_uri : Presigned.result -> Uri.t);
+  ignore (Presigned.signed_headers : Presigned.result -> (string * string) list);
+  ignore (Presigned.reveal_url : Presigned.result -> string);
+  ignore
+    (S3.Presigned.get_object
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
+        ?options:Presigned.Get_object.options ->
+        unit ->
+        (Presigned.result, Error.t) result);
+  ignore
+    (S3.Presigned.put_object
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
+        ?options:Presigned.Put_object.options ->
+        unit ->
+        (Presigned.result, Error.t) result);
+  ignore
+    (S3.Presigned.head_object
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
+        ?options:Presigned.Get_object.options ->
+        unit ->
+        (Presigned.result, Error.t) result);
+  ignore
+    (S3.Presigned.delete_object
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
+        ?options:Presigned.Delete_object.options ->
+        unit ->
+        (Presigned.result, Error.t) result);
+  ignore
+    (S3.Presigned.upload_part
+      : S3.connection ->
+        bucket:Bucket_name.t ->
+        key:Object_key.t ->
+        upload_id:Multipart.Upload_id.t ->
+        part_number:int ->
+        ?options:Presigned.Upload_part.options ->
+        unit ->
+        (Presigned.result, Error.t) result);
+  ()
+
 let service_error ?code ?message status =
   Awskit.Error.Internal.service ~status ?code ?message ~headers:[] ()
 
@@ -352,6 +460,8 @@ let suite =
           test_public_operation_aliases;
         Alcotest.test_case "native body api compiles" `Quick
           test_native_body_api_compiles;
+        Alcotest.test_case "presigned api compiles" `Quick
+          test_presigned_api_compiles;
         Alcotest.test_case "error classifiers" `Quick test_error_classifiers;
       ] );
   ]

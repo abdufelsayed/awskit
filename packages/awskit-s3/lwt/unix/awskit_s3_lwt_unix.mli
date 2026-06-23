@@ -34,7 +34,8 @@ module Body : sig
   include
     Awskit_s3.BODY with type 'a io := 'a Lwt.t and type t = Runtime.request_body
 
-  val of_lwt_stream : content_length:int64 -> string Lwt_stream.t -> t
+  val of_lwt_stream :
+    content_length:int64 -> string Lwt_stream.t -> (t, Awskit_s3.Error.t) result
   (** Build a non-replayable request body from an existing Lwt stream.
       [content_length] must match the produced bytes, and the stream must remain
       valid until the request finishes. *)
@@ -43,7 +44,7 @@ module Body : sig
     content_length:int64 ->
     ?on_progress:(int64 -> unit) ->
     Lwt_io.input_channel ->
-    t
+    (t, Awskit_s3.Error.t) result
   (** Build a non-replayable request body from an existing input channel.
       [content_length] must match the produced bytes, and the channel must
       remain valid until the request finishes. *)
