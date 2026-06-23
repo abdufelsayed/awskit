@@ -360,17 +360,105 @@ let test_public_operation_aliases () =
     "default upload threshold"
     (Int64.of_int Transfer.default_part_size)
     Transfer.default_multipart_threshold;
+  let put_result : Put_object.result =
+    {
+      etag = None;
+      version_id = None;
+      checksum = { Object.Checksum.values = []; checksum_type = None };
+      response = Awskit.Response.create_exn ~status:200 ();
+    }
+  in
+  let transfer_put_result : Transfer.put_upload_result =
+    { put = put_result; bytes_transferred = 5L }
+  in
+  ignore (transfer_put_result.put : Put_object.result);
+  ignore (transfer_put_result.bytes_transferred : int64);
+  let transfer_upload_result = Transfer.Put transfer_put_result in
   Alcotest.(check bool)
     "put strategy" true
-    (Transfer.upload_strategy
-       (Transfer.Put
-          {
-            etag = None;
-            version_id = None;
-            checksum = { Object.Checksum.values = []; checksum_type = None };
-            response = Awskit.Response.create_exn ~status:200 ();
-          })
-    = `Put);
+    (Transfer.upload_strategy transfer_upload_result = `Put);
+  Alcotest.(check int64)
+    "put bytes" 5L
+    (Transfer.upload_bytes_transferred transfer_upload_result);
+  let transfer_multipart_result : Transfer.multipart_upload_result =
+    {
+      upload = multipart_upload;
+      parts = [];
+      complete =
+        {
+          etag = None;
+          version_id = None;
+          checksum = { Object.Checksum.values = []; checksum_type = None };
+          response = Awskit.Response.create_exn ~status:200 ();
+        };
+      bytes_transferred = 8L;
+    }
+  in
+  ignore
+    (transfer_multipart_result.upload
+      : Multipart.Upload.caller_owned Multipart.Upload.t);
+  ignore (transfer_multipart_result.parts : Multipart.Part.t list);
+  ignore (transfer_multipart_result.complete : Complete_multipart_upload.result);
+  ignore (transfer_multipart_result.bytes_transferred : int64);
+  ignore
+    (Transfer.upload_bytes_transferred
+       (Transfer.Multipart transfer_multipart_result)
+      : int64);
+  let transfer_get_result : Transfer.get_download_result =
+    {
+      info =
+        {
+          etag = None;
+          content_type = None;
+          content_length = Some 5L;
+          content_range = None;
+          last_modified = None;
+          metadata = Metadata.empty;
+          storage_class = None;
+          version_id = None;
+          checksum = { Object.Checksum.values = []; checksum_type = None };
+          server_side_encryption = None;
+          response = Awskit.Response.create_exn ~status:200 ();
+        };
+      bytes_transferred = 5L;
+    }
+  in
+  ignore (transfer_get_result.info : Get_object.info);
+  ignore (transfer_get_result.bytes_transferred : int64);
+  let transfer_download_result = Transfer.Get transfer_get_result in
+  Alcotest.(check bool)
+    "get strategy" true
+    (Transfer.download_strategy transfer_download_result = `Get);
+  Alcotest.(check int64)
+    "get bytes" 5L
+    (Transfer.download_bytes_transferred transfer_download_result);
+  let transfer_ranged_result : Transfer.ranged_download_result =
+    {
+      info =
+        {
+          etag = None;
+          content_type = None;
+          content_length = Some 8L;
+          content_range = None;
+          last_modified = None;
+          metadata = Metadata.empty;
+          storage_class = None;
+          version_id = None;
+          checksum = { Object.Checksum.values = []; checksum_type = None };
+          server_side_encryption = None;
+          response = Awskit.Response.create_exn ~status:200 ();
+        };
+      parts = 2;
+      bytes_transferred = 8L;
+    }
+  in
+  ignore (transfer_ranged_result.info : Head_object.result);
+  ignore (transfer_ranged_result.parts : int);
+  ignore (transfer_ranged_result.bytes_transferred : int64);
+  ignore
+    (Transfer.download_bytes_transferred
+       (Transfer.Ranged transfer_ranged_result)
+      : int64);
   ignore (None : Complete_multipart_upload.result option);
   ignore (None : Abort_multipart_upload.result option);
   ignore (List_parts.default_options : List_parts.options)

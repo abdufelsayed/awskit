@@ -276,9 +276,13 @@ larger transfers use multipart upload or ranged [GetObject] requests.
 [multipart_upload_file] and [resume_multipart_upload_file] are explicit
 multipart upload helpers. Filesystem transfer helpers live only in the Eio and
 Lwt Unix adapters; they are not part of the runtime-agnostic [awskit-s3] core.
+Transfer results include the selected strategy, the underlying S3 result
+metadata, and [bytes_transferred].
 Download helpers write through a private temporary file before publishing the
 target. Set [Transfer.download_options ~overwrite:Error_if_exists] to reject an
-existing local target before issuing S3 requests.
+existing local target before issuing S3 requests. Retry and timeout policies are
+configured when the client is created, then applied to the S3 operations the
+transfer helper performs.
 
 {2 Eio}
 

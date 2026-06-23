@@ -379,6 +379,14 @@ struct
             notify_transfer_progress callback ~direction ~phase ?total
               ?part_number transferred)
 
+  let tracked_byte_progress_callback callback ~direction ~phase ?total
+      ?part_number transferred_ref =
+    Some
+      (fun transferred ->
+        transferred_ref := transferred;
+        notify_transfer_progress callback ~direction ~phase ?total ?part_number
+          transferred)
+
   let range_body_of_path path (spec : Plan.upload_part) =
     let descriptor =
       {
@@ -508,7 +516,7 @@ struct
       | Error _ as error -> Lwt.return error
       | Ok _ -> Lwt.return_ok ())
 
-  let complete_multipart conn ~upload ~options parts =
+  let complete_multipart conn ~upload ~options ~bytes_transferred parts =
     let parts = sort_parts parts in
     Lwt.bind
       (S3.Multipart.complete_upload conn ~upload ~parts
@@ -521,6 +529,7 @@ struct
                 Awskit_s3.Multipart.Upload.as_caller_owned upload;
               parts;
               complete;
+              bytes_transferred;
             })
 
   let resume_multipart_upload_file conn ~upload ?options ?on_progress ~path () =
@@ -542,7 +551,8 @@ struct
       upload_missing_parts conn ~upload ~options ~path ?on_progress
         ~content_length specs
     in
-    complete_multipart conn ~upload ~options uploaded_now
+    complete_multipart conn ~upload ~options ~bytes_transferred:content_length
+      uploaded_now
 
   let multipart_upload_file conn ~bucket ~key ?options ?on_progress ~path () =
     let options =
@@ -593,8 +603,8 @@ struct
         | Error error -> abort_and_return error
         | Ok parts ->
             Lwt.bind
-              (complete_multipart conn ~upload:created.upload ~options parts)
-              (function
+              (complete_multipart conn ~upload:created.upload ~options
+                 ~bytes_transferred:content_length parts) (function
               | Ok _ as result -> Lwt.return result
               | Error error -> abort_and_return error))
     in
@@ -610,7 +620,9 @@ struct
         Lwt.bind (regular_file_length path) (function
           | Error _ as error -> Lwt.return error
           | Ok content_length -> (
-              if Int64.compare content_length options.multipart_threshold < 0
+              if
+                Int64.equal content_length 0L
+                || Int64.compare content_length options.multipart_threshold < 0
               then
                 let upload_progress =
                   byte_progress_callback on_progress ~direction:Transfer.Upload
@@ -621,7 +633,9 @@ struct
                   S3.Object.put conn ~bucket ~key ~options:options.put_options
                     ~body ()
                 in
-                Lwt.return_ok (Awskit_s3.Transfer.Put result)
+                Lwt.return_ok
+                  (Awskit_s3.Transfer.Put
+                     { put = result; bytes_transferred = content_length })
               else
                 match
                   Awskit_s3.Transfer.validate_upload_multipart_selection options
@@ -757,16 +771,19 @@ struct
     in
     let* () = validate_download_target path options in
     let download_with_get ?total () =
+      let bytes_transferred = ref 0L in
       let download_progress =
-        byte_progress_callback on_progress ~direction:Transfer.Download
-          ~phase:Transfer.Single_request ?total ()
+        tracked_byte_progress_callback on_progress ~direction:Transfer.Download
+          ~phase:Transfer.Single_request ?total bytes_transferred
       in
       let* result =
         S3.Object.get conn ~bucket ~key ~options:options.get_options
           ~consume:(Reader.to_path ?on_progress:download_progress path)
           ()
       in
-      Lwt.return_ok (Awskit_s3.Transfer.Get (get_info result))
+      Lwt.return_ok
+        (Awskit_s3.Transfer.Get
+           { info = get_info result; bytes_transferred = !bytes_transferred })
     in
     let head_options = head_options_of_get_options options.get_options in
     let* info = S3.Object.head conn ~bucket ~key ~options:head_options () in
@@ -789,5 +806,10 @@ struct
                 ~path:temp_path ~fd ~content_length ranges
             in
             Lwt.return_ok
-              (Awskit_s3.Transfer.Ranged { info; parts = List.length ranges }))
+              (Awskit_s3.Transfer.Ranged
+                 {
+                   info;
+                   parts = List.length ranges;
+                   bytes_transferred = content_length;
+                 }))
 end

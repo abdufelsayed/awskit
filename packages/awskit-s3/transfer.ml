@@ -41,23 +41,41 @@ type download_options = {
 
 type upload_strategy = [ `Put | `Multipart ]
 type download_strategy = [ `Get | `Ranged ]
+type put_upload_result = { put : Object.Put.result; bytes_transferred : int64 }
 
 type multipart_upload_result = {
   upload : Multipart.Upload.caller_owned Multipart.Upload.t;
   parts : Multipart.Part.t list;
   complete : Multipart.Complete.result;
+  bytes_transferred : int64;
 }
 
 type upload_result =
-  | Put of Object.Put.result
+  | Put of put_upload_result
   | Multipart of multipart_upload_result
 
+type get_download_result = { info : Object.Get.info; bytes_transferred : int64 }
+
+type ranged_download_result = {
+  info : Object.Head.result;
+  parts : int;
+  bytes_transferred : int64;
+}
+
 type download_result =
-  | Get of Object.Get.info
-  | Ranged of { info : Object.Head.result; parts : int }
+  | Get of get_download_result
+  | Ranged of ranged_download_result
 
 let upload_strategy = function Put _ -> `Put | Multipart _ -> `Multipart
 let download_strategy = function Get _ -> `Get | Ranged _ -> `Ranged
+
+let upload_bytes_transferred = function
+  | Put result -> result.bytes_transferred
+  | Multipart result -> result.bytes_transferred
+
+let download_bytes_transferred = function
+  | Get result -> result.bytes_transferred
+  | Ranged result -> result.bytes_transferred
 
 let progress ~direction ~phase ~transferred ?total ?part_number () =
   { direction; phase; transferred; total; part_number }

@@ -941,6 +941,9 @@ let test_upload_file_uses_put_below_threshold () =
           Alcotest.(check bool)
             "strategy" true
             (Awskit_s3.Transfer.upload_strategy result = `Put);
+          Alcotest.(check int64)
+            "bytes transferred" 5L
+            (Awskit_s3.Transfer.upload_bytes_transferred result);
           Alcotest.(check int) "put count" 1 conn.Runtime.put_count;
           Alcotest.(check int)
             "multipart create count" 0 conn.Runtime.multipart_create_count;
@@ -951,6 +954,38 @@ let test_upload_file_uses_put_below_threshold () =
                   (has_progress_event ~direction:Awskit_s3.Transfer.Upload
                      ~phase:Awskit_s3.Transfer.Single_request ~total:5L 5L)
                   !progress)))
+
+let test_upload_empty_file_uses_put_at_zero_threshold () =
+  Runtime.reset_write_fault ();
+  let path = Filename.temp_file "awskit-upload-empty-put" ".bin" in
+  write_file path "";
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let conn = connection () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          multipart_threshold = 0L;
+        }
+      in
+      match
+        Lwt_main.run (Transfer.upload_file conn ~bucket ~key ~options ~path ())
+      with
+      | Error error ->
+          Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
+      | Ok result ->
+          Alcotest.(check bool)
+            "strategy" true
+            (Awskit_s3.Transfer.upload_strategy result = `Put);
+          Alcotest.(check int64)
+            "bytes transferred" 0L
+            (Awskit_s3.Transfer.upload_bytes_transferred result);
+          Alcotest.(check int) "put count" 1 conn.Runtime.put_count;
+          Alcotest.(check int)
+            "multipart create count" 0 conn.Runtime.multipart_create_count;
+          Alcotest.(check (option string))
+            "uploaded body" (Some "") conn.Runtime.uploaded_body)
 
 let test_upload_file_allows_put_checksum_below_threshold () =
   Runtime.reset_write_fault ();
@@ -1015,6 +1050,10 @@ let test_upload_file_uses_multipart_at_threshold () =
           Alcotest.(check bool)
             "strategy" true
             (Awskit_s3.Transfer.upload_strategy result = `Multipart);
+          Alcotest.(check int64)
+            "bytes transferred"
+            (Int64.of_int Awskit_s3.Transfer.min_part_size)
+            (Awskit_s3.Transfer.upload_bytes_transferred result);
           Alcotest.(check int) "put count" 0 conn.Runtime.put_count;
           Alcotest.(check int)
             "multipart create count" 1 conn.Runtime.multipart_create_count;
@@ -1349,6 +1388,10 @@ let test_download_file_uses_get_below_threshold () =
           Alcotest.(check bool)
             "strategy" true
             (Awskit_s3.Transfer.download_strategy result = `Get);
+          Alcotest.(check int64)
+            "bytes transferred"
+            (Int64.of_int (String.length body))
+            (Awskit_s3.Transfer.download_bytes_transferred result);
           Alcotest.(check string) "body" body (read_file path);
           Alcotest.(check int) "head count" 1 conn.Runtime.head_count;
           Alcotest.(check int) "get count" 1 conn.Runtime.get_count;
@@ -1470,6 +1513,10 @@ let test_download_file_uses_ranges_at_threshold () =
           Alcotest.(check bool)
             "strategy" true
             (Awskit_s3.Transfer.download_strategy result = `Ranged);
+          Alcotest.(check int64)
+            "bytes transferred"
+            (Int64.of_int (String.length body))
+            (Awskit_s3.Transfer.download_bytes_transferred result);
           (match result with
           | Awskit_s3.Transfer.Ranged { parts; _ } ->
               Alcotest.(check int) "parts" 2 parts
@@ -1707,6 +1754,8 @@ let suite () =
           test_reader_to_path_reports_cleanup_failure;
         Alcotest.test_case "upload uses put below threshold" `Quick
           test_upload_file_uses_put_below_threshold;
+        Alcotest.test_case "upload empty file uses put at zero threshold" `Quick
+          test_upload_empty_file_uses_put_at_zero_threshold;
         Alcotest.test_case "upload allows put checksum below threshold" `Quick
           test_upload_file_allows_put_checksum_below_threshold;
         Alcotest.test_case "upload uses multipart at threshold" `Quick

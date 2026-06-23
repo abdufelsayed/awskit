@@ -791,6 +791,9 @@ let test_upload_file_strategies env () =
       Alcotest.(check bool)
         "small strategy" true
         (Awskit_s3.Transfer.upload_strategy small = `Put);
+      Alcotest.(check int64)
+        "small bytes" 5L
+        (Awskit_s3.Transfer.upload_bytes_transferred small);
       Alcotest.(check int) "small put count" 1 small_conn.Runtime.put_count;
       Alcotest.(check bool)
         "small progress" true
@@ -819,6 +822,10 @@ let test_upload_file_strategies env () =
       Alcotest.(check bool)
         "multipart strategy" true
         (Awskit_s3.Transfer.upload_strategy multipart = `Multipart);
+      Alcotest.(check int64)
+        "multipart bytes"
+        (Int64.of_int Awskit_s3.Transfer.min_part_size)
+        (Awskit_s3.Transfer.upload_bytes_transferred multipart);
       Alcotest.(check int)
         "multipart part count" 1 multipart_conn.Runtime.upload_part_count;
       let part_number = Awskit_s3.Multipart.Part_number.of_int_exn 1 in
@@ -831,6 +838,39 @@ let test_upload_file_strategies env () =
               ~part_number
               (Int64.of_int Awskit_s3.Transfer.min_part_size)
               !multipart_progress)))
+
+let test_upload_empty_file_uses_put_at_zero_threshold env () =
+  let native_path = Filename.temp_file "awskit-eio-upload-empty-put" ".bin" in
+  write_file native_path "";
+  Fun.protect
+    ~finally:(fun () -> remove_file native_path)
+    (fun () ->
+      let conn = connection () in
+      let options =
+        {
+          Awskit_s3.Transfer.default_upload_options with
+          multipart_threshold = 0L;
+        }
+      in
+      match
+        Transfer.upload_file conn ~bucket ~key ~options
+          ~path:(path_of_native env native_path)
+          ()
+      with
+      | Error error ->
+          Alcotest.failf "upload failed: %a" Awskit_s3.Error.pp error
+      | Ok result ->
+          Alcotest.(check bool)
+            "strategy" true
+            (Awskit_s3.Transfer.upload_strategy result = `Put);
+          Alcotest.(check int64)
+            "bytes transferred" 0L
+            (Awskit_s3.Transfer.upload_bytes_transferred result);
+          Alcotest.(check int) "put count" 1 conn.Runtime.put_count;
+          Alcotest.(check int)
+            "multipart create count" 0 conn.Runtime.multipart_create_count;
+          Alcotest.(check (option string))
+            "uploaded body" (Some "") conn.Runtime.uploaded_body)
 
 let test_multipart_upload_file env () =
   let native_path = Filename.temp_file "awskit-eio-upload-multipart" ".bin" in
@@ -1014,6 +1054,10 @@ let test_download_file_uses_get_below_threshold env () =
           Alcotest.(check bool)
             "strategy" true
             (Awskit_s3.Transfer.download_strategy result = `Get);
+          Alcotest.(check int64)
+            "bytes transferred"
+            (Int64.of_int (String.length payload))
+            (Awskit_s3.Transfer.download_bytes_transferred result);
           Alcotest.(check string) "body" payload (read_file native_path);
           Alcotest.(check int) "head count" 1 conn.Runtime.head_count;
           Alcotest.(check int) "get count" 1 conn.Runtime.get_count;
@@ -1057,6 +1101,10 @@ let test_download_file_ranges env () =
       Alcotest.(check bool)
         "strategy" true
         (Awskit_s3.Transfer.download_strategy result = `Ranged);
+      Alcotest.(check int64)
+        "bytes transferred"
+        (Int64.of_int (String.length body))
+        (Awskit_s3.Transfer.download_bytes_transferred result);
       Alcotest.(check string) "body" body (read_file native_path);
       Alcotest.(check (list string))
         "ranges"
@@ -1227,6 +1275,8 @@ let suite env =
           (test_reader_to_path_cancellation_preserves_target env);
         Alcotest.test_case "upload strategies" `Quick
           (test_upload_file_strategies env);
+        Alcotest.test_case "upload empty file uses put at zero threshold" `Quick
+          (test_upload_empty_file_uses_put_at_zero_threshold env);
         Alcotest.test_case "multipart upload" `Quick
           (test_multipart_upload_file env);
         Alcotest.test_case "multipart upload reports abort failure" `Quick

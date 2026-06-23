@@ -1,4 +1,10 @@
-(** High-level S3 transfer configuration shared by object transfer helpers. *)
+(** High-level S3 transfer configuration shared by object transfer helpers.
+
+    Transfer options cover strategy selection, local file behavior, and the S3
+    operation option records used by helper implementations. Retry and timeout
+    policies remain client/runtime construction policy; transfer helpers execute
+    ordinary S3 operations through that configured client instead of carrying
+    separate per-transfer retry or timeout placeholders. *)
 
 val min_part_size : int
 (** Minimum multipart part size accepted by S3, except for the final part. *)
@@ -89,21 +95,47 @@ type upload_strategy = [ `Put | `Multipart ]
 type download_strategy = [ `Get | `Ranged ]
 (** Strategy used by a high-level download result. *)
 
+type put_upload_result = {
+  put : Object.Put.result;
+      (** Metadata returned by the underlying [PutObject] request. *)
+  bytes_transferred : int64;
+      (** Number of local file bytes streamed into the request body. *)
+}
+(** Result of a single-request upload. *)
+
 type multipart_upload_result = {
   upload : Multipart.Upload.caller_owned Multipart.Upload.t;
   parts : Multipart.Part.t list;
   complete : Multipart.Complete.result;
+  bytes_transferred : int64;
 }
 (** Result of a completed multipart upload. *)
 
 type upload_result =
-  | Put of Object.Put.result
+  | Put of put_upload_result
   | Multipart of multipart_upload_result
       (** High-level upload result, tagged by the strategy actually used. *)
 
+type get_download_result = {
+  info : Object.Get.info;
+      (** Metadata returned by the underlying [GetObject] request. *)
+  bytes_transferred : int64;
+      (** Number of response-body bytes streamed into the local file. *)
+}
+(** Result of a single-request download. *)
+
+type ranged_download_result = {
+  info : Object.Head.result;
+      (** Metadata captured before ranged [GetObject] requests. *)
+  parts : int;  (** Number of ranges downloaded. *)
+  bytes_transferred : int64;
+      (** Number of response-body bytes streamed into the local file. *)
+}
+(** Result of a ranged download. *)
+
 type download_result =
-  | Get of Object.Get.info
-  | Ranged of { info : Object.Head.result; parts : int }
+  | Get of get_download_result
+  | Ranged of ranged_download_result
       (** High-level download result. Ranged downloads include the initial
           [HeadObject] metadata and the number of downloaded ranges. *)
 
@@ -112,6 +144,12 @@ val upload_strategy : upload_result -> upload_strategy
 
 val download_strategy : download_result -> download_strategy
 (** Return the strategy used by a download helper result. *)
+
+val upload_bytes_transferred : upload_result -> int64
+(** Return the number of local file bytes streamed by an upload helper. *)
+
+val download_bytes_transferred : download_result -> int64
+(** Return the number of response-body bytes streamed by a download helper. *)
 
 val default_upload_options : upload_options
 (** Default high-level upload options. *)
