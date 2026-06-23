@@ -215,7 +215,80 @@ let test_public_operation_aliases () =
   ignore (None : Get_bucket_location.result option);
   ignore
     (Create_multipart_upload.default_options : Create_multipart_upload.options);
+  ignore
+    (Create_multipart_upload.options ~content_type ~metadata ~tags
+       ~expected_bucket_owner:owner ()
+      : (Create_multipart_upload.options, Error.t) result);
+  ignore
+    (Create_multipart_upload.options_exn ~content_type ~metadata ~tags
+       ~expected_bucket_owner:owner ()
+      : Create_multipart_upload.options);
   ignore (Upload_part.default_options : Upload_part.options);
+  let upload_checksum : Object.Checksum.value =
+    { algorithm = Object.Checksum.Algorithm.Sha256; value = "part-sha256" }
+  in
+  ignore
+    (Upload_part.options ~checksum:upload_checksum ~expected_bucket_owner:owner
+       ()
+      : (Upload_part.options, Error.t) result);
+  ignore
+    (Upload_part.options_exn ~checksum:upload_checksum
+       ~expected_bucket_owner:owner ()
+      : Upload_part.options);
+  let multipart_part_number = Multipart.Part_number.of_int_exn 1 in
+  let multipart_part =
+    Multipart.Part.create_exn ~part_number:multipart_part_number
+      ~etag:(Object.Etag.of_string_exn "\"etag-1\"")
+      ~size:5_242_880L ()
+  in
+  ignore (multipart_part : Multipart.Part.t);
+  let multipart_upload =
+    Multipart.Upload.resume
+      ~bucket:(bucket_name "multipart-api-bucket")
+      ~key:(object_key "large.bin")
+      ~upload_id:(Multipart.Upload_id.of_string_exn "upload-1")
+  in
+  ignore (multipart_upload : Multipart.Upload.caller_owned Multipart.Upload.t);
+  ignore
+    (Complete_multipart_upload.options
+       ~checksum:
+         {
+           Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
+           value = "full-sha256";
+         }
+       ~checksum_type:Object.Checksum.Type.Composite
+       ~multipart_object_size:5_242_880L ~expected_bucket_owner:owner ()
+      : (Complete_multipart_upload.options, Error.t) result);
+  ignore
+    (Complete_multipart_upload.options_exn
+       ~checksum:
+         {
+           Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
+           value = "full-sha256";
+         }
+       ~checksum_type:Object.Checksum.Type.Composite
+       ~multipart_object_size:5_242_880L ~expected_bucket_owner:owner ()
+      : Complete_multipart_upload.options);
+  ignore
+    (Abort_multipart_upload.options ~expected_bucket_owner:owner ()
+      : (Abort_multipart_upload.options, Error.t) result);
+  ignore
+    (Abort_multipart_upload.options_exn ~expected_bucket_owner:owner ()
+      : Abort_multipart_upload.options);
+  let abort_result : Abort_multipart_upload.result =
+    { response = Awskit.Response.create_exn ~status:204 () }
+  in
+  ignore (abort_result.response : Awskit.Response.t);
+  ignore
+    (List_parts.options ~max_parts:1000
+       ~part_number_marker:(Multipart.Part_number_marker.of_int_exn 2)
+       ~expected_bucket_owner:owner ()
+      : (List_parts.options, Error.t) result);
+  ignore
+    (List_parts.options_exn ~max_parts:1000
+       ~part_number_marker:(Multipart.Part_number_marker.of_int_exn 2)
+       ~expected_bucket_owner:owner ()
+      : List_parts.options);
   ignore
     (Transfer.default_upload_options.create_options
       : Create_multipart_upload.options);
@@ -418,10 +491,8 @@ let test_presigned_api_compiles () =
   ignore
     (S3.Presigned.upload_part
       : S3.connection ->
-        bucket:Bucket_name.t ->
-        key:Object_key.t ->
-        upload_id:Multipart.Upload_id.t ->
-        part_number:int ->
+        upload:_ Multipart.Upload.t ->
+        part_number:Multipart.Part_number.t ->
         ?options:Presigned.Upload_part.options ->
         unit ->
         (Presigned.result, Error.t) result);

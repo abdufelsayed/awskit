@@ -716,14 +716,12 @@ module type MULTIPART = sig
     ?options:Multipart.Create.options ->
     unit ->
     (Multipart.Create.result, Awskit.Error.t) result io
-  (** Start a multipart upload and return its upload id. *)
+  (** Start a multipart upload and return its upload handle. *)
 
   val upload_part :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
-    upload_id:Multipart.Upload_id.t ->
-    part_number:int ->
+    upload:_ Multipart.Upload.t ->
+    part_number:Multipart.Part_number.t ->
     body:request_body ->
     ?options:Multipart.Upload_part.options ->
     unit ->
@@ -735,19 +733,16 @@ module type MULTIPART = sig
 
   val complete_upload :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
-    upload_id:Multipart.Upload_id.t ->
+    upload:_ Multipart.Upload.t ->
     ?options:Multipart.Complete.options ->
-    Multipart.Part.t list ->
+    parts:Multipart.Part.t list ->
+    unit ->
     (Multipart.Complete.result, Awskit.Error.t) result io
   (** Complete a multipart upload using the supplied completed part list. *)
 
   val abort_upload :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
-    upload_id:Multipart.Upload_id.t ->
+    upload:_ Multipart.Upload.t ->
     ?options:Multipart.Abort.options ->
     unit ->
     (Multipart.Abort.result, Awskit.Error.t) result io
@@ -755,9 +750,7 @@ module type MULTIPART = sig
 
   val list_parts :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
-    upload_id:Multipart.Upload_id.t ->
+    upload:_ Multipart.Upload.t ->
     ?options:Multipart.List_parts.options ->
     unit ->
     (Multipart.List_parts.page, Awskit.Error.t) result io
@@ -769,9 +762,7 @@ module type MULTIPART = sig
 
     val fold_pages :
       connection ->
-      bucket:Bucket_name.t ->
-      key:Object_key.t ->
-      upload_id:Multipart.Upload_id.t ->
+      upload:_ Multipart.Upload.t ->
       ?options:Multipart.List_parts.options ->
       ?max_pages:int ->
       init:'acc ->
@@ -783,9 +774,7 @@ module type MULTIPART = sig
 
     val pages :
       connection ->
-      bucket:Bucket_name.t ->
-      key:Object_key.t ->
-      upload_id:Multipart.Upload_id.t ->
+      upload:_ Multipart.Upload.t ->
       ?options:Multipart.List_parts.options ->
       ?max_pages:int ->
       unit ->
@@ -794,9 +783,7 @@ module type MULTIPART = sig
 
     val parts :
       connection ->
-      bucket:Bucket_name.t ->
-      key:Object_key.t ->
-      upload_id:Multipart.Upload_id.t ->
+      upload:_ Multipart.Upload.t ->
       ?options:Multipart.List_parts.options ->
       ?max_pages:int ->
       unit ->
@@ -853,10 +840,8 @@ module type PRESIGNED = sig
 
   val upload_part :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
-    upload_id:Multipart.Upload_id.t ->
-    part_number:int ->
+    upload:_ Multipart.Upload.t ->
+    part_number:Multipart.Part_number.t ->
     ?options:Presigned.Upload_part.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io

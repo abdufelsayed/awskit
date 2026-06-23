@@ -321,9 +321,14 @@ let test_request_body_descriptor_validation () =
   | Ok _ -> Alcotest.fail "expected descriptor validation failure");
   Alcotest.(check int) "object put not called" 0 (List.length conn.calls);
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let upload =
+    Multipart.Upload.resume ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "large.bin") ~upload_id
+  in
   (match
-     Recording_s3.Multipart.upload_part conn ~bucket:(bucket_name "my-bucket")
-       ~key:(object_key "large.bin") ~upload_id ~part_number:1 ~body ()
+     Recording_s3.Multipart.upload_part conn ~upload
+       ~part_number:(Multipart.Part_number.of_int_exn 1)
+       ~body ()
    with
   | Error error when is_validation_field "content_length" error -> ()
   | Error error ->
@@ -352,8 +357,9 @@ let test_request_body_descriptor_validation () =
       Alcotest.failf "unexpected unknown-length put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected unknown-length object validation failure");
   (match
-     Recording_s3.Multipart.upload_part conn ~bucket:(bucket_name "my-bucket")
-       ~key:(object_key "large.bin") ~upload_id ~part_number:1 ~body ()
+     Recording_s3.Multipart.upload_part conn ~upload
+       ~part_number:(Multipart.Part_number.of_int_exn 1)
+       ~body ()
    with
   | Error error when is_validation_field "content_length" error -> ()
   | Error error ->

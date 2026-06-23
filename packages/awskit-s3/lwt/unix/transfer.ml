@@ -450,27 +450,28 @@ struct
     in
     loop results
 
-  let upload_part_from_path conn ~bucket ~key ~upload_id ~options ~path
-      (spec : part_spec) =
+  let upload_part_from_path conn ~upload ~options ~path (spec : part_spec) =
     let body = range_body_of_path path spec in
-    Lwt.bind
-      (S3.Multipart.upload_part conn ~bucket ~key ~upload_id
-         ~part_number:spec.part_number ~body
-         ~options:options.Awskit_s3.Transfer.upload_part_options ()) (function
-      | Error _ as error -> Lwt.return error
-      | Ok uploaded -> Lwt.return_ok uploaded.part)
+    match Awskit_s3.Multipart.Part_number.of_int spec.part_number with
+    | Error error -> Lwt.return_error error
+    | Ok part_number ->
+        Lwt.bind
+          (S3.Multipart.upload_part conn ~upload ~part_number ~body
+             ~options:options.Awskit_s3.Transfer.upload_part_options ())
+          (function
+          | Error _ as error -> Lwt.return error
+          | Ok uploaded -> Lwt.return_ok uploaded.part)
 
-  let upload_missing_parts conn ~bucket ~key ~upload_id ~options ~path
-      ?on_progress ~initial_completed specs =
+  let upload_missing_parts conn ~upload ~options ~path ?on_progress
+      ~initial_completed specs =
     Lwt.catch
       (fun () ->
         let completed = ref initial_completed in
         if Int64.compare !completed 0L > 0 then
           notify_progress on_progress !completed;
         let upload_one spec =
-          Lwt.bind
-            (upload_part_from_path conn ~bucket ~key ~upload_id ~options ~path
-               spec) (function
+          Lwt.bind (upload_part_from_path conn ~upload ~options ~path spec)
+            (function
             | Error _ as error -> Lwt.return error
             | Ok part ->
                 completed := Int64.add !completed (Int64.of_int spec.length);
@@ -496,67 +497,37 @@ struct
   let sort_parts parts =
     List.sort
       (fun (left : Awskit_s3.Multipart.Part.t) right ->
-        compare left.part_number right.part_number)
+        compare
+          (Awskit_s3.Multipart.Part.part_number left
+          |> Awskit_s3.Multipart.Part_number.to_int)
+          (Awskit_s3.Multipart.Part.part_number right
+          |> Awskit_s3.Multipart.Part_number.to_int))
       parts
 
-  let completed_bytes specs parts =
-    parts
-    |> List.fold_left
-         (fun total (part : Awskit_s3.Multipart.Part.t) ->
-           match
-             List.find_opt
-               (fun spec -> spec.part_number = part.part_number)
-               specs
-           with
-           | None -> total
-           | Some spec -> Int64.add total (Int64.of_int spec.length))
-         0L
-
-  let matching_uploaded_parts conn ~bucket ~key ~upload_id ~options specs =
+  let verify_resume_upload conn ~upload ~options =
     Lwt.bind
-      (S3.Multipart.List_parts.parts conn ~bucket ~key ~upload_id
-         ~options:options.Awskit_s3.Transfer.list_parts_options ()) (function
+      (S3.Multipart.List_parts.parts conn ~upload
+         ~options:options.Awskit_s3.Transfer.list_parts_options ~max_pages:1 ())
+      (function
       | Error _ as error -> Lwt.return error
-      | Ok uploaded ->
-          let part_for_spec spec =
-            match
-              List.find_opt
-                (fun (part : Awskit_s3.List_parts.part_info) ->
-                  part.part_number = spec.part_number)
-                uploaded
-            with
-            | None -> None
-            | Some part -> (
-                match (part.etag, part.size) with
-                | Some etag, Some size
-                  when Int64.equal size (Int64.of_int spec.length) ->
-                    Awskit_s3.Multipart.Part.create
-                      ~part_number:spec.part_number ~etag ()
-                    |> Result.to_option
-                | _ -> None)
-          in
-          Lwt.return_ok (List.filter_map part_for_spec specs))
+      | Ok _ -> Lwt.return_ok ())
 
-  let remaining_specs specs uploaded_parts =
-    specs
-    |> List.filter (fun spec ->
-        not
-          (List.exists
-             (fun (part : Awskit_s3.Multipart.Part.t) ->
-               part.part_number = spec.part_number)
-             uploaded_parts))
-
-  let complete_multipart conn ~bucket ~key ~upload_id ~options upload parts =
+  let complete_multipart conn ~upload ~options parts =
     let parts = sort_parts parts in
     Lwt.bind
-      (S3.Multipart.complete_upload conn ~bucket ~key ~upload_id parts
-         ~options:options.Awskit_s3.Transfer.complete_options) (function
+      (S3.Multipart.complete_upload conn ~upload ~parts
+         ~options:options.Awskit_s3.Transfer.complete_options ()) (function
       | Error _ as error -> Lwt.return error
       | Ok complete ->
-          Lwt.return_ok { Awskit_s3.Transfer.upload; parts; complete })
+          Lwt.return_ok
+            {
+              Awskit_s3.Transfer.upload =
+                Awskit_s3.Multipart.Upload.as_caller_owned upload;
+              parts;
+              complete;
+            })
 
-  let resume_multipart_upload_file conn ~bucket ~key ~upload_id ?options
-      ?on_progress ~path () =
+  let resume_multipart_upload_file conn ~upload ?options ?on_progress ~path () =
     let options =
       Option.value ~default:Awskit_s3.Transfer.default_upload_options options
     in
@@ -569,24 +540,12 @@ struct
     let* specs =
       Lwt.return (multipart_specs ~content_length ~part_size:options.part_size)
     in
-    let* upload =
-      Lwt.return
-        (Awskit_s3.Multipart.Upload.create
-           ~bucket:(Awskit_s3.Bucket_name.to_string bucket)
-           ~key:(Awskit_s3.Object_key.to_string key)
-           ~upload_id)
-    in
-    let* uploaded_parts =
-      matching_uploaded_parts conn ~bucket ~key ~upload_id ~options specs
-    in
-    let initial_completed = completed_bytes specs uploaded_parts in
-    let missing = remaining_specs specs uploaded_parts in
+    let* () = verify_resume_upload conn ~upload ~options in
     let* uploaded_now =
-      upload_missing_parts conn ~bucket ~key ~upload_id ~options ~path
-        ?on_progress ~initial_completed missing
+      upload_missing_parts conn ~upload ~options ~path ?on_progress
+        ~initial_completed:0L specs
     in
-    complete_multipart conn ~bucket ~key ~upload_id ~options upload
-      (uploaded_parts @ uploaded_now)
+    complete_multipart conn ~upload ~options uploaded_now
 
   let multipart_upload_file conn ~bucket ~key ?options ?on_progress ~path () =
     let options =
@@ -605,10 +564,9 @@ struct
       S3.Multipart.create_upload conn ~bucket ~key
         ~options:options.create_options ()
     in
-    let upload_id = created.upload.upload_id in
     let abort_and_return error =
       Lwt.bind
-        (S3.Multipart.abort_upload conn ~bucket ~key ~upload_id
+        (S3.Multipart.abort_upload conn ~upload:created.upload
            ~options:options.abort_options ()) (function
         | Ok _ -> Lwt.return_error error
         | Error cleanup_error ->
@@ -622,7 +580,7 @@ struct
         (fun () ->
           Lwt.bind
             (Lwt.protected
-               (S3.Multipart.abort_upload conn ~bucket ~key ~upload_id
+               (S3.Multipart.abort_upload conn ~upload:created.upload
                   ~options:options.abort_options ()))
             (fun _ -> Lwt.return_unit))
         (fun _exn -> Lwt.return_unit)
@@ -632,13 +590,13 @@ struct
     in
     let upload_and_complete () =
       Lwt.bind
-        (upload_missing_parts conn ~bucket ~key ~upload_id ~options ~path
+        (upload_missing_parts conn ~upload:created.upload ~options ~path
            ?on_progress ~initial_completed:0L specs) (function
         | Error error -> abort_and_return error
         | Ok parts ->
             Lwt.bind
-              (complete_multipart conn ~bucket ~key ~upload_id ~options
-                 created.upload parts) (function
+              (complete_multipart conn ~upload:created.upload ~options parts)
+              (function
               | Ok _ as result -> Lwt.return result
               | Error error -> abort_and_return error))
     in

@@ -453,17 +453,15 @@ module Make (Client : SUBJECT) = struct
       |> ok_or_fail "create versioned multipart"
     in
     let part =
-      Client.Multipart.upload_part conn ~bucket
-        ~key:(object_key "multi-versioned.txt")
-        ~upload_id:upload.upload.upload_id ~part_number:1
+      Client.Multipart.upload_part conn ~upload:upload.upload
+        ~part_number:(Multipart.Part_number.of_int_exn 1)
         ~body:(Client.Body.of_string "multipart")
         ()
       |> ok_or_fail "upload versioned part"
     in
     let complete =
-      Client.Multipart.complete_upload conn ~bucket
-        ~key:(object_key "multi-versioned.txt")
-        ~upload_id:upload.upload.upload_id [ part.part ]
+      Client.Multipart.complete_upload conn ~upload:upload.upload
+        ~parts:[ part.part ] ()
       |> ok_or_fail "complete versioned multipart"
     in
     ignore (require_version "complete multipart version" complete.version_id);
@@ -1032,6 +1030,9 @@ module Make (Client : SUBJECT) = struct
   let test_multipart_lifecycle () =
     let conn = Client.fresh () in
     create_bucket conn;
+    let part1_body = String.make Transfer.min_part_size 'h' in
+    let part2_body = "world" in
+    let completed_size = String.length part1_body + String.length part2_body in
     let upload_options =
       {
         Create_multipart_upload.default_options with
@@ -1043,90 +1044,95 @@ module Make (Client : SUBJECT) = struct
         ~options:upload_options ()
       |> ok_or_fail "create multipart"
     in
-    let upload_id = upload.upload.upload_id in
     let part_options =
       {
         Upload_part.default_options with
         checksum =
           Some
             {
-              Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha1;
-              value = "provided-sha1";
+              Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
+              value = "provided-sha256";
             };
       }
     in
     let part1 =
-      Client.Multipart.upload_part conn ~bucket ~key:(object_key "multi.bin")
-        ~upload_id ~part_number:1
-        ~body:(Client.Body.of_string "hello-")
+      Client.Multipart.upload_part conn ~upload:upload.upload
+        ~part_number:(Multipart.Part_number.of_int_exn 1)
+        ~body:(Client.Body.of_string part1_body)
         ~options:part_options ()
       |> ok_or_fail "upload part 1"
     in
     let part2 =
-      Client.Multipart.upload_part conn ~bucket ~key:(object_key "multi.bin")
-        ~upload_id ~part_number:2
-        ~body:(Client.Body.of_string "world")
+      Client.Multipart.upload_part conn ~upload:upload.upload
+        ~part_number:(Multipart.Part_number.of_int_exn 2)
+        ~body:(Client.Body.of_string part2_body)
         ~options:part_options ()
       |> ok_or_fail "upload part 2"
     in
-    let list_options = { List_parts.default_options with max_parts = Some 1 } in
+    let list_options = List_parts.options_exn ~max_parts:1 () in
     let page =
-      Client.Multipart.list_parts conn ~bucket ~key:(object_key "multi.bin")
-        ~upload_id ~options:list_options ()
+      Client.Multipart.list_parts conn ~upload:upload.upload
+        ~options:list_options ()
       |> ok_or_fail "list multipart parts"
     in
     Alcotest.(check int) "first page count" 1 (List.length page.parts);
     Alcotest.(check bool) "parts truncated" true page.is_truncated;
     (match page.parts with
     | [ part ] ->
-        check_checksum "listed part checksum" Object.Checksum.Algorithm.Sha1
-          "provided-sha1" part.checksum
+        check_checksum "listed part checksum" Object.Checksum.Algorithm.Sha256
+          "provided-sha256" part.checksum
     | _ -> Alcotest.fail "expected first multipart page");
     let parts =
-      Client.Multipart.List_parts.parts conn ~bucket
-        ~key:(object_key "multi.bin") ~upload_id ~options:list_options ()
+      Client.Multipart.List_parts.parts conn ~upload:upload.upload
+        ~options:list_options ()
       |> ok_or_fail "paginate multipart parts"
     in
     Alcotest.(check (list int))
       "part numbers" [ 1; 2 ]
-      (List.map (fun (part : List_parts.part_info) -> part.part_number) parts);
+      (List.map
+         (fun (part : List_parts.part_info) ->
+           Multipart.Part_number.to_int part.part_number)
+         parts);
     let complete =
-      Client.Multipart.complete_upload conn ~bucket
-        ~key:(object_key "multi.bin") ~upload_id [ part1.part; part2.part ]
+      Client.Multipart.complete_upload conn ~upload:upload.upload
+        ~parts:[ part1.part; part2.part ] ()
       |> ok_or_fail "complete multipart"
     in
     Alcotest.(check bool) "complete etag" true (Option.is_some complete.etag);
     check_checksum "complete checksum" Object.Checksum.Algorithm.Sha256
-      "r6J7RNQ7Aqn+pB0TztwuQBbPz4fF2/mQ5ZNmmqjOKG0=" complete.checksum;
+      "pvs7IaTrOkof6IZmHexkX/ojbcQuYLNipUgSmw1ws7k=" complete.checksum;
     let result =
       get_object_as_string conn ~bucket ~key:(object_key "multi.bin")
-        ~max_bytes:16L ()
+        ~max_bytes:(Int64.of_int completed_size)
+        ()
       |> ok_get_or_fail "get completed multipart object"
     in
+    Alcotest.(check int)
+      "completed body length" completed_size
+      (String.length result.Get_object.value);
+    Alcotest.(check char) "completed first byte" 'h' result.Get_object.value.[0];
     Alcotest.(check string)
-      "completed body" "hello-world" result.Get_object.value;
+      "completed suffix" part2_body
+      (String.sub result.Get_object.value
+         (String.length result.Get_object.value - String.length part2_body)
+         (String.length part2_body));
     check_checksum "completed object checksum" Object.Checksum.Algorithm.Sha256
-      "r6J7RNQ7Aqn+pB0TztwuQBbPz4fF2/mQ5ZNmmqjOKG0=" result.checksum;
+      "pvs7IaTrOkof6IZmHexkX/ojbcQuYLNipUgSmw1ws7k=" result.checksum;
     let aborted =
       Client.Multipart.create_upload conn ~bucket ~key:(object_key "abort.bin")
         ()
       |> ok_or_fail "create abort multipart"
     in
-    let aborted_upload_id = aborted.upload.upload_id in
     ignore
-      (Client.Multipart.upload_part conn ~bucket ~key:(object_key "abort.bin")
-         ~upload_id:aborted_upload_id ~part_number:1
+      (Client.Multipart.upload_part conn ~upload:aborted.upload
+         ~part_number:(Multipart.Part_number.of_int_exn 1)
          ~body:(Client.Body.of_string "discarded")
          ()
       |> ok_or_fail "upload aborted part");
     ignore
-      (Client.Multipart.abort_upload conn ~bucket ~key:(object_key "abort.bin")
-         ~upload_id:aborted_upload_id ()
+      (Client.Multipart.abort_upload conn ~upload:aborted.upload ()
       |> ok_or_fail "abort multipart");
-    match
-      Client.Multipart.list_parts conn ~bucket ~key:(object_key "abort.bin")
-        ~upload_id:aborted_upload_id ()
-    with
+    match Client.Multipart.list_parts conn ~upload:aborted.upload () with
     | Error error when Error.service_code error = Some "NoSuchUpload" -> ()
     | Error error ->
         Alcotest.failf "unexpected abort list error: %a" Error.pp error
@@ -1135,57 +1141,72 @@ module Make (Client : SUBJECT) = struct
   let test_multipart_completion_edges () =
     let conn = Client.fresh () in
     create_bucket conn;
+    let first_body = String.make Transfer.min_part_size 'f' in
+    let second_body = "second" in
+    let overwritten_body = String.make Transfer.min_part_size 'F' in
+    let completed_size =
+      String.length overwritten_body + String.length second_body
+    in
     let upload =
       Client.Multipart.create_upload conn ~bucket ~key:(object_key "edges.bin")
         ()
       |> ok_or_fail "create edge multipart"
     in
-    let upload_id = upload.upload.upload_id in
     let first =
-      Client.Multipart.upload_part conn ~bucket ~key:(object_key "edges.bin")
-        ~upload_id ~part_number:1
-        ~body:(Client.Body.of_string "first")
+      Client.Multipart.upload_part conn ~upload:upload.upload
+        ~part_number:(Multipart.Part_number.of_int_exn 1)
+        ~body:(Client.Body.of_string first_body)
         ()
       |> ok_or_fail "upload first part"
     in
     let second =
-      Client.Multipart.upload_part conn ~bucket ~key:(object_key "edges.bin")
-        ~upload_id ~part_number:2
-        ~body:(Client.Body.of_string "second")
+      Client.Multipart.upload_part conn ~upload:upload.upload
+        ~part_number:(Multipart.Part_number.of_int_exn 2)
+        ~body:(Client.Body.of_string second_body)
         ()
       |> ok_or_fail "upload second part"
     in
     let overwritten =
-      Client.Multipart.upload_part conn ~bucket ~key:(object_key "edges.bin")
-        ~upload_id ~part_number:1
-        ~body:(Client.Body.of_string "FIRST")
+      Client.Multipart.upload_part conn ~upload:upload.upload
+        ~part_number:(Multipart.Part_number.of_int_exn 1)
+        ~body:(Client.Body.of_string overwritten_body)
         ()
       |> ok_or_fail "overwrite first part"
     in
     expect_status "complete with stale part etag" 400
-      (Client.Multipart.complete_upload conn ~bucket
-         ~key:(object_key "edges.bin") ~upload_id
-         [ first.part; second.part ]);
+      (Client.Multipart.complete_upload conn ~upload:upload.upload
+         ~parts:[ first.part; second.part ]
+         ());
     expect_validation "complete with unsorted parts"
-      (Client.Multipart.complete_upload conn ~bucket
-         ~key:(object_key "edges.bin") ~upload_id
-         [ second.part; overwritten.part ]);
+      (Client.Multipart.complete_upload conn ~upload:upload.upload
+         ~parts:[ second.part; overwritten.part ]
+         ());
     ignore
-      (Client.Multipart.complete_upload conn ~bucket
-         ~key:(object_key "edges.bin") ~upload_id
-         [ overwritten.part; second.part ]
+      (Client.Multipart.complete_upload conn ~upload:upload.upload
+         ~parts:[ overwritten.part; second.part ]
+         ()
       |> ok_or_fail "complete overwritten parts");
     let result =
       get_object_as_string conn ~bucket ~key:(object_key "edges.bin")
-        ~max_bytes:16L ()
+        ~max_bytes:(Int64.of_int completed_size)
+        ()
       |> ok_get_or_fail "get edge multipart object"
     in
+    Alcotest.(check int)
+      "completed overwritten body length" completed_size
+      (String.length result.Get_object.value);
+    Alcotest.(check char)
+      "completed overwritten first byte" 'F'
+      result.Get_object.value.[0];
     Alcotest.(check string)
-      "completed overwritten body" "FIRSTsecond" result.Get_object.value;
+      "completed overwritten suffix" second_body
+      (String.sub result.Get_object.value
+         (String.length result.Get_object.value - String.length second_body)
+         (String.length second_body));
     expect_status "complete already completed upload" 404
-      (Client.Multipart.complete_upload conn ~bucket
-         ~key:(object_key "edges.bin") ~upload_id
-         [ overwritten.part; second.part ])
+      (Client.Multipart.complete_upload conn ~upload:upload.upload
+         ~parts:[ overwritten.part; second.part ]
+         ())
 
   let cases =
     [

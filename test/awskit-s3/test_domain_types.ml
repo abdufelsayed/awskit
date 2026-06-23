@@ -326,6 +326,72 @@ let test_tag_and_set_validation () =
   in
   expect_error_field "tags" (Tag.Set.of_list eleven_tags)
 
+let test_multipart_domain_values () =
+  let bucket = Bucket_name.of_string_exn "multipart-bucket" in
+  let key = Object_key.of_string_exn "large.bin" in
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  Alcotest.(check string)
+    "upload id round trips" "upload-1"
+    (Multipart.Upload_id.to_string upload_id);
+  expect_error_field "upload_id" (Multipart.Upload_id.of_string "");
+  expect_error_field "upload_id" (Multipart.Upload_id.of_string "bad\nid");
+  let first = Multipart.Part_number.of_int_exn 1 in
+  let last = Multipart.Part_number.of_int_exn 10_000 in
+  Alcotest.(check int)
+    "first part number" 1
+    (Multipart.Part_number.to_int first);
+  Alcotest.(check int)
+    "last part number" 10_000
+    (Multipart.Part_number.to_int last);
+  expect_error_field "part_number" (Multipart.Part_number.of_int 0);
+  expect_error_field "part_number" (Multipart.Part_number.of_int (-1));
+  expect_error_field "part_number" (Multipart.Part_number.of_int 10_001);
+  let first_marker = Multipart.Part_number_marker.of_int_exn 0 in
+  let last_marker = Multipart.Part_number_marker.of_int_exn 10_000 in
+  Alcotest.(check int)
+    "first marker" 0
+    (Multipart.Part_number_marker.to_int first_marker);
+  Alcotest.(check int)
+    "last marker" 10_000
+    (Multipart.Part_number_marker.to_int last_marker);
+  expect_error_field "part_number_marker"
+    (Multipart.Part_number_marker.of_int (-1));
+  expect_error_field "part_number_marker"
+    (Multipart.Part_number_marker.of_int 10_001);
+  let resumed = Multipart.Upload.resume ~bucket ~key ~upload_id in
+  Alcotest.(check string)
+    "resume bucket" "multipart-bucket"
+    (Bucket_name.to_string (Multipart.Upload.bucket resumed));
+  Alcotest.(check string)
+    "resume key" "large.bin"
+    (Object_key.to_string (Multipart.Upload.key resumed));
+  Alcotest.(check string)
+    "resume upload id" "upload-1"
+    (Multipart.Upload.upload_id resumed |> Multipart.Upload_id.to_string);
+  let created = Multipart.Upload.created ~bucket ~key ~upload_id in
+  let caller_owned = Multipart.Upload.as_caller_owned created in
+  Alcotest.(check string)
+    "as_caller_owned preserves identity" "upload-1"
+    (Multipart.Upload.upload_id caller_owned |> Multipart.Upload_id.to_string);
+  let etag = Object.Etag.of_string_exn "\"etag-1\"" in
+  let part = Multipart.Part.create_exn ~part_number:first ~etag ~size:0L () in
+  Alcotest.(check int)
+    "part stores typed number" 1
+    (Multipart.Part.part_number part |> Multipart.Part_number.to_int);
+  Alcotest.(check (option int64))
+    "part size" (Some 0L) (Multipart.Part.size part);
+  expect_error_field "size"
+    (Multipart.Part.create ~part_number:first ~etag ~size:(-1L) ());
+  expect_error_field "checksum_algorithm"
+    (Multipart.Part.create ~part_number:first ~etag
+       ~checksum:
+         {
+           Object.Checksum.algorithm =
+             Object.Checksum.Algorithm.Unknown "FUTURE";
+           value = "checksum";
+         }
+       ())
+
 let suite =
   [
     ( "pbt:domain:bucket",
@@ -366,5 +432,7 @@ let suite =
           test_metadata_collection;
         Alcotest.test_case "tag and set validation" `Quick
           test_tag_and_set_validation;
+        Alcotest.test_case "multipart domain values" `Quick
+          test_multipart_domain_values;
       ] );
   ]

@@ -15,6 +15,10 @@ release packaging.
   bounded in-memory workflows; use `Object.put` with `Body`,
   `Object.get ~consume` with scoped readers, and transfer helpers for larger
   file workflows. (#5, 53a7642; 5815ba4; 73ef68f)
+- Reworked multipart upload APIs around typed upload handles, typed part
+  numbers, named operation results, ownership-aware transfer lifecycle, and
+  resume helpers that complete only from fresh `UploadPart` results.
+  (4aee1e4)
 - Eio callers now provide their own HTTPS policy when creating runtime and S3
   clients. (#8, c53921f)
 - Moved `Awskit.Error` constructors, context tagging, and exception bridge

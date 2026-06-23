@@ -47,6 +47,8 @@ module Runtime = struct
     mutable upload_part_count : int;
     mutable complete_count : int;
     mutable abort_count : int;
+    mutable listed_parts : Awskit_s3.List_parts.part_info list;
+    mutable completed_part_etags : string list;
     mutable get_ranges : string list;
     mutable ranged_get_version_ids : string option list;
     mutable ranged_get_if_matches : string option list;
@@ -283,6 +285,8 @@ let connection ?(response_body = "") ?head_etag ?head_version_id () =
     upload_part_count = 0;
     complete_count = 0;
     abort_count = 0;
+    listed_parts = [];
+    completed_part_etags = [];
     get_ranges = [];
     ranged_get_version_ids = [];
     ranged_get_if_matches = [];
@@ -296,6 +300,16 @@ let response status = Awskit.Response.create_exn ~status ()
 
 let empty_checksum : Awskit_s3.Object.Checksum.response =
   { values = []; checksum_type = None }
+
+let listed_part ~part_number ~size ~etag =
+  {
+    Awskit_s3.List_parts.part_number =
+      Awskit_s3.Multipart.Part_number.of_int_exn part_number;
+    etag = Some (Awskit_s3.Object.Etag.of_string_exn etag);
+    size = Some size;
+    last_modified = None;
+    checksum = empty_checksum;
+  }
 
 let put_result () : Awskit_s3.Put_object.result =
   {
@@ -491,27 +505,25 @@ module S3 = struct
       conn.Runtime.multipart_create_count <-
         conn.Runtime.multipart_create_count + 1;
       let upload_id = Awskit_s3.Multipart.Upload_id.of_string_exn "upload-1" in
-      let upload =
-        Awskit_s3.Multipart.Upload.create_exn
-          ~bucket:(Awskit_s3.Bucket_name.to_string bucket)
-          ~key:(Awskit_s3.Object_key.to_string key)
-          ~upload_id
-      in
+      let upload = Awskit_s3.Multipart.Upload.created ~bucket ~key ~upload_id in
       Lwt.return_ok
         { Awskit_s3.Create_multipart_upload.upload; response = response 200 }
 
-    let upload_part conn ~bucket:_ ~key:_ ~upload_id:_ ~part_number ~body
-        ?options:_ () =
+    let upload_part conn ~upload:_ ~part_number ~body ?options:_ () =
       conn.Runtime.upload_part_count <- conn.Runtime.upload_part_count + 1;
       Lwt.bind (Runtime.drain_request_body body) (function
         | Error _ as error -> Lwt.return error
-        | Ok _ ->
+        | Ok body ->
+            let part_number_int =
+              Awskit_s3.Multipart.Part_number.to_int part_number
+            in
             let etag =
               Awskit_s3.Object.Etag.of_string_exn
-                (Fmt.str "etag-%d" part_number)
+                (Fmt.str "etag-%d" part_number_int)
             in
+            let size = Int64.of_int (String.length body) in
             let part =
-              Awskit_s3.Multipart.Part.create_exn ~part_number ~etag ()
+              Awskit_s3.Multipart.Part.create_exn ~part_number ~etag ~size ()
             in
             Lwt.return_ok
               {
@@ -520,8 +532,15 @@ module S3 = struct
                 response = response 200;
               })
 
-    let complete_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ _ =
+    let complete_upload conn ~upload:_ ?options:_ ~parts () =
       conn.Runtime.complete_count <- conn.Runtime.complete_count + 1;
+      conn.Runtime.completed_part_etags <-
+        List.map
+          (fun (part : Awskit_s3.Multipart.Part.t) ->
+            part
+            |> Awskit_s3.Multipart.Part.etag
+            |> Awskit_s3.Object.Etag.to_string)
+          parts;
       if conn.Runtime.fail_complete_upload then
         Lwt.return_error
           (Awskit.Error.Internal.body "simulated complete failure")
@@ -534,28 +553,27 @@ module S3 = struct
             response = response 200;
           }
 
-    let abort_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
+    let abort_upload conn ~upload:_ ?options:_ () =
       conn.Runtime.abort_count <- conn.Runtime.abort_count + 1;
       if conn.Runtime.fail_abort_upload then
         Lwt.return_error (Awskit.Error.Internal.body "simulated abort failure")
-      else Lwt.return_ok (response 204)
+      else
+        Lwt.return_ok
+          { Awskit_s3.Abort_multipart_upload.response = response 204 }
 
-    let list_parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
-      unsupported ()
+    let list_parts _ ~upload:_ ?options:_ () = unsupported ()
 
     module List_parts = struct
-      let fold_pages _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ ?max_pages:_
-          ~init:_ ~f:_ () =
+      let fold_pages _ ~upload:_ ?options:_ ?max_pages:_ ~init:_ ~f:_ () =
         unsupported ()
 
-      let pages _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ ?max_pages:_ () =
-        unsupported ()
+      let pages _ ~upload:_ ?options:_ ?max_pages:_ () = unsupported ()
 
-      let parts conn ~bucket:_ ~key:_ ~upload_id:_ ?options ?max_pages:_ () =
+      let parts conn ~upload:_ ?options ?max_pages:_ () =
         conn.Runtime.list_parts_expected_owner <-
           Option.bind options (fun (options : Awskit_s3.List_parts.options) ->
               options.expected_bucket_owner);
-        Lwt.return_ok []
+        Lwt.return_ok conn.Runtime.listed_parts
     end
   end
 end
@@ -1139,7 +1157,14 @@ let test_resume_multipart_upload_file_uses_list_parts_options () =
     ~finally:(fun () -> remove_file path)
     (fun () ->
       let conn = connection () in
+      conn.Runtime.listed_parts <-
+        [
+          listed_part ~part_number:1
+            ~size:(Int64.of_int Awskit_s3.Transfer.min_part_size)
+            ~etag:"stale-etag-1";
+        ];
       let upload_id = Awskit_s3.Multipart.Upload_id.of_string_exn "upload-1" in
+      let upload = Awskit_s3.Multipart.Upload.resume ~bucket ~key ~upload_id in
       let list_parts_options =
         {
           Awskit_s3.List_parts.default_options with
@@ -1151,8 +1176,7 @@ let test_resume_multipart_upload_file_uses_list_parts_options () =
       in
       match
         Lwt_main.run
-          (Transfer.resume_multipart_upload_file conn ~bucket ~key ~upload_id
-             ~options ~path ())
+          (Transfer.resume_multipart_upload_file conn ~upload ~options ~path ())
       with
       | Error error ->
           Alcotest.failf "resume failed: %a" Awskit_s3.Error.pp error
@@ -1163,7 +1187,13 @@ let test_resume_multipart_upload_file_uses_list_parts_options () =
                  (testable Awskit_s3.Account_id.pp Awskit_s3.Account_id.equal)))
             "list expected owner"
             (Some (account_id "123456789012"))
-            conn.Runtime.list_parts_expected_owner)
+            conn.Runtime.list_parts_expected_owner;
+          Alcotest.(check int)
+            "upload part count" 1 conn.Runtime.upload_part_count;
+          Alcotest.(check int) "complete count" 1 conn.Runtime.complete_count;
+          Alcotest.(check (list string))
+            "completed fresh part etags" [ "etag-1" ]
+            conn.Runtime.completed_part_etags)
 
 let test_multipart_upload_reports_abort_failure () =
   let path = Filename.temp_file "awskit-upload-abort-failure" ".bin" in

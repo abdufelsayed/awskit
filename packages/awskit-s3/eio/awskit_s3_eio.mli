@@ -115,21 +115,22 @@ module Object : sig
       unit ->
       (Awskit_s3.Transfer.multipart_upload_result, Awskit_s3.Error.t) result
     (** Upload a local file with S3 multipart upload. The helper aborts the
-        multipart upload when a fresh upload fails. *)
+        multipart upload when an Awskit-created upload fails before completion.
+    *)
 
     val resume_multipart_upload_file :
       t ->
-      bucket:Awskit_s3.Bucket_name.t ->
-      key:Awskit_s3.Object_key.t ->
-      upload_id:Awskit_s3.Multipart.Upload_id.t ->
+      upload:
+        Awskit_s3.Multipart.Upload.caller_owned Awskit_s3.Multipart.Upload.t ->
       ?options:Awskit_s3.Transfer.upload_options ->
       ?on_progress:(int64 -> unit) ->
       path:_ Eio.Path.t ->
       unit ->
       (Awskit_s3.Transfer.multipart_upload_result, Awskit_s3.Error.t) result
-    (** Resume an existing multipart upload by listing uploaded parts, skipping
-        matching part numbers and sizes, uploading missing parts, and completing
-        the upload. Existing uploads are not aborted on failure. *)
+    (** Resume a caller-owned multipart upload by verifying the upload with
+        [ListParts], uploading every local part into that upload, and completing
+        from the fresh [UploadPart] results. Caller-owned uploads are not
+        aborted on failure. *)
   end
 end
 

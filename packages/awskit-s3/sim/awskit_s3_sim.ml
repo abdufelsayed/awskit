@@ -337,35 +337,27 @@ module Multipart = struct
     Raw.create_upload conn ~bucket:(bucket_to_string bucket)
       ~key:(key_to_string key) ?options ()
 
-  let upload_part conn ~bucket ~key ~upload_id ~part_number ~body ?options () =
-    Raw.upload_part conn ~bucket:(bucket_to_string bucket)
-      ~key:(key_to_string key) ~upload_id ~part_number ~body ?options ()
+  let upload_part conn ~upload ~part_number ~body ?options () =
+    Raw.upload_part conn ~upload ~part_number ~body ?options ()
 
-  let complete_upload conn ~bucket ~key ~upload_id ?options parts =
-    Raw.complete_upload conn ~bucket:(bucket_to_string bucket)
-      ~key:(key_to_string key) ~upload_id ?options parts
+  let complete_upload conn ~upload ?options ~parts () =
+    Raw.complete_upload conn ~upload ?options ~parts ()
 
-  let abort_upload conn ~bucket ~key ~upload_id ?options () =
-    Raw.abort_upload conn ~bucket:(bucket_to_string bucket)
-      ~key:(key_to_string key) ~upload_id ?options ()
+  let abort_upload conn ~upload ?options () =
+    Raw.abort_upload conn ~upload ?options ()
 
-  let list_parts conn ~bucket ~key ~upload_id ?options () =
-    Raw.list_parts conn ~bucket:(bucket_to_string bucket)
-      ~key:(key_to_string key) ~upload_id ?options ()
+  let list_parts conn ~upload ?options () =
+    Raw.list_parts conn ~upload ?options ()
 
   module List_parts = struct
-    let fold_pages conn ~bucket ~key ~upload_id ?options ?max_pages ~init ~f ()
-        =
-      Raw.List_parts.fold_pages conn ~bucket:(bucket_to_string bucket)
-        ~key:(key_to_string key) ~upload_id ?options ?max_pages ~init ~f ()
+    let fold_pages conn ~upload ?options ?max_pages ~init ~f () =
+      Raw.List_parts.fold_pages conn ~upload ?options ?max_pages ~init ~f ()
 
-    let pages conn ~bucket ~key ~upload_id ?options ?max_pages () =
-      Raw.List_parts.pages conn ~bucket:(bucket_to_string bucket)
-        ~key:(key_to_string key) ~upload_id ?options ?max_pages ()
+    let pages conn ~upload ?options ?max_pages () =
+      Raw.List_parts.pages conn ~upload ?options ?max_pages ()
 
-    let parts conn ~bucket ~key ~upload_id ?options ?max_pages () =
-      Raw.List_parts.parts conn ~bucket:(bucket_to_string bucket)
-        ~key:(key_to_string key) ~upload_id ?options ?max_pages ()
+    let parts conn ~upload ?options ?max_pages () =
+      Raw.List_parts.parts conn ~upload ?options ?max_pages ()
   end
 end
 

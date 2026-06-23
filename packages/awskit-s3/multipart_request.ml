@@ -19,7 +19,12 @@ module Make (C : Request_context.S) = struct
 
   let part_number_of_string_opt value =
     match int_of_string_opt value with
-    | Some value when value > 0 && value <= 10_000 -> Some value
+    | Some value -> Result.to_option (Multipart.Part_number.of_int value)
+    | _ -> None
+
+  let part_number_marker_of_string_opt value =
+    match int_of_string_opt value with
+    | Some value -> Result.to_option (Multipart.Part_number_marker.of_int value)
     | _ -> None
 
   let validate_opt f = function None -> Ok () | Some value -> f value
@@ -34,10 +39,65 @@ module Make (C : Request_context.S) = struct
 
   let bucket_string = Bucket_name.to_string
   let key_string = Object_key.to_string
+  let upload_bucket upload = Multipart.Upload.bucket upload |> bucket_string
+  let upload_key upload = Multipart.Upload.key upload |> key_string
+  let upload_id upload = Multipart.Upload.upload_id upload
+  let complete_min_part_size = 5_242_880L
+
+  let validate_complete_options (options : Complete_multipart_upload.options) =
+    Complete_multipart_upload.options
+      ?expected_bucket_owner:options.expected_bucket_owner
+      ?checksum:options.checksum ?checksum_type:options.checksum_type
+      ?multipart_object_size:options.multipart_object_size ()
+    |> Result.map ignore
+
+  let validate_complete_parts ?multipart_object_size parts =
+    let invalid_part_size () =
+      invalid ~field:"parts" "non-final multipart parts must be at least 5 MiB"
+    in
+    let invalid_object_size () =
+      invalid ~field:"multipart_object_size"
+        "multipart object size does not match completed part sizes"
+    in
+    let rec loop previous total all_sizes_known = function
+      | [] -> (
+          match multipart_object_size with
+          | Some expected
+            when all_sizes_known && not (Int64.equal expected total) ->
+              invalid_object_size ()
+          | _ -> Ok ())
+      | (part : Multipart.Part.t) :: rest -> (
+          let part_number =
+            Multipart.Part.part_number part |> Multipart.Part_number.to_int
+          in
+          if
+            match previous with
+            | Some prev -> part_number <= prev
+            | None -> false
+          then
+            invalid ~field:"part_number" "parts must be sorted by part_number"
+          else
+            match (rest, Multipart.Part.size part) with
+            | _ :: _, Some size
+              when Int64.compare size complete_min_part_size < 0 ->
+                invalid_part_size ()
+            | _ ->
+                let total, all_sizes_known =
+                  match Multipart.Part.size part with
+                  | None -> (total, false)
+                  | Some size -> (Int64.add total size, all_sizes_known)
+                in
+                loop (Some part_number) total all_sizes_known rest)
+    in
+    match parts with
+    | [] -> invalid ~field:"parts" "complete requires at least one part"
+    | parts -> loop None 0L true parts
 
   let create_upload conn ~bucket ~key ?options () =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+    let typed_bucket = bucket in
+    let typed_key = key in
+    let bucket = bucket_string typed_bucket in
+    let key = key_string typed_key in
     let options =
       Option.value ~default:Create_multipart_upload.default_options options
     in
@@ -114,92 +174,85 @@ module Make (C : Request_context.S) = struct
                                                  {
                                                    Create_multipart_upload
                                                    .upload =
-                                                     Multipart.Upload.create_exn
-                                                       ~bucket ~key ~upload_id;
+                                                     Multipart.Upload.created
+                                                       ~bucket:typed_bucket
+                                                       ~key:typed_key ~upload_id;
                                                    response;
                                                  })))))))))
 
-  let upload_part conn ~bucket ~key ~upload_id ~part_number ~body ?options () =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+  let upload_part conn ~upload ~part_number ~body ?options () =
+    let bucket = upload_bucket upload in
+    let key = upload_key upload in
+    let upload_id = upload_id upload in
     let options = Option.value ~default:Upload_part.default_options options in
     let return_error =
       return_s3_error return_error ~operation:"UploadPart" ~bucket ~key
     in
+    let handle_response ~content_length response body =
+      let* discarded = discard_response_body body in
+      match discarded with
+      | Error error -> return_error error
+      | Ok () -> (
+          match response_etag response with
+          | Error error -> return_error error
+          | Ok None -> return_error (decode "missing multipart part etag")
+          | Ok (Some etag) -> (
+              let checksum = response_checksum response in
+              let part_checksum =
+                match checksum.values with
+                | [] -> options.checksum
+                | value :: _ -> Some value
+              in
+              match
+                Multipart.Part.create ~part_number ~etag ?checksum:part_checksum
+                  ~size:content_length ()
+              with
+              | Error error -> return_error error
+              | Ok part -> return_ok { Upload_part.part; checksum; response }))
+    in
+    let send ~content_length (descriptor : Awskit.Body.Request.descriptor) =
+      let headers =
+        ("content-length", Int64.to_string content_length)
+        :: checksum_value_headers options.checksum
+        |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+             options.expected_bucket_owner
+      in
+      let query =
+        [
+          ( "partNumber",
+            [ part_number |> Multipart.Part_number.to_int |> string_of_int ] );
+          ("uploadId", [ Multipart.Upload_id.to_string upload_id ]);
+        ]
+      in
+      match object_request conn ~bucket ~key with
+      | Error error -> return_error error
+      | Ok request ->
+          with_operation_result return_error return_ok
+            (with_response conn ~method_:`PUT ~request ~query ~headers
+               ~payload_hash:descriptor.payload_hash body
+               ~f:(handle_response ~content_length))
+    in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        let etag = Object.Etag.of_string_exn "unused" in
-        match Multipart.Part.create ~part_number ~etag () with
+        match validate_opt validate_checksum_value options.checksum with
         | Error error -> return_error error
-        | Ok _ -> (
-            match validate_opt validate_checksum_value options.checksum with
-            | Error error -> return_error error
-            | Ok () -> (
-                let descriptor = R.Request_body.descriptor body in
-                match descriptor.content_length with
-                | None ->
-                    return_error
-                      (Awskit.Error.Internal.validation ~field:"content_length"
-                         "S3 multipart uploads require a known content length")
-                | Some content_length -> (
-                    match
-                      Awskit.Body.Request.validate_descriptor descriptor
-                    with
-                    | Error error -> return_error error
-                    | Ok () -> (
-                        let headers =
-                          ("content-length", Int64.to_string content_length)
-                          :: checksum_value_headers options.checksum
-                          |> add_opt_account_id_header
-                               "x-amz-expected-bucket-owner"
-                               options.expected_bucket_owner
-                        in
-                        let query =
-                          [
-                            ("partNumber", [ string_of_int part_number ]);
-                            ( "uploadId",
-                              [ Multipart.Upload_id.to_string upload_id ] );
-                          ]
-                        in
-                        match object_request conn ~bucket ~key with
-                        | Error error -> return_error error
-                        | Ok request ->
-                            with_operation_result return_error return_ok
-                              (with_response conn ~method_:`PUT ~request ~query
-                                 ~headers ~payload_hash:descriptor.payload_hash
-                                 body ~f:(fun response body ->
-                                   let* discarded =
-                                     discard_response_body body
-                                   in
-                                   match discarded with
-                                   | Error error -> return_error error
-                                   | Ok () -> (
-                                       match response_etag response with
-                                       | Error error -> return_error error
-                                       | Ok None ->
-                                           return_error
-                                             (decode
-                                                "missing multipart part etag")
-                                       | Ok (Some etag) -> (
-                                           match
-                                             Multipart.Part.create ~part_number
-                                               ~etag ?checksum:options.checksum
-                                               ()
-                                           with
-                                           | Error error -> return_error error
-                                           | Ok part ->
-                                               return_ok
-                                                 {
-                                                   Upload_part.part;
-                                                   checksum =
-                                                     response_checksum response;
-                                                   response;
-                                                 })))))))))
+        | Ok () -> (
+            let descriptor = R.Request_body.descriptor body in
+            match descriptor.content_length with
+            | None ->
+                return_error
+                  (Awskit.Error.Internal.validation ~field:"content_length"
+                     "S3 multipart uploads require a known content length")
+            | Some content_length -> (
+                match Awskit.Body.Request.validate_descriptor descriptor with
+                | Error error -> return_error error
+                | Ok () -> send ~content_length descriptor)))
 
-  let complete_upload conn ~bucket ~key ~upload_id ?options parts =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+  let complete_upload conn ~upload ?options ~parts () =
+    let bucket = upload_bucket upload in
+    let key = upload_key upload in
+    let upload_id = upload_id upload in
     let options =
       Option.value ~default:Complete_multipart_upload.default_options options
     in
@@ -210,95 +263,80 @@ module Make (C : Request_context.S) = struct
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        match
-          ( validate_opt validate_checksum_value options.checksum,
-            validate_opt validate_checksum_type options.checksum_type )
-        with
-        | Error error, _ | _, Error error -> return_error error
-        | Ok (), Ok () -> (
-            let rec validate previous = function
-              | [] -> Ok ()
-              | (part : Multipart.Part.t) :: rest ->
-                  if part.part_number <= 0 then
-                    invalid ~field:"part_number" "part number must be positive"
-                  else if
-                    match previous with
-                    | Some prev -> part.part_number <= prev
-                    | None -> false
-                  then
-                    invalid ~field:"part_number"
-                      "parts must be sorted by part_number"
-                  else validate (Some part.part_number) rest
-            in
-            match parts with
-            | [] ->
-                return_error
-                  (Awskit.Error.Internal.validation ~field:"parts"
-                     "complete requires at least one part")
-            | parts -> (
-                match validate None parts with
-                | Error error -> return_error error
-                | Ok () -> (
-                    let part_xml (part : Multipart.Part.t) =
-                      let children =
-                        [
-                          Xml.text "PartNumber" (string_of_int part.part_number);
-                          Xml.text "ETag" (Object.Etag.to_string part.etag);
-                        ]
-                      in
-                      let children =
-                        match part.checksum with
+        match validate_complete_options options with
+        | Error error -> return_error error
+        | Ok () -> (
+            match
+              validate_complete_parts
+                ?multipart_object_size:options.multipart_object_size parts
+            with
+            | Error error -> return_error error
+            | Ok () -> (
+                let part_xml (part : Multipart.Part.t) =
+                  let part_number =
+                    Multipart.Part.part_number part
+                    |> Multipart.Part_number.to_int
+                  in
+                  let children =
+                    [
+                      Xml.text "PartNumber" (string_of_int part_number);
+                      Xml.text "ETag"
+                        (Object.Etag.to_string (Multipart.Part.etag part));
+                    ]
+                  in
+                  let children =
+                    match Multipart.Part.checksum part with
+                    | None -> children
+                    | Some checksum -> (
+                        match checksum_xml_name checksum.algorithm with
                         | None -> children
-                        | Some checksum -> (
-                            match checksum_xml_name checksum.algorithm with
-                            | None -> children
-                            | Some name ->
-                                children @ [ Xml.text name checksum.value ])
-                      in
-                      Xml.el "Part" children
-                    in
-                    let body =
-                      Xml.el "CompleteMultipartUpload" (List.map part_xml parts)
-                      |> Xml.to_string
-                    in
-                    let upload = R.Request_body.of_string body in
-                    match object_request conn ~bucket ~key with
-                    | Error error -> return_error error
-                    | Ok request ->
-                        with_operation_result return_error return_ok
-                          (with_response conn ~method_:`POST ~request
-                             ~query:
-                               [
-                                 ( "uploadId",
-                                   [ Multipart.Upload_id.to_string upload_id ]
-                                 );
-                               ]
-                             ~headers:
-                               ([ ("content-type", "application/xml") ]
-                                @ checksum_value_headers options.checksum
-                                @ checksum_type_header options.checksum_type
-                                @ multipart_object_size_header
-                                    options.multipart_object_size
-                               |> add_opt_account_id_header
-                                    "x-amz-expected-bucket-owner"
-                                    options.expected_bucket_owner)
-                             ~payload_hash:
-                               (R.Request_body.descriptor upload).payload_hash
-                             upload
-                             ~f:(fun response body ->
-                               let* body =
-                                 read_response_body body ~max_size:1_048_576L
-                               in
-                               match body with
+                        | Some name ->
+                            children @ [ Xml.text name checksum.value ])
+                  in
+                  Xml.el "Part" children
+                in
+                let body =
+                  Xml.el "CompleteMultipartUpload" (List.map part_xml parts)
+                  |> Xml.to_string
+                in
+                let upload = R.Request_body.of_string body in
+                match object_request conn ~bucket ~key with
+                | Error error -> return_error error
+                | Ok request ->
+                    with_operation_result return_error return_ok
+                      (with_response conn ~method_:`POST ~request
+                         ~query:
+                           [
+                             ( "uploadId",
+                               [ Multipart.Upload_id.to_string upload_id ] );
+                           ]
+                         ~headers:
+                           ([ ("content-type", "application/xml") ]
+                            @ checksum_value_headers options.checksum
+                            @ checksum_type_header options.checksum_type
+                            @ multipart_object_size_header
+                                options.multipart_object_size
+                           |> add_opt_account_id_header
+                                "x-amz-expected-bucket-owner"
+                                options.expected_bucket_owner)
+                         ~payload_hash:
+                           (R.Request_body.descriptor upload).payload_hash
+                         upload
+                         ~f:(fun response body ->
+                           let* body =
+                             read_response_body body ~max_size:1_048_576L
+                           in
+                           match body with
+                           | Error error -> return_error error
+                           | Ok body -> (
+                               match complete_result response body with
                                | Error error -> return_error error
-                               | Ok body -> (
-                                   match complete_result response body with
-                                   | Error error -> return_error error
-                                   | Ok result -> return_ok result)))))))
+                               | Ok result -> return_ok result))))))
 
-  let abort_upload conn ~bucket ~key ~upload_id ?options () =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+  let abort_upload conn ~upload ?options () =
+    let bucket = upload_bucket upload in
+    let key = upload_key upload in
+    let upload_id = upload_id upload in
     let options =
       Option.value ~default:Abort_multipart_upload.default_options options
     in
@@ -324,22 +362,18 @@ module Make (C : Request_context.S) = struct
                    let* discarded = discard_response_body body in
                    match discarded with
                    | Error error -> return_error error
-                   | Ok () -> return_ok response)))
+                   | Ok () -> return_ok { Abort_multipart_upload.response })))
 
   let validate_list_parts_options (options : List_parts.options) =
-    match options.max_parts with
-    | Some value when value <= 0 ->
-        invalid ~field:"max_parts" "max_parts must be greater than zero"
-    | _ -> (
-        match options.part_number_marker with
-        | Some value when value < 0 ->
-            invalid ~field:"part_number_marker"
-              "part_number_marker must be non-negative"
-        | _ -> Ok ())
+    List_parts.options ?max_parts:options.max_parts
+      ?part_number_marker:options.part_number_marker
+      ?expected_bucket_owner:options.expected_bucket_owner ()
+    |> Result.map ignore
 
-  let list_parts conn ~bucket ~key ~upload_id ?options () =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+  let list_parts conn ~upload ?options () =
+    let bucket = upload_bucket upload in
+    let key = upload_key upload in
+    let upload_id = upload_id upload in
     let options = Option.value ~default:List_parts.default_options options in
     let return_error =
       return_s3_error return_error ~operation:"ListParts" ~bucket ~key
@@ -353,14 +387,27 @@ module Make (C : Request_context.S) = struct
             match object_request conn ~bucket ~key with
             | Error error -> return_error error
             | Ok request ->
-                let add name = function
+                let add_int name = function
                   | None -> []
                   | Some value -> [ (name, [ string_of_int value ]) ]
                 in
+                let add_part_number_marker name = function
+                  | None -> []
+                  | Some value ->
+                      [
+                        ( name,
+                          [
+                            value
+                            |> Multipart.Part_number_marker.to_int
+                            |> string_of_int;
+                          ] );
+                      ]
+                in
                 let query =
                   [ ("uploadId", [ Multipart.Upload_id.to_string upload_id ]) ]
-                  @ add "max-parts" options.max_parts
-                  @ add "part-number-marker" options.part_number_marker
+                  @ add_int "max-parts" options.max_parts
+                  @ add_part_number_marker "part-number-marker"
+                      options.part_number_marker
                 in
                 with_operation_result return_error return_ok
                   (with_empty_response conn ~method_:`GET ~request ~query
@@ -443,7 +490,8 @@ module Make (C : Request_context.S) = struct
                                        Xml.optional_child_parse
                                          ~path:"ListPartsResult"
                                          "NextPartNumberMarker"
-                                         non_negative_int_of_string_opt nodes )
+                                         part_number_marker_of_string_opt nodes
+                                     )
                                    with
                                    | Error error, _ | _, Error error ->
                                        return_error error
@@ -474,11 +522,10 @@ module Make (C : Request_context.S) = struct
     let options_for_page (base : List_parts.options) part_number_marker =
       { base with List_parts.part_number_marker }
 
-    let fold_pages conn ~bucket ~key ~upload_id ?options ?max_pages ~init ~f ()
-        =
+    let fold_pages conn ~upload ?options ?max_pages ~init ~f () =
       let return_context_error =
         return_s3_error return_error ~operation:"ListParts"
-          ~bucket:(bucket_string bucket) ~key:(key_string key)
+          ~bucket:(upload_bucket upload) ~key:(upload_key upload)
       in
       match validate_max_pages max_pages with
       | Error error -> return_context_error error
@@ -486,7 +533,7 @@ module Make (C : Request_context.S) = struct
           let base = Option.value ~default:List_parts.default_options options in
           let rec loop part_number_marker page_count acc =
             let options = options_for_page base part_number_marker in
-            let* page = list_parts conn ~bucket ~key ~upload_id ~options () in
+            let* page = list_parts conn ~upload ~options () in
             match page with
             | Error error -> return_error error
             | Ok page -> (
@@ -511,21 +558,19 @@ module Make (C : Request_context.S) = struct
           in
           loop base.part_number_marker 0 init
 
-    let pages conn ~bucket ~key ~upload_id ?options ?max_pages () =
+    let pages conn ~upload ?options ?max_pages () =
       let f pages page = return_ok (page :: pages) in
       let* result =
-        fold_pages conn ~bucket ~key ~upload_id ?options ?max_pages ~init:[] ~f
-          ()
+        fold_pages conn ~upload ?options ?max_pages ~init:[] ~f ()
       in
       return (Result.map List.rev result)
 
-    let parts conn ~bucket ~key ~upload_id ?options ?max_pages () =
+    let parts conn ~upload ?options ?max_pages () =
       let f parts (page : List_parts.page) =
         return_ok (List.rev_append page.parts parts)
       in
       let* result =
-        fold_pages conn ~bucket ~key ~upload_id ?options ?max_pages ~init:[] ~f
-          ()
+        fold_pages conn ~upload ?options ?max_pages ~init:[] ~f ()
       in
       return (Result.map List.rev result)
   end

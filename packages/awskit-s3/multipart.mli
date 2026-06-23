@@ -13,47 +13,157 @@ module Upload_id : sig
 
   val to_string : t -> string
   (** Return the upload id string. *)
+
+  val pp : Format.formatter -> t -> unit
+  (** Pretty-print the upload id. *)
+
+  val equal : t -> t -> bool
+  (** Compare two upload ids. *)
+end
+
+module Part_number : sig
+  type t
+  (** Opaque S3 multipart part number. S3 accepts part numbers from 1 to 10,000
+      inclusive. *)
+
+  val of_int : int -> (t, Awskit.Error.t) result
+  (** Validate and wrap a multipart part number. *)
+
+  val of_int_exn : int -> t
+  (** Like {!val:of_int}, but raises [Awskit.Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
+
+  val to_int : t -> int
+  (** Return the raw part number. *)
+
+  val pp : Format.formatter -> t -> unit
+  (** Pretty-print the part number. *)
+
+  val equal : t -> t -> bool
+  (** Compare two part numbers. *)
+end
+
+module Part_number_marker : sig
+  type t
+  (** Opaque S3 [ListParts] part-number marker. Markers accept [0] as the
+      position before part 1 and otherwise follow S3's 10,000-part limit. *)
+
+  val of_int : int -> (t, Awskit.Error.t) result
+  (** Validate and wrap a part-number marker. *)
+
+  val of_int_exn : int -> t
+  (** Like {!val:of_int}, but raises [Awskit.Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
+
+  val to_int : t -> int
+  (** Return the raw marker. *)
+
+  val pp : Format.formatter -> t -> unit
+  (** Pretty-print the marker. *)
+
+  val equal : t -> t -> bool
+  (** Compare two markers. *)
 end
 
 module Upload : sig
-  type t = private { bucket : string; key : string; upload_id : Upload_id.t }
-  (** Identifies one multipart upload for a bucket/key pair. *)
+  type created
+  (** Upload handle returned by [CreateMultipartUpload]. High-level helpers may
+      abort these handles automatically when they created the upload and
+      post-create work fails before completion. *)
 
-  val create :
+  type caller_owned
+  (** Upload handle supplied by the caller, typically from persisted multipart
+      state. High-level helpers do not abort caller-owned uploads automatically.
+  *)
+
+  type +'ownership t
+  (** Identifies one multipart upload for a bucket/key pair. The ownership
+      phantom tracks whether Awskit created the upload or the caller resumed it.
+  *)
+
+  val created :
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    upload_id:Upload_id.t ->
+    created t
+  (** Create an Awskit-owned handle after a successful [CreateMultipartUpload]
+      response. This is primarily for runtime and simulator implementations. *)
+
+  val resume :
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    upload_id:Upload_id.t ->
+    caller_owned t
+  (** Rebuild a caller-owned upload handle from persisted multipart state. *)
+
+  val of_strings :
     bucket:string ->
     key:string ->
     upload_id:Upload_id.t ->
-    (t, Awskit.Error.t) result
-  (** Create an upload handle after validating bucket, key, and upload id. *)
+    (caller_owned t, Awskit.Error.t) result
+  (** Validate raw bucket/key strings and create a caller-owned upload handle.
+      Raw string construction is only an edge convenience; standard operations
+      use typed bucket and key values. *)
 
-  val create_exn : bucket:string -> key:string -> upload_id:Upload_id.t -> t
-  (** Like {!val:create}, but raises [Awskit.Error.Awskit_error] carrying the
-      structured validation error on validation failure. *)
+  val of_strings_exn :
+    bucket:string -> key:string -> upload_id:Upload_id.t -> caller_owned t
+  (** Like {!val:of_strings}, but raises on validation failure. *)
+
+  val bucket : _ t -> Bucket_name.t
+  (** Return the upload bucket. *)
+
+  val key : _ t -> Object_key.t
+  (** Return the upload key. *)
+
+  val upload_id : _ t -> Upload_id.t
+  (** Return the S3 upload id. *)
+
+  val as_caller_owned : _ t -> caller_owned t
+  (** Forget Awskit cleanup ownership. Use when persisting or returning a handle
+      to callers that own future cleanup. *)
 end
 
 module Part : sig
   type t = private {
-    part_number : int;
+    part_number : Part_number.t;
     etag : Object.Etag.t;
     checksum : Object.Checksum.value option;
+    size : int64 option;
   }
   (** Completed multipart part reference used by [CompleteMultipartUpload]. *)
 
   val create :
     ?checksum:Object.Checksum.value ->
-    part_number:int ->
+    ?size:int64 ->
+    part_number:Part_number.t ->
     etag:Object.Etag.t ->
     unit ->
     (t, Awskit.Error.t) result
-  (** Create a completed part reference. S3 part numbers must be in the valid
-      multipart part-number range. *)
+  (** Create a completed part reference. [size] is optional because callers may
+      complete parts discovered outside Awskit. Awskit uses known sizes for
+      client-side [CompleteMultipartUpload] validation when enough information
+      is available; S3 remains the authority for final object-size validation.
+  *)
 
   val create_exn :
     ?checksum:Object.Checksum.value ->
-    part_number:int ->
+    ?size:int64 ->
+    part_number:Part_number.t ->
     etag:Object.Etag.t ->
     unit ->
     t
+
+  val part_number : t -> Part_number.t
+  (** Return the completed part number. *)
+
+  val etag : t -> Object.Etag.t
+  (** Return the completed part ETag. *)
+
+  val checksum : t -> Object.Checksum.value option
+  (** Return the completed part checksum, when known. *)
+
+  val size : t -> int64 option
+  (** Return the completed part size, when known. *)
 end
 
 module Create : sig
@@ -74,11 +184,40 @@ module Create : sig
   }
   (** [CreateMultipartUpload] request options. *)
 
-  type result = { upload : Upload.t; response : Awskit.Response.t }
+  type result = {
+    upload : Upload.created Upload.t;
+    response : Awskit.Response.t;
+  }
   (** [CreateMultipartUpload] result metadata, including the upload handle used
       by subsequent part requests. *)
 
   val default_options : options
+
+  val options :
+    ?content_type:Content_type.t ->
+    ?metadata:Metadata.t ->
+    ?storage_class:Storage_class.t ->
+    ?tags:Tag.Set.t ->
+    ?checksum_algorithm:Object.Checksum.Algorithm.t ->
+    ?checksum_type:Object.Checksum.Type.t ->
+    ?server_side_encryption:Object.Encryption.request ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [CreateMultipartUpload] options. *)
+
+  val options_exn :
+    ?content_type:Content_type.t ->
+    ?metadata:Metadata.t ->
+    ?storage_class:Storage_class.t ->
+    ?tags:Tag.Set.t ->
+    ?checksum_algorithm:Object.Checksum.Algorithm.t ->
+    ?checksum_type:Object.Checksum.Type.t ->
+    ?server_side_encryption:Object.Encryption.request ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Upload_part : sig
@@ -100,6 +239,20 @@ module Upload_part : sig
   (** [UploadPart] result metadata. *)
 
   val default_options : options
+
+  val options :
+    ?checksum:Object.Checksum.value ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [UploadPart] options. *)
+
+  val options_exn :
+    ?checksum:Object.Checksum.value ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Complete : sig
@@ -126,31 +279,59 @@ module Complete : sig
   (** [CompleteMultipartUpload] result metadata. *)
 
   val default_options : options
+
+  val options :
+    ?expected_bucket_owner:Account_id.t ->
+    ?checksum:Object.Checksum.value ->
+    ?checksum_type:Object.Checksum.Type.t ->
+    ?multipart_object_size:int64 ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [CompleteMultipartUpload] options. *)
+
+  val options_exn :
+    ?expected_bucket_owner:Account_id.t ->
+    ?checksum:Object.Checksum.value ->
+    ?checksum_type:Object.Checksum.Type.t ->
+    ?multipart_object_size:int64 ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Abort : sig
   type options = { expected_bucket_owner : Account_id.t option }
   (** [AbortMultipartUpload] request options. *)
 
-  type result = Awskit.Response.t
-  (** [AbortMultipartUpload] returns only raw response metadata. *)
+  type result = { response : Awskit.Response.t }
+  (** [AbortMultipartUpload] result metadata. *)
 
   val default_options : options
+
+  val options :
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [AbortMultipartUpload] options. *)
+
+  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module List_parts : sig
   type options = {
     max_parts : int option;
         (** Maximum number of parts S3 should return in one page. *)
-    part_number_marker : int option;
-        (** Pagination marker, usually from [next_part_number_marker]. *)
+    part_number_marker : Part_number_marker.t option;
+        (** Pagination marker, usually from [next_part_number_marker]. Omit to
+            start listing from the beginning. *)
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
   (** [ListParts] request options. *)
 
   type part_info = {
-    part_number : int;  (** Uploaded part number. *)
+    part_number : Part_number.t;  (** Uploaded part number. *)
     etag : Object.Etag.t option;  (** Part ETag. *)
     size : int64 option;  (** Part size in bytes. *)
     last_modified : Ptime.t option;  (** Part upload timestamp. *)
@@ -161,7 +342,7 @@ module List_parts : sig
   type page = {
     parts : part_info list;  (** Uploaded parts in this page. *)
     is_truncated : bool;  (** Whether more part pages are available. *)
-    next_part_number_marker : int option;
+    next_part_number_marker : Part_number_marker.t option;
         (** Marker to use for the next page. *)
     checksum_type : Object.Checksum.Type.t option;
         (** Checksum aggregation mode reported by S3. *)
@@ -170,4 +351,21 @@ module List_parts : sig
   (** One [ListParts] page. *)
 
   val default_options : options
+
+  val options :
+    ?max_parts:int ->
+    ?part_number_marker:Part_number_marker.t ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build [ListParts] options. [max_parts], when present, must be in S3's
+      accepted range of 1 to 1,000. *)
+
+  val options_exn :
+    ?max_parts:int ->
+    ?part_number_marker:Part_number_marker.t ->
+    ?expected_bucket_owner:Account_id.t ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end

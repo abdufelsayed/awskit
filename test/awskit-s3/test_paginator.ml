@@ -205,15 +205,20 @@ let test_multipart_paginator_follows_markers () =
       ]
   in
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let upload =
+    Multipart.Upload.resume ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "large.bin") ~upload_id
+  in
   let parts =
-    Recording_s3.Multipart.List_parts.parts conn
-      ~bucket:(bucket_name "my-bucket") ~key:(object_key "large.bin") ~upload_id
-      ()
+    Recording_s3.Multipart.List_parts.parts conn ~upload ()
     |> ok_or_fail "multipart paginator parts"
   in
   Alcotest.(check (list int))
     "parts" [ 1; 2 ]
-    (List.map (fun (part : List_parts.part_info) -> part.part_number) parts);
+    (List.map
+       (fun (part : List_parts.part_info) ->
+         Multipart.Part_number.to_int part.part_number)
+       parts);
   let calls = List.rev conn.calls in
   Alcotest.(check int) "calls" 2 (List.length calls);
   match calls with
@@ -222,6 +227,27 @@ let test_multipart_paginator_follows_markers () =
         "part marker" (Some [ "1" ])
         (List.assoc_opt "part-number-marker" second.request.target.query)
   | _ -> Alcotest.fail "expected two calls"
+
+let test_multipart_list_parts_accepts_zero_marker () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          (list_parts_page ~next_part_number_marker:0 ~truncated:false [ 1 ]);
+      ]
+  in
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let upload =
+    Multipart.Upload.resume ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "large.bin") ~upload_id
+  in
+  let page =
+    Recording_s3.Multipart.list_parts conn ~upload ()
+    |> ok_or_fail "multipart list parts"
+  in
+  Alcotest.(check (option int))
+    "zero next marker" (Some 0)
+    (Option.map Multipart.Part_number_marker.to_int page.next_part_number_marker)
 
 let test_multipart_list_parts_rejects_malformed_known_fields () =
   let conn =
@@ -232,11 +258,11 @@ let test_multipart_list_parts_rejects_malformed_known_fields () =
       ]
   in
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
-  match
-    Recording_s3.Multipart.List_parts.parts conn
-      ~bucket:(bucket_name "my-bucket") ~key:(object_key "large.bin") ~upload_id
-      ()
-  with
+  let upload =
+    Multipart.Upload.resume ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "large.bin") ~upload_id
+  in
+  match Recording_s3.Multipart.List_parts.parts conn ~upload () with
   | Error error when is_decode_error error ->
       let text = Awskit.Error.to_string_hum error in
       Alcotest.(check bool)
@@ -260,14 +286,14 @@ let test_multipart_list_parts_rejects_invalid_numeric_fields () =
     ]
   in
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let upload =
+    Multipart.Upload.resume ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "large.bin") ~upload_id
+  in
   List.iter
     (fun (field, body) ->
       let conn = Recording_runtime.connect [ response 200 body ] in
-      match
-        Recording_s3.Multipart.List_parts.parts conn
-          ~bucket:(bucket_name "my-bucket") ~key:(object_key "large.bin")
-          ~upload_id ()
-      with
+      match Recording_s3.Multipart.List_parts.parts conn ~upload () with
       | Error error when is_decode_error error ->
           let text = Awskit.Error.to_string_hum error in
           Alcotest.(check bool)
@@ -292,6 +318,8 @@ let suite =
           test_version_paginator_early_stop;
         Alcotest.test_case "multipart paginator follows markers" `Quick
           test_multipart_paginator_follows_markers;
+        Alcotest.test_case "multipart list parts accepts zero marker" `Quick
+          test_multipart_list_parts_accepts_zero_marker;
         Alcotest.test_case "multipart list parts rejects malformed fields"
           `Quick test_multipart_list_parts_rejects_malformed_known_fields;
         Alcotest.test_case "multipart list parts rejects invalid numbers" `Quick

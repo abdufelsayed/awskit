@@ -308,7 +308,7 @@ let* result =
 
 For explicit multipart upload, use [multipart_upload_file]. It uploads file
 parts with bounded concurrency from [Transfer.upload_options] and aborts the
-multipart upload if a fresh upload fails:
+multipart upload if an Awskit-created upload fails before completion:
 
 {[
 let options =
@@ -324,17 +324,24 @@ let* result =
     ()
 ]}
 
-To resume an interrupted multipart upload, keep the [upload_id]. The resume
-helper lists uploaded parts, skips matching part numbers and sizes, uploads the
-missing parts, and completes the upload. Existing uploads are left open on
-failure, so the same upload ID can be retried:
+To continue a caller-owned multipart upload, persist the bucket, key, and
+[upload_id], then rebuild an upload handle. The resume helper verifies the
+upload with [ListParts], uploads every local part into that upload, and completes
+from the fresh [UploadPart] results. It does not trust [ListParts] output as the
+completion manifest because a local file can change while retaining the same
+part sizes. Caller-owned uploads are left open on failure, so the same upload
+can be retried:
 
 {[
-let* result =
-  Awskit_s3_lwt_unix.Object.Transfer.resume_multipart_upload_file s3
+let upload =
+  Awskit_s3.Multipart.Upload.resume
     ~bucket
     ~key:(Awskit_s3.Object_key.of_string_exn "large.tar")
     ~upload_id
+in
+let* result =
+  Awskit_s3_lwt_unix.Object.Transfer.resume_multipart_upload_file s3
+    ~upload
     ~path:"/tmp/large.tar"
     ()
 ]}
@@ -492,7 +499,7 @@ Awskit_s3_eio.Bucket.Encryption.put s3
 [Multipart] exposes the AWS multipart flow:
 
 {ol
-  {li [Multipart.create_upload] starts an upload and returns an upload ID.}
+  {li [Multipart.create_upload] starts an upload and returns an upload handle.}
   {li [Multipart.upload_part] uploads a known-length part.}
   {li [Multipart.complete_upload] completes the upload with ordered parts.}
   {li [Multipart.abort_upload] cancels an upload.}
@@ -570,17 +577,22 @@ Awskit_s3.Presigned.put_object_with_endpoint_config
 ]}
 
 Multipart direct-upload flows can presign individual [UploadPart] requests
-after [Multipart.create_upload] has produced an upload ID:
+after [Multipart.create_upload] has produced an upload handle. Persisted upload
+state can be rebuilt with [Multipart.Upload.resume]:
 
 {[
+let upload =
+  Awskit_s3.Multipart.Upload.resume
+    ~bucket
+    ~key:(Awskit_s3.Object_key.of_string_exn "large.bin")
+    ~upload_id
+in
 Awskit_s3.Presigned.upload_part
   ~region:"us-east-1"
   ~credentials
   ~now
-  ~bucket
-  ~key:(Awskit_s3.Object_key.of_string_exn "large.bin")
-  ~upload_id
-  ~part_number:1
+  ~upload
+  ~part_number:(Awskit_s3.Multipart.Part_number.of_int_exn 1)
   ()
 ]}
 

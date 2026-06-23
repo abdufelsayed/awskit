@@ -431,38 +431,37 @@ let test_multipart_edges () =
           (S3.Multipart.create_upload conn ~bucket ~key:(object_key "edges.bin")
              ())
       in
-      let upload_id = upload.upload.upload_id in
       let first =
         await "upload first"
-          (S3.Multipart.upload_part conn ~bucket ~key:(object_key "edges.bin")
-             ~upload_id ~part_number:1
+          (S3.Multipart.upload_part conn ~upload:upload.upload
+             ~part_number:(Multipart.Part_number.of_int_exn 1)
              ~body:(S3.Body.of_string first_body)
              ())
       in
       let second =
         await "upload second"
-          (S3.Multipart.upload_part conn ~bucket ~key:(object_key "edges.bin")
-             ~upload_id ~part_number:2
+          (S3.Multipart.upload_part conn ~upload:upload.upload
+             ~part_number:(Multipart.Part_number.of_int_exn 2)
              ~body:(S3.Body.of_string final_body)
              ())
       in
       let overwritten =
         await "overwrite first"
-          (S3.Multipart.upload_part conn ~bucket ~key:(object_key "edges.bin")
-             ~upload_id ~part_number:1
+          (S3.Multipart.upload_part conn ~upload:upload.upload
+             ~part_number:(Multipart.Part_number.of_int_exn 1)
              ~body:(S3.Body.of_string overwritten_body)
              ())
       in
       expect_status "complete stale etag" 400
         (Lwt_main.run
-           (S3.Multipart.complete_upload conn ~bucket
-              ~key:(object_key "edges.bin") ~upload_id
-              [ first.part; second.part ]));
+           (S3.Multipart.complete_upload conn ~upload:upload.upload
+              ~parts:[ first.part; second.part ]
+              ()));
       ignore
         (await "complete overwritten"
-           (S3.Multipart.complete_upload conn ~bucket
-              ~key:(object_key "edges.bin") ~upload_id
-              [ overwritten.part; second.part ]));
+           (S3.Multipart.complete_upload conn ~upload:upload.upload
+              ~parts:[ overwritten.part; second.part ]
+              ()));
       let get_result =
         await_get "get multipart"
           (get_string conn ~bucket ~key:"edges.bin"
@@ -484,9 +483,9 @@ let test_multipart_edges () =
            (String.length final_body));
       expect_status "complete missing upload" 404
         (Lwt_main.run
-           (S3.Multipart.complete_upload conn ~bucket
-              ~key:(object_key "edges.bin") ~upload_id
-              [ overwritten.part; second.part ])))
+           (S3.Multipart.complete_upload conn ~upload:upload.upload
+              ~parts:[ overwritten.part; second.part ]
+              ())))
 
 let test_path_transfer_streams () =
   with_bucket "transfer" (fun conn ~bucket ->
@@ -555,18 +554,22 @@ let test_multipart_path_transfer_resumes () =
               (S3.Multipart.create_upload conn ~bucket
                  ~key:(object_key "resume.bin") ())
           in
-          let upload_id = created.upload.upload_id in
-          let first_part = String.sub body 0 part_size in
+          let upload_id = Multipart.Upload.upload_id created.upload in
+          let resume_upload =
+            Multipart.Upload.resume ~bucket ~key:(object_key "resume.bin")
+              ~upload_id
+          in
+          let stale_first_part = String.make part_size 's' in
           ignore
             (await "upload resume seed"
-               (S3.Multipart.upload_part conn ~bucket
-                  ~key:(object_key "resume.bin") ~upload_id ~part_number:1
-                  ~body:(S3.Body.of_string first_part)
+               (S3.Multipart.upload_part conn ~upload:created.upload
+                  ~part_number:(Multipart.Part_number.of_int_exn 1)
+                  ~body:(S3.Body.of_string stale_first_part)
                   ()));
           let result =
             await "resume multipart path"
-              (S3.Object.Transfer.resume_multipart_upload_file conn ~bucket
-                 ~key:(object_key "resume.bin") ~upload_id ~options ~path
+              (S3.Object.Transfer.resume_multipart_upload_file conn
+                 ~upload:resume_upload ~options ~path
                  ~on_progress:(fun transferred ->
                    progress := transferred :: !progress)
                  ())
@@ -581,7 +584,7 @@ let test_multipart_path_transfer_resumes () =
           Alcotest.(check string)
             "resumed body" body get_result.Get_object.value;
           Alcotest.(check (option int64))
-            "resume initial progress includes first part"
+            "resume final progress"
             (Some (Int64.of_int (String.length body)))
             (first !progress)))
 

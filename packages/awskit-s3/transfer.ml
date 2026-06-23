@@ -29,7 +29,7 @@ type upload_strategy = [ `Put | `Multipart ]
 type download_strategy = [ `Get | `Ranged ]
 
 type multipart_upload_result = {
-  upload : Multipart.Upload.t;
+  upload : Multipart.Upload.caller_owned Multipart.Upload.t;
   parts : Multipart.Part.t list;
   complete : Multipart.Complete.result;
 }

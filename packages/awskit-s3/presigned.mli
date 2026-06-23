@@ -202,10 +202,8 @@ val upload_part :
   now:Ptime.t ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
-  upload_id:Multipart.Upload_id.t ->
-  part_number:int ->
+  upload:_ Multipart.Upload.t ->
+  part_number:Multipart.Part_number.t ->
   ?options:Upload_part.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -265,10 +263,8 @@ val upload_part_with_endpoint_config :
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
-  upload_id:Multipart.Upload_id.t ->
-  part_number:int ->
+  upload:_ Multipart.Upload.t ->
+  part_number:Multipart.Part_number.t ->
   ?options:Upload_part.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result

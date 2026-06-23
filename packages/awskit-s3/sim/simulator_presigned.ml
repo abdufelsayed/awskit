@@ -35,10 +35,10 @@ module Presigned = struct
       ~endpoint_config:(Runtime.S3_endpoint.s3_endpoint_config conn)
       ~bucket ~key ?options ()
 
-  let upload_part conn ~bucket ~key ~upload_id ~part_number ?options () =
+  let upload_part conn ~upload ~part_number ?options () =
     Presigned.upload_part_with_endpoint_config
       ~region:(Runtime.Endpoint.region conn)
       ~credentials:(credentials conn) ~now:(now conn)
       ~endpoint_config:(Runtime.S3_endpoint.s3_endpoint_config conn)
-      ~bucket ~key ~upload_id ~part_number ?options ()
+      ~upload ~part_number ?options ()
 end

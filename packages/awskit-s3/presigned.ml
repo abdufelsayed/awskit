@@ -396,7 +396,7 @@ let delete_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
 
 let upload_part_query ~upload_id ~part_number =
   [
-    ("partNumber", [ string_of_int part_number ]);
+    ("partNumber", [ Multipart.Part_number.to_int part_number |> string_of_int ]);
     ("uploadId", [ Multipart.Upload_id.to_string upload_id ]);
   ]
 
@@ -406,10 +406,12 @@ let upload_part_headers (options : Upload_part.options) =
   @ options.extra_signed_headers
 
 let upload_part ~region ~credentials ~now ?addressing_style ?endpoint_variant
-    ~bucket ~key ~upload_id ~part_number ?options () =
-  let* () = validate_part_number part_number in
+    ~upload ~part_number ?options () =
   let options = Option.value ~default:Upload_part.default_options options in
   let* () = validate_opt Headers.validate_checksum_value options.checksum in
+  let bucket = Multipart.Upload.bucket upload in
+  let key = Multipart.Upload.key upload in
+  let upload_id = Multipart.Upload.upload_id upload in
   generate ~region ~credentials ~now ?addressing_style ?endpoint_variant ~bucket
     ~key ~method_:`PUT
     ~signed_headers:(upload_part_headers options)
@@ -465,10 +467,12 @@ let delete_object_with_endpoint_config ~region ~credentials ~now
     ?expires_in:options.expires_in ()
 
 let upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~upload_id ~part_number ?options () =
-  let* () = validate_part_number part_number in
+    ~upload ~part_number ?options () =
   let options = Option.value ~default:Upload_part.default_options options in
   let* () = validate_opt Headers.validate_checksum_value options.checksum in
+  let bucket = Multipart.Upload.bucket upload in
+  let key = Multipart.Upload.key upload in
+  let upload_id = Multipart.Upload.upload_id upload in
   generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ~method_:`PUT
     ~signed_headers:(upload_part_headers options)

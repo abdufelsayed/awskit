@@ -52,11 +52,10 @@ let test_simulator_request_body_requires_known_length () =
       ~key:(object_key "large.bin") ()
     |> ok_or_fail "create multipart upload"
   in
-  let upload_id = created.upload.upload_id in
   (match
-     Simulator.Multipart.upload_part conn
-       ~bucket:(bucket_name "test-bucket")
-       ~key:(object_key "large.bin") ~upload_id ~part_number:1 ~body ()
+     Simulator.Multipart.upload_part conn ~upload:created.upload
+       ~part_number:(Multipart.Part_number.of_int_exn 1)
+       ~body ()
    with
   | Error error when is_validation_field "content_length" error -> ()
   | Error error ->
@@ -64,9 +63,7 @@ let test_simulator_request_body_requires_known_length () =
         Error.pp error
   | Ok _ -> Alcotest.fail "expected simulator unknown-length multipart failure");
   let listed =
-    Simulator.Multipart.list_parts conn
-      ~bucket:(bucket_name "test-bucket")
-      ~key:(object_key "large.bin") ~upload_id ()
+    Simulator.Multipart.list_parts conn ~upload:created.upload ()
     |> ok_or_fail "list multipart parts"
   in
   Alcotest.(check int) "stored parts" 0 (List.length listed.parts)
@@ -186,7 +183,6 @@ let test_simulator_multipart_upload_part_stream_error_does_not_store_part () =
       ~key:(object_key "large.bin") ()
     |> ok_or_fail "create multipart upload"
   in
-  let upload_id = created.upload.upload_id in
   let stream_error =
     Awskit.Error.Internal.body "simulator multipart request body failed"
   in
@@ -204,18 +200,16 @@ let test_simulator_multipart_upload_part_stream_error_does_not_store_part () =
         | Ok () -> Error stream_error)
   in
   (match
-     Simulator.Multipart.upload_part conn
-       ~bucket:(bucket_name "test-bucket")
-       ~key:(object_key "large.bin") ~upload_id ~part_number:1 ~body ()
+     Simulator.Multipart.upload_part conn ~upload:created.upload
+       ~part_number:(Multipart.Part_number.of_int_exn 1)
+       ~body ()
    with
   | Error error when Error.equal error stream_error -> ()
   | Error error ->
       Alcotest.failf "unexpected upload part error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream request body error");
   let listed =
-    Simulator.Multipart.list_parts conn
-      ~bucket:(bucket_name "test-bucket")
-      ~key:(object_key "large.bin") ~upload_id ()
+    Simulator.Multipart.list_parts conn ~upload:created.upload ()
     |> ok_or_fail "list multipart parts"
   in
   Alcotest.(check int) "stored parts" 0 (List.length listed.parts)
@@ -479,18 +473,17 @@ let test_simulator_rejects_unknown_checksum_writes () =
       ~key:(object_key "bad.bin") ()
     |> ok_or_fail "create upload"
   in
-  let upload_id = upload.upload.upload_id in
   let upload_part_options =
     { Upload_part.checksum = Some checksum; expected_bucket_owner = None }
   in
   expect_checksum_validation "simulator upload part"
-    (Simulator.Multipart.upload_part conn
-       ~bucket:(bucket_name "test-bucket")
-       ~key:(object_key "bad.bin") ~upload_id ~part_number:1
+    (Simulator.Multipart.upload_part conn ~upload:upload.upload
+       ~part_number:(Multipart.Part_number.of_int_exn 1)
        ~body:(Simulator.Body.of_string "body")
        ~options:upload_part_options ());
   let part =
-    Multipart.Part.create_exn ~part_number:1
+    Multipart.Part.create_exn
+      ~part_number:(Multipart.Part_number.of_int_exn 1)
       ~etag:(Object.Etag.of_string_exn "\"etag\"")
       ()
   in
@@ -503,9 +496,8 @@ let test_simulator_rejects_unknown_checksum_writes () =
     }
   in
   expect_checksum_validation "simulator complete checksum"
-    (Simulator.Multipart.complete_upload conn
-       ~bucket:(bucket_name "test-bucket")
-       ~key:(object_key "bad.bin") ~upload_id ~options:complete_options [ part ]);
+    (Simulator.Multipart.complete_upload conn ~upload:upload.upload
+       ~options:complete_options ~parts:[ part ] ());
   let complete_options =
     {
       Complete_multipart_upload.default_options with
@@ -513,9 +505,8 @@ let test_simulator_rejects_unknown_checksum_writes () =
     }
   in
   match
-    Simulator.Multipart.complete_upload conn
-      ~bucket:(bucket_name "test-bucket")
-      ~key:(object_key "bad.bin") ~upload_id ~options:complete_options [ part ]
+    Simulator.Multipart.complete_upload conn ~upload:upload.upload
+      ~options:complete_options ~parts:[ part ] ()
   with
   | Error error when is_validation_field "checksum_type" error -> ()
   | Error error ->
@@ -523,6 +514,133 @@ let test_simulator_rejects_unknown_checksum_writes () =
         Error.pp error
   | Ok _ ->
       Alcotest.fail "simulator complete checksum type: expected validation"
+
+let expect_validation_field label field = function
+  | Error error when is_validation_field field error -> ()
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected validation field %s" label field
+
+let test_simulator_multipart_complete_validates_sizes () =
+  let conn = make_simulator () in
+  let upload =
+    Simulator.Multipart.create_upload conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "sized.bin") ()
+    |> ok_or_fail "create sized upload"
+  in
+  let upload_part part_number body =
+    Simulator.Multipart.upload_part conn ~upload:upload.upload
+      ~part_number:(Multipart.Part_number.of_int_exn part_number)
+      ~body:(Simulator.Body.of_string body)
+      ()
+    |> ok_or_fail ("upload part " ^ string_of_int part_number)
+  in
+  let small_part = upload_part 1 "a" in
+  Alcotest.(check (option int64))
+    "simulator upload part size" (Some 1L)
+    (Multipart.Part.size small_part.part);
+  let negative_options =
+    {
+      Complete_multipart_upload.default_options with
+      multipart_object_size = Some (-1L);
+    }
+  in
+  expect_validation_field "negative multipart object size"
+    "multipart_object_size"
+    (Simulator.Multipart.complete_upload conn ~upload:upload.upload
+       ~options:negative_options ~parts:[ small_part.part ] ());
+  let small_part_2 = upload_part 2 "b" in
+  expect_validation_field "undersized non-final simulator part" "parts"
+    (Simulator.Multipart.complete_upload conn ~upload:upload.upload
+       ~parts:[ small_part.part; small_part_2.part ]
+       ());
+  let large_part = upload_part 1 (String.make Transfer.min_part_size 'x') in
+  let final_part = upload_part 2 "z" in
+  let mismatch_options =
+    {
+      Complete_multipart_upload.default_options with
+      multipart_object_size = Some 1L;
+    }
+  in
+  expect_validation_field "simulator multipart object size mismatch"
+    "multipart_object_size"
+    (Simulator.Multipart.complete_upload conn ~upload:upload.upload
+       ~options:mismatch_options
+       ~parts:[ large_part.part; final_part.part ]
+       ())
+
+let test_simulator_multipart_complete_validates_part_checksums () =
+  let conn = make_simulator () in
+  let upload =
+    Simulator.Multipart.create_upload conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "checksummed.bin")
+      ()
+    |> ok_or_fail "create checksum upload"
+  in
+  let checksum : Object.Checksum.value =
+    { algorithm = Object.Checksum.Algorithm.Sha256; value = "part-sha256" }
+  in
+  let uploaded =
+    Simulator.Multipart.upload_part conn ~upload:upload.upload
+      ~part_number:(Multipart.Part_number.of_int_exn 1)
+      ~body:(Simulator.Body.of_string "part")
+      ~options:(Upload_part.options_exn ~checksum ())
+      ()
+    |> ok_or_fail "upload checksummed part"
+  in
+  let wrong_checksum : Object.Checksum.value =
+    { algorithm = Object.Checksum.Algorithm.Sha256; value = "wrong-sha256" }
+  in
+  let wrong_part =
+    Multipart.Part.create_exn
+      ~part_number:(Multipart.Part.part_number uploaded.part)
+      ~etag:(Multipart.Part.etag uploaded.part)
+      ~checksum:wrong_checksum
+      ?size:(Multipart.Part.size uploaded.part)
+      ()
+  in
+  expect_status "complete with wrong part checksum" 400
+    (Simulator.Multipart.complete_upload conn ~upload:upload.upload
+       ~parts:[ wrong_part ] ());
+  let missing_checksum_part =
+    Multipart.Part.create_exn
+      ~part_number:(Multipart.Part.part_number uploaded.part)
+      ~etag:(Multipart.Part.etag uploaded.part)
+      ?size:(Multipart.Part.size uploaded.part)
+      ()
+  in
+  expect_status "complete with missing part checksum" 400
+    (Simulator.Multipart.complete_upload conn ~upload:upload.upload
+       ~parts:[ missing_checksum_part ] ());
+  ignore
+    (Simulator.Multipart.complete_upload conn ~upload:upload.upload
+       ~parts:[ uploaded.part ] ()
+    |> ok_or_fail "complete checksummed part")
+
+let test_simulator_multipart_abort_removes_upload () =
+  let conn = make_simulator () in
+  let upload =
+    Simulator.Multipart.create_upload conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "abort-twice.bin")
+      ()
+    |> ok_or_fail "create abort upload"
+  in
+  let aborted =
+    Simulator.Multipart.abort_upload conn ~upload:upload.upload ()
+    |> ok_or_fail "abort upload"
+  in
+  Alcotest.(check int)
+    "abort response status" 204
+    (Awskit.Response.status aborted.response);
+  match Simulator.Multipart.abort_upload conn ~upload:upload.upload () with
+  | Error error when Error.service_code error = Some "NoSuchUpload" -> ()
+  | Error error ->
+      Alcotest.failf "unexpected repeated simulator abort error: %a" Error.pp
+        error
+  | Ok _ -> Alcotest.fail "expected repeated simulator abort to fail"
 
 let test_simulator_streaming_get () =
   let conn = make_simulator () in
@@ -732,6 +850,12 @@ let suite =
           test_simulator_conveniences_validate_max_bytes_before_lookup;
         Alcotest.test_case "simulator rejects unknown checksum writes" `Quick
           test_simulator_rejects_unknown_checksum_writes;
+        Alcotest.test_case "simulator validates multipart complete sizes" `Quick
+          test_simulator_multipart_complete_validates_sizes;
+        Alcotest.test_case "simulator validates multipart complete checksums"
+          `Quick test_simulator_multipart_complete_validates_part_checksums;
+        Alcotest.test_case "simulator abort removes multipart upload" `Quick
+          test_simulator_multipart_abort_removes_upload;
         Alcotest.test_case "simulator streaming get" `Quick
           test_simulator_streaming_get;
         Alcotest.test_case "in-memory helper limit" `Quick test_buffer_limit;

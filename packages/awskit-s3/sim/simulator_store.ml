@@ -249,7 +249,10 @@ let require_multipart_upload t ~bucket ~key ~upload_id =
   match
     Hashtbl.find_opt bucket_state.multipart_uploads (upload_key upload_id)
   with
-  | Some upload when String.equal upload.upload.key key ->
+  | Some upload
+    when String.equal
+           (Multipart.Upload.key upload.upload |> Object_key.to_string)
+           key ->
       Ok (bucket_state, upload)
   | _ -> Error (no_such_upload ())
 

@@ -47,7 +47,7 @@ type stored_part = {
 }
 
 type multipart_upload = {
-  upload : Multipart.Upload.t;
+  upload : Multipart.Upload.created Multipart.Upload.t;
   content_type : Content_type.t option;
   metadata : Metadata.t;
   storage_class : Storage_class.t option;

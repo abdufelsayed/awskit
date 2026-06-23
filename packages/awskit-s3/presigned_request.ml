@@ -55,10 +55,12 @@ module Make (C : Request_context.S) = struct
           ~credentials ~now:(now conn) ~endpoint_config:(endpoint_config conn)
           ~bucket ~key ?options ())
 
-  let upload_part conn ~bucket ~key ~upload_id ~part_number ?options () =
+  let upload_part conn ~upload ~part_number ?options () =
+    let bucket = Multipart.Upload.bucket upload in
+    let key = Multipart.Upload.key upload in
     with_credentials conn ~operation:"UploadPart" ~bucket ~key
       (fun credentials ->
         Presigned.upload_part_with_endpoint_config ~region:(region conn)
           ~credentials ~now:(now conn) ~endpoint_config:(endpoint_config conn)
-          ~bucket ~key ~upload_id ~part_number ?options ())
+          ~upload ~part_number ?options ())
 end

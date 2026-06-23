@@ -33,13 +33,15 @@ type upload_options = {
   complete_options : Multipart.Complete.options;
       (** Options used by [CompleteMultipartUpload]. *)
   abort_options : Multipart.Abort.options;
-      (** Options used when aborting a failed fresh multipart upload. *)
+      (** Options used when aborting a failed Awskit-created multipart upload.
+      *)
   list_parts_options : Multipart.List_parts.options;
-      (** Options used when resuming and listing existing uploaded parts. *)
+      (** Options used when verifying caller-owned uploads before resumed file
+          transfer writes fresh parts. *)
 }
 (** High-level upload behavior. [put_options] are used for single-request
     uploads; multipart option records are used when the selected strategy is
-    multipart or when resuming an upload. *)
+    multipart or when writing into a caller-owned upload. *)
 
 type download_options = {
   multipart_threshold : int64;
@@ -61,7 +63,7 @@ type download_strategy = [ `Get | `Ranged ]
 (** Strategy used by a high-level download result. *)
 
 type multipart_upload_result = {
-  upload : Multipart.Upload.t;
+  upload : Multipart.Upload.caller_owned Multipart.Upload.t;
   parts : Multipart.Part.t list;
   complete : Multipart.Complete.result;
 }

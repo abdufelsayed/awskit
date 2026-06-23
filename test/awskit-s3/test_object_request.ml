@@ -907,10 +907,11 @@ let test_malformed_xml_responses () =
       Alcotest.failf "unexpected version decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected version list decode error");
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
-  match
-    Recording_s3.Multipart.list_parts conn ~bucket:(bucket_name "my-bucket")
-      ~key:(object_key "large.bin") ~upload_id ()
-  with
+  let upload =
+    Multipart.Upload.resume ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "large.bin") ~upload_id
+  in
+  match Recording_s3.Multipart.list_parts conn ~upload () with
   | Error error when is_decode_error error ->
       check_context "multipart list" error ~operation:"ListParts"
         ~resource:"s3://my-bucket/large.bin" ()

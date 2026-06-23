@@ -20,6 +20,11 @@ let add_span label time span =
   | Some time -> time
   | None -> Alcotest.failf "%s: timestamp outside supported range" label
 
+let multipart_upload ?(bucket = bucket_name "bucket")
+    ?(key = object_key "large.bin")
+    ?(upload_id = Multipart.Upload_id.of_string_exn "upload-1") () =
+  Multipart.Upload.resume ~bucket ~key ~upload_id
+
 let temporary_credentials ?session_token expires_at =
   Awskit.Credentials.create_exn ~access_key_id:"AKIA_TEST_TEMP"
     ~secret_access_key:"temp-secret" ?session_token ~expires_at ()
@@ -375,7 +380,7 @@ let test_presigned_expected_bucket_owner_headers () =
     "put signed expected owner" true
     (List.mem "x-amz-expected-bucket-owner"
        (signed_headers_or_fail (Presigned.reveal_url put)));
-  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let upload = multipart_upload () in
   let upload_part_options =
     {
       Presigned.Upload_part.default_options with
@@ -384,8 +389,9 @@ let test_presigned_expected_bucket_owner_headers () =
   in
   let upload_part =
     Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:(bucket_name "bucket") ~key:(object_key "large.bin") ~upload_id
-      ~part_number:1 ~options:upload_part_options ()
+      ~upload
+      ~part_number:(Multipart.Part_number.of_int_exn 1)
+      ~options:upload_part_options ()
     |> ok_or_fail "presigned upload-part expected owner"
   in
   Alcotest.(check (option string))
@@ -417,7 +423,7 @@ let test_presigned_expected_bucket_owner_headers () =
        (signed_headers_or_fail (Presigned.reveal_url delete)))
 
 let test_presigned_upload_part () =
-  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let upload = multipart_upload () in
   let checksum : Object.Checksum.value =
     {
       Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
@@ -429,8 +435,9 @@ let test_presigned_upload_part () =
   in
   let result =
     Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:(bucket_name "bucket") ~key:(object_key "large.bin") ~upload_id
-      ~part_number:7 ~options ()
+      ~upload
+      ~part_number:(Multipart.Part_number.of_int_exn 7)
+      ~options ()
     |> ok_or_fail "presigned upload part"
   in
   Alcotest.(check string)
@@ -452,14 +459,7 @@ let test_presigned_upload_part () =
   let signed_headers = signed_headers_or_fail (Presigned.reveal_url result) in
   Alcotest.(check bool)
     "signed checksum value" true
-    (List.mem "x-amz-checksum-sha256" signed_headers);
-  match
-    Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:(bucket_name "bucket") ~key:(object_key "large.bin") ~upload_id
-      ~part_number:0 ()
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "expected invalid part number"
+    (List.mem "x-amz-checksum-sha256" signed_headers)
 
 let test_presigned_rejects_header_newline () =
   let options =
@@ -494,14 +494,15 @@ let test_presigned_rejects_unknown_checksum () =
   | Error error when is_validation_field "checksum_algorithm" error -> ()
   | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected presigned put checksum validation");
-  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let upload = multipart_upload () in
   let upload_part_options =
     { Presigned.Upload_part.default_options with checksum = Some checksum }
   in
   match
     Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:(bucket_name "bucket") ~key:(object_key "large.bin") ~upload_id
-      ~part_number:1 ~options:upload_part_options ()
+      ~upload
+      ~part_number:(Multipart.Part_number.of_int_exn 1)
+      ~options:upload_part_options ()
   with
   | Error error when is_validation_field "checksum_algorithm" error -> ()
   | Error error ->
@@ -509,7 +510,7 @@ let test_presigned_rejects_unknown_checksum () =
   | Ok _ -> Alcotest.fail "expected presigned upload-part checksum validation"
 
 let test_presigned_accepts_string_region_and_endpoint_config () =
-  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  let upload = multipart_upload () in
   let endpoint_config =
     Endpoint_config.local_plaintext
       ~endpoint:(Awskit.Endpoint.http_exn ~host:"localhost" ~port:9000 ())
@@ -547,9 +548,9 @@ let test_presigned_accepts_string_region_and_endpoint_config () =
   check_url "upload part string region endpoint"
     (Presigned.upload_part_with_endpoint_config
        ~region:(Region.of_string_exn "us-east-1")
-       ~credentials:creds ~now:test_time ~endpoint_config
-       ~bucket:(bucket_name "bucket") ~key:(object_key "large.bin") ~upload_id
-       ~part_number:1 ())
+       ~credentials:creds ~now:test_time ~endpoint_config ~upload
+       ~part_number:(Multipart.Part_number.of_int_exn 1)
+       ())
 
 let test_presigned_string_validation_errors () =
   (match

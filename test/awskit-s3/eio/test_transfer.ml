@@ -49,6 +49,8 @@ module Runtime = struct
     mutable upload_part_count : int;
     mutable complete_count : int;
     mutable abort_count : int;
+    mutable listed_parts : Awskit_s3.List_parts.part_info list;
+    mutable completed_part_etags : string list;
     mutable fail_complete_upload : bool;
     mutable fail_abort_upload : bool;
     mutable get_ranges : string list;
@@ -262,6 +264,8 @@ let connection ?(response_body = "") ?head_etag ?head_version_id () =
     upload_part_count = 0;
     complete_count = 0;
     abort_count = 0;
+    listed_parts = [];
+    completed_part_etags = [];
     fail_complete_upload = false;
     fail_abort_upload = false;
     get_ranges = [];
@@ -273,6 +277,16 @@ let response status = Awskit.Response.create_exn ~status ()
 
 let empty_checksum : Awskit_s3.Object.Checksum.response =
   { values = []; checksum_type = None }
+
+let listed_part ~part_number ~size ~etag =
+  {
+    Awskit_s3.List_parts.part_number =
+      Awskit_s3.Multipart.Part_number.of_int_exn part_number;
+    etag = Some (Awskit_s3.Object.Etag.of_string_exn etag);
+    size = Some size;
+    last_modified = None;
+    checksum = empty_checksum;
+  }
 
 let put_result () : Awskit_s3.Put_object.result =
   {
@@ -455,23 +469,22 @@ module S3 = struct
       conn.Runtime.multipart_create_count <-
         conn.Runtime.multipart_create_count + 1;
       let upload_id = Awskit_s3.Multipart.Upload_id.of_string_exn "upload-1" in
-      let upload =
-        Awskit_s3.Multipart.Upload.create_exn
-          ~bucket:(Awskit_s3.Bucket_name.to_string bucket)
-          ~key:(Awskit_s3.Object_key.to_string key)
-          ~upload_id
-      in
+      let upload = Awskit_s3.Multipart.Upload.created ~bucket ~key ~upload_id in
       Ok { Awskit_s3.Create_multipart_upload.upload; response = response 200 }
 
-    let upload_part conn ~bucket:_ ~key:_ ~upload_id:_ ~part_number ~body
-        ?options:_ () =
+    let upload_part conn ~upload:_ ~part_number ~body ?options:_ () =
       conn.Runtime.upload_part_count <- conn.Runtime.upload_part_count + 1;
       let* body = Runtime.drain_request_body body in
-      ignore body;
-      let etag =
-        Awskit_s3.Object.Etag.of_string_exn (Fmt.str "etag-%d" part_number)
+      let part_number_int =
+        Awskit_s3.Multipart.Part_number.to_int part_number
       in
-      let part = Awskit_s3.Multipart.Part.create_exn ~part_number ~etag () in
+      let etag =
+        Awskit_s3.Object.Etag.of_string_exn (Fmt.str "etag-%d" part_number_int)
+      in
+      let size = Int64.of_int (String.length body) in
+      let part =
+        Awskit_s3.Multipart.Part.create_exn ~part_number ~etag ~size ()
+      in
       Ok
         {
           Awskit_s3.Upload_part.part;
@@ -479,8 +492,15 @@ module S3 = struct
           response = response 200;
         }
 
-    let complete_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ _ =
+    let complete_upload conn ~upload:_ ?options:_ ~parts () =
       conn.Runtime.complete_count <- conn.Runtime.complete_count + 1;
+      conn.Runtime.completed_part_etags <-
+        List.map
+          (fun (part : Awskit_s3.Multipart.Part.t) ->
+            part
+            |> Awskit_s3.Multipart.Part.etag
+            |> Awskit_s3.Object.Etag.to_string)
+          parts;
       if conn.Runtime.fail_complete_upload then
         Error (Awskit.Error.Internal.body "simulated complete failure")
       else
@@ -492,24 +512,22 @@ module S3 = struct
             response = response 200;
           }
 
-    let abort_upload conn ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () =
+    let abort_upload conn ~upload:_ ?options:_ () =
       conn.Runtime.abort_count <- conn.Runtime.abort_count + 1;
       if conn.Runtime.fail_abort_upload then
         Error (Awskit.Error.Internal.body "simulated abort failure")
-      else Ok (response 204)
+      else Ok { Awskit_s3.Abort_multipart_upload.response = response 204 }
 
-    let list_parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ () = assert false
+    let list_parts _ ~upload:_ ?options:_ () = assert false
 
     module List_parts = struct
-      let fold_pages _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ ?max_pages:_
-          ~init:_ ~f:_ () =
+      let fold_pages _ ~upload:_ ?options:_ ?max_pages:_ ~init:_ ~f:_ () =
         assert false
 
-      let pages _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ ?max_pages:_ () =
-        assert false
+      let pages _ ~upload:_ ?options:_ ?max_pages:_ () = assert false
 
-      let parts _ ~bucket:_ ~key:_ ~upload_id:_ ?options:_ ?max_pages:_ () =
-        Ok []
+      let parts conn ~upload:_ ?options:_ ?max_pages:_ () =
+        Ok conn.Runtime.listed_parts
     end
   end
 end
@@ -904,7 +922,14 @@ let test_resume_multipart_upload_file env () =
     ~finally:(fun () -> remove_file native_path)
     (fun () ->
       let conn = connection () in
+      conn.Runtime.listed_parts <-
+        [
+          listed_part ~part_number:1
+            ~size:(Int64.of_int Awskit_s3.Transfer.min_part_size)
+            ~etag:"stale-etag-1";
+        ];
       let upload_id = Awskit_s3.Multipart.Upload_id.of_string_exn "upload-1" in
+      let upload = Awskit_s3.Multipart.Upload.resume ~bucket ~key ~upload_id in
       let options =
         {
           Awskit_s3.Transfer.default_upload_options with
@@ -912,8 +937,7 @@ let test_resume_multipart_upload_file env () =
         }
       in
       match
-        Transfer.resume_multipart_upload_file conn ~bucket ~key ~upload_id
-          ~options
+        Transfer.resume_multipart_upload_file conn ~upload ~options
           ~path:(path_of_native env native_path)
           ()
       with
@@ -922,7 +946,10 @@ let test_resume_multipart_upload_file env () =
       | Ok _ ->
           Alcotest.(check int)
             "upload part count" 1 conn.Runtime.upload_part_count;
-          Alcotest.(check int) "complete count" 1 conn.Runtime.complete_count)
+          Alcotest.(check int) "complete count" 1 conn.Runtime.complete_count;
+          Alcotest.(check (list string))
+            "completed fresh part etags" [ "etag-1" ]
+            conn.Runtime.completed_part_etags)
 
 let test_download_file_uses_get_below_threshold env () =
   let native_path = Filename.temp_file "awskit-eio-download-get" ".bin" in
