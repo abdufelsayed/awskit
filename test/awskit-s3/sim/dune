@@ -8,3 +8,9 @@
  (deps test_awskit_s3_sim.exe)
  (action
   (run ./test_awskit_s3_sim.exe)))
+
+(rule
+ (alias runtime-conformance)
+ (deps test_awskit_s3_sim.exe)
+ (action
+  (run ./test_awskit_s3_sim.exe test "simulator contract:object")))

@@ -2,3 +2,9 @@
  (name test_awskit_lwt)
  (package awskit-lwt)
  (libraries awskit awskit-lwt cohttp-lwt-unix ptime alcotest))
+
+(rule
+ (alias runtime-conformance)
+ (deps test_awskit_lwt.exe)
+ (action
+  (run ./test_awskit_lwt.exe test "integration:connection")))

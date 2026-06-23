@@ -2,3 +2,9 @@
  (name test_awskit_eio)
  (package awskit-eio)
  (libraries awskit awskit-eio cohttp-eio eio eio_main ptime alcotest unix))
+
+(rule
+ (alias runtime-conformance)
+ (deps test_awskit_eio.exe)
+ (action
+  (run ./test_awskit_eio.exe test "integration:connection")))
