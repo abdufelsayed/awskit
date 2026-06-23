@@ -64,9 +64,9 @@ let content_range response =
         (Awskit.Error.Producer.get_ok_exn (Range.Content_range.of_header value))
 
 let info_of_object ?content_length response (obj : stored_object) :
-    Get_object.info =
+    Object.Get.info =
   {
-    Get_object.etag = Some obj.etag;
+    Object.Get.etag = Some obj.etag;
     content_type = obj.content_type;
     content_length =
       Some

@@ -37,7 +37,7 @@ preconditions, checksum headers, and server-side encryption headers:
 
 {[
 let options =
-  Awskit_s3.Put_object.options_exn
+  Awskit_s3.Object.Put.options_exn
     ~content_type:(Awskit_s3.Content_type.of_string_exn "text/plain")
     ~metadata:(Awskit_s3.Metadata.of_list_exn [ ("origin", "example") ])
     ~tags:
@@ -140,7 +140,7 @@ The object surface also includes:
   {li [Object.Tagging.get], [put], and [delete]}
 }
 
-Pagination helpers preserve the regular [List_objects_v2.options] record and
+Pagination helpers preserve the regular [Object.List.options] record and
 update only the continuation token between requests. Collection helpers require
 an explicit [max_pages] bound and return an error if S3 reports more pages than
 the bound allows:
@@ -150,7 +150,7 @@ let prefix = Awskit_s3.Object_key.Prefix.of_string_exn "logs/" in
 let keys =
   Awskit_s3_eio.Object.List.keys s3
     ~bucket
-    ~options:(Awskit_s3.List_objects_v2.options_exn ~prefix ())
+    ~options:(Awskit_s3.Object.List.options_exn ~prefix ())
     ~max_pages:10
     ()
 ]}
@@ -160,17 +160,16 @@ let keys =
 [Bucket.Versioning.put] enables bucket versioning. Object writes, copies, and
 multipart completion return version IDs when the bucket is versioned. Reads,
 heads, and deletes accept a [version_id] option. Copy requests can select a
-source version with [Copy_object.source_version_id].
+source version with [Object.Copy.source_version_id].
 
 Deleting the current object in a versioned bucket creates a delete marker.
 [Object.list_versions] returns object versions and delete markers, and
 [Object.Versions] provides pagination helpers for traversing the full history.
-[List_object_versions] is the public alias for version-listing
-options and page types:
+[Object.Versions] contains version-listing options and page types:
 
 {[
 let options =
-  Awskit_s3.List_object_versions.options_exn
+  Awskit_s3.Object.Versions.options_exn
     ~prefix:(Awskit_s3.Object_key.Prefix.of_string_exn "logs/")
     ()
 in

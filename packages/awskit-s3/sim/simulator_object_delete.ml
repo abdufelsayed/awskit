@@ -6,7 +6,7 @@ open Simulator_store
 
 let delete_result ?delete_marker ?version_id () =
   {
-    Delete_object.delete_marker;
+    Object.Delete.delete_marker;
     version_id;
     response =
       response 204
@@ -15,12 +15,12 @@ let delete_result ?delete_marker ?version_id () =
   }
 
 let delete_objects_error key code message =
-  { Delete_objects.key; code; message = Some message }
+  { Object.Delete_many.key; code; message = Some message }
 
 let delete_objects_conditions_match object_ = function
   | Some (Stored_object obj) ->
       let etag_matches =
-        match object_.Delete_objects.etag with
+        match object_.Object.Delete_many.etag with
         | None -> true
         | Some etag -> Object.Etag.equal obj.etag etag
       in
@@ -28,7 +28,7 @@ let delete_objects_conditions_match object_ = function
   | None | Some (Stored_delete_marker _) -> Option.is_none object_.etag
 
 let delete conn ~bucket ~key ?options () =
-  let options = Option.value ~default:Delete_object.default_options options in
+  let options = Option.value ~default:Object.Delete.default_options options in
   match validate_bucket_key bucket key with
   | Error error -> Error error
   | Ok () -> (
@@ -105,7 +105,8 @@ let delete_objects conn ~bucket ~objects ?options:_ () =
           | None ->
               let deleted, errors =
                 List.fold_right
-                  (fun (object_ : Delete_objects.object_) (deleted, errors) ->
+                  (fun (object_ : Object.Delete_many.object_) (deleted, errors)
+                     ->
                     let key = key_string object_.key in
                     let target =
                       match object_.version_id with
@@ -139,7 +140,7 @@ let delete_objects conn ~bucket ~objects ?options:_ () =
                             (None, None)
                       in
                       ( {
-                          Delete_objects.key = object_.key;
+                          Object.Delete_many.key = object_.key;
                           version_id;
                           delete_marker;
                           delete_marker_version_id =
@@ -151,4 +152,5 @@ let delete_objects conn ~bucket ~objects ?options:_ () =
                         errors ))
                   objects ([], [])
               in
-              Ok { Delete_objects.deleted; errors; response = response 200 }))
+              Ok { Object.Delete_many.deleted; errors; response = response 200 }
+          ))

@@ -8,11 +8,11 @@
 
 <!-- Describe the removed or changed public contract. -->
 
-## API Role And Snapshot
+## API Role And Review
 
 <!-- Name the affected role: application SDK, advanced application API, runtime
-API, simulator API, or package boundary. Include @api-compile and
-@api-snapshot results, plus any public-api-tier updates. -->
+API, simulator API, or package boundary. Include the public `.mli`, docs, and
+examples that changed. -->
 
 ## Migration
 

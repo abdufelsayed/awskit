@@ -69,7 +69,7 @@ let test_endpoint_resolution_fixture () =
 
 let test_put_object_metadata_tags_fixture () =
   let options =
-    Put_object.options_exn
+    Object.Put.options_exn
       ~content_type:(content_type "text/plain")
       ~metadata:
         (Metadata.of_list_exn [ ("origin", "fixture"); ("trace", "abc-123") ])
@@ -122,7 +122,7 @@ let test_range_get_fixture () =
     ]
   in
   let options =
-    Get_object.options_exn ~range:(Range.bytes_exn ~start:2L ~finish:5L) ()
+    Object.Get.options_exn ~range:(Range.bytes_exn ~start:2L ~finish:5L) ()
   in
   let conn = Recording_runtime.connect [ response ~headers 206 "cdef" ] in
   let result =

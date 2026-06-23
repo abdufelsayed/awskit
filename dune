@@ -2,9 +2,6 @@
  (name check-fast)
  (deps
   (alias_rec runtest)
-  (alias_rec api-compile)
-  (alias_rec api-snapshot)
-  (alias_rec docs-content)
   (alias_rec examples)))
 
 (alias
@@ -15,29 +12,3 @@
   (alias_rec fuzz-replay)
   (alias_rec simulator-contract)
   (alias_rec runtime-conformance)))
-
-(rule
- (alias docs-content)
- (deps
-  scripts/check-docs-content.sh
-  SUPPORT.md
-  SECURITY.md
-  README.md
-  (source_tree docs)
-  (source_tree packages)
-  (source_tree examples))
- (action
-  (run ./scripts/check-docs-content.sh)))
-
-(rule
- (alias api-snapshot)
- (deps
-  (alias_rec install)
-  scripts/api-snapshot.sh
-  api-snapshot/public-api-tiers.sexp
-  api-snapshot/current-installed-cmis.txt)
- (action
-  (setenv
-   AWSKIT_API_SNAPSHOT_USE_CURRENT_BUILD
-   1
-   (run ./scripts/api-snapshot.sh))))

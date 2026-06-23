@@ -63,7 +63,7 @@ module Runtime = struct
     mutable upload_part_count : int;
     mutable complete_count : int;
     mutable abort_count : int;
-    mutable listed_parts : Awskit_s3.List_parts.part_info list;
+    mutable listed_parts : Awskit_s3.Multipart.List_parts.part_info list;
     mutable completed_part_etags : string list;
     mutable fail_complete_upload : bool;
     mutable fail_abort_upload : bool;
@@ -294,7 +294,7 @@ let empty_checksum : Awskit_s3.Object.Checksum.response =
 
 let listed_part ~part_number ~size ~etag =
   {
-    Awskit_s3.List_parts.part_number =
+    Awskit_s3.Multipart.List_parts.part_number =
       Awskit_s3.Multipart.Part_number.of_int_exn part_number;
     etag = Some (Awskit_s3.Object.Etag.of_string_exn etag);
     size = Some size;
@@ -302,7 +302,7 @@ let listed_part ~part_number ~size ~etag =
     checksum = empty_checksum;
   }
 
-let put_result () : Awskit_s3.Put_object.result =
+let put_result () : Awskit_s3.Object.Put.result =
   {
     etag = None;
     version_id = None;
@@ -310,7 +310,7 @@ let put_result () : Awskit_s3.Put_object.result =
     response = response 200;
   }
 
-let get_info ?etag ?version_id content_length : Awskit_s3.Get_object.info =
+let get_info ?etag ?version_id content_length : Awskit_s3.Object.Get.info =
   {
     etag;
     content_type = None;
@@ -326,10 +326,10 @@ let get_info ?etag ?version_id content_length : Awskit_s3.Get_object.info =
   }
 
 let get_result ?etag ?version_id content_length value :
-    _ Awskit_s3.Get_object.result =
+    _ Awskit_s3.Object.Get.result =
   let info = get_info ?etag ?version_id content_length in
   {
-    Awskit_s3.Get_object.value;
+    Awskit_s3.Object.Get.value;
     etag = info.etag;
     content_type = info.content_type;
     content_length = info.content_length;
@@ -379,7 +379,7 @@ module S3 = struct
       conn.Runtime.get_count <- conn.Runtime.get_count + 1;
       let body =
         match
-          Option.bind options (fun (options : Awskit_s3.Get_object.options) ->
+          Option.bind options (fun (options : Awskit_s3.Object.Get.options) ->
               options.range)
         with
         | None -> conn.Runtime.response_body
@@ -390,7 +390,7 @@ module S3 = struct
               conn.Runtime.ranged_get_version_ids
               @ [
                   Option.bind options
-                    (fun (options : Awskit_s3.Get_object.options) ->
+                    (fun (options : Awskit_s3.Object.Get.options) ->
                       Option.map Awskit_s3.Object.Version_id.to_string
                         options.version_id);
                 ];
@@ -398,7 +398,7 @@ module S3 = struct
               conn.Runtime.ranged_get_if_matches
               @ [
                   Option.bind options
-                    (fun (options : Awskit_s3.Get_object.options) ->
+                    (fun (options : Awskit_s3.Object.Get.options) ->
                       Option.map etag_condition_to_string
                         options.preconditions.if_match);
                 ];
@@ -484,7 +484,7 @@ module S3 = struct
         conn.Runtime.multipart_create_count + 1;
       let upload_id = Awskit_s3.Multipart.Upload_id.of_string_exn "upload-1" in
       let upload = Awskit_s3.Multipart.Upload.created ~bucket ~key ~upload_id in
-      Ok { Awskit_s3.Create_multipart_upload.upload; response = response 200 }
+      Ok { Awskit_s3.Multipart.Create.upload; response = response 200 }
 
     let upload_part conn ~upload:_ ~part_number ~body ?options:_ () =
       conn.Runtime.upload_part_count <- conn.Runtime.upload_part_count + 1;
@@ -501,7 +501,7 @@ module S3 = struct
       in
       Ok
         {
-          Awskit_s3.Upload_part.part;
+          Awskit_s3.Multipart.Upload_part.part;
           checksum = empty_checksum;
           response = response 200;
         }
@@ -520,7 +520,7 @@ module S3 = struct
       else
         Ok
           {
-            Awskit_s3.Complete_multipart_upload.etag = None;
+            Awskit_s3.Multipart.Complete.etag = None;
             version_id = None;
             checksum = empty_checksum;
             response = response 200;
@@ -530,7 +530,7 @@ module S3 = struct
       conn.Runtime.abort_count <- conn.Runtime.abort_count + 1;
       if conn.Runtime.fail_abort_upload then
         Error (Awskit.Error.Producer.body "simulated abort failure")
-      else Ok { Awskit_s3.Abort_multipart_upload.response = response 204 }
+      else Ok { Awskit_s3.Multipart.Abort.response = response 204 }
 
     let list_parts _ ~upload:_ ?options:_ () = assert false
 

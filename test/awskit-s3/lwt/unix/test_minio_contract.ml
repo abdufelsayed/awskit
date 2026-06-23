@@ -2,12 +2,6 @@ module S3 = Awskit_s3_lwt_unix
 module Bucket = Awskit_s3.Bucket
 module Object = Awskit_s3.Object
 module Multipart = Awskit_s3.Multipart
-module Put_object = Awskit_s3.Put_object
-module Get_object = Awskit_s3.Get_object
-module Delete_object = Awskit_s3.Delete_object
-module Delete_objects = Awskit_s3.Delete_objects
-module Copy_object = Awskit_s3.Copy_object
-module List_object_versions = Awskit_s3.List_object_versions
 module Object_key = Awskit_s3.Object_key
 module Range = Awskit_s3.Range
 module Transfer = Awskit_s3.Transfer
@@ -90,12 +84,12 @@ let expect_status label status result =
 let bucket_name_string suffix =
   Printf.sprintf "awskit-minio-%d-%s" (Unix.getpid ()) suffix
 
-let delete_object_key key = Delete_objects.object_ ~key ()
+let delete_object_key key = Object.Delete_many.object_ ~key ()
 let delete_object key = delete_object_key (object_key key)
 
 let delete_object_version key version_id =
   match version_id with
-  | Some version_id -> Delete_objects.object_ ~key ~version_id ()
+  | Some version_id -> Object.Delete_many.object_ ~key ~version_id ()
   | None -> delete_object_key key
 
 let cleanup_bucket conn ~bucket =
@@ -107,16 +101,16 @@ let cleanup_bucket conn ~bucket =
     | Ok pages ->
         let objects =
           List.concat_map
-            (fun (page : List_object_versions.page) ->
+            (fun (page : Object.Versions.page) ->
               let versions =
                 List.map
-                  (fun (version : List_object_versions.object_version) ->
+                  (fun (version : Object.Versions.object_version) ->
                     delete_object_version version.key version.version_id)
                   page.versions
               in
               let markers =
                 List.map
-                  (fun (marker : List_object_versions.delete_marker) ->
+                  (fun (marker : Object.Versions.delete_marker) ->
                     delete_object_version marker.key marker.version_id)
                   page.delete_markers
               in
@@ -275,7 +269,7 @@ let test_object_range_metadata_and_copy () =
   with_bucket "objects" (fun conn ~bucket ->
       let put_options =
         {
-          Put_object.default_options with
+          Object.Put.default_options with
           content_type = Some (content_type "text/plain");
           metadata =
             Awskit_s3.Metadata.of_list_exn
@@ -288,7 +282,7 @@ let test_object_range_metadata_and_copy () =
               "abcdefghij"));
       let range_options =
         {
-          Get_object.default_options with
+          Object.Get.default_options with
           range = Some (Range.bytes_exn ~start:2L ~finish:5L);
         }
       in
@@ -297,7 +291,7 @@ let test_object_range_metadata_and_copy () =
           (get_string conn ~bucket ~key:"range.txt" ~options:range_options
              ~max_bytes:16L ())
       in
-      Alcotest.(check string) "range body" "cdef" result.Get_object.value;
+      Alcotest.(check string) "range body" "cdef" result.Object.Get.value;
       Alcotest.(check int)
         "range status" 206
         (Awskit.Response.status result.response);
@@ -305,16 +299,16 @@ let test_object_range_metadata_and_copy () =
         "content-range" (Some "bytes 2-5/10")
         (Awskit.Response.header result.response "content-range");
       let suffix_options =
-        { Get_object.default_options with range = Some (Range.suffix_exn 3L) }
+        { Object.Get.default_options with range = Some (Range.suffix_exn 3L) }
       in
       let result =
         await_get "get suffix"
           (get_string conn ~bucket ~key:"range.txt" ~options:suffix_options
              ~max_bytes:16L ())
       in
-      Alcotest.(check string) "suffix body" "hij" result.Get_object.value;
+      Alcotest.(check string) "suffix body" "hij" result.Object.Get.value;
       let invalid_range_options =
-        { Get_object.default_options with range = Some (Range.from_exn 99L) }
+        { Object.Get.default_options with range = Some (Range.from_exn 99L) }
       in
       expect_status "invalid range" 416
         (Lwt_main.run
@@ -334,7 +328,7 @@ let test_object_range_metadata_and_copy () =
         (List.assoc_opt "origin" (Awskit_s3.Metadata.to_list copied.metadata));
       let replace_options =
         {
-          Copy_object.default_options with
+          Object.Copy.default_options with
           metadata_directive =
             Some
               (`Replace
@@ -375,7 +369,7 @@ let test_object_versioning () =
       in
       let v2 = require_version "put version two" put2.version_id in
       let previous_options =
-        { Get_object.default_options with version_id = Some v1 }
+        { Object.Get.default_options with version_id = Some v1 }
       in
       let result =
         await_get "get previous version"
@@ -383,9 +377,9 @@ let test_object_versioning () =
              ~options:previous_options ~max_bytes:16L ())
       in
       Alcotest.(check string)
-        "previous version body" "one" result.Get_object.value;
+        "previous version body" "one" result.Object.Get.value;
       let copy_previous_options =
-        { Copy_object.default_options with source_version_id = Some v1 }
+        { Object.Copy.default_options with source_version_id = Some v1 }
       in
       let copied =
         await "copy previous version"
@@ -404,7 +398,7 @@ let test_object_versioning () =
           (get_string conn ~bucket ~key:"copy-previous.txt" ~max_bytes:16L ())
       in
       Alcotest.(check string)
-        "copied previous body" "one" result.Get_object.value;
+        "copied previous body" "one" result.Object.Get.value;
       let deleted =
         await "delete current"
           (S3.Object.delete conn ~bucket ~key:(object_key "versioned.txt") ())
@@ -417,7 +411,7 @@ let test_object_versioning () =
         (await "exists after delete marker"
            (S3.Object.exists conn ~bucket ~key:(object_key "versioned.txt")));
       let list_options =
-        List_object_versions.options_exn
+        Object.Versions.options_exn
           ~prefix:(Object_key.Prefix.of_string_exn "versioned.txt")
           ~max_keys:1 ()
       in
@@ -428,7 +422,7 @@ let test_object_versioning () =
       in
       let listed_versions =
         List.filter_map
-          (fun (version : List_object_versions.object_version) ->
+          (fun (version : Object.Versions.object_version) ->
             Option.map Object.Version_id.to_string version.version_id)
           versions
       in
@@ -445,7 +439,7 @@ let test_object_versioning () =
       in
       let listed_markers =
         List.filter_map
-          (fun (marker : List_object_versions.delete_marker) ->
+          (fun (marker : Object.Versions.delete_marker) ->
             Option.map Object.Version_id.to_string marker.version_id)
           markers
       in
@@ -453,7 +447,7 @@ let test_object_versioning () =
         "listed delete marker" true
         (List.mem (Object.Version_id.to_string marker) listed_markers);
       let version_two_options =
-        { Get_object.default_options with version_id = Some v2 }
+        { Object.Get.default_options with version_id = Some v2 }
       in
       let result =
         await_get "get hidden current"
@@ -461,20 +455,20 @@ let test_object_versioning () =
              ~options:version_two_options ~max_bytes:16L ())
       in
       Alcotest.(check string)
-        "hidden version body" "two" result.Get_object.value;
+        "hidden version body" "two" result.Object.Get.value;
       ignore
         (await "delete marker version"
            (S3.Object.delete conn ~bucket
               ~key:(object_key "versioned.txt")
               ~options:
-                { Delete_object.default_options with version_id = Some marker }
+                { Object.Delete.default_options with version_id = Some marker }
               ()));
       let result =
         await_get "get restored current"
           (get_string conn ~bucket ~key:"versioned.txt" ~max_bytes:16L ())
       in
       Alcotest.(check string)
-        "restored current body" "two" result.Get_object.value)
+        "restored current body" "two" result.Object.Get.value)
 
 let test_bucket_config_roundtrip () =
   with_bucket "bucket-config" (fun conn ~bucket ->
@@ -559,7 +553,7 @@ let test_multipart_edges () =
                   (String.length overwritten_body + String.length final_body))
              ())
       in
-      let body = get_result.Get_object.value in
+      let body = get_result.Object.Get.value in
       Alcotest.(check int)
         "multipart body length"
         (String.length overwritten_body + String.length final_body)
@@ -671,7 +665,7 @@ let test_multipart_path_transfer_resumes () =
                  ())
           in
           Alcotest.(check string)
-            "resumed body" body get_result.Get_object.value;
+            "resumed body" body get_result.Object.Get.value;
           Alcotest.(check (option int64))
             "resume final progress"
             (Some (Int64.of_int (String.length body)))

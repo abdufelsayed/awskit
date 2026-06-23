@@ -48,6 +48,12 @@ release packaging.
   should construct domain values with `Bucket_name`, `Object_key`, `Metadata`,
   `Tag.Set`, and operation `options`/`options_exn` builders instead of passing
   raw strings or relying on tuple-style get results. (138ab16)
+- Removed flat S3 root operation aliases such as `Awskit_s3.Put_object`,
+  `Get_object`, `Head_object`, `List_objects_v2`, `List_object_versions`,
+  bucket operation aliases, and multipart operation aliases. Use canonical
+  domain modules such as `Awskit_s3.Object.Put`, `Object.Get`, `Object.List`,
+  `Object.Versions`, `Bucket.Create`, `Bucket.Head`,
+  `Multipart.Create`, and `Multipart.Upload_part`. (138ab16)
 - Request builders, XML parsers, runtime internals, and adapter transfer helper
   modules are now private implementation modules. Use the public `Awskit`,
   `Awskit_s3`, and adapter APIs. (fc67929)
@@ -105,11 +111,9 @@ release packaging.
 ## Documentation, CI, and Release
 
 - Added root support and security policies, simulator-backed no-network S3
-  examples, docs content policy checks, and CI/release gates for examples and
-  documentation claims. (475bf37)
-- Added an installed API snapshot gate, release governance checks, branch and
-  ruleset release verification, and PR template prompts for API/support impact
-  review. (2aa5523)
+  examples, and CI/release gates for examples and documentation builds.
+  (475bf37)
+- Added PR template prompts for API/support impact review. (2aa5523)
 - Installed Eio HTTPS example-only dependencies in documentation/example CI and
   local release validation without adding them to published package
   dependencies. (d804565)

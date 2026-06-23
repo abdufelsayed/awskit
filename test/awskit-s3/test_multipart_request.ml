@@ -49,7 +49,9 @@ let test_multipart_upload_part_checksum_headers () =
       value = "provided-sha256";
     }
   in
-  let options = { Upload_part.default_options with checksum = Some checksum } in
+  let options =
+    { Multipart.Upload_part.default_options with checksum = Some checksum }
+  in
   let part =
     Recording_s3.Multipart.upload_part conn ~upload
       ~part_number:(Multipart.Part_number.of_int_exn 1)
@@ -90,7 +92,7 @@ let test_multipart_checksum_and_expected_owner_headers () =
   in
   let create_options =
     {
-      Create_multipart_upload.default_options with
+      Multipart.Create.default_options with
       checksum_algorithm = Some Object.Checksum.Algorithm.Sha256;
       checksum_type = Some Object.Checksum.Type.Composite;
       expected_bucket_owner = Some expected_owner;
@@ -109,7 +111,7 @@ let test_multipart_checksum_and_expected_owner_headers () =
   in
   let upload_options =
     {
-      Upload_part.checksum = Some part_checksum;
+      Multipart.Upload_part.checksum = Some part_checksum;
       expected_bucket_owner = Some expected_owner;
     }
   in
@@ -136,7 +138,7 @@ let test_multipart_checksum_and_expected_owner_headers () =
   in
   let complete_options =
     {
-      Complete_multipart_upload.expected_bucket_owner = Some expected_owner;
+      Multipart.Complete.expected_bucket_owner = Some expected_owner;
       checksum = Some complete_checksum;
       checksum_type = Some Object.Checksum.Type.Composite;
       multipart_object_size = Some 5L;
@@ -251,7 +253,7 @@ let test_complete_multipart_revalidates_options_record () =
   let conn = Recording_runtime.connect [] in
   let options =
     {
-      Complete_multipart_upload.default_options with
+      Multipart.Complete.default_options with
       multipart_object_size = Some (-1L);
     }
   in
@@ -276,7 +278,7 @@ let test_complete_multipart_rejects_known_object_size_mismatch () =
   let first_size = Int64.of_int Transfer.min_part_size in
   let options =
     {
-      Complete_multipart_upload.default_options with
+      Multipart.Complete.default_options with
       multipart_object_size = Some (Int64.add first_size 2L);
     }
   in
@@ -297,10 +299,7 @@ let test_complete_multipart_allows_unknown_part_sizes () =
       ]
   in
   let options =
-    {
-      Complete_multipart_upload.default_options with
-      multipart_object_size = Some 1L;
-    }
+    { Multipart.Complete.default_options with multipart_object_size = Some 1L }
   in
   ignore
     (Recording_s3.Multipart.complete_upload conn ~upload:(upload_handle ())

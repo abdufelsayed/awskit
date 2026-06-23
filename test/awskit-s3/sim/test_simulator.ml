@@ -309,7 +309,7 @@ let test_simulator_buffer_roundtrip () =
       ~key:(object_key "hello.txt")
       ~options:
         {
-          Put_object.default_options with
+          Object.Put.default_options with
           content_type = Some (content_type "text/plain");
           checksum = Some checksum;
         }
@@ -328,7 +328,7 @@ let test_simulator_buffer_roundtrip () =
       ()
     |> ok_or_fail "get"
   in
-  let body = result.Get_object.value in
+  let body = result.Object.Get.value in
   Alcotest.(check string) "body" "hello" body;
   Alcotest.(check (option string))
     "content-type" (Some "text/plain")
@@ -445,12 +445,12 @@ let test_simulator_rejects_unknown_checksum_writes () =
     (Simulator.Object.put conn
        ~bucket:(bucket_name "test-bucket")
        ~key:(object_key "bad.txt")
-       ~options:{ Put_object.default_options with checksum = Some checksum }
+       ~options:{ Object.Put.default_options with checksum = Some checksum }
        ~body:(Simulator.Body.of_string "body")
        ());
   let copy_options =
     {
-      Copy_object.default_options with
+      Object.Copy.default_options with
       checksum_algorithm = Some (Object.Checksum.Algorithm.Unknown "FUTURE");
     }
   in
@@ -474,7 +474,10 @@ let test_simulator_rejects_unknown_checksum_writes () =
     |> ok_or_fail "create upload"
   in
   let upload_part_options =
-    { Upload_part.checksum = Some checksum; expected_bucket_owner = None }
+    {
+      Multipart.Upload_part.checksum = Some checksum;
+      expected_bucket_owner = None;
+    }
   in
   expect_checksum_validation "simulator upload part"
     (Simulator.Multipart.upload_part conn ~upload:upload.upload
@@ -489,7 +492,7 @@ let test_simulator_rejects_unknown_checksum_writes () =
   in
   let complete_options =
     {
-      Complete_multipart_upload.expected_bucket_owner = None;
+      Multipart.Complete.expected_bucket_owner = None;
       checksum = Some checksum;
       checksum_type = None;
       multipart_object_size = None;
@@ -500,7 +503,7 @@ let test_simulator_rejects_unknown_checksum_writes () =
        ~options:complete_options ~parts:[ part ] ());
   let complete_options =
     {
-      Complete_multipart_upload.default_options with
+      Multipart.Complete.default_options with
       checksum_type = Some (Object.Checksum.Type.Unknown "FUTURE");
     }
   in
@@ -542,7 +545,7 @@ let test_simulator_multipart_complete_validates_sizes () =
     (Multipart.Part.size small_part.part);
   let negative_options =
     {
-      Complete_multipart_upload.default_options with
+      Multipart.Complete.default_options with
       multipart_object_size = Some (-1L);
     }
   in
@@ -558,10 +561,7 @@ let test_simulator_multipart_complete_validates_sizes () =
   let large_part = upload_part 1 (String.make Transfer.min_part_size 'x') in
   let final_part = upload_part 2 "z" in
   let mismatch_options =
-    {
-      Complete_multipart_upload.default_options with
-      multipart_object_size = Some 1L;
-    }
+    { Multipart.Complete.default_options with multipart_object_size = Some 1L }
   in
   expect_validation_field "simulator multipart object size mismatch"
     "multipart_object_size"
@@ -586,7 +586,7 @@ let test_simulator_multipart_complete_validates_part_checksums () =
     Simulator.Multipart.upload_part conn ~upload:upload.upload
       ~part_number:(Multipart.Part_number.of_int_exn 1)
       ~body:(Simulator.Body.of_string "part")
-      ~options:(Upload_part.options_exn ~checksum ())
+      ~options:(Multipart.Upload_part.options_exn ~checksum ())
       ()
     |> ok_or_fail "upload checksummed part"
   in
@@ -662,7 +662,7 @@ let test_simulator_streaming_get () =
       ~bucket:(bucket_name "test-bucket")
       ~key:(object_key "stream") ~consume ()
     |> ok_or_fail "stream get"
-    |> fun result -> result.Get_object.value
+    |> fun result -> result.Object.Get.value
   in
   Alcotest.(check string) "partial body" "abc" body
 
@@ -710,7 +710,7 @@ let test_simulator_paginator_keys () =
        ()
     |> ok_or_fail "put other");
   let options =
-    List_objects_v2.options_exn
+    Object.List.options_exn
       ~prefix:(Object_key.Prefix.of_string_exn "logs/")
       ~max_keys:1 ()
   in
@@ -737,9 +737,9 @@ let test_simulator_list_common_prefixes () =
   ignore (put "logs/2026/a" "nested");
   ignore (put "reports/a" "report");
   let options =
-    List_objects_v2.options_exn
+    Object.List.options_exn
       ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-      ~delimiter:List_objects_v2.Delimiter.slash ()
+      ~delimiter:Object.List.Delimiter.slash ()
   in
   let page =
     Simulator.Object.list conn ~bucket:(bucket_name "test-bucket") ~options ()
@@ -748,7 +748,7 @@ let test_simulator_list_common_prefixes () =
   Alcotest.(check (list string))
     "direct objects" [ "logs/a" ]
     (List.map
-       (fun (object_ : List_objects_v2.object_summary) ->
+       (fun (object_ : Object.List.object_summary) ->
          Object_key.to_string object_.key)
        page.objects);
   Alcotest.(check (list string))
@@ -768,7 +768,7 @@ let test_simulator_list_token_handles_control_key () =
   ignore (put "logs/a\nx" "a");
   ignore (put "logs/b" "b");
   let options =
-    List_objects_v2.options_exn
+    Object.List.options_exn
       ~prefix:(Object_key.Prefix.of_string_exn "logs/")
       ~max_keys:1 ()
   in
@@ -800,9 +800,9 @@ let test_simulator_version_list_common_prefixes () =
   ignore (put "logs/2026/a" "nested");
   ignore (put "reports/a" "report");
   let options =
-    List_object_versions.options_exn
+    Object.Versions.options_exn
       ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-      ~delimiter:List_object_versions.Delimiter.slash ()
+      ~delimiter:Object.Versions.Delimiter.slash ()
   in
   let page =
     Simulator.Object.list_versions conn
@@ -813,7 +813,7 @@ let test_simulator_version_list_common_prefixes () =
   Alcotest.(check (list string))
     "direct versions" [ "logs/a" ]
     (List.map
-       (fun (version : List_object_versions.object_version) ->
+       (fun (version : Object.Versions.object_version) ->
          Object_key.to_string version.key)
        page.versions);
   Alcotest.(check (list string))

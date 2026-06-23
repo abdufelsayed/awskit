@@ -55,7 +55,7 @@ module Runtime = struct
     mutable upload_part_count : int;
     mutable complete_count : int;
     mutable abort_count : int;
-    mutable listed_parts : Awskit_s3.List_parts.part_info list;
+    mutable listed_parts : Awskit_s3.Multipart.List_parts.part_info list;
     mutable completed_part_etags : string list;
     mutable get_ranges : string list;
     mutable ranged_get_version_ids : string option list;
@@ -311,7 +311,7 @@ let empty_checksum : Awskit_s3.Object.Checksum.response =
 
 let listed_part ~part_number ~size ~etag =
   {
-    Awskit_s3.List_parts.part_number =
+    Awskit_s3.Multipart.List_parts.part_number =
       Awskit_s3.Multipart.Part_number.of_int_exn part_number;
     etag = Some (Awskit_s3.Object.Etag.of_string_exn etag);
     size = Some size;
@@ -319,7 +319,7 @@ let listed_part ~part_number ~size ~etag =
     checksum = empty_checksum;
   }
 
-let put_result () : Awskit_s3.Put_object.result =
+let put_result () : Awskit_s3.Object.Put.result =
   {
     etag = None;
     version_id = None;
@@ -327,7 +327,7 @@ let put_result () : Awskit_s3.Put_object.result =
     response = response 200;
   }
 
-let get_info ?etag ?version_id content_length : Awskit_s3.Get_object.info =
+let get_info ?etag ?version_id content_length : Awskit_s3.Object.Get.info =
   {
     etag;
     content_type = None;
@@ -343,10 +343,10 @@ let get_info ?etag ?version_id content_length : Awskit_s3.Get_object.info =
   }
 
 let get_result ?etag ?version_id content_length value :
-    _ Awskit_s3.Get_object.result =
+    _ Awskit_s3.Object.Get.result =
   let info = get_info ?etag ?version_id content_length in
   {
-    Awskit_s3.Get_object.value;
+    Awskit_s3.Object.Get.value;
     etag = info.etag;
     content_type = info.content_type;
     content_length = info.content_length;
@@ -395,7 +395,7 @@ module S3 = struct
       conn.Runtime.get_count <- conn.Runtime.get_count + 1;
       let body =
         match
-          Option.bind options (fun (options : Awskit_s3.Get_object.options) ->
+          Option.bind options (fun (options : Awskit_s3.Object.Get.options) ->
               options.range)
         with
         | None -> conn.Runtime.response_body
@@ -406,7 +406,7 @@ module S3 = struct
               conn.Runtime.ranged_get_version_ids
               @ [
                   Option.bind options
-                    (fun (options : Awskit_s3.Get_object.options) ->
+                    (fun (options : Awskit_s3.Object.Get.options) ->
                       Option.map Awskit_s3.Object.Version_id.to_string
                         options.version_id);
                 ];
@@ -414,7 +414,7 @@ module S3 = struct
               conn.Runtime.ranged_get_if_matches
               @ [
                   Option.bind options
-                    (fun (options : Awskit_s3.Get_object.options) ->
+                    (fun (options : Awskit_s3.Object.Get.options) ->
                       Option.map etag_condition_to_string
                         options.preconditions.if_match);
                 ];
@@ -515,7 +515,7 @@ module S3 = struct
       let upload_id = Awskit_s3.Multipart.Upload_id.of_string_exn "upload-1" in
       let upload = Awskit_s3.Multipart.Upload.created ~bucket ~key ~upload_id in
       Lwt.return_ok
-        { Awskit_s3.Create_multipart_upload.upload; response = response 200 }
+        { Awskit_s3.Multipart.Create.upload; response = response 200 }
 
     let upload_part conn ~upload:_ ~part_number ~body ?options:_ () =
       conn.Runtime.upload_part_count <- conn.Runtime.upload_part_count + 1;
@@ -535,7 +535,7 @@ module S3 = struct
             in
             Lwt.return_ok
               {
-                Awskit_s3.Upload_part.part;
+                Awskit_s3.Multipart.Upload_part.part;
                 checksum = empty_checksum;
                 response = response 200;
               })
@@ -555,7 +555,7 @@ module S3 = struct
       else
         Lwt.return_ok
           {
-            Awskit_s3.Complete_multipart_upload.etag = None;
+            Awskit_s3.Multipart.Complete.etag = None;
             version_id = None;
             checksum = empty_checksum;
             response = response 200;
@@ -565,9 +565,7 @@ module S3 = struct
       conn.Runtime.abort_count <- conn.Runtime.abort_count + 1;
       if conn.Runtime.fail_abort_upload then
         Lwt.return_error (Awskit.Error.Producer.body "simulated abort failure")
-      else
-        Lwt.return_ok
-          { Awskit_s3.Abort_multipart_upload.response = response 204 }
+      else Lwt.return_ok { Awskit_s3.Multipart.Abort.response = response 204 }
 
     let list_parts _ ~upload:_ ?options:_ () = unsupported ()
 
@@ -579,7 +577,8 @@ module S3 = struct
 
       let parts conn ~upload:_ ?options ?max_pages:_ () =
         conn.Runtime.list_parts_expected_owner <-
-          Option.bind options (fun (options : Awskit_s3.List_parts.options) ->
+          Option.bind options
+            (fun (options : Awskit_s3.Multipart.List_parts.options) ->
               options.expected_bucket_owner);
         Lwt.return_ok conn.Runtime.listed_parts
     end
@@ -997,7 +996,7 @@ let test_upload_file_allows_put_checksum_below_threshold () =
       let conn = connection () in
       let put_options =
         {
-          Awskit_s3.Put_object.default_options with
+          Awskit_s3.Object.Put.default_options with
           checksum = Some checksum_value;
         }
       in
@@ -1092,7 +1091,7 @@ let test_upload_file_rejects_invalid_options () =
       | Ok _ -> Alcotest.fail "expected concurrency validation");
       let put_options =
         {
-          Awskit_s3.Put_object.default_options with
+          Awskit_s3.Object.Put.default_options with
           checksum = Some checksum_value;
         }
       in
@@ -1123,7 +1122,7 @@ let test_upload_file_rejects_invalid_options () =
       | Ok _ -> Alcotest.fail "expected explicit multipart checksum validation");
       let upload_part_options =
         {
-          Awskit_s3.Upload_part.default_options with
+          Awskit_s3.Multipart.Upload_part.default_options with
           checksum = Some checksum_value;
         }
       in
@@ -1143,7 +1142,7 @@ let test_upload_file_rejects_invalid_options () =
       | Ok _ -> Alcotest.fail "expected upload-part checksum validation");
       let create_options =
         {
-          Awskit_s3.Create_multipart_upload.default_options with
+          Awskit_s3.Multipart.Create.default_options with
           checksum_algorithm = Some Awskit_s3.Object.Checksum.Algorithm.Sha256;
         }
       in
@@ -1163,7 +1162,7 @@ let test_upload_file_rejects_invalid_options () =
       | Ok _ -> Alcotest.fail "expected create checksum validation");
       let complete_options =
         {
-          Awskit_s3.Complete_multipart_upload.default_options with
+          Awskit_s3.Multipart.Complete.default_options with
           checksum = Some checksum_value;
         }
       in
@@ -1183,7 +1182,7 @@ let test_upload_file_rejects_invalid_options () =
       | Ok _ -> Alcotest.fail "expected complete checksum validation");
       let create_options =
         {
-          Awskit_s3.Create_multipart_upload.default_options with
+          Awskit_s3.Multipart.Create.default_options with
           checksum_type = Some Awskit_s3.Object.Checksum.Type.Composite;
         }
       in
@@ -1203,7 +1202,7 @@ let test_upload_file_rejects_invalid_options () =
       | Ok _ -> Alcotest.fail "expected create checksum-type validation");
       let complete_options =
         {
-          Awskit_s3.Complete_multipart_upload.default_options with
+          Awskit_s3.Multipart.Complete.default_options with
           checksum_type = Some Awskit_s3.Object.Checksum.Type.Composite;
         }
       in
@@ -1239,7 +1238,7 @@ let test_resume_multipart_upload_file_uses_list_parts_options () =
       let upload = Awskit_s3.Multipart.Upload.resume ~bucket ~key ~upload_id in
       let list_parts_options =
         {
-          Awskit_s3.List_parts.default_options with
+          Awskit_s3.Multipart.List_parts.default_options with
           expected_bucket_owner = Some (account_id "123456789012");
         }
       in
@@ -1657,7 +1656,7 @@ let test_download_file_rejects_range_option () =
       let conn = connection ~response_body:"body" () in
       let get_options =
         {
-          Awskit_s3.Get_object.default_options with
+          Awskit_s3.Object.Get.default_options with
           range = Some (Awskit_s3.Range.bytes_exn ~start:0L ~finish:1L);
         }
       in

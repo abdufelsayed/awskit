@@ -306,29 +306,29 @@ module Make
           Runtime.connection ->
           bucket:Awskit_s3.Bucket_name.t ->
           key:Awskit_s3.Object_key.t ->
-          ?options:Awskit_s3.Put_object.options ->
+          ?options:Awskit_s3.Object.Put.options ->
           body:Runtime.request_body ->
           unit ->
-          (Awskit_s3.Put_object.result, Awskit_s3.Error.t) result Lwt.t
+          (Awskit_s3.Object.Put.result, Awskit_s3.Error.t) result Lwt.t
 
         val get :
           Runtime.connection ->
           bucket:Awskit_s3.Bucket_name.t ->
           key:Awskit_s3.Object_key.t ->
-          ?options:Awskit_s3.Get_object.options ->
+          ?options:Awskit_s3.Object.Get.options ->
           consume:
             (Runtime.response_body_reader ->
             ('a, Awskit_s3.Error.t) result Lwt.t) ->
           unit ->
-          ('a Awskit_s3.Get_object.result, Awskit_s3.Error.t) result Lwt.t
+          ('a Awskit_s3.Object.Get.result, Awskit_s3.Error.t) result Lwt.t
 
         val head :
           Runtime.connection ->
           bucket:Awskit_s3.Bucket_name.t ->
           key:Awskit_s3.Object_key.t ->
-          ?options:Awskit_s3.Head_object.options ->
+          ?options:Awskit_s3.Object.Head.options ->
           unit ->
-          (Awskit_s3.Head_object.result, Awskit_s3.Error.t) result Lwt.t
+          (Awskit_s3.Object.Head.result, Awskit_s3.Error.t) result Lwt.t
       end
 
       module Multipart :
@@ -649,8 +649,8 @@ struct
                       | Ok result ->
                           Lwt.return_ok (Awskit_s3.Transfer.Multipart result))))
 
-  let head_options_of_get_options (options : Awskit_s3.Get_object.options) :
-      Awskit_s3.Head_object.options =
+  let head_options_of_get_options (options : Awskit_s3.Object.Get.options) :
+      Awskit_s3.Object.Head.options =
     {
       preconditions = options.preconditions;
       version_id = options.version_id;
@@ -658,8 +658,8 @@ struct
       expected_bucket_owner = options.expected_bucket_owner;
     }
 
-  let get_info (result : _ Awskit_s3.Get_object.result) :
-      Awskit_s3.Get_object.info =
+  let get_info (result : _ Awskit_s3.Object.Get.result) :
+      Awskit_s3.Object.Get.info =
     {
       etag = result.etag;
       content_type = result.content_type;
@@ -674,9 +674,9 @@ struct
       response = result.response;
     }
 
-  let ranged_get_options_of_head (info : Awskit_s3.Head_object.result)
-      (get_options : Awskit_s3.Get_object.options) :
-      Awskit_s3.Get_object.options =
+  let ranged_get_options_of_head (info : Awskit_s3.Object.Head.result)
+      (get_options : Awskit_s3.Object.Get.options) :
+      Awskit_s3.Object.Get.options =
     match info.version_id with
     | Some version_id -> { get_options with version_id = Some version_id }
     | None -> (

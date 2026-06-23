@@ -36,14 +36,13 @@ as release branch pushes, scheduled runs, and manual dispatches.
 - Installs test and documentation dependencies for all packages.
 - Installs Eio HTTPS example-only packages separately because they are not part
   of the published package dependency graph.
-- Builds executable examples, odoc documentation, and docs content policy with
-  `opam exec -- dune build @examples @doc @docs-content`.
+- Builds executable examples and odoc documentation with
+  `opam exec -- dune build @examples @doc`.
 
-`governance`
+`protocol-evidence`
 
 - Runs on Ubuntu with the latest OCaml 5 compiler.
 - Installs test and documentation dependencies for all packages.
-- Runs `scripts/check-release-governance.sh`.
 - Builds protocol evidence with `opam exec -- dune build @check-protocol`.
 
 `s3-minio-contract`
@@ -57,7 +56,7 @@ as release branch pushes, scheduled runs, and manual dispatches.
 
 - Runs only on pushes to `main`.
 - Requires build/test, docs/examples, and MinIO jobs to pass.
-- Also requires the governance job to pass.
+- Also requires the protocol evidence job to pass.
 - Builds odoc documentation and deploys `_build/default/_doc/_html` to GitHub
   Pages.
 

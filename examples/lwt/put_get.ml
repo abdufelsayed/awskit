@@ -39,7 +39,7 @@ let run () =
     (Format.pp_print_option Awskit_s3.Object.Etag.pp)
     put.etag;
   let* got = S3.Object.get_string s3 ~bucket ~key ~max_bytes:1_048_576L () in
-  let downloaded = (unwrap "get object" got).Awskit_s3.Get_object.value in
+  let downloaded = (unwrap "get object" got).Awskit_s3.Object.Get.value in
   Format.printf "downloaded: %S@." downloaded;
   Lwt.return_unit
 

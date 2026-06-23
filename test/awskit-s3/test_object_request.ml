@@ -45,7 +45,7 @@ let test_object_checksum_headers_and_response () =
   in
   let options =
     {
-      Put_object.default_options with
+      Object.Put.default_options with
       checksum = Some checksum;
       content_type = Some (content_type "text/plain");
       metadata = Metadata.of_list_exn [ ("source", "unit-test") ];
@@ -118,7 +118,7 @@ let test_object_precondition_headers () =
     }
   in
   let put_options =
-    { Put_object.default_options with preconditions = write_preconditions }
+    { Object.Put.default_options with preconditions = write_preconditions }
   in
   ignore
     (Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
@@ -136,7 +136,7 @@ let test_object_precondition_headers () =
     }
   in
   let get_options =
-    { Get_object.default_options with preconditions = read_preconditions }
+    { Object.Get.default_options with preconditions = read_preconditions }
   in
   ignore
     (Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
@@ -145,7 +145,7 @@ let test_object_precondition_headers () =
        ()
     |> ok_or_fail "get preconditions");
   let head_options =
-    { Head_object.default_options with preconditions = read_preconditions }
+    { Object.Head.default_options with preconditions = read_preconditions }
   in
   ignore
     (Recording_s3.Object.head conn ~bucket:(bucket_name "my-bucket")
@@ -158,7 +158,7 @@ let test_object_precondition_headers () =
     }
   in
   let delete_options =
-    { Delete_object.default_options with preconditions = delete_preconditions }
+    { Object.Delete.default_options with preconditions = delete_preconditions }
   in
   ignore
     (Recording_s3.Object.delete conn ~bucket:(bucket_name "my-bucket")
@@ -175,7 +175,7 @@ let test_object_precondition_headers () =
   in
   let copy_options =
     {
-      Copy_object.default_options with
+      Object.Copy.default_options with
       source_preconditions = copy_preconditions;
     }
   in
@@ -247,7 +247,7 @@ let test_object_get_range_header () =
       ]
   in
   let options =
-    Get_object.options_exn ~range:(Range.bytes_exn ~start:2L ~finish:5L) ()
+    Object.Get.options_exn ~range:(Range.bytes_exn ~start:2L ~finish:5L) ()
   in
   let result =
     Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
@@ -287,7 +287,7 @@ let test_object_string_conveniences_share_operation_model () =
       ]
   in
   let put_options =
-    Put_object.options_exn ~content_type:(content_type "text/plain") ()
+    Object.Put.options_exn ~content_type:(content_type "text/plain") ()
   in
   let put =
     Recording_s3.Object.put_string conn ~bucket:(bucket_name "my-bucket")
@@ -298,7 +298,7 @@ let test_object_string_conveniences_share_operation_model () =
     "put etag" (Some "\"put\"")
     (Option.map Object.Etag.to_string put.etag);
   let get_options =
-    Get_object.options_exn ~expected_bucket_owner:(account_id "123456789012") ()
+    Object.Get.options_exn ~expected_bucket_owner:(account_id "123456789012") ()
   in
   let get =
     Recording_s3.Object.get_string conn ~bucket:(bucket_name "my-bucket")
@@ -420,7 +420,7 @@ let test_object_get_rejects_malformed_content_range () =
       ]
   in
   let options =
-    Get_object.options_exn ~range:(Range.bytes_exn ~start:2L ~finish:5L) ()
+    Object.Get.options_exn ~range:(Range.bytes_exn ~start:2L ~finish:5L) ()
   in
   match
     Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
@@ -438,9 +438,11 @@ let test_delete_objects_request_body () =
   let etag = Object.Etag.of_string_exn "\"etag\"" in
   let objects =
     [
-      Delete_objects.object_ ~key:(object_key "key-only.txt") ();
-      Delete_objects.object_ ~key:(object_key "versioned.txt") ~version_id ();
-      Delete_objects.object_ ~key:(object_key "etag.txt") ~etag ();
+      Object.Delete_many.object_ ~key:(object_key "key-only.txt") ();
+      Object.Delete_many.object_
+        ~key:(object_key "versioned.txt")
+        ~version_id ();
+      Object.Delete_many.object_ ~key:(object_key "etag.txt") ~etag ();
     ]
   in
   ignore
@@ -480,7 +482,7 @@ let test_delete_objects_response_decode () =
     {|<DeleteResult><Deleted><Key>deleted.txt</Key><VersionId>version-1</VersionId><DeleteMarker>true</DeleteMarker><DeleteMarkerVersionId>marker-version</DeleteMarkerVersionId></Deleted><Error><Key>blocked.txt</Key><Code>AccessDenied</Code><Message>denied</Message></Error></DeleteResult>|}
   in
   let conn = Recording_runtime.connect [ response 200 body ] in
-  let object_ = Delete_objects.object_ ~key:(object_key "deleted.txt") () in
+  let object_ = Object.Delete_many.object_ ~key:(object_key "deleted.txt") () in
   let result =
     Recording_s3.Object.delete_objects conn ~bucket:(bucket_name "my-bucket")
       ~objects:[ object_ ] ()
@@ -515,7 +517,7 @@ let test_delete_objects_embedded_error () =
     {|<Error><Code>MalformedXML</Code><Message>request body is malformed</Message></Error>|}
   in
   let conn = Recording_runtime.connect [ response 200 body ] in
-  let object_ = Delete_objects.object_ ~key:(object_key "file") () in
+  let object_ = Object.Delete_many.object_ ~key:(object_key "file") () in
   match
     Recording_s3.Object.delete_objects conn ~bucket:(bucket_name "my-bucket")
       ~objects:[ object_ ] ()
@@ -527,13 +529,15 @@ let test_delete_objects_embedded_error () =
 
 let test_delete_objects_rejects_invalid_count () =
   let conn = Recording_runtime.connect [] in
-  let object_ = Delete_objects.object_ ~key:(object_key "file") () in
+  let object_ = Object.Delete_many.object_ ~key:(object_key "file") () in
   let result =
     Recording_s3.Object.delete_objects conn ~bucket:(bucket_name "my-bucket")
       ~objects:[] ()
   in
   expect_validation "delete objects empty" result;
-  let objects = List.init (Delete_objects.max_objects + 1) (fun _ -> object_) in
+  let objects =
+    List.init (Object.Delete_many.max_objects + 1) (fun _ -> object_)
+  in
   let result =
     Recording_s3.Object.delete_objects conn ~bucket:(bucket_name "my-bucket")
       ~objects ()
@@ -550,19 +554,19 @@ let test_object_version_id_queries () =
         response 204 "";
       ]
   in
-  let get_options = Get_object.options_exn ~version_id () in
+  let get_options = Object.Get.options_exn ~version_id () in
   ignore
     (Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
        ~key:(object_key "file") ~options:get_options
        ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
        ()
     |> ok_or_fail "get version");
-  let head_options = Head_object.options_exn ~version_id () in
+  let head_options = Object.Head.options_exn ~version_id () in
   ignore
     (Recording_s3.Object.head conn ~bucket:(bucket_name "my-bucket")
        ~key:(object_key "file") ~options:head_options ()
     |> ok_or_fail "head version");
-  let delete_options = Delete_object.options_exn ~version_id () in
+  let delete_options = Object.Delete.options_exn ~version_id () in
   ignore
     (Recording_s3.Object.delete conn ~bucket:(bucket_name "my-bucket")
        ~key:(object_key "file") ~options:delete_options ()
@@ -603,7 +607,7 @@ let test_object_versioning_requests_and_parse () =
       ]
   in
   let copy_options =
-    { Copy_object.default_options with source_version_id = Some version_id }
+    { Object.Copy.default_options with source_version_id = Some version_id }
   in
   let copy =
     Recording_s3.Object.copy conn ~source_bucket:(bucket_name "my-bucket")
@@ -616,7 +620,7 @@ let test_object_versioning_requests_and_parse () =
     "copy result source version" (Some "version-1")
     (version_string copy.copy_source_version_id);
   let list_options =
-    List_object_versions.options_exn
+    Object.Versions.options_exn
       ~prefix:(Object_key.Prefix.of_string_exn "logs/")
       ~max_keys:10 ~key_marker:(object_key "logs/a.txt")
       ~version_id_marker:version_id ()
@@ -670,7 +674,7 @@ let test_copy_source_exact_once_encoding () =
       ]
   in
   let options =
-    { Copy_object.default_options with source_version_id = Some version_id }
+    { Object.Copy.default_options with source_version_id = Some version_id }
   in
   ignore
     (Recording_s3.Object.copy conn
@@ -804,7 +808,7 @@ let test_find_success_returns_some () =
       ()
   with
   | Ok (Some result) ->
-      let body = result.Get_object.value in
+      let body = result.Object.Get.value in
       Alcotest.(check string) "body" "hello" body;
       Alcotest.(check (option string))
         "etag" (Some "\"etag\"")
@@ -1040,15 +1044,15 @@ let test_list_options_reject_invalid_max_keys () =
     | Ok _ -> Alcotest.failf "%s: expected max_keys validation error" label
   in
   [
-    ("list zero", List_objects_v2.options ~max_keys:0 ());
-    ("list negative", List_objects_v2.options ~max_keys:(-1) ());
-    ("list too large", List_objects_v2.options ~max_keys:1001 ());
+    ("list zero", Object.List.options ~max_keys:0 ());
+    ("list negative", Object.List.options ~max_keys:(-1) ());
+    ("list too large", Object.List.options ~max_keys:1001 ());
   ]
   |> List.iter (fun (label, result) -> check label result);
   [
-    ("versions zero", List_object_versions.options ~max_keys:0 ());
-    ("versions negative", List_object_versions.options ~max_keys:(-1) ());
-    ("versions too large", List_object_versions.options ~max_keys:1001 ());
+    ("versions zero", Object.Versions.options ~max_keys:0 ());
+    ("versions negative", Object.Versions.options ~max_keys:(-1) ());
+    ("versions too large", Object.Versions.options ~max_keys:1001 ());
   ]
   |> List.iter (fun (label, build) -> check label build)
 
@@ -1060,11 +1064,9 @@ let test_list_operations_reject_record_max_keys () =
         Alcotest.failf "%s: unexpected error: %a" label Error.pp error
     | Ok _ -> Alcotest.failf "%s: expected max_keys validation error" label
   in
-  let list_options =
-    { List_objects_v2.default_options with max_keys = Some 0 }
-  in
+  let list_options = { Object.List.default_options with max_keys = Some 0 } in
   let version_options =
-    { List_object_versions.default_options with max_keys = Some 1001 }
+    { Object.Versions.default_options with max_keys = Some 1001 }
   in
   let conn =
     Recording_runtime.connect
@@ -1273,7 +1275,7 @@ let test_object_checksum_mode_and_expected_owner_headers () =
       ]
   in
   let read_options =
-    Get_object.options_exn ~checksum_mode:Object.Checksum.Mode.Enabled
+    Object.Get.options_exn ~checksum_mode:Object.Checksum.Mode.Enabled
       ~expected_bucket_owner:expected_owner ()
   in
   ignore
@@ -1283,7 +1285,7 @@ let test_object_checksum_mode_and_expected_owner_headers () =
        ()
     |> ok_or_fail "get checksum mode");
   let head_options =
-    Head_object.options_exn ~checksum_mode:Object.Checksum.Mode.Enabled
+    Object.Head.options_exn ~checksum_mode:Object.Checksum.Mode.Enabled
       ~expected_bucket_owner:expected_owner ()
   in
   ignore
@@ -1291,22 +1293,22 @@ let test_object_checksum_mode_and_expected_owner_headers () =
        ~key:(object_key "file") ~options:head_options ()
     |> ok_or_fail "head checksum mode");
   let delete_options =
-    Delete_object.options_exn ~expected_bucket_owner:expected_owner ()
+    Object.Delete.options_exn ~expected_bucket_owner:expected_owner ()
   in
   ignore
     (Recording_s3.Object.delete conn ~bucket:(bucket_name "my-bucket")
        ~key:(object_key "file") ~options:delete_options ()
     |> ok_or_fail "delete expected owner");
   let delete_many_options =
-    Delete_objects.options_exn ~expected_bucket_owner:expected_owner ()
+    Object.Delete_many.options_exn ~expected_bucket_owner:expected_owner ()
   in
   ignore
     (Recording_s3.Object.delete_objects conn ~bucket:(bucket_name "my-bucket")
-       ~objects:[ Delete_objects.object_ ~key:(object_key "file") () ]
+       ~objects:[ Object.Delete_many.object_ ~key:(object_key "file") () ]
        ~options:delete_many_options ()
     |> ok_or_fail "delete many expected owner");
   let copy_options =
-    Copy_object.options_exn ~checksum_algorithm:Object.Checksum.Algorithm.Sha256
+    Object.Copy.options_exn ~checksum_algorithm:Object.Checksum.Algorithm.Sha256
       ~expected_bucket_owner:expected_owner
       ~source_expected_bucket_owner:(account_id "210987654321")
       ()
@@ -1318,14 +1320,14 @@ let test_object_checksum_mode_and_expected_owner_headers () =
        ~destination_key:(object_key "copy") ~options:copy_options ()
     |> ok_or_fail "copy expected owner");
   let list_options =
-    List_objects_v2.options_exn ~expected_bucket_owner:expected_owner ()
+    Object.List.options_exn ~expected_bucket_owner:expected_owner ()
   in
   ignore
     (Recording_s3.Object.list conn ~bucket:(bucket_name "my-bucket")
        ~options:list_options ()
     |> ok_or_fail "list expected owner");
   let version_options =
-    List_object_versions.options_exn ~expected_bucket_owner:expected_owner ()
+    Object.Versions.options_exn ~expected_bucket_owner:expected_owner ()
   in
   ignore
     (Recording_s3.Object.list_versions conn ~bucket:(bucket_name "my-bucket")

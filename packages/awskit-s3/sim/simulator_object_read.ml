@@ -23,9 +23,9 @@ let object_read_info (obj : stored_object) ~status ~content_length
   in
   info_of_object ~content_length response obj
 
-let get_result (info : Get_object.info) value : _ Get_object.result =
+let get_result (info : Object.Get.info) value : _ Object.Get.result =
   {
-    Get_object.value;
+    Object.Get.value;
     etag = info.etag;
     content_type = info.content_type;
     content_length = info.content_length;
@@ -40,7 +40,7 @@ let get_result (info : Get_object.info) value : _ Get_object.result =
   }
 
 let read_object ?read_fault obj options ~consume =
-  let* () = ensure_read_preconditions obj options.Get_object.preconditions in
+  let* () = ensure_read_preconditions obj options.Object.Get.preconditions in
   let* body, status, range_headers = ranged_body obj.body options.range in
   let info =
     object_read_info obj ~status ~content_length:(String.length body)
@@ -52,7 +52,7 @@ let read_object ?read_fault obj options ~consume =
        ~consume)
 
 let get conn ~bucket ~key ?options ~consume () =
-  let options = Option.value ~default:Get_object.default_options options in
+  let options = Option.value ~default:Object.Get.default_options options in
   match validate_bucket_key bucket key with
   | Error error -> Error error
   | Ok () -> (
@@ -81,7 +81,7 @@ let get conn ~bucket ~key ?options ~consume () =
                   read_object obj options ~consume)))
 
 let find conn ~bucket ~key ?options ~consume () =
-  let options = Option.value ~default:Get_object.default_options options in
+  let options = Option.value ~default:Object.Get.default_options options in
   let lookup_error error =
     if Error.is_no_such_key error then Ok None else Error error
   in
@@ -114,7 +114,7 @@ let find conn ~bucket ~key ?options ~consume () =
                   Result.map Option.some (read_object obj options ~consume))))
 
 let head conn ~bucket ~key ?options () =
-  let options = Option.value ~default:Head_object.default_options options in
+  let options = Option.value ~default:Object.Head.default_options options in
   match validate_bucket_key bucket key with
   | Error error -> Error error
   | Ok () -> (
@@ -161,7 +161,7 @@ let get_as_bytes conn ~bucket ~key ~max_bytes ?options () =
   Result.map
     (fun result ->
       {
-        Get_object.value = Bytes.of_string result.Get_object.value;
+        Object.Get.value = Bytes.of_string result.Object.Get.value;
         etag = result.etag;
         content_type = result.content_type;
         content_length = result.content_length;

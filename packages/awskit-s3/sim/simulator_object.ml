@@ -42,7 +42,7 @@ module Object = struct
 
   let list_versions conn ~bucket ?options () =
     let options =
-      Option.value ~default:List_object_versions.default_options options
+      Option.value ~default:Object.Versions.default_options options
     in
     match validate_bucket bucket with
     | Error error -> Error error
@@ -97,7 +97,7 @@ module Object = struct
                     in
                     Ok
                       {
-                        List_object_versions.bucket =
+                        Object.Versions.bucket =
                           Some (Bucket_name.of_string_exn bucket);
                         prefix = options.prefix;
                         delimiter = options.delimiter;
@@ -113,9 +113,7 @@ module Object = struct
                       })))
 
   let list conn ~bucket ?options () =
-    let options =
-      Option.value ~default:List_objects_v2.default_options options
-    in
+    let options = Option.value ~default:Object.List.default_options options in
     match validate_bucket bucket with
     | Error error -> Error error
     | Ok () -> (
@@ -152,10 +150,10 @@ module Object = struct
         (Fmt.str "ListObjectsV2 collection exceeded max_pages bound (%d)"
            max_pages)
 
-    let options_for_page (base : List_objects_v2.options) continuation_token =
+    let options_for_page (base : Object.List.options) continuation_token =
       {
         base with
-        List_objects_v2.continuation_token;
+        Object.List.continuation_token;
         start_after =
           (match continuation_token with
           | None -> base.start_after
@@ -167,7 +165,7 @@ module Object = struct
       | Error error -> Error error
       | Ok () ->
           let base =
-            Option.value ~default:List_objects_v2.default_options options
+            Option.value ~default:Object.List.default_options options
           in
           let rec loop continuation_token page_count acc =
             let options = options_for_page base continuation_token in
@@ -201,9 +199,7 @@ module Object = struct
 
     let collect_pages conn ~bucket ?options ~max_pages ~init ~f () =
       let* () = validate_required_max_pages max_pages in
-      let base =
-        Option.value ~default:List_objects_v2.default_options options
-      in
+      let base = Option.value ~default:Object.List.default_options options in
       let rec loop continuation_token page_count acc =
         let options = options_for_page base continuation_token in
         match list conn ~bucket ~options () with
@@ -236,17 +232,17 @@ module Object = struct
     let objects conn ~bucket ?options ~max_pages () =
       Result.map Stdlib.List.rev
         (collect_pages conn ~bucket ?options ~max_pages ~init:[]
-           ~f:(fun objects (page : List_objects_v2.page) ->
+           ~f:(fun objects (page : Object.List.page) ->
              Ok (Stdlib.List.rev_append page.objects objects))
            ())
 
     let keys conn ~bucket ?options ~max_pages () =
       Result.map Stdlib.List.rev
         (collect_pages conn ~bucket ?options ~max_pages ~init:[]
-           ~f:(fun keys (page : List_objects_v2.page) ->
+           ~f:(fun keys (page : Object.List.page) ->
              let page_keys =
                Stdlib.List.map
-                 (fun (object_ : List_objects_v2.object_summary) -> object_.key)
+                 (fun (object_ : Object.List.object_summary) -> object_.key)
                  page.objects
              in
              Ok (Stdlib.List.rev_append page_keys keys))
@@ -271,11 +267,11 @@ module Object = struct
         (Fmt.str "ListObjectVersions collection exceeded max_pages bound (%d)"
            max_pages)
 
-    let options_for_page (base : List_object_versions.options)
-        (page : List_object_versions.page) =
+    let options_for_page (base : Object.Versions.options)
+        (page : Object.Versions.page) =
       {
         base with
-        List_object_versions.key_marker = page.next_key_marker;
+        Object.Versions.key_marker = page.next_key_marker;
         version_id_marker = page.next_version_id_marker;
       }
 
@@ -284,7 +280,7 @@ module Object = struct
       | Error error -> Error error
       | Ok () ->
           let base =
-            Option.value ~default:List_object_versions.default_options options
+            Option.value ~default:Object.Versions.default_options options
           in
           let rec loop options page_count acc =
             match list_versions conn ~bucket ~options () with
@@ -320,7 +316,7 @@ module Object = struct
     let collect_pages conn ~bucket ?options ~max_pages ~init ~f () =
       let* () = validate_required_max_pages max_pages in
       let base =
-        Option.value ~default:List_object_versions.default_options options
+        Option.value ~default:Object.Versions.default_options options
       in
       let rec loop options page_count acc =
         match list_versions conn ~bucket ~options () with
@@ -355,14 +351,14 @@ module Object = struct
     let object_versions conn ~bucket ?options ~max_pages () =
       Result.map Stdlib.List.rev
         (collect_pages conn ~bucket ?options ~max_pages ~init:[]
-           ~f:(fun versions (page : List_object_versions.page) ->
+           ~f:(fun versions (page : Object.Versions.page) ->
              Ok (Stdlib.List.rev_append page.versions versions))
            ())
 
     let delete_markers conn ~bucket ?options ~max_pages () =
       Result.map Stdlib.List.rev
         (collect_pages conn ~bucket ?options ~max_pages ~init:[]
-           ~f:(fun markers (page : List_object_versions.page) ->
+           ~f:(fun markers (page : Object.Versions.page) ->
              Ok (Stdlib.List.rev_append page.delete_markers markers))
            ())
   end

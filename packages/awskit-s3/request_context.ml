@@ -1,7 +1,17 @@
 open Common
 
+module type RUNTIME = sig
+  include Awskit.Runtime.S
+
+  module S3_endpoint : sig
+    type nonrec connection = connection
+
+    val s3_endpoint_config : connection -> Endpoint_resolver.t
+  end
+end
+
 module type S = sig
-  module R : Awskit_s3_intf.RUNTIME
+  module R : RUNTIME
 
   type connection = R.connection
   type 'a io = 'a R.t

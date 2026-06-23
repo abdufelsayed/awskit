@@ -10,7 +10,7 @@ let validate_opt f = function None -> Ok () | Some value -> f value
 
 let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
     ?options () =
-  let options = Option.value ~default:Copy_object.default_options options in
+  let options = Option.value ~default:Object.Copy.default_options options in
   match validate_bucket_key source_bucket source_key with
   | Error error -> Error error
   | Ok () -> (
@@ -80,7 +80,7 @@ let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
                               in
                               Ok
                                 {
-                                  Copy_object.etag = Some obj.etag;
+                                  Object.Copy.etag = Some obj.etag;
                                   last_modified = Some obj.last_modified;
                                   version_id = obj.version_id;
                                   copy_source_version_id = src.version_id;

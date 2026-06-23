@@ -1,87 +1,87 @@
 open Awskit_s3
 open Awskit_s3_test
 
-let test_public_operation_aliases () =
+let test_public_operation_modules () =
   let owner = Account_id.of_string_exn "123456789012" in
   let content_type = Content_type.of_string_exn "text/plain" in
   let metadata = Metadata.of_list_exn [ ("source", "api") ] in
   let tags =
     Tag.Set.of_list_exn [ Tag.create_exn ~key:"project" ~value:"awskit" ]
   in
-  ignore (Put_object.default_options : Put_object.options);
+  ignore (Object.Put.default_options : Object.Put.options);
   ignore
-    (Put_object.options ~content_type ~metadata ~tags
+    (Object.Put.options ~content_type ~metadata ~tags
        ~expected_bucket_owner:owner ()
-      : (Put_object.options, Error.t) result);
+      : (Object.Put.options, Error.t) result);
   ignore
-    (Put_object.options_exn ~content_type ~metadata ~tags
+    (Object.Put.options_exn ~content_type ~metadata ~tags
        ~expected_bucket_owner:owner ()
-      : Put_object.options);
-  ignore (Get_object.default_options : Get_object.options);
+      : Object.Put.options);
+  ignore (Object.Get.default_options : Object.Get.options);
   ignore
-    (Get_object.options ~expected_bucket_owner:owner ()
-      : (Get_object.options, Error.t) result);
+    (Object.Get.options ~expected_bucket_owner:owner ()
+      : (Object.Get.options, Error.t) result);
   ignore
-    (Get_object.options_exn ~expected_bucket_owner:owner ()
-      : Get_object.options);
-  ignore (Head_object.default_options : Head_object.options);
+    (Object.Get.options_exn ~expected_bucket_owner:owner ()
+      : Object.Get.options);
+  ignore (Object.Head.default_options : Object.Head.options);
   ignore
-    (Head_object.options ~expected_bucket_owner:owner ()
-      : (Head_object.options, Error.t) result);
+    (Object.Head.options ~expected_bucket_owner:owner ()
+      : (Object.Head.options, Error.t) result);
   ignore
-    (Head_object.options_exn ~expected_bucket_owner:owner ()
-      : Head_object.options);
-  ignore (Delete_object.default_options : Delete_object.options);
+    (Object.Head.options_exn ~expected_bucket_owner:owner ()
+      : Object.Head.options);
+  ignore (Object.Delete.default_options : Object.Delete.options);
   ignore
-    (Delete_object.options ~expected_bucket_owner:owner ()
-      : (Delete_object.options, Error.t) result);
+    (Object.Delete.options ~expected_bucket_owner:owner ()
+      : (Object.Delete.options, Error.t) result);
   ignore
-    (Delete_object.options_exn ~expected_bucket_owner:owner ()
-      : Delete_object.options);
-  let delete_object : Delete_objects.object_ =
-    Delete_objects.object_ ~key:(object_key "file.txt") ()
+    (Object.Delete.options_exn ~expected_bucket_owner:owner ()
+      : Object.Delete.options);
+  let delete_object : Object.Delete_many.object_ =
+    Object.Delete_many.object_ ~key:(object_key "file.txt") ()
   in
-  ignore (delete_object : Delete_objects.object_);
-  ignore (Delete_objects.max_objects : int);
+  ignore (delete_object : Object.Delete_many.object_);
+  ignore (Object.Delete_many.max_objects : int);
   ignore
-    (Delete_objects.options ~expected_bucket_owner:owner ()
-      : (Delete_objects.options, Error.t) result);
+    (Object.Delete_many.options ~expected_bucket_owner:owner ()
+      : (Object.Delete_many.options, Error.t) result);
   ignore
-    (Delete_objects.options_exn ~expected_bucket_owner:owner ()
-      : Delete_objects.options);
-  ignore (None : string Get_object.result option);
-  ignore (None : Get_object.info option);
-  ignore (Copy_object.default_options : Copy_object.options);
+    (Object.Delete_many.options_exn ~expected_bucket_owner:owner ()
+      : Object.Delete_many.options);
+  ignore (None : string Object.Get.result option);
+  ignore (None : Object.Get.info option);
+  ignore (Object.Copy.default_options : Object.Copy.options);
   ignore
-    (Copy_object.options ~expected_bucket_owner:owner
+    (Object.Copy.options ~expected_bucket_owner:owner
        ~source_expected_bucket_owner:owner ()
-      : (Copy_object.options, Error.t) result);
+      : (Object.Copy.options, Error.t) result);
   ignore
-    (Copy_object.options_exn ~expected_bucket_owner:owner
+    (Object.Copy.options_exn ~expected_bucket_owner:owner
        ~source_expected_bucket_owner:owner ()
-      : Copy_object.options);
+      : Object.Copy.options);
   ignore
     (Object.Tagging.options ~expected_bucket_owner:owner ()
       : (Object.Tagging.options, Error.t) result);
   ignore
     (Object.Tagging.options_exn ~expected_bucket_owner:owner ()
       : Object.Tagging.options);
-  ignore (List_objects_v2.default_options : List_objects_v2.options);
+  ignore (Object.List.default_options : Object.List.options);
   ignore
-    (List_objects_v2.options
+    (Object.List.options
        ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-       ~delimiter:List_objects_v2.Delimiter.slash
+       ~delimiter:Object.List.Delimiter.slash
        ~start_after:(object_key "logs/0001.txt")
        ~max_keys:100 ~expected_bucket_owner:owner ()
-      : (List_objects_v2.options, Error.t) result);
+      : (Object.List.options, Error.t) result);
   ignore
-    (List_objects_v2.options_exn
+    (Object.List.options_exn
        ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-       ~delimiter:List_objects_v2.Delimiter.slash
+       ~delimiter:Object.List.Delimiter.slash
        ~start_after:(object_key "logs/0001.txt")
        ~max_keys:100 ~expected_bucket_owner:owner ()
-      : List_objects_v2.options);
-  let listed_object : List_objects_v2.object_summary =
+      : Object.List.options);
+  let listed_object : Object.List.object_summary =
     {
       key = object_key "file.txt";
       size = Some 1L;
@@ -91,34 +91,34 @@ let test_public_operation_aliases () =
       checksum = Object.Checksum.empty_summary;
     }
   in
-  ignore (listed_object : List_objects_v2.object_summary);
-  ignore (List_object_versions.default_options : List_object_versions.options);
+  ignore (listed_object : Object.List.object_summary);
+  ignore (Object.Versions.default_options : Object.Versions.options);
   ignore
-    (List_object_versions.options
+    (Object.Versions.options
        ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-       ~delimiter:List_object_versions.Delimiter.slash
+       ~delimiter:Object.Versions.Delimiter.slash
        ~key_marker:(object_key "logs/0001.txt")
        ~max_keys:100 ~expected_bucket_owner:owner ()
-      : (List_object_versions.options, Error.t) result);
+      : (Object.Versions.options, Error.t) result);
   ignore
-    (List_object_versions.options_exn
+    (Object.Versions.options_exn
        ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-       ~delimiter:List_object_versions.Delimiter.slash
+       ~delimiter:Object.Versions.Delimiter.slash
        ~key_marker:(object_key "logs/0001.txt")
        ~max_keys:100 ~expected_bucket_owner:owner ()
-      : List_object_versions.options);
-  ignore (Create_bucket.default_options : Create_bucket.options);
+      : Object.Versions.options);
+  ignore (Bucket.Create.default_options : Bucket.Create.options);
   ignore
-    ({ Create_bucket.region = Some (Awskit.Region.of_string_exn "us-west-2") }
-      : Create_bucket.options);
+    ({ Bucket.Create.region = Some (Awskit.Region.of_string_exn "us-west-2") }
+      : Bucket.Create.options);
   ignore
-    (Create_bucket.options ~region:(Awskit.Region.of_string_exn "us-west-2") ()
-      : (Create_bucket.options, Error.t) result);
+    (Bucket.Create.options ~region:(Awskit.Region.of_string_exn "us-west-2") ()
+      : (Bucket.Create.options, Error.t) result);
   ignore
-    (Create_bucket.options_exn
+    (Bucket.Create.options_exn
        ~region:(Awskit.Region.of_string_exn "us-west-2")
        ()
-      : Create_bucket.options);
+      : Bucket.Create.options);
   ignore (Endpoint_config.aws () : endpoint_config);
   let local_endpoint =
     Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ()
@@ -135,20 +135,20 @@ let test_public_operation_aliases () =
   in
   ignore (local : endpoint_config);
   ignore (unsafe : endpoint_config);
-  ignore (Delete_bucket.default_options : Delete_bucket.options);
+  ignore (Bucket.Delete.default_options : Bucket.Delete.options);
   ignore
-    (Delete_bucket.options ~expected_bucket_owner:owner ()
-      : (Delete_bucket.options, Error.t) result);
+    (Bucket.Delete.options ~expected_bucket_owner:owner ()
+      : (Bucket.Delete.options, Error.t) result);
   ignore
-    (Delete_bucket.options_exn ~expected_bucket_owner:owner ()
-      : Delete_bucket.options);
-  ignore (Head_bucket.default_options : Head_bucket.options);
+    (Bucket.Delete.options_exn ~expected_bucket_owner:owner ()
+      : Bucket.Delete.options);
+  ignore (Bucket.Head.default_options : Bucket.Head.options);
   ignore
-    (Head_bucket.options ~expected_bucket_owner:owner ()
-      : (Head_bucket.options, Error.t) result);
+    (Bucket.Head.options ~expected_bucket_owner:owner ()
+      : (Bucket.Head.options, Error.t) result);
   ignore
-    (Head_bucket.options_exn ~expected_bucket_owner:owner ()
-      : Head_bucket.options);
+    (Bucket.Head.options_exn ~expected_bucket_owner:owner ()
+      : Bucket.Head.options);
   ignore (Bucket.Policy.default_options : Bucket.Policy.options);
   ignore
     (Bucket.Policy.options ~expected_bucket_owner:owner ()
@@ -202,39 +202,38 @@ let test_public_operation_aliases () =
   ignore
     (Bucket.Ownership_controls.options_exn ~expected_bucket_owner:owner ()
       : Bucket.Ownership_controls.options);
-  ignore (None : Delete_bucket.result option);
-  ignore (None : Head_bucket.result option);
-  ignore (None : List_buckets.result option);
-  ignore (Get_bucket_location.default_options : Get_bucket_location.options);
+  ignore (None : Bucket.Delete.result option);
+  ignore (None : Bucket.Head.result option);
+  ignore (None : Bucket.List_buckets.result option);
+  ignore (Bucket.Get_location.default_options : Bucket.Get_location.options);
   ignore
-    (Get_bucket_location.options ~expected_bucket_owner:owner ()
-      : (Get_bucket_location.options, Error.t) result);
+    (Bucket.Get_location.options ~expected_bucket_owner:owner ()
+      : (Bucket.Get_location.options, Error.t) result);
   ignore
-    (Get_bucket_location.options_exn ~expected_bucket_owner:owner ()
-      : Get_bucket_location.options);
-  ignore (None : Get_bucket_location.result option);
+    (Bucket.Get_location.options_exn ~expected_bucket_owner:owner ()
+      : Bucket.Get_location.options);
+  ignore (None : Bucket.Get_location.result option);
+  ignore (Multipart.Create.default_options : Multipart.Create.options);
   ignore
-    (Create_multipart_upload.default_options : Create_multipart_upload.options);
-  ignore
-    (Create_multipart_upload.options ~content_type ~metadata ~tags
+    (Multipart.Create.options ~content_type ~metadata ~tags
        ~expected_bucket_owner:owner ()
-      : (Create_multipart_upload.options, Error.t) result);
+      : (Multipart.Create.options, Error.t) result);
   ignore
-    (Create_multipart_upload.options_exn ~content_type ~metadata ~tags
+    (Multipart.Create.options_exn ~content_type ~metadata ~tags
        ~expected_bucket_owner:owner ()
-      : Create_multipart_upload.options);
-  ignore (Upload_part.default_options : Upload_part.options);
+      : Multipart.Create.options);
+  ignore (Multipart.Upload_part.default_options : Multipart.Upload_part.options);
   let upload_checksum : Object.Checksum.value =
     { algorithm = Object.Checksum.Algorithm.Sha256; value = "part-sha256" }
   in
   ignore
-    (Upload_part.options ~checksum:upload_checksum ~expected_bucket_owner:owner
-       ()
-      : (Upload_part.options, Error.t) result);
-  ignore
-    (Upload_part.options_exn ~checksum:upload_checksum
+    (Multipart.Upload_part.options ~checksum:upload_checksum
        ~expected_bucket_owner:owner ()
-      : Upload_part.options);
+      : (Multipart.Upload_part.options, Error.t) result);
+  ignore
+    (Multipart.Upload_part.options_exn ~checksum:upload_checksum
+       ~expected_bucket_owner:owner ()
+      : Multipart.Upload_part.options);
   let multipart_part_number = Multipart.Part_number.of_int_exn 1 in
   let multipart_part =
     Multipart.Part.create_exn ~part_number:multipart_part_number
@@ -250,7 +249,7 @@ let test_public_operation_aliases () =
   in
   ignore (multipart_upload : Multipart.Upload.caller_owned Multipart.Upload.t);
   ignore
-    (Complete_multipart_upload.options
+    (Multipart.Complete.options
        ~checksum:
          {
            Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
@@ -258,9 +257,9 @@ let test_public_operation_aliases () =
          }
        ~checksum_type:Object.Checksum.Type.Composite
        ~multipart_object_size:5_242_880L ~expected_bucket_owner:owner ()
-      : (Complete_multipart_upload.options, Error.t) result);
+      : (Multipart.Complete.options, Error.t) result);
   ignore
-    (Complete_multipart_upload.options_exn
+    (Multipart.Complete.options_exn
        ~checksum:
          {
            Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
@@ -268,35 +267,36 @@ let test_public_operation_aliases () =
          }
        ~checksum_type:Object.Checksum.Type.Composite
        ~multipart_object_size:5_242_880L ~expected_bucket_owner:owner ()
-      : Complete_multipart_upload.options);
+      : Multipart.Complete.options);
   ignore
-    (Abort_multipart_upload.options ~expected_bucket_owner:owner ()
-      : (Abort_multipart_upload.options, Error.t) result);
+    (Multipart.Abort.options ~expected_bucket_owner:owner ()
+      : (Multipart.Abort.options, Error.t) result);
   ignore
-    (Abort_multipart_upload.options_exn ~expected_bucket_owner:owner ()
-      : Abort_multipart_upload.options);
-  let abort_result : Abort_multipart_upload.result =
+    (Multipart.Abort.options_exn ~expected_bucket_owner:owner ()
+      : Multipart.Abort.options);
+  let abort_result : Multipart.Abort.result =
     { response = Awskit.Response.create_exn ~status:204 () }
   in
   ignore (abort_result.response : Awskit.Response.t);
   ignore
-    (List_parts.options ~max_parts:1000
+    (Multipart.List_parts.options ~max_parts:1000
        ~part_number_marker:(Multipart.Part_number_marker.of_int_exn 2)
        ~expected_bucket_owner:owner ()
-      : (List_parts.options, Error.t) result);
+      : (Multipart.List_parts.options, Error.t) result);
   ignore
-    (List_parts.options_exn ~max_parts:1000
+    (Multipart.List_parts.options_exn ~max_parts:1000
        ~part_number_marker:(Multipart.Part_number_marker.of_int_exn 2)
        ~expected_bucket_owner:owner ()
-      : List_parts.options);
+      : Multipart.List_parts.options);
   ignore
-    (Transfer.default_upload_options.create_options
-      : Create_multipart_upload.options);
+    (Transfer.default_upload_options.create_options : Multipart.Create.options);
   ignore
-    (Transfer.default_upload_options.upload_part_options : Upload_part.options);
+    (Transfer.default_upload_options.upload_part_options
+      : Multipart.Upload_part.options);
   ignore
-    (Transfer.default_upload_options.list_parts_options : List_parts.options);
-  ignore (Transfer.default_download_options.get_options : Get_object.options);
+    (Transfer.default_upload_options.list_parts_options
+      : Multipart.List_parts.options);
+  ignore (Transfer.default_download_options.get_options : Object.Get.options);
   let transfer_upload_options =
     Transfer.upload_options_exn
       ~multipart_threshold:Transfer.default_multipart_threshold
@@ -308,21 +308,22 @@ let test_public_operation_aliases () =
   ignore (Transfer.upload_part_size transfer_upload_options : int);
   ignore (Transfer.upload_concurrency transfer_upload_options : int);
   ignore
-    (Transfer.upload_put_options transfer_upload_options : Put_object.options);
+    (Transfer.upload_put_options transfer_upload_options : Object.Put.options);
   ignore
     (Transfer.upload_create_options transfer_upload_options
-      : Create_multipart_upload.options);
+      : Multipart.Create.options);
   ignore
-    (Transfer.upload_part_options transfer_upload_options : Upload_part.options);
+    (Transfer.upload_part_options transfer_upload_options
+      : Multipart.Upload_part.options);
   ignore
     (Transfer.upload_complete_options transfer_upload_options
-      : Complete_multipart_upload.options);
+      : Multipart.Complete.options);
   ignore
     (Transfer.upload_abort_options transfer_upload_options
-      : Abort_multipart_upload.options);
+      : Multipart.Abort.options);
   ignore
     (Transfer.upload_list_parts_options transfer_upload_options
-      : List_parts.options);
+      : Multipart.List_parts.options);
   ignore
     (Transfer.upload_options ~part_size:1 ()
       : (Transfer.upload_options, Error.t) result);
@@ -341,7 +342,7 @@ let test_public_operation_aliases () =
     (Transfer.download_overwrite transfer_download_options : Transfer.overwrite);
   ignore
     (Transfer.download_get_options transfer_download_options
-      : Get_object.options);
+      : Object.Get.options);
   ignore
     (Transfer.download_options ~part_size:0 ()
       : (Transfer.download_options, Error.t) result);
@@ -360,7 +361,7 @@ let test_public_operation_aliases () =
     "default upload threshold"
     (Int64.of_int Transfer.default_part_size)
     Transfer.default_multipart_threshold;
-  let put_result : Put_object.result =
+  let put_result : Object.Put.result =
     {
       etag = None;
       version_id = None;
@@ -371,7 +372,7 @@ let test_public_operation_aliases () =
   let transfer_put_result : Transfer.put_upload_result =
     { put = put_result; bytes_transferred = 5L }
   in
-  ignore (transfer_put_result.put : Put_object.result);
+  ignore (transfer_put_result.put : Object.Put.result);
   ignore (transfer_put_result.bytes_transferred : int64);
   let transfer_upload_result = Transfer.Put transfer_put_result in
   Alcotest.(check bool)
@@ -398,7 +399,7 @@ let test_public_operation_aliases () =
     (transfer_multipart_result.upload
       : Multipart.Upload.caller_owned Multipart.Upload.t);
   ignore (transfer_multipart_result.parts : Multipart.Part.t list);
-  ignore (transfer_multipart_result.complete : Complete_multipart_upload.result);
+  ignore (transfer_multipart_result.complete : Multipart.Complete.result);
   ignore (transfer_multipart_result.bytes_transferred : int64);
   ignore
     (Transfer.upload_bytes_transferred
@@ -423,7 +424,7 @@ let test_public_operation_aliases () =
       bytes_transferred = 5L;
     }
   in
-  ignore (transfer_get_result.info : Get_object.info);
+  ignore (transfer_get_result.info : Object.Get.info);
   ignore (transfer_get_result.bytes_transferred : int64);
   let transfer_download_result = Transfer.Get transfer_get_result in
   Alcotest.(check bool)
@@ -452,16 +453,16 @@ let test_public_operation_aliases () =
       bytes_transferred = 8L;
     }
   in
-  ignore (transfer_ranged_result.info : Head_object.result);
+  ignore (transfer_ranged_result.info : Object.Head.result);
   ignore (transfer_ranged_result.parts : int);
   ignore (transfer_ranged_result.bytes_transferred : int64);
   ignore
     (Transfer.download_bytes_transferred
        (Transfer.Ranged transfer_ranged_result)
       : int64);
-  ignore (None : Complete_multipart_upload.result option);
-  ignore (None : Abort_multipart_upload.result option);
-  ignore (List_parts.default_options : List_parts.options)
+  ignore (None : Multipart.Complete.result option);
+  ignore (None : Multipart.Abort.result option);
+  ignore (Multipart.List_parts.default_options : Multipart.List_parts.options)
 
 let test_native_body_api_compiles () =
   let module S3 = Recording_s3 in
@@ -487,72 +488,72 @@ let test_native_body_api_compiles () =
       : S3.connection ->
         bucket:Bucket_name.t ->
         key:Object_key.t ->
-        ?options:Head_object.options ->
+        ?options:Object.Head.options ->
         unit ->
-        (Head_object.result option, Error.t) result);
+        (Object.Head.result option, Error.t) result);
   ignore
     (S3.Object.find
       : S3.connection ->
         bucket:Bucket_name.t ->
         key:Object_key.t ->
-        ?options:Get_object.options ->
+        ?options:Object.Get.options ->
         consume:(S3.Reader.t -> ('a, Error.t) result) ->
         unit ->
-        ('a Get_object.result option, Error.t) result);
+        ('a Object.Get.result option, Error.t) result);
   ignore
     (S3.Object.put_string
       : S3.connection ->
         bucket:Bucket_name.t ->
         key:Object_key.t ->
-        ?options:Put_object.options ->
+        ?options:Object.Put.options ->
         contents:string ->
         unit ->
-        (Put_object.result, Error.t) result);
+        (Object.Put.result, Error.t) result);
   ignore
     (S3.Object.put_bytes
       : S3.connection ->
         bucket:Bucket_name.t ->
         key:Object_key.t ->
-        ?options:Put_object.options ->
+        ?options:Object.Put.options ->
         contents:bytes ->
         unit ->
-        (Put_object.result, Error.t) result);
+        (Object.Put.result, Error.t) result);
   ignore
     (S3.Object.get_string
       : S3.connection ->
         bucket:Bucket_name.t ->
         key:Object_key.t ->
-        ?options:Get_object.options ->
+        ?options:Object.Get.options ->
         max_bytes:int64 ->
         unit ->
-        (string Get_object.result, Error.t) result);
+        (string Object.Get.result, Error.t) result);
   ignore
     (S3.Object.get_bytes
       : S3.connection ->
         bucket:Bucket_name.t ->
         key:Object_key.t ->
-        ?options:Get_object.options ->
+        ?options:Object.Get.options ->
         max_bytes:int64 ->
         unit ->
-        (bytes Get_object.result, Error.t) result);
+        (bytes Object.Get.result, Error.t) result);
   ignore
     (S3.Object.find_string
       : S3.connection ->
         bucket:Bucket_name.t ->
         key:Object_key.t ->
-        ?options:Get_object.options ->
+        ?options:Object.Get.options ->
         max_bytes:int64 ->
         unit ->
-        (string Get_object.result option, Error.t) result);
+        (string Object.Get.result option, Error.t) result);
   ignore
     (S3.Object.find_bytes
       : S3.connection ->
         bucket:Bucket_name.t ->
         key:Object_key.t ->
-        ?options:Get_object.options ->
+        ?options:Object.Get.options ->
         max_bytes:int64 ->
         unit ->
-        (bytes Get_object.result option, Error.t) result);
+        (bytes Object.Get.result option, Error.t) result);
   ignore
     (S3.Object.Tagging.put
       : S3.connection ->
@@ -566,9 +567,9 @@ let test_native_body_api_compiles () =
     (S3.Bucket.head
       : S3.connection ->
         bucket:Bucket_name.t ->
-        ?options:Head_bucket.options ->
+        ?options:Bucket.Head.options ->
         unit ->
-        (Head_bucket.result, Error.t) result);
+        (Bucket.Head.result, Error.t) result);
   ignore
     (S3.Bucket.Policy.put
       : S3.connection ->
@@ -672,8 +673,8 @@ let suite =
   [
     ( "api",
       [
-        Alcotest.test_case "public operation aliases" `Quick
-          test_public_operation_aliases;
+        Alcotest.test_case "public operation modules" `Quick
+          test_public_operation_modules;
         Alcotest.test_case "native body api compiles" `Quick
           test_native_body_api_compiles;
         Alcotest.test_case "presigned api compiles" `Quick

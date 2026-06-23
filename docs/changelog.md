@@ -86,9 +86,8 @@ Add entries for:
 - CI and release process changes that affect contributors or release quality.
 - Public documentation updates that materially improve package usage.
 
-Breaking public API entries should name the replacement or caller action. If
-the installed public surface changed, review `@api-snapshot` and include the
-same material PR and commit references as the implementation.
+Breaking public API entries should name the replacement or caller action and
+include the same material PR and commit references as the implementation.
 
 Do not add entries for:
 

@@ -16,7 +16,7 @@ let with_put_context ~bucket ~key error =
     ~resource:(s3_uri ~bucket ~key) () error
 
 let put conn ~bucket ~key ?options ~body () =
-  let options = Option.value ~default:Put_object.default_options options in
+  let options = Option.value ~default:Object.Put.default_options options in
   let return_error error = Error (with_put_context ~bucket ~key error) in
   match validate_bucket_key bucket key with
   | Error error -> return_error error
@@ -72,7 +72,7 @@ let put conn ~bucket ~key ?options ~body () =
                                   in
                                   Ok
                                     {
-                                      Put_object.etag = Some etag;
+                                      Object.Put.etag = Some etag;
                                       version_id = obj.version_id;
                                       checksum;
                                       response =

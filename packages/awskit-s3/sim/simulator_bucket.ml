@@ -31,7 +31,7 @@ module Bucket = struct
               public_access_block = None;
               ownership_controls = None;
             };
-          Ok { Create_bucket.response = response 200 }
+          Ok { Bucket.Create.response = response 200 }
         end
 
   let delete conn ~bucket ?options:_ () =
@@ -42,7 +42,7 @@ module Bucket = struct
           Error (service ~status:409 ~code:"BucketNotEmpty" ())
         else begin
           remove_bucket (store conn) bucket;
-          Ok { Delete_bucket.response = response 204 }
+          Ok { Bucket.Delete.response = response 204 }
         end
 
   let head conn ~bucket ?options:_ () =
@@ -51,7 +51,7 @@ module Bucket = struct
     | Ok _ ->
         Ok
           {
-            Head_bucket.name = Bucket_name.of_string_exn bucket;
+            Bucket.Head.name = Bucket_name.of_string_exn bucket;
             region = Some (Runtime.Endpoint.region conn);
             response = response 200;
           }
@@ -76,7 +76,7 @@ module Bucket = struct
             (Bucket_name.to_string a.name)
             (Bucket_name.to_string b.name))
     in
-    Ok { List_buckets.buckets; response = response 200 }
+    Ok { Bucket.List_buckets.buckets; response = response 200 }
 
   let get_location conn ~bucket ?options:_ () =
     match require_bucket conn bucket with
@@ -84,7 +84,7 @@ module Bucket = struct
     | Ok _ ->
         Ok
           {
-            Get_bucket_location.region = Some (Runtime.Endpoint.region conn);
+            Bucket.Get_location.region = Some (Runtime.Endpoint.region conn);
             response = response 200;
           }
 

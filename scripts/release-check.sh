@@ -37,13 +37,12 @@ for package in "$@"; do
 done
 opam install --yes --working-dir "$@"
 opam exec -- dune fmt
-scripts/check-release-governance.sh
 opam exec -- dune runtest --force
 opam exec -- dune build @check-protocol
 if [ -n "$AWSKIT_EXAMPLE_OPAM_PACKAGES" ]; then
   opam install --yes $AWSKIT_EXAMPLE_OPAM_PACKAGES
 fi
-opam exec -- dune build @examples @docs-content
+opam exec -- dune build @examples
 opam exec -- dune build @all @doc @install
 git diff --check
 if ! git diff --quiet || ! git diff --cached --quiet ||

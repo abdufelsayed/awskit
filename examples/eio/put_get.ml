@@ -76,7 +76,7 @@ let run stdenv =
   let downloaded =
     S3.Object.get_string s3 ~bucket ~key ~max_bytes:1_048_576L ()
     |> unwrap "get object"
-    |> fun result -> result.Awskit_s3.Get_object.value
+    |> fun result -> result.Awskit_s3.Object.Get.value
   in
   Format.printf "downloaded: %S@." downloaded
 

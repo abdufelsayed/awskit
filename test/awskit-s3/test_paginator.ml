@@ -79,7 +79,7 @@ let test_object_paginator_follows_tokens () =
           (list_page ~continuation_token:"token-1" ~truncated:false [ "b.txt" ]);
       ]
   in
-  let options = List_objects_v2.options_exn ~max_keys:1 () in
+  let options = Object.List.options_exn ~max_keys:1 () in
   let keys =
     Recording_s3.Object.List.keys conn ~bucket:(bucket_name "my-bucket")
       ~options ~max_pages:10 ()
@@ -149,11 +149,11 @@ let test_object_paginator_early_stop () =
   let keys =
     Recording_s3.Object.List.fold_pages_until conn
       ~bucket:(bucket_name "my-bucket") ~init:[]
-      ~f:(fun keys (page : List_objects_v2.page) ->
+      ~f:(fun keys (page : Object.List.page) ->
         let keys =
           List.rev_append
             (List.map
-               (fun (object_ : List_objects_v2.object_summary) ->
+               (fun (object_ : Object.List.object_summary) ->
                  Object_key.to_string object_.key)
                page.objects)
             keys
@@ -178,11 +178,11 @@ let test_version_paginator_early_stop () =
   let keys =
     Recording_s3.Object.Versions.fold_pages_until conn
       ~bucket:(bucket_name "my-bucket") ~init:[]
-      ~f:(fun keys (page : List_object_versions.page) ->
+      ~f:(fun keys (page : Object.Versions.page) ->
         let keys =
           List.rev_append
             (List.map
-               (fun (version : List_object_versions.object_version) ->
+               (fun (version : Object.Versions.object_version) ->
                  Object_key.to_string version.key)
                page.versions)
             keys
@@ -216,7 +216,7 @@ let test_multipart_paginator_follows_markers () =
   Alcotest.(check (list int))
     "parts" [ 1; 2 ]
     (List.map
-       (fun (part : List_parts.part_info) ->
+       (fun (part : Multipart.List_parts.part_info) ->
          Multipart.Part_number.to_int part.part_number)
        parts);
   let calls = List.rev conn.calls in

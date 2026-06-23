@@ -25,7 +25,8 @@ No custom domain, `CNAME`, or Cloudflare configuration is required.
 The `publish-docs` job in `.github/workflows/main.yml`:
 
 - Runs only on pushes to `main`.
-- Waits for build/test, docs/examples, governance, and MinIO contract jobs.
+- Waits for build/test, docs/examples, protocol evidence, and MinIO contract
+  jobs.
 - Installs documentation dependencies with `opam install --with-doc --deps-only .`.
 - Builds docs with `opam exec -- dune build @doc`.
 - Uploads `_build/default/_doc/_html`.
@@ -48,9 +49,9 @@ Commit the `dune-project` and generated `*.opam` changes together.
 Run:
 
 ```sh
-opam exec -- dune build @doc @examples @docs-content
+opam exec -- dune build @doc @examples
 ```
 
 For release validation, `scripts/release-check.sh` also checks documentation
-build output, example executables, docs content policy, and documentation
-generation from the distribution archive.
+build output, example executables, and documentation generation from the
+distribution archive.

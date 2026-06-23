@@ -112,7 +112,7 @@ let test_bucket_list_rejects_invalid_bucket_names () =
 let test_bucket_create_accepts_typed_region () =
   let conn = Recording_runtime.connect [ response 200 "" ] in
   let options =
-    { Create_bucket.region = Some (Awskit.Region.of_string_exn "eu-west-1") }
+    { Bucket.Create.region = Some (Awskit.Region.of_string_exn "eu-west-1") }
   in
   ignore
     (Recording_s3.Bucket.create conn ~bucket:(bucket_name "new-bucket") ~options
@@ -142,7 +142,7 @@ let test_bucket_fundamental_wire () =
     (Recording_s3.Bucket.create conn ~bucket:(bucket_name "new-bucket") ()
     |> ok_or_fail "create default bucket");
   let create_options =
-    Create_bucket.options_exn
+    Bucket.Create.options_exn
       ~region:(Awskit.Region.of_string_exn "eu-west-1")
       ()
   in

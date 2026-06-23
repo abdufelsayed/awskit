@@ -11,8 +11,7 @@
 ## Public API And Support Impact
 
 <!-- State the touched API role: application SDK, advanced application API,
-runtime API, simulator API, private implementation, or none. Include
-@api-compile/@api-snapshot status when the public surface changes. -->
+runtime API, simulator API, private implementation, or none. -->
 
 <!-- State whether SUPPORT.md, SECURITY.md, package docs, examples, or release
 notes need updates. -->

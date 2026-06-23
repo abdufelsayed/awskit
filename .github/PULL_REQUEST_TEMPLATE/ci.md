@@ -10,9 +10,8 @@
 
 ## Gate Impact
 
-<!-- State whether this changes @check-fast, @check-protocol, @api-snapshot,
-@docs-content, MinIO, release-check, branch/ruleset verification, or docs
-publishing. -->
+<!-- State whether this changes @check-fast, @check-protocol, MinIO,
+release-check, or docs publishing. -->
 
 ## Validation
 

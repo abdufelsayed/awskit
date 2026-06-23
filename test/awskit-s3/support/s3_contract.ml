@@ -150,7 +150,7 @@ module Make (Client : SUBJECT) = struct
     create_bucket conn;
     let options =
       {
-        Put_object.default_options with
+        Object.Put.default_options with
         content_type = Some (content_type "text/plain");
         metadata = Metadata.of_list_exn [ ("origin", "contract") ];
         tags = tag_set [ tag "env" "test" ];
@@ -175,7 +175,7 @@ module Make (Client : SUBJECT) = struct
         ~max_bytes:16L ()
       |> ok_get_or_fail "get object"
     in
-    Alcotest.(check string) "body" "hello" result.Get_object.value;
+    Alcotest.(check string) "body" "hello" result.Object.Get.value;
     Alcotest.(check (option string))
       "content type" (Some "text/plain")
       (Option.map Content_type.to_string result.content_type);
@@ -224,7 +224,7 @@ module Make (Client : SUBJECT) = struct
       Client.Object.get conn ~bucket ~key:(object_key "stream.txt") ~consume ()
       |> run_result "get streaming"
     in
-    Alcotest.(check string) "partial body" "abcd" result.Get_object.value
+    Alcotest.(check string) "partial body" "abcd" result.Object.Get.value
 
   let test_large_streaming_roundtrip conn =
     create_bucket conn;
@@ -264,7 +264,7 @@ module Make (Client : SUBJECT) = struct
         ~consume ()
       |> run_result "get large stream"
     in
-    let length, first, last = result.Get_object.value in
+    let length, first, last = result.Object.Get.value in
     Alcotest.(check int) "large stream bytes" (String.length body) length;
     Alcotest.(check (option char)) "first byte" (Some 'x') first;
     Alcotest.(check (option char)) "last byte" (Some 'x') last;
@@ -277,7 +277,7 @@ module Make (Client : SUBJECT) = struct
     create_bucket conn;
     let put_options =
       {
-        Put_object.default_options with
+        Object.Put.default_options with
         content_type = Some (content_type "text/plain");
         metadata =
           Metadata.of_list_exn [ ("origin", "source"); ("mode", "copy") ];
@@ -289,7 +289,7 @@ module Make (Client : SUBJECT) = struct
       |> ok_or_fail "put range source");
     let range_options =
       {
-        Get_object.default_options with
+        Object.Get.default_options with
         range = Some (Range.bytes_exn ~start:2L ~finish:5L);
       }
     in
@@ -298,7 +298,7 @@ module Make (Client : SUBJECT) = struct
         ~options:range_options ~max_bytes:16L ()
       |> ok_get_or_fail "get byte range"
     in
-    Alcotest.(check string) "range body" "cdef" result.Get_object.value;
+    Alcotest.(check string) "range body" "cdef" result.Object.Get.value;
     Alcotest.(check int)
       "range status" 206
       (Awskit.Response.status result.response);
@@ -315,16 +315,16 @@ module Make (Client : SUBJECT) = struct
       "range content range" (Some "bytes 2-5/10")
       (Awskit.Response.header result.response "content-range");
     let suffix_options =
-      { Get_object.default_options with range = Some (Range.suffix_exn 3L) }
+      { Object.Get.default_options with range = Some (Range.suffix_exn 3L) }
     in
     let result =
       get_object_as_string conn ~bucket ~key:(object_key "range.txt")
         ~options:suffix_options ~max_bytes:16L ()
       |> ok_get_or_fail "get suffix range"
     in
-    Alcotest.(check string) "suffix body" "hij" result.Get_object.value;
+    Alcotest.(check string) "suffix body" "hij" result.Object.Get.value;
     let invalid_range_options =
-      { Get_object.default_options with range = Some (Range.from_exn 99L) }
+      { Object.Get.default_options with range = Some (Range.from_exn 99L) }
     in
     expect_status "invalid range" 416
       (get_object_as_string conn ~bucket ~key:(object_key "range.txt")
@@ -343,7 +343,7 @@ module Make (Client : SUBJECT) = struct
       (List.assoc_opt "origin" (Metadata.to_list copied.metadata));
     let replace_options =
       {
-        Copy_object.default_options with
+        Object.Copy.default_options with
         metadata_directive =
           Some (`Replace (Metadata.of_list_exn [ ("origin", "replacement") ]));
       }
@@ -376,7 +376,7 @@ module Make (Client : SUBJECT) = struct
          ~destination_key:(object_key "copy/a.txt") ()
       |> run_result "copy");
     let list_options =
-      List_objects_v2.options_exn
+      Object.List.options_exn
         ~prefix:(Object_key.Prefix.of_string_exn "logs/")
         ~max_keys:1 ()
     in
@@ -386,7 +386,9 @@ module Make (Client : SUBJECT) = struct
     in
     Alcotest.(check int) "listed count" 1 (List.length page.objects);
     Alcotest.(check bool) "truncated" true page.is_truncated;
-    let delete_object key = Delete_objects.object_ ~key:(object_key key) () in
+    let delete_object key =
+      Object.Delete_many.object_ ~key:(object_key key) ()
+    in
     ignore
       (Client.Object.delete_objects conn ~bucket
          ~objects:[ delete_object "logs/a.txt"; delete_object "logs/b.txt" ]
@@ -447,13 +449,13 @@ module Make (Client : SUBJECT) = struct
         ~max_bytes:16L ()
       |> ok_get_or_fail "get current version"
     in
-    Alcotest.(check string) "current body" "two" result.Get_object.value;
+    Alcotest.(check string) "current body" "two" result.Object.Get.value;
     Alcotest.(check (option string))
       "current version"
       (Some (Object.Version_id.to_string v2))
       (version_string result.version_id);
     let previous_options =
-      { Get_object.default_options with version_id = Some v1 }
+      { Object.Get.default_options with version_id = Some v1 }
     in
     let result =
       get_object_as_string conn ~bucket
@@ -461,13 +463,13 @@ module Make (Client : SUBJECT) = struct
         ~max_bytes:16L ~options:previous_options ()
       |> ok_get_or_fail "get previous version"
     in
-    Alcotest.(check string) "previous body" "one" result.Get_object.value;
+    Alcotest.(check string) "previous body" "one" result.Object.Get.value;
     Alcotest.(check (option string))
       "previous version"
       (Some (Object.Version_id.to_string v1))
       (version_string result.version_id);
     let head_options =
-      { Head_object.default_options with version_id = Some v1 }
+      { Object.Head.default_options with version_id = Some v1 }
     in
     let head =
       Client.Object.head conn ~bucket
@@ -494,7 +496,7 @@ module Make (Client : SUBJECT) = struct
         (Some (Object.Version_id.to_string v2))
         (version_string copy.copy_source_version_id);
     let copy_previous_options =
-      { Copy_object.default_options with source_version_id = Some v1 }
+      { Object.Copy.default_options with source_version_id = Some v1 }
     in
     let copy_previous =
       Client.Object.copy conn ~source_bucket:bucket
@@ -514,7 +516,7 @@ module Make (Client : SUBJECT) = struct
         ~max_bytes:16L ()
       |> ok_get_or_fail "get copied previous"
     in
-    Alcotest.(check string) "copied previous body" "one" result.Get_object.value;
+    Alcotest.(check string) "copied previous body" "one" result.Object.Get.value;
     let upload =
       Client.Multipart.create_upload conn ~bucket
         ~key:(object_key "multi-versioned.txt")
@@ -546,14 +548,14 @@ module Make (Client : SUBJECT) = struct
       (Client.Object.exists conn ~bucket ~key:(object_key "versioned.txt")
       |> run_result "exists after delete marker");
     let marker_get_options =
-      { Get_object.default_options with version_id = Some marker }
+      { Object.Get.default_options with version_id = Some marker }
     in
     expect_status "get delete marker version" 405
       (get_object_as_string conn ~bucket
          ~key:(object_key "versioned.txt")
          ~max_bytes:16L ~options:marker_get_options ());
     let versions_options =
-      List_object_versions.options_exn
+      Object.Versions.options_exn
         ~prefix:(Object_key.Prefix.of_string_exn "versioned.txt")
         ~max_keys:2 ()
     in
@@ -576,7 +578,7 @@ module Make (Client : SUBJECT) = struct
       "listed object versions"
       [ Object.Version_id.to_string v2; Object.Version_id.to_string v1 ]
       (List.filter_map
-         (fun (version : List_object_versions.object_version) ->
+         (fun (version : Object.Versions.object_version) ->
            Option.map Object.Version_id.to_string version.version_id)
          all_versions);
     let all_markers =
@@ -588,12 +590,12 @@ module Make (Client : SUBJECT) = struct
       "listed delete markers"
       [ Object.Version_id.to_string marker ]
       (List.filter_map
-         (fun (marker : List_object_versions.delete_marker) ->
+         (fun (marker : Object.Versions.delete_marker) ->
            Option.map Object.Version_id.to_string marker.version_id)
          all_markers);
     let missing_version_options =
       {
-        Delete_object.default_options with
+        Object.Delete.default_options with
         version_id = Some (Object.Version_id.of_string_exn "missing-version");
       }
     in
@@ -614,7 +616,7 @@ module Make (Client : SUBJECT) = struct
              ~key:(object_key "versioned.txt")
              ~options:missing_version_options ()));
     let version_two_options =
-      { Get_object.default_options with version_id = Some v2 }
+      { Object.Get.default_options with version_id = Some v2 }
     in
     let result =
       get_object_as_string conn ~bucket
@@ -622,9 +624,9 @@ module Make (Client : SUBJECT) = struct
         ~max_bytes:16L ~options:version_two_options ()
       |> ok_get_or_fail "get hidden version"
     in
-    Alcotest.(check string) "hidden body" "two" result.Get_object.value;
+    Alcotest.(check string) "hidden body" "two" result.Object.Get.value;
     let delete_marker_options =
-      { Delete_object.default_options with version_id = Some marker }
+      { Object.Delete.default_options with version_id = Some marker }
     in
     ignore
       (Client.Object.delete conn ~bucket
@@ -637,9 +639,9 @@ module Make (Client : SUBJECT) = struct
         ~max_bytes:16L ()
       |> ok_get_or_fail "get restored current"
     in
-    Alcotest.(check string) "restored current" "two" result.Get_object.value;
+    Alcotest.(check string) "restored current" "two" result.Object.Get.value;
     let delete_v2_options =
-      { Delete_object.default_options with version_id = Some v2 }
+      { Object.Delete.default_options with version_id = Some v2 }
     in
     ignore
       (Client.Object.delete conn ~bucket
@@ -652,10 +654,10 @@ module Make (Client : SUBJECT) = struct
         ~max_bytes:16L ()
       |> ok_get_or_fail "get remaining version"
     in
-    Alcotest.(check string) "remaining current" "one" result.Get_object.value;
+    Alcotest.(check string) "remaining current" "one" result.Object.Get.value;
     if Client.capabilities.delete_preconditions then (
       let wrong_delete =
-        Delete_objects.object_
+        Object.Delete_many.object_
           ~key:(object_key "versioned.txt")
           ~version_id:v1
           ~etag:(Object.Etag.of_string_exn "\"wrong\"")
@@ -672,7 +674,9 @@ module Make (Client : SUBJECT) = struct
         "delete objects failed deleted" 0
         (List.length failed_many.deleted));
     let correct_delete =
-      Delete_objects.object_ ~key:(object_key "versioned.txt") ~version_id:v1 ()
+      Object.Delete_many.object_
+        ~key:(object_key "versioned.txt")
+        ~version_id:v1 ()
     in
     let deleted_many =
       Client.Object.delete_objects conn ~bucket ~objects:[ correct_delete ] ()
@@ -715,9 +719,9 @@ module Make (Client : SUBJECT) = struct
         |> ok_get_or_fail "get suspended current"
       in
       Alcotest.(check string)
-        "suspended current body" "suspended" result.Get_object.value;
+        "suspended current body" "suspended" result.Object.Get.value;
       let enabled_options =
-        { Get_object.default_options with version_id = Some enabled_version }
+        { Object.Get.default_options with version_id = Some enabled_version }
       in
       let result =
         get_object_as_string conn ~bucket
@@ -726,11 +730,11 @@ module Make (Client : SUBJECT) = struct
         |> ok_get_or_fail "get enabled version after suspend"
       in
       Alcotest.(check string)
-        "enabled version body" "enabled" result.Get_object.value;
+        "enabled version body" "enabled" result.Object.Get.value;
       let suspended_versions =
         Client.Object.Versions.object_versions conn ~bucket
           ~options:
-            (List_object_versions.options_exn
+            (Object.Versions.options_exn
                ~prefix:(Object_key.Prefix.of_string_exn "suspended.txt")
                ())
           ~max_pages:10 ()
@@ -739,13 +743,13 @@ module Make (Client : SUBJECT) = struct
       Alcotest.(check bool)
         "listed null object version" true
         (List.exists
-           (fun (version : List_object_versions.object_version) ->
+           (fun (version : Object.Versions.object_version) ->
              version_string version.version_id = Some "null")
            suspended_versions);
       Alcotest.(check bool)
         "listed enabled object version" true
         (List.exists
-           (fun (version : List_object_versions.object_version) ->
+           (fun (version : Object.Versions.object_version) ->
              version_string version.version_id
              = Some (Object.Version_id.to_string enabled_version))
            suspended_versions);
@@ -764,7 +768,7 @@ module Make (Client : SUBJECT) = struct
         |> run_result "exists after suspended delete");
       let null_version = Object.Version_id.of_string_exn "null" in
       let null_marker_options =
-        { Delete_object.default_options with version_id = Some null_version }
+        { Object.Delete.default_options with version_id = Some null_version }
       in
       ignore
         (Client.Object.delete conn ~bucket
@@ -778,7 +782,7 @@ module Make (Client : SUBJECT) = struct
         |> ok_get_or_fail "get restored enabled version"
       in
       Alcotest.(check string)
-        "restored enabled body" "enabled" result.Get_object.value)
+        "restored enabled body" "enabled" result.Object.Get.value)
 
   let sample_policy_json =
     Fmt.str
@@ -969,7 +973,7 @@ module Make (Client : SUBJECT) = struct
     let bad_etag = Object.Etag.of_string_exn "\"bad\"" in
     let absent_options =
       {
-        Put_object.default_options with
+        Object.Put.default_options with
         preconditions = Object.Preconditions.Write.if_absent;
       }
     in
@@ -979,7 +983,7 @@ module Make (Client : SUBJECT) = struct
          ~options:absent_options "new-body");
     let match_options =
       {
-        Put_object.default_options with
+        Object.Put.default_options with
         preconditions = Object.Preconditions.Write.if_etag bad_etag;
       }
     in
@@ -989,7 +993,7 @@ module Make (Client : SUBJECT) = struct
          ~options:match_options "new-body");
     let read_options =
       {
-        Get_object.default_options with
+        Object.Get.default_options with
         preconditions =
           {
             Object.Preconditions.Read.none with
@@ -1003,7 +1007,7 @@ module Make (Client : SUBJECT) = struct
          ~options:read_options ~max_bytes:16L ());
     let not_modified_options =
       {
-        Get_object.default_options with
+        Object.Get.default_options with
         preconditions =
           {
             Object.Preconditions.Read.none with
@@ -1017,7 +1021,7 @@ module Make (Client : SUBJECT) = struct
          ~options:not_modified_options ~max_bytes:16L ());
     let head_not_modified_options =
       {
-        Head_object.default_options with
+        Object.Head.default_options with
         preconditions =
           {
             Object.Preconditions.Read.none with
@@ -1032,7 +1036,7 @@ module Make (Client : SUBJECT) = struct
            ~options:head_not_modified_options ());
     let stale_options =
       {
-        Head_object.default_options with
+        Object.Head.default_options with
         preconditions =
           {
             Object.Preconditions.Read.none with
@@ -1047,7 +1051,7 @@ module Make (Client : SUBJECT) = struct
            ~options:stale_options ());
     let copy_options =
       {
-        Copy_object.default_options with
+        Object.Copy.default_options with
         source_preconditions =
           {
             Object.Preconditions.Copy_source.none with
@@ -1064,7 +1068,7 @@ module Make (Client : SUBJECT) = struct
       |> run_result "copy if match etag");
     let copy_fail_options =
       {
-        Copy_object.default_options with
+        Object.Copy.default_options with
         source_preconditions =
           {
             Object.Preconditions.Copy_source.none with
@@ -1090,7 +1094,7 @@ module Make (Client : SUBJECT) = struct
     in
     let delete_options =
       {
-        Delete_object.default_options with
+        Object.Delete.default_options with
         preconditions =
           {
             Object.Preconditions.Delete.if_match =
@@ -1107,7 +1111,7 @@ module Make (Client : SUBJECT) = struct
     put_string conn delete_fail_key_name "abc";
     let delete_fail_options =
       {
-        Delete_object.default_options with
+        Object.Delete.default_options with
         preconditions =
           {
             Object.Preconditions.Delete.if_match =
@@ -1135,7 +1139,7 @@ module Make (Client : SUBJECT) = struct
       (if Client.capabilities.multipart_checksums then
          let options =
            {
-             Create_multipart_upload.default_options with
+             Multipart.Create.default_options with
              checksum_algorithm = Some Object.Checksum.Algorithm.Sha256;
            }
          in
@@ -1150,7 +1154,7 @@ module Make (Client : SUBJECT) = struct
       (if Client.capabilities.multipart_checksums then
          let options =
            {
-             Upload_part.default_options with
+             Multipart.Upload_part.default_options with
              checksum =
                Some
                  {
@@ -1178,7 +1182,7 @@ module Make (Client : SUBJECT) = struct
         (Multipart.Part_number.of_int_exn 2)
         part2_body "upload part 2"
     in
-    let list_options = List_parts.options_exn ~max_parts:1 () in
+    let list_options = Multipart.List_parts.options_exn ~max_parts:1 () in
     let page =
       Client.Multipart.list_parts conn ~upload:upload.upload
         ~options:list_options ()
@@ -1200,7 +1204,7 @@ module Make (Client : SUBJECT) = struct
     Alcotest.(check (list int))
       "part numbers" [ 1; 2 ]
       (List.map
-         (fun (part : List_parts.part_info) ->
+         (fun (part : Multipart.List_parts.part_info) ->
            Multipart.Part_number.to_int part.part_number)
          parts);
     let complete =
@@ -1220,12 +1224,12 @@ module Make (Client : SUBJECT) = struct
     in
     Alcotest.(check int)
       "completed body length" completed_size
-      (String.length result.Get_object.value);
-    Alcotest.(check char) "completed first byte" 'h' result.Get_object.value.[0];
+      (String.length result.Object.Get.value);
+    Alcotest.(check char) "completed first byte" 'h' result.Object.Get.value.[0];
     Alcotest.(check string)
       "completed suffix" part2_body
-      (String.sub result.Get_object.value
-         (String.length result.Get_object.value - String.length part2_body)
+      (String.sub result.Object.Get.value
+         (String.length result.Object.Get.value - String.length part2_body)
          (String.length part2_body));
     if Client.capabilities.multipart_checksums then
       check_checksum "completed object checksum"
@@ -1308,14 +1312,14 @@ module Make (Client : SUBJECT) = struct
     in
     Alcotest.(check int)
       "completed overwritten body length" completed_size
-      (String.length result.Get_object.value);
+      (String.length result.Object.Get.value);
     Alcotest.(check char)
       "completed overwritten first byte" 'F'
-      result.Get_object.value.[0];
+      result.Object.Get.value.[0];
     Alcotest.(check string)
       "completed overwritten suffix" second_body
-      (String.sub result.Get_object.value
-         (String.length result.Get_object.value - String.length second_body)
+      (String.sub result.Object.Get.value
+         (String.length result.Object.Get.value - String.length second_body)
          (String.length second_body));
     run_expect_status "complete already completed upload" 404
       (Client.Multipart.complete_upload conn ~upload:upload.upload

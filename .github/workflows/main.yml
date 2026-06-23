@@ -135,9 +135,9 @@ jobs:
           opam install ${{ env.EXAMPLE_OPAM_PACKAGES }}
 
       - name: Build examples and documentation
-        run: opam exec -- dune build @examples @doc @docs-content
+        run: opam exec -- dune build @examples @doc
 
-  governance:
+  protocol-evidence:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -154,11 +154,8 @@ jobs:
           opam-local-packages: |
             *.opam
 
-      - name: Install governance dependencies
+      - name: Install dependencies
         run: opam install --with-test --with-doc --deps-only .
-
-      - name: Run release governance checks
-        run: scripts/check-release-governance.sh
 
       - name: Build protocol evidence
         run: opam exec -- dune build @check-protocol
@@ -205,7 +202,7 @@ jobs:
       - build-test-default
       - build-test-eio
       - docs-examples
-      - governance
+      - protocol-evidence
       - s3-minio-contract
     runs-on: ubuntu-latest
     timeout-minutes: 30

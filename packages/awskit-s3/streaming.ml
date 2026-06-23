@@ -1,4 +1,4 @@
-module Make (R : Awskit_s3_intf.RUNTIME) = struct
+module Make (R : Request_context.RUNTIME) = struct
   let ( let* ) = R.IO.bind
 
   module Body = struct

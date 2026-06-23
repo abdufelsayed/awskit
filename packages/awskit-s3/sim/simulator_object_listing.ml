@@ -50,11 +50,11 @@ let decode_marker encoded =
     loop 0
 
 let encode_continuation_token marker =
-  List_objects_v2.Continuation_token.of_string_exn
+  Object.List.Continuation_token.of_string_exn
     (continuation_token_prefix ^ encode_marker marker)
 
 let decode_continuation_token token =
-  let value = List_objects_v2.Continuation_token.to_string token in
+  let value = Object.List.Continuation_token.to_string token in
   if is_prefix ~prefix:continuation_token_prefix value then
     let encoded =
       String.sub value
@@ -74,7 +74,7 @@ let find_sub ~sub value =
   in
   loop 0
 
-let visible_objects bucket_state (options : List_objects_v2.options) =
+let visible_objects bucket_state (options : Object.List.options) =
   let prefix = Option.map Object_key.Prefix.to_string options.prefix in
   Hashtbl.to_seq bucket_state.objects
   |> Seq.filter_map (function
@@ -87,7 +87,7 @@ let visible_objects bucket_state (options : List_objects_v2.options) =
   |> List.of_seq
   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
 
-let entry_of_object (options : List_objects_v2.options) (key, obj) =
+let entry_of_object (options : Object.List.options) (key, obj) =
   match options.delimiter with
   | None -> Object (key, obj)
   | Some delimiter -> (
@@ -95,7 +95,7 @@ let entry_of_object (options : List_objects_v2.options) (key, obj) =
         Option.value ~default:""
           (Option.map Object_key.Prefix.to_string options.prefix)
       in
-      let delimiter = List_objects_v2.Delimiter.to_string delimiter in
+      let delimiter = Object.List.Delimiter.to_string delimiter in
       let rest =
         String.sub key (String.length prefix)
           (String.length key - String.length prefix)
@@ -124,7 +124,7 @@ let listing_entries bucket_state options =
   in
   dedupe [] [] entries
 
-let after_start_marker entries (options : List_objects_v2.options) =
+let after_start_marker entries (options : Object.List.options) =
   let marker =
     match options.continuation_token with
     | Some token -> Some (decode_continuation_token token)
@@ -137,8 +137,8 @@ let after_start_marker entries (options : List_objects_v2.options) =
         (fun entry -> String.compare (entry_marker entry) marker > 0)
         entries
 
-let page ~default_max_keys ~bucket bucket_state
-    (options : List_objects_v2.options) ~response =
+let page ~default_max_keys ~bucket bucket_state (options : Object.List.options)
+    ~response =
   let all = after_start_marker (listing_entries bucket_state options) options in
   let max_keys = Option.value ~default:default_max_keys options.max_keys in
   let selected = all |> List.to_seq |> Seq.take max_keys |> List.of_seq in
@@ -157,7 +157,7 @@ let page ~default_max_keys ~bucket bucket_state
         | Object (key, (obj : stored_object)) ->
             Some
               {
-                List_objects_v2.key = Object_key.of_string_exn key;
+                Object.List.key = Object_key.of_string_exn key;
                 size = Some (Int64.of_int (String.length obj.body));
                 etag = Some obj.etag;
                 last_modified = Some obj.last_modified;
@@ -174,7 +174,7 @@ let page ~default_max_keys ~bucket bucket_state
       selected
   in
   {
-    List_objects_v2.bucket = Some (Bucket_name.of_string_exn bucket);
+    Object.List.bucket = Some (Bucket_name.of_string_exn bucket);
     prefix = options.prefix;
     delimiter = options.delimiter;
     objects;

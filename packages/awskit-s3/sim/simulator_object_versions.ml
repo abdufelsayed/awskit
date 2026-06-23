@@ -5,8 +5,8 @@ open Simulator_store
 open Simulator_checksum
 
 type version_entry =
-  | Object_version of List_object_versions.object_version
-  | Delete_marker of List_object_versions.delete_marker
+  | Object_version of Object.Versions.object_version
+  | Delete_marker of Object.Versions.delete_marker
 
 type listing_entry =
   | Version_entry of version_entry
@@ -87,9 +87,9 @@ let version_entry_is_current bucket key version =
       Object.Version_id.equal current.version_id marker.version_id
   | _ -> false
 
-let sorted_version_entries bucket (options : List_object_versions.options) =
+let sorted_version_entries bucket (options : Object.Versions.options) =
   let prefix =
-    Option.map Object_key.Prefix.to_string options.List_object_versions.prefix
+    Option.map Object_key.Prefix.to_string options.Object.Versions.prefix
   in
   let from_version key version =
     let is_latest = Some (version_entry_is_current bucket key version) in
@@ -97,7 +97,7 @@ let sorted_version_entries bucket (options : List_object_versions.options) =
     | Stored_object obj ->
         Object_version
           {
-            List_object_versions.key = Object_key.of_string_exn key;
+            Object.Versions.key = Object_key.of_string_exn key;
             version_id = obj.version_id;
             is_latest;
             last_modified = Some obj.last_modified;
@@ -110,7 +110,7 @@ let sorted_version_entries bucket (options : List_object_versions.options) =
     | Stored_delete_marker marker ->
         Delete_marker
           {
-            List_object_versions.key = Object_key.of_string_exn key;
+            Object.Versions.key = Object_key.of_string_exn key;
             version_id = Some marker.version_id;
             is_latest;
             last_modified = Some marker.last_modified;
@@ -145,7 +145,7 @@ let sorted_version_entries bucket (options : List_object_versions.options) =
       | value -> value)
   |> List.map (fun (key, version) -> from_version key version)
 
-let version_entries bucket (options : List_object_versions.options) =
+let version_entries bucket (options : Object.Versions.options) =
   sorted_version_entries bucket options
   |> version_entries_after_marker options.key_marker options.version_id_marker
 
@@ -159,7 +159,7 @@ let find_sub ~sub value =
   in
   loop 0
 
-let common_prefix_for_key (options : List_object_versions.options) key =
+let common_prefix_for_key (options : Object.Versions.options) key =
   match options.delimiter with
   | None -> None
   | Some delimiter -> (
@@ -168,7 +168,7 @@ let common_prefix_for_key (options : List_object_versions.options) key =
         Option.value ~default:""
           (Option.map Object_key.Prefix.to_string options.prefix)
       in
-      let delimiter = List_object_versions.Delimiter.to_string delimiter in
+      let delimiter = Object.Versions.Delimiter.to_string delimiter in
       let rest =
         String.sub key (String.length prefix)
           (String.length key - String.length prefix)
@@ -203,7 +203,7 @@ let dedupe_listing_entries entries =
   in
   dedupe [] [] entries
 
-let listing_entries bucket (options : List_object_versions.options) =
+let listing_entries bucket (options : Object.Versions.options) =
   sorted_version_entries bucket options
   |> List.map (listing_entry_of_version options)
   |> dedupe_listing_entries

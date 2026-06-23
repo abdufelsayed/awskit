@@ -10,10 +10,6 @@
   qcheck-alcotest
   ptime))
 
-(alias
- (name api-compile)
- (deps test_awskit_s3.exe))
-
 (rule
  (alias protocol-pbt)
  (deps test_awskit_s3.exe)
