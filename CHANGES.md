@@ -86,6 +86,8 @@ release packaging.
   XML, invalid numeric fields, bad response headers, and invalid CopyObject
   replacement metadata while preserving supported S3-compatible marker and
   payload-hash forms. (6213acd, fa14e23, e83d337, 3732f9a)
+- Preserved Lwt timeout errors over request-body cleanup cancellation races.
+  (d804565)
 
 ## Documentation, CI, and Release
 
@@ -95,6 +97,9 @@ release packaging.
 - Added an installed API snapshot gate, release governance checks, branch and
   ruleset release verification, and PR template prompts for API/support impact
   review. (2aa5523)
+- Installed Eio HTTPS example-only dependencies in documentation/example CI and
+  local release validation without adding them to published package
+  dependencies. (d804565)
 - Expanded public API documentation across core Awskit modules, S3 operations,
   adapter entrypoints, simulator APIs, and guide examples. (#3, 0e2021c)
 - Updated README and guide coverage for the v0.2.0 S3 streaming API, package
