@@ -86,6 +86,9 @@ release packaging.
 
 ## Documentation, CI, and Release
 
+- Added root support and security policies, simulator-backed no-network S3
+  examples, docs content policy checks, and CI/release gates for examples and
+  documentation claims. (475bf37)
 - Expanded public API documentation across core Awskit modules, S3 operations,
   adapter entrypoints, simulator APIs, and guide examples. (#3, 0e2021c)
 - Updated README and guide coverage for the v0.2.0 S3 streaming API, package
