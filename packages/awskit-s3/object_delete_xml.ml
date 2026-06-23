@@ -12,6 +12,13 @@ let validate_objects objects =
       Delete_objects.max_objects
   else Ok ()
 
+let condition_etag_xml_value etag =
+  let value = Object.Etag.to_string etag in
+  let len = String.length value in
+  if len >= 2 && value.[0] = '"' && value.[len - 1] = '"' then
+    String.sub value 1 (len - 2)
+  else value
+
 let body objects =
   let object_xml (object_ : Delete_objects.object_) =
     let optional name value =
@@ -21,10 +28,9 @@ let body objects =
       ([ Xml.text "Key" (Object_key.to_string object_.Delete_objects.key) ]
       @ optional "VersionId"
           (Option.map Object.Version_id.to_string object_.version_id)
-      @ optional "ETag" (Option.map Object.Etag.to_string object_.etag))
+      @ optional "ETag" (Option.map condition_etag_xml_value object_.etag))
   in
-  Xml.el "Delete" (Xml.text "Quiet" "false" :: List.map object_xml objects)
-  |> Xml.to_string
+  Xml.el "Delete" (List.map object_xml objects) |> Xml.to_string
 
 let parse_key ~path name nodes =
   let* key = Xml.required_child_text ~path name nodes in
@@ -38,7 +44,16 @@ let parse_version_id ~path name nodes =
   Xml.optional_child_result ~path name Object.Version_id.of_string nodes
 
 let parse_result ~response body =
-  let* nodes = Xml.decode_root body ~name:"DeleteResult" in
+  let* nodes =
+    match Xml.root body with
+    | Error _ as error -> error
+    | Ok ("Error", _) -> Error (Response.embedded_service_error response body)
+    | Ok ("DeleteResult", nodes) -> Ok nodes
+    | Ok (actual, _) ->
+        Error
+          (Awskit.Error.Internal.decode
+             (Fmt.str "expected DeleteResult XML, got %s" actual))
+  in
   let* deleted =
     Xml.children_result "Deleted" nodes ~f:(fun index nodes ->
         let path = Fmt.str "DeleteResult.Deleted[%d]" index in
@@ -48,7 +63,16 @@ let parse_result ~response body =
           Xml.optional_child_parse ~path "DeleteMarker" Response.parse_bool
             nodes
         in
-        Ok { Delete_objects.key; version_id; delete_marker })
+        let* delete_marker_version_id =
+          parse_version_id ~path "DeleteMarkerVersionId" nodes
+        in
+        Ok
+          {
+            Delete_objects.key;
+            version_id;
+            delete_marker;
+            delete_marker_version_id;
+          })
   in
   let* errors =
     Xml.children_result "Error" nodes ~f:(fun index nodes ->

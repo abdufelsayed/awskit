@@ -28,6 +28,7 @@ module Make (C : Request_context.S) = struct
       etag = info.etag;
       content_type = info.content_type;
       content_length = info.content_length;
+      content_range = info.content_range;
       last_modified = info.last_modified;
       metadata = info.metadata;
       storage_class = info.storage_class;
@@ -272,7 +273,7 @@ module Make (C : Request_context.S) = struct
     let* result = head conn ~bucket ~key () in
     match result with
     | Ok _ -> return_ok true
-    | Error error when Error.is_not_found error -> return_ok false
+    | Error error when is_head_object_missing error -> return_ok false
     | Error error -> return_error error
 
   let delete conn ~bucket ~key ?options () =

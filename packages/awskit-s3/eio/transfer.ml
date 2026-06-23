@@ -611,6 +611,7 @@ struct
       etag = result.etag;
       content_type = result.content_type;
       content_length = result.content_length;
+      content_range = result.content_range;
       last_modified = result.last_modified;
       metadata = result.metadata;
       storage_class = result.storage_class;

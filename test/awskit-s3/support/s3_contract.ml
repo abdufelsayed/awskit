@@ -233,6 +233,13 @@ module Make (Client : SUBJECT) = struct
       (Awskit.Response.status result.response);
     Alcotest.(check (option int64))
       "range content length" (Some 4L) result.content_length;
+    (match result.content_range with
+    | None -> Alcotest.fail "expected typed content range"
+    | Some content_range ->
+        Alcotest.(check int64) "range start" 2L content_range.start;
+        Alcotest.(check int64) "range finish" 5L content_range.finish;
+        Alcotest.(check (option int64))
+          "range complete length" (Some 10L) content_range.complete_length);
     Alcotest.(check (option string))
       "range content range" (Some "bytes 2-5/10")
       (Awskit.Response.header result.response "content-range");

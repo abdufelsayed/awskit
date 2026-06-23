@@ -56,7 +56,15 @@ let clear_faults = Simulator_state.clear_faults
 let enable_random_faults = Simulator_state.enable_random_faults
 let disable_random_faults = Simulator_state.disable_random_faults
 
-let info_of_object ?content_length response (obj : stored_object) =
+let content_range response =
+  match Awskit.Response.header response "content-range" with
+  | None -> None
+  | Some value ->
+      Some
+        (Awskit.Error.Internal.get_ok_exn (Range.Content_range.of_header value))
+
+let info_of_object ?content_length response (obj : stored_object) :
+    Get_object.info =
   {
     Get_object.etag = Some obj.etag;
     content_type = obj.content_type;
@@ -64,6 +72,7 @@ let info_of_object ?content_length response (obj : stored_object) =
       Some
         (Option.value ~default:(String.length obj.body) content_length
         |> Int64.of_int);
+    content_range = content_range response;
     last_modified = Some obj.last_modified;
     metadata = obj.metadata;
     storage_class = obj.storage_class;

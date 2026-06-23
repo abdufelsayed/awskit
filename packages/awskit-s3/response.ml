@@ -86,12 +86,17 @@ let response_content_type response =
             (decode_with_context ~what:"Content-Type response header"
                (Awskit.Error.to_string_hum error)))
 
+let response_content_range response =
+  option_map_result Range.Content_range.of_header
+    (Awskit.Response.header response "content-range")
+
 let object_info response =
   let* etag = response_etag response in
   let* storage_class = storage_class response in
   let* content_length = Awskit.Response.header_int response "content-length" in
   let* version_id = response_version response in
   let* content_type = response_content_type response in
+  let* content_range = response_content_range response in
   let* metadata =
     Metadata_headers.of_headers (Awskit.Response.headers response)
   in
@@ -100,6 +105,7 @@ let object_info response =
       Get_object.etag;
       content_type;
       content_length = Option.map Int64.of_int content_length;
+      content_range;
       last_modified =
         Option.bind
           (Awskit.Response.header response "last-modified")

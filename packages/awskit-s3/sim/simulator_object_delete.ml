@@ -142,6 +142,10 @@ let delete_objects conn ~bucket ~objects ?options:_ () =
                           Delete_objects.key = object_.key;
                           version_id;
                           delete_marker;
+                          delete_marker_version_id =
+                            (match delete_marker with
+                            | Some true -> version_id
+                            | Some false | None -> None);
                         }
                         :: deleted,
                         errors ))

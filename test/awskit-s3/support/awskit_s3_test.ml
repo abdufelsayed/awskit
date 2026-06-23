@@ -12,6 +12,11 @@ let string_contains = Awskit_test.String.contains
 let version_string = Option.map Object.Version_id.to_string
 let query_param name url = Uri.query (Uri.of_string url) |> List.assoc_opt name
 
+let check_method label expected request =
+  Alcotest.(check string)
+    label expected
+    (Awskit.Request.Method.to_string request.Awskit.Request.method_)
+
 let signed_headers_or_fail url =
   match query_param "X-Amz-SignedHeaders" url with
   | Some [ value ] -> String.split_on_char ';' value

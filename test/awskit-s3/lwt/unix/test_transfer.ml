@@ -310,6 +310,7 @@ let get_info ?etag ?version_id content_length : Awskit_s3.Get_object.info =
     etag;
     content_type = None;
     content_length;
+    content_range = None;
     last_modified = None;
     metadata = Awskit_s3.Metadata.empty;
     storage_class = None;
@@ -327,6 +328,7 @@ let get_result ?etag ?version_id content_length value :
     etag = info.etag;
     content_type = info.content_type;
     content_length = info.content_length;
+    content_range = info.content_range;
     last_modified = info.last_modified;
     metadata = info.metadata;
     storage_class = info.storage_class;

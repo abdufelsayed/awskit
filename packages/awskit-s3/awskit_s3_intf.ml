@@ -159,10 +159,11 @@ module type OBJECT = sig
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     (bool, Awskit.Error.t) result io
-  (** Return [false] for S3 not-found responses and [true] for success.
+  (** Return [false] for object-not-found responses and [true] for success.
 
-      Other errors, including auth/transport/decode failures, are returned as
-      [Error]. *)
+      Code-less [HeadObject] 404 responses are treated as absent objects. Coded
+      [NoSuchBucket] responses and other service, auth, transport, and decode
+      failures remain [Error]. *)
 
   val delete :
     connection ->

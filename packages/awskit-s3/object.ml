@@ -250,6 +250,7 @@ module Get = struct
     etag : Etag.t option;
     content_type : Content_type.t option;
     content_length : int64 option;
+    content_range : Range.Content_range.t option;
     last_modified : Ptime.t option;
     metadata : Metadata.t;
     storage_class : Storage_class.t option;
@@ -264,6 +265,7 @@ module Get = struct
     etag : Etag.t option;
     content_type : Content_type.t option;
     content_length : int64 option;
+    content_range : Range.Content_range.t option;
     last_modified : Ptime.t option;
     metadata : Metadata.t;
     storage_class : Storage_class.t option;
@@ -367,6 +369,7 @@ module Delete_many = struct
     key : Object_key.t;
     version_id : Version_id.t option;
     delete_marker : bool option;
+    delete_marker_version_id : Version_id.t option;
   }
 
   type item_error = {

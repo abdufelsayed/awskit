@@ -268,6 +268,8 @@ module Get : sig
         (** Object [Content-Type] response header. *)
     content_length : int64 option;
         (** Number of response-body bytes when S3 supplied [Content-Length]. *)
+    content_range : Range.Content_range.t option;
+        (** Parsed [Content-Range] response header for ranged responses. *)
     last_modified : Ptime.t option;
         (** Last modified timestamp parsed from the response. *)
     metadata : Metadata.t;
@@ -290,6 +292,8 @@ module Get : sig
         (** Object [Content-Type] response header. *)
     content_length : int64 option;
         (** Number of response-body bytes when S3 supplied [Content-Length]. *)
+    content_range : Range.Content_range.t option;
+        (** Parsed [Content-Range] response header for ranged responses. *)
     last_modified : Ptime.t option;
         (** Last modified timestamp parsed from the response. *)
     metadata : Metadata.t;
@@ -430,6 +434,8 @@ module Delete_many : sig
     key : Object_key.t;  (** Deleted key reported by S3. *)
     version_id : Version_id.t option;  (** Deleted version id, when present. *)
     delete_marker : bool option;  (** Delete-marker flag reported by S3. *)
+    delete_marker_version_id : Version_id.t option;
+        (** Delete-marker version id, when S3 reports one. *)
   }
   (** One successful [DeleteObjects] member result. *)
 

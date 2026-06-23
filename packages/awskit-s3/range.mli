@@ -35,3 +35,19 @@ val to_header : t -> string
 
 val view : t -> view
 (** Return the structured range shape. *)
+
+module Content_range : sig
+  type t = {
+    start : int64;
+    finish : int64;
+    complete_length : int64 option;
+        (** [None] when S3 returned an unknown complete length ([*]). *)
+  }
+  (** Parsed [Content-Range] response header for successful ranged reads. *)
+
+  val of_header : string -> (t, Awskit.Error.t) result
+  (** Parse a [Content-Range] response header such as [bytes 2-5/10]. *)
+
+  val to_header : t -> string
+  (** Render a [Content-Range] response header value. *)
+end

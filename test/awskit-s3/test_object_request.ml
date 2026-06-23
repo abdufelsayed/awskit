@@ -43,6 +43,9 @@ let test_object_checksum_headers_and_response () =
     {
       Put_object.default_options with
       checksum = Some checksum;
+      content_type = Some (content_type "text/plain");
+      metadata = Metadata.of_list_exn [ ("source", "unit-test") ];
+      tags = tag_set [ tag "env" "prod" ];
       expected_bucket_owner = Some (account_id "123456789012");
     }
   in
@@ -61,7 +64,20 @@ let test_object_checksum_headers_and_response () =
     "checksum type" true
     (put.checksum.checksum_type = Some Object.Checksum.Type.Composite);
   let call = Recording_runtime.last_call conn in
+  check_method "put method" "PUT" call.request;
   Alcotest.(check string) "body" "hello" call.body;
+  Alcotest.(check (option string))
+    "content length" (Some "5")
+    (header "content-length" call.request.headers);
+  Alcotest.(check (option string))
+    "content type" (Some "text/plain")
+    (header "content-type" call.request.headers);
+  Alcotest.(check (option string))
+    "metadata" (Some "unit-test")
+    (header "x-amz-meta-source" call.request.headers);
+  Alcotest.(check (option string))
+    "tags" (Some "env=prod")
+    (header "x-amz-tagging" call.request.headers);
   Alcotest.(check (option string))
     "no checksum algorithm header" None
     (header "x-amz-checksum-algorithm" call.request.headers);
@@ -167,6 +183,11 @@ let test_object_precondition_headers () =
     |> ok_or_fail "copy preconditions");
   match List.rev conn.calls with
   | [ put; get; head; delete; copy ] ->
+      check_method "put method" "PUT" put.request;
+      check_method "get method" "GET" get.request;
+      check_method "head method" "HEAD" head.request;
+      check_method "delete method" "DELETE" delete.request;
+      check_method "copy method" "PUT" copy.request;
       Alcotest.(check (option string))
         "put if-match" (Some "\"etag\"")
         (header "if-match" put.request.headers);
@@ -211,6 +232,69 @@ let test_object_precondition_headers () =
         (header "x-amz-copy-source-if-unmodified-since" copy.request.headers)
   | _ -> Alcotest.fail "expected five recorded calls"
 
+let test_object_get_range_header () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 206
+          ~headers:
+            [ ("content-length", "4"); ("content-range", "bytes 2-5/10") ]
+          "cdef";
+      ]
+  in
+  let options =
+    Get_object.options_exn ~range:(Range.bytes_exn ~start:2L ~finish:5L) ()
+  in
+  let result =
+    Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file") ~options
+      ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
+      ()
+    |> ok_or_fail "get range"
+  in
+  Alcotest.(check string) "range body" "cdef" result.value;
+  (match result.content_range with
+  | None -> Alcotest.fail "expected parsed content range"
+  | Some content_range ->
+      Alcotest.(check int64) "content range start" 2L content_range.start;
+      Alcotest.(check int64) "content range finish" 5L content_range.finish;
+      Alcotest.(check (option int64))
+        "content range complete length" (Some 10L) content_range.complete_length);
+  let call = Recording_runtime.last_call conn in
+  check_method "range method" "GET" call.request;
+  let range_headers =
+    List.filter
+      (fun (name, _) -> String.lowercase_ascii name = "range")
+      call.request.headers
+  in
+  Alcotest.(check (list (pair string string)))
+    "single range header"
+    [ ("range", "bytes=2-5") ]
+    range_headers
+
+let test_object_get_rejects_malformed_content_range () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 206
+          ~headers:
+            [ ("content-length", "4"); ("content-range", "bytes 5-2/10") ]
+          "cdef";
+      ]
+  in
+  let options =
+    Get_object.options_exn ~range:(Range.bytes_exn ~start:2L ~finish:5L) ()
+  in
+  match
+    Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file") ~options
+      ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
+      ()
+  with
+  | Error error when is_decode_error error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected malformed Content-Range decode error"
+
 let test_delete_objects_request_body () =
   let conn = Recording_runtime.connect [ response 200 "<DeleteResult/>" ] in
   let version_id = Object.Version_id.of_string_exn "version-1" in
@@ -226,20 +310,83 @@ let test_delete_objects_request_body () =
     (Recording_s3.Object.delete_objects conn ~bucket:(bucket_name "my-bucket")
        ~objects ()
     |> ok_or_fail "delete objects request body");
-  let body = (Recording_runtime.last_call conn).body in
+  let call = Recording_runtime.last_call conn in
+  check_method "delete objects method" "POST" call.request;
+  Alcotest.(check (list (pair string (list string))))
+    "delete query"
+    [ ("delete", []) ]
+    call.request.target.query;
+  Alcotest.(check bool)
+    "content-md5 present" true
+    (Option.is_some (header "content-md5" call.request.headers));
+  Alcotest.(check (option string))
+    "content type" (Some "application/xml")
+    (header "content-type" call.request.headers);
+  let body = call.body in
   let check_contains label substring =
     Alcotest.(check bool) label true (string_contains ~substring body)
   in
   let check_absent label substring =
     Alcotest.(check bool) label false (string_contains ~substring body)
   in
+  check_absent "quiet omitted" "<Quiet>";
   check_contains "key-only key" "<Key>key-only.txt</Key>";
   check_contains "versioned key" "<Key>versioned.txt</Key>";
   check_contains "version id" "<VersionId>version-1</VersionId>";
   check_contains "etag key" "<Key>etag.txt</Key>";
-  check_contains "etag" "<ETag>&quot;etag&quot;</ETag>";
+  check_contains "etag" "<ETag>etag</ETag>";
   check_absent "last modified omitted" "LastModifiedTime";
   check_absent "size omitted" "<Size>"
+
+let test_delete_objects_response_decode () =
+  let body =
+    {|<DeleteResult><Deleted><Key>deleted.txt</Key><VersionId>version-1</VersionId><DeleteMarker>true</DeleteMarker><DeleteMarkerVersionId>marker-version</DeleteMarkerVersionId></Deleted><Error><Key>blocked.txt</Key><Code>AccessDenied</Code><Message>denied</Message></Error></DeleteResult>|}
+  in
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  let object_ = Delete_objects.object_ ~key:(object_key "deleted.txt") () in
+  let result =
+    Recording_s3.Object.delete_objects conn ~bucket:(bucket_name "my-bucket")
+      ~objects:[ object_ ] ()
+    |> ok_or_fail "delete objects response decode"
+  in
+  (match result.deleted with
+  | [ deleted ] ->
+      Alcotest.(check string)
+        "deleted key" "deleted.txt"
+        (Object_key.to_string deleted.key);
+      Alcotest.(check (option string))
+        "deleted version" (Some "version-1")
+        (version_string deleted.version_id);
+      Alcotest.(check (option bool))
+        "delete marker" (Some true) deleted.delete_marker;
+      Alcotest.(check (option string))
+        "delete marker version" (Some "marker-version")
+        (version_string deleted.delete_marker_version_id)
+  | _ -> Alcotest.fail "expected one deleted member");
+  match result.errors with
+  | [ error ] ->
+      Alcotest.(check string)
+        "error key" "blocked.txt"
+        (Object_key.to_string error.key);
+      Alcotest.(check string) "error code" "AccessDenied" error.code;
+      Alcotest.(check (option string))
+        "error message" (Some "denied") error.message
+  | _ -> Alcotest.fail "expected one error member"
+
+let test_delete_objects_embedded_error () =
+  let body =
+    {|<Error><Code>MalformedXML</Code><Message>request body is malformed</Message></Error>|}
+  in
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  let object_ = Delete_objects.object_ ~key:(object_key "file") () in
+  match
+    Recording_s3.Object.delete_objects conn ~bucket:(bucket_name "my-bucket")
+      ~objects:[ object_ ] ()
+  with
+  | Error error when Error.service_code error = Some "MalformedXML" -> ()
+  | Error error ->
+      Alcotest.failf "unexpected delete objects error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected embedded delete objects error"
 
 let test_delete_objects_rejects_invalid_count () =
   let conn = Recording_runtime.connect [] in
@@ -255,6 +402,49 @@ let test_delete_objects_rejects_invalid_count () =
       ~objects ()
   in
   expect_validation "delete objects too many" result
+
+let test_object_version_id_queries () =
+  let version_id = Object.Version_id.of_string_exn "version-1" in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 ~headers:[ ("content-length", "0") ] "";
+        response 200 ~headers:[ ("content-length", "0") ] "";
+        response 204 "";
+      ]
+  in
+  let get_options = Get_object.options_exn ~version_id () in
+  ignore
+    (Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ~options:get_options
+       ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
+       ()
+    |> ok_or_fail "get version");
+  let head_options = Head_object.options_exn ~version_id () in
+  ignore
+    (Recording_s3.Object.head conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ~options:head_options ()
+    |> ok_or_fail "head version");
+  let delete_options = Delete_object.options_exn ~version_id () in
+  ignore
+    (Recording_s3.Object.delete conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ~options:delete_options ()
+    |> ok_or_fail "delete version");
+  match List.rev conn.calls with
+  | [ get; head; delete ] ->
+      List.iter
+        (fun (label, expected_method, (call : Recording_runtime.call)) ->
+          check_method (label ^ " method") expected_method call.request;
+          Alcotest.(check (list (pair string (list string))))
+            (label ^ " query")
+            [ ("versionId", [ "version-1" ]) ]
+            call.request.target.query)
+        [
+          ("get", "GET", get);
+          ("head", "HEAD", head);
+          ("delete", "DELETE", delete);
+        ]
+  | _ -> Alcotest.fail "expected get/head/delete calls"
 
 let test_object_versioning_requests_and_parse () =
   let version_id = Object.Version_id.of_string_exn "version-1" in
@@ -310,6 +500,8 @@ let test_object_versioning_requests_and_parse () =
     (version_string page.next_version_id_marker);
   match List.rev conn.calls with
   | [ copy_call; versions_call ] ->
+      check_method "copy versioning method" "PUT" copy_call.request;
+      check_method "versions method" "GET" versions_call.request;
       Alcotest.(check (option string))
         "copy source header" (Some "/my-bucket/file?versionId=version-1")
         (header "x-amz-copy-source" copy_call.request.headers);
@@ -329,6 +521,32 @@ let test_object_versioning_requests_and_parse () =
         "version marker query" (Some [ "version-1" ])
         (List.assoc_opt "version-id-marker" versions_call.request.target.query)
   | _ -> Alcotest.fail "expected copy and version listing calls"
+
+let test_copy_source_exact_once_encoding () =
+  let version_id = Object.Version_id.of_string_exn "v 1/%?" in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          {|<CopyObjectResult><ETag>"copy"</ETag></CopyObjectResult>|};
+      ]
+  in
+  let options =
+    { Copy_object.default_options with source_version_id = Some version_id }
+  in
+  ignore
+    (Recording_s3.Object.copy conn
+       ~source_bucket:(bucket_name "source-bucket")
+       ~source_key:(object_key "space dir/a%25?b.txt")
+       ~destination_bucket:(bucket_name "my-bucket")
+       ~destination_key:(object_key "copy") ~options ()
+    |> ok_or_fail "copy source exact once encoding");
+  let call = Recording_runtime.last_call conn in
+  check_method "copy source encoding method" "PUT" call.request;
+  Alcotest.(check (option string))
+    "copy source header"
+    (Some "/source-bucket/space%20dir/a%2525%3Fb.txt?versionId=v%201%2F%25%3F")
+    (header "x-amz-copy-source" call.request.headers)
 
 let test_object_versioning_empty_markers_are_absent () =
   let conn =
@@ -385,7 +603,9 @@ let test_find_metadata_bare_head_404_returns_none () =
     Recording_s3.Object.find_metadata conn ~bucket:(bucket_name "my-bucket")
       ~key:(object_key "missing") ()
   with
-  | Ok None -> ()
+  | Ok None ->
+      check_method "find metadata bare head 404 method" "HEAD"
+        (Recording_runtime.last_call conn).request
   | Ok (Some _) -> Alcotest.fail "expected None for bare HEAD 404"
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
 
@@ -400,6 +620,31 @@ let test_find_metadata_missing_bucket_returns_error () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok None -> Alcotest.fail "expected missing bucket error, got None"
   | Ok (Some _) -> Alcotest.fail "expected missing bucket error"
+
+let test_object_exists_missing_object_returns_false () =
+  let conn = Recording_runtime.connect [ response 404 no_such_key_body ] in
+  let exists =
+    Recording_s3.Object.exists conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "missing")
+    |> ok_or_fail "object exists missing object"
+  in
+  Alcotest.(check bool) "exists" false exists;
+  check_method "object exists method" "HEAD"
+    (Recording_runtime.last_call conn).request
+
+let test_object_exists_missing_bucket_returns_error () =
+  let conn = Recording_runtime.connect [ response 404 no_such_bucket_body ] in
+  match
+    Recording_s3.Object.exists conn
+      ~bucket:(bucket_name "missing-bucket")
+      ~key:(object_key "file")
+  with
+  | Error error when Error.is_no_such_bucket error ->
+      check_method "object exists missing bucket method" "HEAD"
+        (Recording_runtime.last_call conn).request
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok false -> Alcotest.fail "expected missing bucket error, got false"
+  | Ok true -> Alcotest.fail "expected missing bucket error"
 
 let test_find_success_returns_some () =
   let conn =
@@ -612,6 +857,63 @@ let test_object_tagging_rejects_incomplete_tag_xml () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected incomplete tag decode error"
 
+let test_object_tagging_request_wire () =
+  let expected_owner = account_id "123456789012" in
+  let options =
+    Object.Tagging.options_exn ~expected_bucket_owner:expected_owner ()
+  in
+  let tags = tag_set [ tag "env" "prod" ] in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          "<Tagging><TagSet><Tag><Key>env</Key><Value>prod</Value></Tag></TagSet></Tagging>";
+        response 200 "";
+        response 204 "";
+      ]
+  in
+  ignore
+    (Recording_s3.Object.Tagging.get conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ~options ()
+    |> ok_or_fail "get object tagging");
+  ignore
+    (Recording_s3.Object.Tagging.put conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ~options ~tags ()
+    |> ok_or_fail "put object tagging");
+  ignore
+    (Recording_s3.Object.Tagging.delete conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ~options ()
+    |> ok_or_fail "delete object tagging");
+  match List.rev conn.calls with
+  | [ get; put; delete ] ->
+      List.iter
+        (fun (label, expected_method, (call : Recording_runtime.call)) ->
+          check_method (label ^ " method") expected_method call.request;
+          Alcotest.(check (list (pair string (list string))))
+            (label ^ " query")
+            [ ("tagging", []) ]
+            call.request.target.query;
+          Alcotest.(check (option string))
+            (label ^ " expected owner")
+            (Some "123456789012")
+            (header "x-amz-expected-bucket-owner" call.request.headers))
+        [
+          ("get", "GET", get); ("put", "PUT", put); ("delete", "DELETE", delete);
+        ];
+      Alcotest.(check bool)
+        "put content-md5 present" true
+        (Option.is_some (header "content-md5" put.request.headers));
+      Alcotest.(check (option string))
+        "put content type" (Some "application/xml")
+        (header "content-type" put.request.headers);
+      Alcotest.(check bool)
+        "put tag key" true
+        (string_contains put.body ~substring:"<Key>env</Key>");
+      Alcotest.(check bool)
+        "put tag value" true
+        (string_contains put.body ~substring:"<Value>prod</Value>")
+  | _ -> Alcotest.fail "expected object tagging calls"
+
 let test_head_rejects_duplicate_metadata_headers_as_decode_error () =
   let conn =
     Recording_runtime.connect
@@ -732,6 +1034,14 @@ let test_object_checksum_mode_and_expected_owner_headers () =
     |> ok_or_fail "list versions expected owner");
   match List.rev conn.calls with
   | [ get; head; delete; delete_many; copy; list; versions ] ->
+      check_method "get expected owner method" "GET" get.request;
+      check_method "head expected owner method" "HEAD" head.request;
+      check_method "delete expected owner method" "DELETE" delete.request;
+      check_method "delete many expected owner method" "POST"
+        delete_many.request;
+      check_method "copy expected owner method" "PUT" copy.request;
+      check_method "list expected owner method" "GET" list.request;
+      check_method "versions expected owner method" "GET" versions.request;
       List.iter
         (fun (label, (call : Recording_runtime.call)) ->
           Alcotest.(check (option string))
@@ -769,12 +1079,24 @@ let suite =
           test_object_checksum_headers_and_response;
         Alcotest.test_case "object precondition headers" `Quick
           test_object_precondition_headers;
+        Alcotest.test_case "object get range header" `Quick
+          test_object_get_range_header;
+        Alcotest.test_case "object get rejects malformed content range" `Quick
+          test_object_get_rejects_malformed_content_range;
         Alcotest.test_case "delete objects request body" `Quick
           test_delete_objects_request_body;
+        Alcotest.test_case "delete objects response decode" `Quick
+          test_delete_objects_response_decode;
+        Alcotest.test_case "delete objects embedded error" `Quick
+          test_delete_objects_embedded_error;
         Alcotest.test_case "delete objects rejects invalid count" `Quick
           test_delete_objects_rejects_invalid_count;
+        Alcotest.test_case "object version id queries" `Quick
+          test_object_version_id_queries;
         Alcotest.test_case "object versioning requests and parse" `Quick
           test_object_versioning_requests_and_parse;
+        Alcotest.test_case "copy source exact once encoding" `Quick
+          test_copy_source_exact_once_encoding;
         Alcotest.test_case "object versioning empty markers are absent" `Quick
           test_object_versioning_empty_markers_are_absent;
         Alcotest.test_case "version paginator rejects invalid next key marker"
@@ -785,6 +1107,10 @@ let suite =
           test_find_metadata_bare_head_404_returns_none;
         Alcotest.test_case "find metadata missing bucket returns error" `Quick
           test_find_metadata_missing_bucket_returns_error;
+        Alcotest.test_case "object exists missing object returns false" `Quick
+          test_object_exists_missing_object_returns_false;
+        Alcotest.test_case "object exists missing bucket returns error" `Quick
+          test_object_exists_missing_bucket_returns_error;
         Alcotest.test_case "find success returns some" `Quick
           test_find_success_returns_some;
         Alcotest.test_case "find missing object returns none" `Quick
@@ -805,6 +1131,8 @@ let suite =
           test_object_list_allows_unknown_extra_elements;
         Alcotest.test_case "object tagging rejects incomplete tag xml" `Quick
           test_object_tagging_rejects_incomplete_tag_xml;
+        Alcotest.test_case "object tagging request wire" `Quick
+          test_object_tagging_request_wire;
         Alcotest.test_case
           "head rejects duplicate metadata headers as decode error" `Quick
           test_head_rejects_duplicate_metadata_headers_as_decode_error;

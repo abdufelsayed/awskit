@@ -165,6 +165,32 @@ let test_find_metadata_missing_bucket_returns_error () =
   | Ok None -> Alcotest.fail "expected missing bucket error, got None"
   | Ok (Some _) -> Alcotest.fail "expected missing bucket error"
 
+let test_exists_missing_object_returns_false () =
+  let conn = Simulator_subject.fresh () in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:(bucket_name "test-bucket") ()
+    |> ok_or_fail "create bucket");
+  match
+    Simulator.Object.exists conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "missing")
+  with
+  | Ok false -> ()
+  | Ok true -> Alcotest.fail "expected false for missing object"
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+
+let test_exists_missing_bucket_returns_error () =
+  let conn = Simulator_subject.fresh () in
+  match
+    Simulator.Object.exists conn
+      ~bucket:(bucket_name "missing-bucket")
+      ~key:(object_key "file")
+  with
+  | Error error when Error.is_no_such_bucket error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
+  | Ok false -> Alcotest.fail "expected missing bucket error, got false"
+  | Ok true -> Alcotest.fail "expected missing bucket error"
+
 let test_find_missing_object_returns_none () =
   let conn = Simulator_subject.fresh () in
   ignore
@@ -237,6 +263,10 @@ let suite =
           test_find_metadata_missing_object_returns_none;
         Alcotest.test_case "find metadata missing bucket returns error" `Quick
           test_find_metadata_missing_bucket_returns_error;
+        Alcotest.test_case "exists missing object returns false" `Quick
+          test_exists_missing_object_returns_false;
+        Alcotest.test_case "exists missing bucket returns error" `Quick
+          test_exists_missing_bucket_returns_error;
         Alcotest.test_case "find missing object returns none" `Quick
           test_find_missing_object_returns_none;
         Alcotest.test_case "find missing bucket returns error" `Quick

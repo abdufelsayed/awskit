@@ -29,6 +29,7 @@ let get_result (info : Get_object.info) value : _ Get_object.result =
     etag = info.etag;
     content_type = info.content_type;
     content_length = info.content_length;
+    content_range = info.content_range;
     last_modified = info.last_modified;
     metadata = info.metadata;
     storage_class = info.storage_class;
@@ -150,7 +151,7 @@ let head conn ~bucket ~key ?options () =
 let exists conn ~bucket ~key =
   match head conn ~bucket ~key () with
   | Ok _ -> Ok true
-  | Error error when Error.is_not_found error -> Ok false
+  | Error error when Error.is_no_such_key error -> Ok false
   | Error error -> Error error
 
 let get_as_string conn ~bucket ~key ~max_bytes ?options () =
@@ -164,6 +165,7 @@ let get_as_bytes conn ~bucket ~key ~max_bytes ?options () =
         etag = result.etag;
         content_type = result.content_type;
         content_length = result.content_length;
+        content_range = result.content_range;
         last_modified = result.last_modified;
         metadata = result.metadata;
         storage_class = result.storage_class;
