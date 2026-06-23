@@ -19,6 +19,11 @@ release packaging.
   numbers, named operation results, ownership-aware transfer lifecycle, and
   resume helpers that complete only from fresh `UploadPart` results.
   (aab863c)
+- High-level Lwt Unix and Eio transfer progress callbacks now receive
+  `Awskit_s3.Transfer.progress` events instead of raw byte counts. Use
+  `progress.transferred` for the previous byte count, and inspect `direction`,
+  `phase`, `total`, and `part_number` for structured transfer context.
+  (2ee158f)
 - Eio callers now provide their own HTTPS policy when creating runtime and S3
   clients. (#8, c53921f)
 - Moved `Awskit.Error` constructors, context tagging, and exception bridge
@@ -54,6 +59,10 @@ release packaging.
 - Added structured SDK errors with operation, retry, decode, body, and S3
   context, plus SDK exception helpers and option-returning object lookup
   helpers. (#7, ca7be3c)
+- Added validated `Awskit_s3.Transfer` option builders, option accessors,
+  runtime-neutral upload/download planning helpers with property coverage,
+  structured transfer progress events, and a download overwrite policy.
+  (2ee158f)
 
 ## Fixed
 
@@ -66,6 +75,10 @@ release packaging.
 - Hardened scoped body cleanup and transfer helpers so consumer exceptions,
   canceled multipart uploads, and ranged downloads preserve resource ownership
   and object identity. (391b216, b251b54)
+- Reused the shared transfer planner from Lwt Unix and Eio helpers, propagated
+  transfer progress callback exceptions and cancellation consistently after
+  owned cleanup, and added pre-transport validation for
+  `Error_if_exists` downloads. (2ee158f)
 - Hardened S3 wire-format and request validation, rejecting malformed modeled
   XML, invalid numeric fields, bad response headers, and invalid CopyObject
   replacement metadata while preserving supported S3-compatible marker and
