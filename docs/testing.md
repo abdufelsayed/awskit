@@ -19,7 +19,7 @@ docs, or releases.
 | Simulator contracts | No-network S3 behavior, model-oracle state, fault injection, and docs/test backend behavior. The simulator is not an AWS wire authority. | `opam exec -- dune build @simulator-contract` |
 | Runtime conformance | Runtime authoring laws: request/response body ownership, retry sleep/random/timeout capability, scoped readers, drains, and error precedence. | `opam exec -- dune build @runtime-conformance` |
 | MinIO contracts | Explicitly supported local S3-compatible behavior through the Lwt Unix adapter. Requires Docker and cleanup. | `opam exec -- dune build --force @minio-contract` |
-| Examples/docs | Extracted examples, odoc pages, and future MDX/docs checks. Examples should compile, and simulator-backed examples should execute when practical. | `opam exec -- dune build @examples @doc` |
+| Examples/docs | Extracted examples, odoc pages, docs content policy, and future MDX/docs checks. Examples should compile, and simulator-backed examples should execute when practical. | `opam exec -- dune build @examples @doc @docs-content` |
 | Release gates | The composed local evidence plus opam/install/archive/docs checks and external-service lifecycle. | `scripts/release-check.sh` |
 
 For protocol behavior, prefer structured assertions or fixture comparisons over
@@ -31,11 +31,12 @@ mentioning a field name.
 
 | Alias | Purpose | External service |
 | --- | --- | --- |
-| `@check-fast` | Local `runtest`, API compile checks, and examples. | No |
+| `@check-fast` | Local `runtest`, API compile checks, docs content policy, and examples. | No |
 | `@check-protocol` | Protocol PBT, protocol fixtures, fuzz replay, simulator contract, and runtime conformance. | No |
 | `@protocol-pbt` | Fast deterministic protocol property tests. | No |
 | `@protocol-fixtures` | Fixture-backed protocol artifact tests with normalized comparisons. | No |
 | `@fuzz-replay` | Deterministic replay of committed minimized parser/validator failures. | No |
+| `@docs-content` | Markdown/odoc policy checks for support, security, Eio, S3-compatible, and presign safety claims. | No |
 | `@simulator-contract` | Simulator contract and simulator-specific fault/lifecycle tests. | No |
 | `@runtime-conformance` | Runtime capability and lifecycle conformance checks. | No |
 | `@minio-contract` | MinIO-backed S3-compatible contract tests. | Local Docker |
@@ -44,6 +45,10 @@ mentioning a field name.
 Long-running mutation fuzzing, live AWS account tests, and broader provider
 compatibility tests are opt-in unless a support policy explicitly promotes them
 to release gates.
+
+`@docs-mdx` does not exist yet. Do not add a placeholder alias. Add it only
+when README or package-guide snippets are normalized into real MDX or extracted
+checks that compile meaningful code.
 
 Shared S3 contract suites should name backend capability differences explicitly
 instead of weakening assertions globally. For example, the simulator can run the
@@ -122,7 +127,7 @@ opam exec -- dune build
 opam exec -- dune test
 opam exec -- dune build @check-fast
 opam exec -- dune build @check-protocol
-opam exec -- dune build @doc
+opam exec -- dune build @doc @examples @docs-content
 opam exec -- dune build @opam
 git diff --check
 ```

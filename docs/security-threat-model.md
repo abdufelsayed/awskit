@@ -1,9 +1,9 @@
 # Security Threat Model
 
-Awskit protects security-sensitive SDK material at public API boundaries,
-runtime boundaries, and test/documentation boundaries. The current scope is the
-core SDK and supported S3 SDK packages; MinIO is the named local S3-compatible
-contract target where executable contract coverage exists.
+Awskit treats security-sensitive SDK material as part of the public API
+contract at runtime, diagnostics, and test/documentation boundaries. The
+current scope is the core SDK and supported S3 SDK packages; MinIO is the named
+local S3-compatible contract target where executable contract coverage exists.
 
 ## Protected Assets
 
@@ -31,7 +31,7 @@ contract target where executable contract coverage exists.
 - The simulator is an in-process test/runtime boundary and does not prove live
   AWS behavior.
 - MinIO is the named local S3-compatible contract target covered by contract
-  tests; coverage does not imply every S3-compatible provider is supported.
+  tests; coverage does not imply provider-wide S3-compatible support.
 - Documentation examples are public artifacts and must avoid printing bearer
   presigned URLs or raw credentials by default.
 - CI is the automated evidence boundary for builds, documentation, and tests.
@@ -40,7 +40,7 @@ contract target where executable contract coverage exists.
 
 | Protection | Current evidence | Planned evidence |
 | --- | --- | --- |
-| Public diagnostics redact credentials, authorization material, signed URLs, endpoint secrets, metadata responses, and user-provided sensitive values. | `test/awskit/test_error_redaction.ml` | Expanded redaction matrix coverage as new diagnostics surfaces are added. |
+| Public diagnostics redact modeled service bodies and known secret-bearing fields, while raw diagnostics stay behind explicit unsafe APIs. | `test/awskit/test_error_redaction.ml` | Expanded redaction matrix coverage as new diagnostics surfaces are added. |
 | Presign APIs distinguish safe artifacts from bearer URLs and keep signed material out of default diagnostics and examples. | `test/awskit-s3/test_presigned.ml` | Additional presign artifact tests when the artifact surface expands. |
 | Credential chains continue only after unavailable providers and stop on invalid configured credentials or provider failures. | `test/awskit/test_core_contract.ml`; `test/awskit/lwt/unix/test_integration.ml` | Additional credential-chain tests for any newly supported provider family. |
 | Endpoint policy rejects unsafe endpoint components and requires explicit local/plaintext behavior. | `test/awskit-s3/test_endpoint.ml`; runtime integration tests under `test/awskit-s3/{lwt,eio}/test_integration.ml` | Endpoint-policy tests for new endpoint modes or contract targets. |
@@ -52,6 +52,9 @@ contract target where executable contract coverage exists.
   default.
 - Raw access to credentials or bearer presigned URLs must use deliberate
   `reveal_*` or `Unsafe_*` naming.
+- Do not place secrets in object keys, user metadata, custom source labels, or
+  application diagnostic strings and expect Awskit's public diagnostics to
+  discover every application-defined secret.
 - Runtime packages may expose advanced SDK APIs directly, but they must preserve
   the same redaction, credential, endpoint, and presign safety contracts.
 - New provider or endpoint support must add executable evidence before the docs

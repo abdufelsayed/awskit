@@ -14,6 +14,11 @@ Unix.
 
 The first supported service surface is AWS S3.
 
+Public support and security policy live in
+{{:https://github.com/abdufelsayed/awskit/blob/main/SUPPORT.md}[SUPPORT.md]}
+and
+{{:https://github.com/abdufelsayed/awskit/blob/main/SECURITY.md}[SECURITY.md]}.
+
 {1 Package Split}
 
 Awskit follows a Cohttp-style package split. Install the runtime adapter that
@@ -28,15 +33,15 @@ matches your application, and leave the rest out of your dependency graph.
   {li [awskit-lwt] — generic Lwt runtime adapter over a caller-supplied
     Cohttp Lwt client}
   {li [awskit-lwt-unix] — ready-to-use Lwt + Unix runtime adapter}
-  {li [awskit-eio] — direct-style Eio runtime adapter over a caller-provided
-    HTTPS policy}
+  {li [awskit-eio] — direct-style Eio runtime adapter with caller-owned HTTPS,
+    TLS, CA roots, RNG initialization, and platform policy}
   {li [awskit-s3] — runtime-agnostic AWS S3 core: buckets, objects, multipart
     upload, presigned request artifacts, policies, and endpoint resolution}
   {li [awskit-s3-sim] — deterministic in-memory S3 implementation for tests}
   {li [awskit-s3-lwt] — S3 adapter over the generic Awskit Lwt runtime}
   {li [awskit-s3-lwt-unix] — ready-to-use S3 client for Lwt + Unix}
   {li [awskit-s3-eio] — direct-style S3 client for Eio applications over a
-    caller-provided HTTPS policy}
+    caller-owned HTTPS policy}
 }
 
 The core [awskit] and [awskit-s3] packages do not depend on Unix, Eio, Lwt, or
@@ -114,6 +119,9 @@ metadata, and it can load the region from standard AWS environment variables.
 does not perform HTTP calls.
 
 {1 Minimal Signing Example}
+
+This example uses dummy credentials for a pure signing demonstration. Prefer
+standard provider sources or temporary credentials in real applications.
 
 {[
 let credentials =

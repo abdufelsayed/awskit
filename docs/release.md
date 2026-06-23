@@ -86,6 +86,7 @@ Required release-branch checks:
 
 - Default package build and tests.
 - Eio package build and tests.
+- Documentation, examples, and docs content policy.
 - MinIO S3 contract.
 
 The `publish-docs` job is expected to skip on release branches because it only
@@ -99,8 +100,9 @@ Before tagging, run:
 scripts/release-check.sh
 ```
 
-This validates package metadata, formatting, tests, documentation, distribution
-archives, and the MinIO contract.
+This validates package metadata, formatting, tests, examples, documentation
+content policy, generated documentation, distribution archives, and the MinIO
+contract.
 
 ## Merge, Tag, And Publish
 

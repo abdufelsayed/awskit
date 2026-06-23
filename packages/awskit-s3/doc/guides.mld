@@ -3,6 +3,8 @@
 Guides for using [awskit-s3] with AWS S3 object and bucket workflows. The
 client is streaming-first, endpoint-configurable, and result-returning, so
 applications can make memory use, retries, and error handling explicit.
+The supported S3 scope is defined in
+{{:https://github.com/abdufelsayed/awskit/blob/main/SUPPORT.md}[SUPPORT.md]}.
 
 {1 Object Operations}
 
@@ -450,8 +452,8 @@ must be enabled on the bucket in AWS.
 
 {1 Bucket Operations}
 
-[Bucket] covers general-purpose bucket basics and common configuration
-subresources:
+[Bucket] covers general-purpose bucket basics and selected modeled
+configuration subresources:
 
 {ul
   {li [Bucket.create], [delete], [head], [exists], [list], [get_location]}
@@ -632,10 +634,8 @@ above.
 
 {[
 let credentials =
-  Awskit.Credentials.create_exn
-    ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
-    ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-    ()
+  Awskit_unix.Credentials.default_chain ()
+  |> Result.get_ok
 in
 let https = Https.connector () in
 Awskit_s3_eio.create ~sw ~env ~https ~region:"us-east-1" ~credentials ()
@@ -678,7 +678,8 @@ the selected runtime monad.
 signing, transport, service, decode, and body-consumption failures with
 structured context. Use [Awskit.Error.pp] or [Awskit.Error.to_string_hum] for
 human-readable logs, and [Awskit.Error.sexp_of_t] for structured diagnostics
-and tests.
+and tests. Raw service diagnostics are available only through
+[Awskit.Error.Unsafe_diagnostics].
 
 Functions ending in [_exn] raise [Awskit.Error.Awskit_error] on SDK validation
 or construction failure. Prefer the result-returning form in libraries and
@@ -742,13 +743,16 @@ in
 Awskit_s3_lwt_unix.create ~retry_policy ()
 ]}
 
-[jitter] is in the range [[0, 1]]. The default [0] keeps deterministic delays.
-Values greater than zero spread retry waits below the capped exponential delay.
+[jitter] is in the range [[0, 1]]. A custom value of [0] keeps deterministic
+delays. Values greater than zero spread retry waits below the capped
+exponential delay; the default policy uses jitter.
 
 {1 Local MinIO Contract Testing}
 
-Most tests do not require a network service. For local wire-level checks
-against MinIO, start the included Compose stack and run the opt-in alias:
+Most tests do not require a network service. The simulator is deterministic
+application-level evidence, not live AWS coverage. For local wire-level checks
+against the named MinIO contract target, start the included Compose stack and
+run the opt-in alias:
 
 {[
 docker compose up -d

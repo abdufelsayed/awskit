@@ -5,9 +5,14 @@ Use it when you want S3-shaped behavior without creating buckets, opening
 network connections, or depending on a local service.
 
 It implements the synchronous [Awskit_s3.S] client shape and does not perform
-network IO.
+network IO. It is a simulator for tests and documentation workflows, not live
+AWS coverage and not a wire-protocol authority.
 
 The public entrypoint is {!module:Awskit_s3_sim}.
+The supported simulator surface and security policy are documented in
+{{:https://github.com/abdufelsayed/awskit/blob/main/SUPPORT.md}[SUPPORT.md]}
+and
+{{:https://github.com/abdufelsayed/awskit/blob/main/SECURITY.md}[SECURITY.md]}.
 
 {1 Test Surface}
 

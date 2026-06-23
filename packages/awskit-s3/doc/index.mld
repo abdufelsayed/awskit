@@ -1,15 +1,20 @@
 {0 awskit-s3}
 
 AWS S3 client for bucket and object storage, multipart uploads, presigned
-request artifacts, and bucket configuration.
+request artifacts, and the supported bucket/object scope documented in
+{{:https://github.com/abdufelsayed/awskit/blob/main/SUPPORT.md}[SUPPORT.md]}.
 
 See {{:../awskit/index.html}[awskit]} for the pure core and runtime adapter
 overview.
 
-The main entrypoint is {!module:Awskit_s3}. The package also exposes lower-level
-request builders, XML codecs, and response parsers for advanced integrations and
-tests. Most application code should start with the client modules documented
-below.
+The main entrypoint is {!module:Awskit_s3}. Advanced application APIs such as
+streaming bodies, scoped readers, presigning, multipart upload, endpoint
+configuration, retry, timeout, and transfer helpers are normal SDK APIs.
+Protocol encoders, protocol parsers, response helpers, and other implementation
+modules are private unless they are deliberately documented as public.
+
+Security reporting and sensitive-data handling are documented in
+{{:https://github.com/abdufelsayed/awskit/blob/main/SECURITY.md}[SECURITY.md]}.
 
 {1 Client Surface}
 
@@ -22,9 +27,9 @@ below.
     local-file transfer helpers in Unix-capable adapters}
   {li S3 presigned request artifacts for object and multipart upload-part
     workflows}
-  {li bucket lifecycle needed to create, locate, inspect, and remove buckets}
-  {li bucket configuration helpers for policy, CORS, encryption, tagging, and
-    versioning}
+  {li bucket basics needed to create, locate, inspect, and remove buckets}
+  {li selected modeled bucket configuration helpers such as policy, CORS,
+    encryption metadata, tagging, and versioning}
   {li endpoint configuration, credentials, retries, pagination, streaming
     contracts, and structured error classifiers}
 }
@@ -86,12 +91,13 @@ Main modules:
 [Awskit_s3_sim] provides a deterministic in-memory S3 implementation for tests.
 It implements the same synchronous S3 operation shape as runtime-backed clients
 and adds a controllable clock, store inspection, operation history, and fault
-injection.
+injection. It is not live AWS coverage and is not a wire-protocol authority.
 
 {2 awskit-s3-eio}
 
-[Awskit_s3_eio] provides a direct-style Eio adapter over a caller-provided
-HTTPS policy. Operations return plain results. It also exposes local-path
+[Awskit_s3_eio] provides a direct-style Eio adapter over a caller-owned HTTPS
+policy. Applications own TLS configuration, CA roots, RNG initialization, and
+platform policy. Operations return plain results. It also exposes local-path
 helpers under [Body] and [Reader], plus managed local-file helpers under
 [Object.Transfer].
 
@@ -139,25 +145,23 @@ end
 let run env =
   Switch.run @@ fun sw ->
   let credentials =
-    Awskit.Credentials.create_exn
-      ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
-      ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-      ()
-	  in
-	  let https = Https.connector () in
-	  match
-	    Awskit_s3_eio.create ~sw ~env ~https ~region:"us-east-1" ~credentials ()
-	  with
-	  | Error err -> Fmt.epr "%a@." Awskit_s3.Error.pp err
-	  | Ok s3 -> (
-	      let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
-	      let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
-	      match
-	        Awskit_s3_eio.Object.put_string s3
-	          ~bucket
-	          ~key
-	          ~contents:"Hello, S3!"
-	          ()
+    Awskit_unix.Credentials.default_chain ()
+    |> Result.get_ok
+  in
+  let https = Https.connector () in
+  match
+    Awskit_s3_eio.create ~sw ~env ~https ~region:"us-east-1" ~credentials ()
+  with
+  | Error err -> Fmt.epr "%a@." Awskit_s3.Error.pp err
+  | Ok s3 -> (
+      let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
+      let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
+      match
+        Awskit_s3_eio.Object.put_string s3
+          ~bucket
+          ~key
+          ~contents:"Hello, S3!"
+          ()
       with
       | Ok _ -> ()
       | Error err -> Fmt.epr "%a@." Awskit_s3.Error.pp err)
@@ -169,22 +173,22 @@ let run env =
 let run () =
   let open Lwt.Syntax in
   match Awskit_s3_lwt_unix.create () with
-	  | Error err ->
-	      Lwt_io.eprintf "%s\n" (Awskit_s3.Error.to_string_hum err)
-	  | Ok s3 ->
-	      let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
-	      let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
-	      let* result =
-	        Awskit_s3_lwt_unix.Object.get_string s3
-	          ~bucket
-	          ~key
-	          ~max_bytes:1_048_576L
-	          ()
-	      in
-	      match result with
-	      | Ok result -> Lwt_io.printl result.value
-	      | Error err -> Lwt_io.eprintf "%a\n" Awskit_s3.Error.pp err
-	]}
+  | Error err ->
+      Lwt_io.eprintf "%s\n" (Awskit_s3.Error.to_string_hum err)
+  | Ok s3 ->
+      let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
+      let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
+      let* result =
+        Awskit_s3_lwt_unix.Object.get_string s3
+          ~bucket
+          ~key
+          ~max_bytes:1_048_576L
+          ()
+      in
+      match result with
+      | Ok result -> Lwt_io.printl result.value
+      | Error err -> Lwt_io.eprintf "%a\n" Awskit_s3.Error.pp err
+]}
 
 {1 Guides}
 

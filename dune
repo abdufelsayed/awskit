@@ -3,6 +3,7 @@
  (deps
   (alias_rec runtest)
   (alias_rec api-compile)
+  (alias_rec docs-content)
   (alias_rec examples)))
 
 (alias
@@ -13,3 +14,16 @@
   (alias_rec fuzz-replay)
   (alias_rec simulator-contract)
   (alias_rec runtime-conformance)))
+
+(rule
+ (alias docs-content)
+ (deps
+  scripts/check-docs-content.sh
+  SUPPORT.md
+  SECURITY.md
+  README.md
+  (source_tree docs)
+  (source_tree packages)
+  (source_tree examples))
+ (action
+  (run ./scripts/check-docs-content.sh)))

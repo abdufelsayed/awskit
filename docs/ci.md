@@ -30,6 +30,13 @@ as release branch pushes, scheduled runs, and manual dispatches.
 - Tests OCaml 5 and 5.2.
 - Covers Eio packages.
 
+`docs-examples`
+
+- Runs on Ubuntu with the latest OCaml 5 compiler.
+- Installs test and documentation dependencies for all packages.
+- Builds executable examples, odoc documentation, and docs content policy with
+  `opam exec -- dune build @examples @doc @docs-content`.
+
 `s3-minio-contract`
 
 - Runs on Ubuntu.
@@ -40,7 +47,7 @@ as release branch pushes, scheduled runs, and manual dispatches.
 `publish-docs`
 
 - Runs only on pushes to `main`.
-- Requires build/test and MinIO jobs to pass.
+- Requires build/test, docs/examples, and MinIO jobs to pass.
 - Builds odoc documentation and deploys `_build/default/_doc/_html` to GitHub
   Pages.
 

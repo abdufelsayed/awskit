@@ -14,7 +14,8 @@ Awskit currently focuses on AWS S3.
 
 - Runtime-agnostic AWS core types for credentials, regions, endpoints, signing,
   errors, retries, and HTTP metadata.
-- Ready-to-use adapters for Eio and Lwt applications.
+- Runtime adapter packages for Eio and Lwt applications, including ready Lwt
+  Unix constructors and caller-owned Eio transport setup.
 - S3 bucket, object, multipart upload, policy, tagging, versioning, endpoint,
   and presigned request artifact support.
 - A deterministic in-memory S3 simulator for fast tests.
@@ -70,6 +71,17 @@ The `awskit` and `awskit-s3` packages do not depend on Unix, Eio, Lwt, or
 Cohttp runtime packages. Use `awskit-s3-sim` in tests when you want deterministic
 S3 behavior without HTTP requests. Adapter packages carry runtime dependencies.
 
+## Support And Security
+
+Awskit is production-ready only for the scoped surface documented in
+[SUPPORT.md](SUPPORT.md). The policy defines supported packages, runtimes,
+credential sources, platform coverage, S3 feature scope, MinIO coverage, and
+the current live-AWS stance.
+
+Security reporting, credential handling, redaction boundaries, presigned URL
+handling, and caller-owned Eio transport responsibilities are documented in
+[SECURITY.md](SECURITY.md).
+
 ## Error Handling
 
 Awskit APIs return errors as values. Runtime-backed operations use the shape
@@ -80,6 +92,8 @@ adapter. Pure constructors return `('a, Awskit.Error.t) result`.
 HTTP status, AWS error code, request id, retry class, and retry attempts. Use
 `Awskit.Error.pp` or `Awskit.Error.to_string_hum` for human-readable logs, and
 `Awskit.Error.sexp_of_t` for structured diagnostics and tests.
+Raw service diagnostics are available only through
+`Awskit.Error.Unsafe_diagnostics`.
 
 Application code should inspect, classify, and print errors returned by Awskit
 operations. Constructing `Awskit.Error.t` values is reserved for Awskit
@@ -106,6 +120,7 @@ Add the libraries to your Dune file:
 ; dune
 (libraries
  awskit
+ awskit-unix
  awskit-s3
  awskit-s3-eio
  eio_main
@@ -145,14 +160,16 @@ module Https = struct
         Tls_eio.client_of_flow ?host tls_config raw)
 end
 
+let unwrap label = function
+  | Ok value -> value
+  | Error error ->
+      invalid_arg (Fmt.str "%s: %a" label Awskit.Error.pp error)
+
 let () =
   Eio_main.run @@ fun env ->
   Switch.run @@ fun sw ->
   let credentials =
-    Awskit.Credentials.create_exn
-      ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
-      ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-      ()
+    Awskit_unix.Credentials.default_chain () |> unwrap "load credentials"
   in
   let https = Https.connector () in
   match
@@ -238,19 +255,21 @@ S3-compatible endpoint. Plain HTTP is explicit: loopback endpoints use
 
 ## S3
 
-`awskit-s3` exposes AWS S3 operations for:
+`awskit-s3` exposes AWS S3 operations for the supported scope in
+[SUPPORT.md](SUPPORT.md), including:
 
 - bucket creation, deletion, listing, and configuration;
 - object put, get, head, delete, copy, ranges, metadata, tags, and versions;
 - multipart upload and local-file transfer helpers;
 - presigned request artifacts;
-- bucket policies and related XML/JSON wire types;
+- modeled bucket policy and selected bucket configuration helpers;
 - S3 endpoint and addressing configuration;
 - structured S3 error classifiers.
 
 Awskit targets AWS S3 semantics. S3-compatible services such as MinIO are useful
-for local contract testing, but application behavior should be written against
-AWS S3 semantics unless a provider-specific difference is intentional.
+for local contract testing where stated in the support policy, but application
+behavior should be written against AWS S3 semantics unless a provider-specific
+difference is intentional.
 
 Optional lookup helpers convert object-not-found responses to `Ok None` while
 leaving other failures structured. S3 can return status-only `HeadObject` 404
@@ -273,7 +292,9 @@ match S3.Object.find_metadata s3 ~bucket ~key () with
 
 ## S3 Simulation
 
-Use `awskit-s3-sim` for deterministic in-memory S3 tests:
+Use `awskit-s3-sim` for deterministic in-memory S3 tests and documentation
+workflows. The simulator is not live AWS coverage and is not a wire-protocol
+authority:
 
 ```ocaml
 let credentials =
@@ -375,6 +396,7 @@ Install dependencies and run the build and test suite:
 opam install . --deps-only --with-test
 opam exec -- dune build
 opam exec -- dune test
+opam exec -- dune build @examples @doc
 ```
 
 Optional MinIO contract tests:
@@ -402,6 +424,7 @@ Issues and pull requests are welcome. For code changes, please run:
 ```sh
 opam exec -- dune build
 opam exec -- dune test
+opam exec -- dune build @examples @doc
 ```
 
 Keep changes focused, include tests for behavior changes, and prefer the

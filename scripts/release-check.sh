@@ -35,6 +35,7 @@ opam lint ./*.opam
 opam install . --yes --working-dir
 opam exec -- dune fmt
 opam exec -- dune runtest --force
+opam exec -- dune build @examples @docs-content
 opam exec -- dune build @all @doc @install
 git diff --check
 if ! git diff --quiet || ! git diff --cached --quiet ||
