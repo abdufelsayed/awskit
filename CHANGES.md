@@ -46,6 +46,9 @@ release packaging.
 - Request builders, XML parsers, runtime internals, and adapter transfer helper
   modules are now private implementation modules. Use the public `Awskit`,
   `Awskit_s3`, and adapter APIs. (fc67929)
+- S3 simulator implementation modules are now private. Use the public
+  `Awskit_s3_sim` root API for deterministic simulator stores, connections,
+  faults, history, inspection, and operation modules. (2aa5523)
 
 ## Added
 
@@ -89,6 +92,9 @@ release packaging.
 - Added root support and security policies, simulator-backed no-network S3
   examples, docs content policy checks, and CI/release gates for examples and
   documentation claims. (475bf37)
+- Added an installed API snapshot gate, release governance checks, branch and
+  ruleset release verification, and PR template prompts for API/support impact
+  review. (2aa5523)
 - Expanded public API documentation across core Awskit modules, S3 operations,
   adapter entrypoints, simulator APIs, and guide examples. (#3, 0e2021c)
 - Updated README and guide coverage for the v0.2.0 S3 streaming API, package
