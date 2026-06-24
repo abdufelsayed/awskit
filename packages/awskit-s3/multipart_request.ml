@@ -530,6 +530,10 @@ module Make (C : Request_context.S) = struct
           S3_error_context.invalid ~field:"max_pages"
             "max_pages must be greater than zero"
 
+    let max_pages_exceeded max_pages =
+      Awskit.Error.Producer.validation ~field:"max_pages"
+        (Fmt.str "ListParts collection exceeded max_pages bound (%d)" max_pages)
+
     let options_for_page (base : List_parts.options) part_number_marker =
       { base with List_parts.part_number_marker }
 
@@ -569,10 +573,46 @@ module Make (C : Request_context.S) = struct
           in
           loop base.part_number_marker 0 init
 
+    let collect_pages conn ~upload ?options ?max_pages ~init ~f () =
+      let return_context_error =
+        S3_error_context.return_s3_error return_error ~operation:"ListParts"
+          ~bucket:(upload_bucket upload) ~key:(upload_key upload)
+      in
+      match validate_max_pages max_pages with
+      | Error error -> return_context_error error
+      | Ok () ->
+          let base = Option.value ~default:List_parts.default_options options in
+          let rec loop part_number_marker page_count acc =
+            let options = options_for_page base part_number_marker in
+            let* page = list_parts conn ~upload ~options () in
+            match page with
+            | Error error -> return_error error
+            | Ok page -> (
+                let* next_acc = f acc page in
+                match next_acc with
+                | Error error -> return_context_error error
+                | Ok acc -> (
+                    let page_count = page_count + 1 in
+                    if not page.is_truncated then return_ok acc
+                    else
+                      match max_pages with
+                      | Some max_pages when page_count >= max_pages ->
+                          return_context_error (max_pages_exceeded max_pages)
+                      | _ -> (
+                          match page.next_part_number_marker with
+                          | Some marker -> loop (Some marker) page_count acc
+                          | None ->
+                              return_context_error
+                                (S3_error_context.decode
+                                   "truncated list-parts response missing \
+                                    NextPartNumberMarker"))))
+          in
+          loop base.part_number_marker 0 init
+
     let pages conn ~upload ?options ?max_pages () =
       let f pages page = return_ok (page :: pages) in
       let* result =
-        fold_pages conn ~upload ?options ?max_pages ~init:[] ~f ()
+        collect_pages conn ~upload ?options ?max_pages ~init:[] ~f ()
       in
       return (Result.map List.rev result)
 
@@ -581,7 +621,7 @@ module Make (C : Request_context.S) = struct
         return_ok (List.rev_append page.parts parts)
       in
       let* result =
-        fold_pages conn ~upload ?options ?max_pages ~init:[] ~f ()
+        collect_pages conn ~upload ?options ?max_pages ~init:[] ~f ()
       in
       return (Result.map List.rev result)
   end

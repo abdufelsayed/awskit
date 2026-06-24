@@ -246,48 +246,22 @@ module Make (C : Request_context.S) = struct
         get conn ~bucket ~key ?options ~consume:(read_bytes ~max_bytes) ()
 
   let find conn ~bucket ~key ?options ~consume () =
-    let bucket = Bucket_name.to_string bucket in
-    let key = Object_key.to_string key in
-    let options = Option.value ~default:Get_object.default_options options in
-    let return_error =
+    let return_consumer_error =
       S3_error_context.return_s3_error return_error ~operation:"GetObject"
-        ~bucket ~key
+        ~bucket:(Bucket_name.to_string bucket)
+        ~key:(Object_key.to_string key)
     in
-    match S3_validation.validate_bucket_key bucket key with
+    let consume reader =
+      let* result = consume reader in
+      return_ok result
+    in
+    let* result = get conn ~bucket ~key ?options ~consume () in
+    match result with
+    | Ok ({ Get_object.value = Ok value; _ } as result) ->
+        return_ok (Some { result with Get_object.value })
+    | Ok { Get_object.value = Error error; _ } -> return_consumer_error error
+    | Error error when Error.is_no_such_key error -> return_ok None
     | Error error -> return_error error
-    | Ok () -> (
-        let headers =
-          read_precondition_headers options.preconditions
-          @ checksum_mode_header options.checksum_mode
-          |> add_opt_header "range" (Option.map Range.to_header options.range)
-          |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-               options.expected_bucket_owner
-        in
-        let query =
-          match options.version_id with
-          | None -> []
-          | Some version_id ->
-              [ ("versionId", [ Object.Version_id.to_string version_id ]) ]
-        in
-        match object_request conn ~bucket ~key with
-        | Error error -> return_error error
-        | Ok request -> (
-            let* result =
-              with_empty_response conn ~method_:`GET ~request ~query ~headers
-                ~f:(fun response body ->
-                  match object_info response with
-                  | Error error -> return_ok (Error error)
-                  | Ok info ->
-                      let* consumed =
-                        R.Response_body.with_reader body ~consume
-                      in
-                      return_ok (Result.map (get_result info) consumed))
-            in
-            match result with
-            | Ok (Ok value) -> return_ok (Some value)
-            | Ok (Error error) -> return_error error
-            | Error error when Error.is_no_such_key error -> return_ok None
-            | Error error -> return_error error))
 
   let find_string conn ~bucket ~key ?options ~max_bytes () =
     let return_error =

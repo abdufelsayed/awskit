@@ -358,15 +358,6 @@ let generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
       expires_at = Ptime.add_span now effective_expires_in;
     }
 
-let generate ~region ~credentials ~now ?addressing_style ?endpoint_variant
-    ~bucket ~key ~method_ ~signed_headers ~query ?expires_in () =
-  let* region = parse_region region in
-  let endpoint_config =
-    endpoint_config ?addressing_style ?endpoint_variant ()
-  in
-  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_ ~signed_headers ~query ?expires_in ()
-
 let object_read_query ~response_content_type ~response_content_disposition
     ~version_id =
   let add_opt key value acc =
@@ -388,81 +379,6 @@ let head_query (options : Head_object.options) =
   object_read_query ~response_content_type:options.response_content_type
     ~response_content_disposition:options.response_content_disposition
     ~version_id:options.version_id
-
-let get_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
-    ~bucket ~key ?options () =
-  let options = Option.value ~default:Get_object.default_options options in
-  let signed_headers =
-    expected_owner_header options.expected_bucket_owner
-    @ options.extra_signed_headers
-  in
-  generate ~region ~credentials ~now ?addressing_style ?endpoint_variant ~bucket
-    ~key ~method_:`GET ~signed_headers ~query:(get_query options)
-    ?expires_in:options.expires_in ()
-
-let head_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
-    ~bucket ~key ?options () =
-  let options = Option.value ~default:Head_object.default_options options in
-  let signed_headers =
-    expected_owner_header options.expected_bucket_owner
-    @ options.extra_signed_headers
-  in
-  generate ~region ~credentials ~now ?addressing_style ?endpoint_variant ~bucket
-    ~key ~method_:`HEAD ~signed_headers ~query:(head_query options)
-    ?expires_in:options.expires_in ()
-
-let put_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
-    ~bucket ~key ?options () =
-  let options = Option.value ~default:Put_object.default_options options in
-  let* () = validate_opt Headers.validate_checksum_value options.checksum in
-  let* () =
-    Headers.validate_encryption_request options.server_side_encryption
-  in
-  let headers =
-    option_content_type_header "content-type" options.content_type
-    @ Headers.checksum_value_headers options.checksum
-    @ Headers.encryption_request_headers options.server_side_encryption
-    @ expected_owner_header options.expected_bucket_owner
-    @ options.extra_signed_headers
-  in
-  generate ~region ~credentials ~now ?addressing_style ?endpoint_variant ~bucket
-    ~key ~method_:`PUT ~signed_headers:headers ~query:[]
-    ?expires_in:options.expires_in ()
-
-let delete_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
-    ~bucket ~key ?options () =
-  let options = Option.value ~default:Delete_object.default_options options in
-  let signed_headers =
-    expected_owner_header options.expected_bucket_owner
-    @ options.extra_signed_headers
-  in
-  generate ~region ~credentials ~now ?addressing_style ?endpoint_variant ~bucket
-    ~key ~method_:`DELETE ~signed_headers ~query:[]
-    ?expires_in:options.expires_in ()
-
-let upload_part_query ~upload_id ~part_number =
-  [
-    ("partNumber", [ Multipart.Part_number.to_int part_number |> string_of_int ]);
-    ("uploadId", [ Multipart.Upload_id.to_string upload_id ]);
-  ]
-
-let upload_part_headers (options : Upload_part.options) =
-  Headers.checksum_value_headers options.checksum
-  @ expected_owner_header options.expected_bucket_owner
-  @ options.extra_signed_headers
-
-let upload_part ~region ~credentials ~now ?addressing_style ?endpoint_variant
-    ~upload ~part_number ?options () =
-  let options = Option.value ~default:Upload_part.default_options options in
-  let* () = validate_opt Headers.validate_checksum_value options.checksum in
-  let bucket = Multipart.Upload.bucket upload in
-  let key = Multipart.Upload.key upload in
-  let upload_id = Multipart.Upload.upload_id upload in
-  generate ~region ~credentials ~now ?addressing_style ?endpoint_variant ~bucket
-    ~key ~method_:`PUT
-    ~signed_headers:(upload_part_headers options)
-    ~query:(upload_part_query ~upload_id ~part_number)
-    ?expires_in:options.expires_in ()
 
 let get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
@@ -515,6 +431,17 @@ let delete_object_with_endpoint_config ~region ~credentials ~now
     ~bucket ~key ~method_:`DELETE ~signed_headers ~query:[]
     ?expires_in:options.expires_in ()
 
+let upload_part_query ~upload_id ~part_number =
+  [
+    ("partNumber", [ Multipart.Part_number.to_int part_number |> string_of_int ]);
+    ("uploadId", [ Multipart.Upload_id.to_string upload_id ]);
+  ]
+
+let upload_part_headers (options : Upload_part.options) =
+  Headers.checksum_value_headers options.checksum
+  @ expected_owner_header options.expected_bucket_owner
+  @ options.extra_signed_headers
+
 let upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~upload ~part_number ?options () =
   let options = Option.value ~default:Upload_part.default_options options in
@@ -527,3 +454,48 @@ let upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~signed_headers:(upload_part_headers options)
     ~query:(upload_part_query ~upload_id ~part_number)
     ?expires_in:options.expires_in ()
+
+let get_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
+    ~bucket ~key ?options () =
+  let* region = parse_region region in
+  let endpoint_config =
+    endpoint_config ?addressing_style ?endpoint_variant ()
+  in
+  get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ?options ()
+
+let head_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
+    ~bucket ~key ?options () =
+  let* region = parse_region region in
+  let endpoint_config =
+    endpoint_config ?addressing_style ?endpoint_variant ()
+  in
+  head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ?options ()
+
+let put_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
+    ~bucket ~key ?options () =
+  let* region = parse_region region in
+  let endpoint_config =
+    endpoint_config ?addressing_style ?endpoint_variant ()
+  in
+  put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ?options ()
+
+let delete_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
+    ~bucket ~key ?options () =
+  let* region = parse_region region in
+  let endpoint_config =
+    endpoint_config ?addressing_style ?endpoint_variant ()
+  in
+  delete_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ?options ()
+
+let upload_part ~region ~credentials ~now ?addressing_style ?endpoint_variant
+    ~upload ~part_number ?options () =
+  let* region = parse_region region in
+  let endpoint_config =
+    endpoint_config ?addressing_style ?endpoint_variant ()
+  in
+  upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~upload ~part_number ?options ()

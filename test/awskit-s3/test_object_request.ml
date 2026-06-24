@@ -13,6 +13,15 @@ let is_validation_field field error =
   Awskit.Error.is_validation error
   && Awskit.Error.validation_field error = Some field
 
+let has_s3_operation_context ~operation ~resource error =
+  List.exists
+    (function
+      | Awskit.Error.Operation
+          { service = Some "S3"; name; resource = Some actual_resource } ->
+          String.equal name operation && String.equal actual_resource resource
+      | _ -> false)
+    (Awskit.Error.context error)
+
 let expect_validation_field label field = function
   | Error error when is_validation_field field error -> ()
   | Error error ->
@@ -1100,6 +1109,61 @@ let test_find_success_returns_some () =
   | Ok None -> Alcotest.fail "expected present object"
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
 
+let test_find_forwards_get_options () =
+  let etag = Object.Etag.of_string_exn "\"etag\"" in
+  let preconditions =
+    {
+      Object.Preconditions.Read.none with
+      if_match = Some (Object.Etag_condition.etag etag);
+    }
+  in
+  let options =
+    Object.Get.options_exn
+      ~range:(Range.bytes_exn ~start:2L ~finish:5L)
+      ~preconditions
+      ~version_id:(Object.Version_id.of_string_exn "version-1")
+      ~checksum_mode:Object.Checksum.Mode.Enabled
+      ~expected_bucket_owner:(account_id "123456789012")
+      ()
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 206
+          ~headers:
+            [ ("content-length", "4"); ("content-range", "bytes 2-5/10") ]
+          "cdef";
+      ]
+  in
+  let found =
+    Recording_s3.Object.find conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file") ~options
+      ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
+      ()
+    |> ok_or_fail "find forwards get options"
+  in
+  (match found with
+  | Some result -> Alcotest.(check string) "body" "cdef" result.value
+  | None -> Alcotest.fail "expected present object");
+  let call = Recording_runtime.last_call conn in
+  check_method "find method" "GET" call.request;
+  Alcotest.(check (list (pair string (list string))))
+    "version query"
+    [ ("versionId", [ "version-1" ]) ]
+    call.request.target.query;
+  Alcotest.(check (option string))
+    "range" (Some "bytes=2-5")
+    (header "range" call.request.headers);
+  Alcotest.(check (option string))
+    "if-match" (Some "\"etag\"")
+    (header "if-match" call.request.headers);
+  Alcotest.(check (option string))
+    "checksum mode" (Some "ENABLED")
+    (header "x-amz-checksum-mode" call.request.headers);
+  Alcotest.(check (option string))
+    "expected owner" (Some "123456789012")
+    (header "x-amz-expected-bucket-owner" call.request.headers)
+
 let test_find_missing_object_returns_none () =
   let conn = Recording_runtime.connect [ response 404 no_such_key_body ] in
   match
@@ -1145,7 +1209,11 @@ let test_find_preserves_consumer_not_found_error () =
       ~consume:(fun _reader -> Error consumer_error)
       ()
   with
-  | Error error when Error.is_not_found error -> ()
+  | Error error when Error.is_not_found error ->
+      Alcotest.(check bool)
+        "consumer error operation context" true
+        (has_s3_operation_context ~operation:"GetObject"
+           ~resource:"s3://my-bucket/file" error)
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok None -> Alcotest.fail "expected consumer error, got None"
   | Ok (Some _) -> Alcotest.fail "expected consumer error"
@@ -1836,6 +1904,8 @@ let suite =
           test_object_observed_only_write_values_rejected;
         Alcotest.test_case "find success returns some" `Quick
           test_find_success_returns_some;
+        Alcotest.test_case "find forwards get options" `Quick
+          test_find_forwards_get_options;
         Alcotest.test_case "find missing object returns none" `Quick
           test_find_missing_object_returns_none;
         Alcotest.test_case "find missing bucket returns error" `Quick

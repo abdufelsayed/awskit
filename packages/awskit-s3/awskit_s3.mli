@@ -835,7 +835,10 @@ module type MULTIPART = sig
       ?max_pages:int ->
       unit ->
       (Multipart.List_parts.page list, Awskit.Error.t) result io
-    (** Collect uploaded-part pages. *)
+    (** Collect uploaded-part pages.
+
+        Returns an error if [max_pages] is supplied and S3 reports more pages
+        than the bound allows. *)
 
     val parts :
       connection ->
@@ -844,7 +847,10 @@ module type MULTIPART = sig
       ?max_pages:int ->
       unit ->
       (Multipart.List_parts.part_info list, Awskit.Error.t) result io
-    (** Collect uploaded part summaries across pages. *)
+    (** Collect uploaded part summaries across pages.
+
+        Returns an error if [max_pages] is supplied and S3 reports more pages
+        than the bound allows. *)
   end
 end
 

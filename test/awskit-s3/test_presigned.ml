@@ -22,6 +22,44 @@ let add_span label time span =
 
 let contains_string expected = List.exists (String.equal expected)
 
+let method_string result =
+  Awskit.Request.Method.to_string
+    (Presigned.method_ result :> Awskit.Request.Method.t)
+
+let check_presigned_equal label expected actual =
+  Alcotest.(check string)
+    (label ^ " method") (method_string expected) (method_string actual);
+  Alcotest.(check string)
+    (label ^ " raw url")
+    (Presigned.reveal_url expected)
+    (Presigned.reveal_url actual);
+  Alcotest.(check string)
+    (label ^ " safe uri")
+    (Presigned.safe_uri expected |> Uri.to_string)
+    (Presigned.safe_uri actual |> Uri.to_string);
+  Alcotest.(check (list (pair string string)))
+    (label ^ " signed headers")
+    (Presigned.signed_headers expected)
+    (Presigned.signed_headers actual);
+  Alcotest.(check (list (pair string string)))
+    (label ^ " request headers")
+    (Presigned.request_headers expected)
+    (Presigned.request_headers actual);
+  Alcotest.(check int)
+    (label ^ " requested expiry")
+    (span_seconds "expected requested"
+       (Presigned.requested_expires_in expected))
+    (span_seconds "actual requested" (Presigned.requested_expires_in actual));
+  Alcotest.(check int)
+    (label ^ " effective expiry")
+    (span_seconds "expected effective"
+       (Presigned.effective_expires_in expected))
+    (span_seconds "actual effective" (Presigned.effective_expires_in actual));
+  Alcotest.(check (option string))
+    (label ^ " expires at")
+    (Presigned.expires_at expected |> Option.map Ptime.to_rfc3339)
+    (Presigned.expires_at actual |> Option.map Ptime.to_rfc3339)
+
 let multipart_upload ?(bucket = bucket_name "bucket")
     ?(key = object_key "large.bin")
     ?(upload_id = Multipart.Upload_id.of_string_exn "upload-1") () =
@@ -516,6 +554,96 @@ let test_presigned_upload_part () =
     "signed checksum value" true
     (contains_string "x-amz-checksum-sha256" signed_headers)
 
+let test_presigned_default_helpers_match_endpoint_config_helpers () =
+  let region = Region.of_string_exn "us-east-1" in
+  let endpoint_config = Presigned.endpoint_config () in
+  let bucket = bucket_name "bucket" in
+  let key = object_key "file.txt" in
+  let owner = account_id "123456789012" in
+  let checksum =
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:"provided-sha256"
+  in
+  let check label normal explicit =
+    check_presigned_equal label
+      (normal |> ok_or_fail (label ^ " default helper"))
+      (explicit |> ok_or_fail (label ^ " endpoint-config helper"))
+  in
+  let get_options : Presigned.Get_object.options =
+    {
+      Presigned.Get_object.default_options with
+      expires_in = Some (Ptime.Span.of_int_s 900);
+      response_content_type = Some (content_type "text/plain");
+      version_id = Some (Object.Version_id.of_string_exn "version-1");
+      expected_bucket_owner = Some owner;
+      extra_signed_headers = [ ("x-get-context", "present") ];
+    }
+  in
+  check "get"
+    (Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+       ~bucket ~key ~options:get_options ())
+    (Presigned.get_object_with_endpoint_config ~region ~credentials:creds
+       ~now:test_time ~endpoint_config ~bucket ~key ~options:get_options ());
+  let head_options : Presigned.Head_object.options =
+    {
+      Presigned.Head_object.default_options with
+      expires_in = Some (Ptime.Span.of_int_s 901);
+      response_content_disposition =
+        Some (header_value ~field:"response-content-disposition" "attachment");
+      version_id = Some (Object.Version_id.of_string_exn "version-2");
+      expected_bucket_owner = Some owner;
+      extra_signed_headers = [ ("x-head-context", "present") ];
+    }
+  in
+  check "head"
+    (Presigned.head_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+       ~bucket ~key ~options:head_options ())
+    (Presigned.head_object_with_endpoint_config ~region ~credentials:creds
+       ~now:test_time ~endpoint_config ~bucket ~key ~options:head_options ());
+  let put_options : Presigned.Put_object.options =
+    {
+      Presigned.Put_object.default_options with
+      expires_in = Some (Ptime.Span.of_int_s 902);
+      content_type = Some (content_type "application/octet-stream");
+      checksum = Some checksum;
+      expected_bucket_owner = Some owner;
+      extra_signed_headers = [ ("x-put-context", "present") ];
+    }
+  in
+  check "put"
+    (Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+       ~bucket ~key ~options:put_options ())
+    (Presigned.put_object_with_endpoint_config ~region ~credentials:creds
+       ~now:test_time ~endpoint_config ~bucket ~key ~options:put_options ());
+  let delete_options : Presigned.Delete_object.options =
+    {
+      expires_in = Some (Ptime.Span.of_int_s 903);
+      expected_bucket_owner = Some owner;
+      extra_signed_headers = [ ("x-delete-context", "present") ];
+    }
+  in
+  check "delete"
+    (Presigned.delete_object ~region:"us-east-1" ~credentials:creds
+       ~now:test_time ~bucket ~key ~options:delete_options ())
+    (Presigned.delete_object_with_endpoint_config ~region ~credentials:creds
+       ~now:test_time ~endpoint_config ~bucket ~key ~options:delete_options ());
+  let upload = multipart_upload ~bucket ~key () in
+  let part_number = Multipart.Part_number.of_int_exn 7 in
+  let upload_part_options : Presigned.Upload_part.options =
+    {
+      expires_in = Some (Ptime.Span.of_int_s 904);
+      checksum = Some checksum;
+      expected_bucket_owner = Some owner;
+      extra_signed_headers = [ ("x-upload-part-context", "present") ];
+    }
+  in
+  check "upload part"
+    (Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
+       ~upload ~part_number ~options:upload_part_options ())
+    (Presigned.upload_part_with_endpoint_config ~region ~credentials:creds
+       ~now:test_time ~endpoint_config ~upload ~part_number
+       ~options:upload_part_options ())
+
 let test_presigned_rejects_duplicate_signed_headers () =
   let options =
     {
@@ -671,6 +799,8 @@ let suite =
           test_presigned_expected_bucket_owner_headers;
         Alcotest.test_case "presigned multipart upload part" `Quick
           test_presigned_upload_part;
+        Alcotest.test_case "presigned default helpers match endpoint config"
+          `Quick test_presigned_default_helpers_match_endpoint_config_helpers;
         Alcotest.test_case "presigned rejects duplicate signed headers" `Quick
           test_presigned_rejects_duplicate_signed_headers;
         Alcotest.test_case "presigned rejects header newline" `Quick

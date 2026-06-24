@@ -224,6 +224,47 @@ let test_multipart_paginator_follows_markers () =
         (List.assoc_opt "part-number-marker" second.request.target.query)
   | _ -> Alcotest.fail "expected two calls"
 
+let multipart_upload () =
+  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
+  Multipart.Upload.resume ~bucket:(bucket_name "my-bucket")
+    ~key:(object_key "large.bin") ~upload_id
+
+let test_multipart_list_parts_pages_max_pages_error () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          (list_parts_page ~next_part_number_marker:1 ~truncated:true [ 1 ]);
+        response 200 (list_parts_page ~truncated:false [ 2 ]);
+      ]
+  in
+  let upload = multipart_upload () in
+  match
+    Recording_s3.Multipart.List_parts.pages conn ~upload ~max_pages:1 ()
+  with
+  | Error error when is_validation_field "max_pages" error ->
+      Alcotest.(check int) "calls" 1 (List.length conn.calls)
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected max_pages bound error"
+
+let test_multipart_list_parts_parts_max_pages_error () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          (list_parts_page ~next_part_number_marker:1 ~truncated:true [ 1 ]);
+        response 200 (list_parts_page ~truncated:false [ 2 ]);
+      ]
+  in
+  let upload = multipart_upload () in
+  match
+    Recording_s3.Multipart.List_parts.parts conn ~upload ~max_pages:1 ()
+  with
+  | Error error when is_validation_field "max_pages" error ->
+      Alcotest.(check int) "calls" 1 (List.length conn.calls)
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected max_pages bound error"
+
 let test_multipart_list_parts_accepts_zero_marker () =
   let conn =
     Recording_runtime.connect
@@ -314,6 +355,10 @@ let suite =
           test_version_paginator_early_stop;
         Alcotest.test_case "multipart paginator follows markers" `Quick
           test_multipart_paginator_follows_markers;
+        Alcotest.test_case "multipart pages max pages errors" `Quick
+          test_multipart_list_parts_pages_max_pages_error;
+        Alcotest.test_case "multipart parts max pages errors" `Quick
+          test_multipart_list_parts_parts_max_pages_error;
         Alcotest.test_case "multipart list parts accepts zero marker" `Quick
           test_multipart_list_parts_accepts_zero_marker;
         Alcotest.test_case "multipart list parts rejects malformed fields"
