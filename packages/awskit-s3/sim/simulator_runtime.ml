@@ -22,6 +22,7 @@ module Runtime = struct
     body : string;
     mutable offset : int;
     mutable read_fault : Awskit.Error.t option;
+    mutable active : bool;
   }
 
   let descriptor_for_string body =
@@ -92,22 +93,30 @@ module Runtime = struct
             Ok ())
 
   let read_response_body (reader : response_body_reader) bytes ~off ~len =
-    match reader.read_fault with
-    | Some error ->
-        reader.read_fault <- None;
-        Error error
-    | None ->
-        if len = 0 then Ok 0
-        else
-          let remaining = String.length reader.body - reader.offset in
-          if remaining <= 0 then Ok 0
+    let bytes_length = Bytes.length bytes in
+    if not reader.active then
+      Error (body_error "response body reader used outside its scope")
+    else if off < 0 || len < 0 || off > bytes_length - len then
+      Error (body_error "response body read bounds are invalid")
+    else
+      match reader.read_fault with
+      | Some error ->
+          reader.read_fault <- None;
+          reader.active <- false;
+          Error error
+      | None ->
+          if len = 0 then Ok 0
           else
-            let copied = min len remaining in
-            String.blit reader.body reader.offset bytes off copied;
-            reader.offset <- reader.offset + copied;
-            Ok copied
+            let remaining = String.length reader.body - reader.offset in
+            if remaining <= 0 then Ok 0
+            else
+              let copied = min len remaining in
+              String.blit reader.body reader.offset bytes off copied;
+              reader.offset <- reader.offset + copied;
+              Ok copied
 
   let response_body ?read_fault body : response_body = { body; read_fault }
+  let close_response_body_reader reader = reader.active <- false
 
   let discard_reader reader =
     let buffer = Bytes.create 8192 in
@@ -123,18 +132,45 @@ module Runtime = struct
 
   let with_response_body (body : response_body) ~consume =
     let reader =
-      { body = body.body; offset = 0; read_fault = body.read_fault }
+      {
+        body = body.body;
+        offset = 0;
+        read_fault = body.read_fault;
+        active = true;
+      }
     in
     match consume reader with
+    | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        ignore (discard_reader reader : (unit, Awskit.Error.t) result);
+        close_response_body_reader reader;
+        Printexc.raise_with_backtrace exn backtrace
     | Ok _ as result -> (
         match discard_reader reader with
-        | Ok () -> result
-        | Error _ as error -> error)
+        | Ok () ->
+            close_response_body_reader reader;
+            result
+        | Error _ as error ->
+            close_response_body_reader reader;
+            error)
     | Error _ as error -> (
-        match discard_reader reader with Ok () | Error _ -> error)
+        match discard_reader reader with
+        | Ok () | Error _ ->
+            close_response_body_reader reader;
+            error)
 
-  let discard_response_body body =
-    with_response_body body ~consume:(fun reader -> discard_reader reader)
+  let discard_response_body (body : response_body) =
+    let reader =
+      {
+        body = body.body;
+        offset = 0;
+        read_fault = body.read_fault;
+        active = true;
+      }
+    in
+    let result = discard_reader reader in
+    close_response_body_reader reader;
+    result
 
   module Request_body = struct
     type 'a io = 'a
@@ -153,7 +189,10 @@ module Runtime = struct
       write_request_body_string writer (Bytes.to_string bytes)
 
     let write_subbytes writer bytes ~off ~len =
-      write_request_body_string writer (Bytes.sub_string bytes off len)
+      let bytes_length = Bytes.length bytes in
+      if off < 0 || len < 0 || off > bytes_length - len then
+        Error (body_error "request body write bounds are invalid")
+      else write_request_body_string writer (Bytes.sub_string bytes off len)
   end
 
   module Response_body = struct

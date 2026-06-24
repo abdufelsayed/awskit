@@ -6,6 +6,12 @@ let is_body_error error =
   let open Awskit.Error in
   match kind error with Body _ -> true | _ -> false
 
+let expect_body_error label = function
+  | Error error when is_body_error error -> ()
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected body error" label
+
 let is_validation_field field error =
   Awskit.Error.is_validation error
   && Awskit.Error.validation_field error = Some field
@@ -163,6 +169,110 @@ let test_simulator_stream_request_body_rejects_length_mismatch () =
   | Error error ->
       Alcotest.failf "unexpected long head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected long body object to be absent"
+
+let test_simulator_runtime_invalid_body_bounds_return_body_errors () =
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials:creds in
+  let bucket = bucket_name "invalid-body-bounds-bucket" in
+  ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
+  let descriptor : Awskit.Body.Request.descriptor =
+    Awskit.Body.Request.descriptor_exn ~content_length:1L
+      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false
+      ()
+  in
+  let body =
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        Simulator.Runtime.Request_body.write_subbytes writer
+          (Bytes.of_string "abc") ~off:(-1) ~len:1)
+  in
+  expect_body_error "invalid write_subbytes"
+    (Simulator.Object.put conn ~bucket
+       ~key:(object_key "invalid-body")
+       ~body ());
+  ignore
+    (Simulator.Object.put conn ~bucket ~key:(object_key "reader")
+       ~body:(Simulator.Body.of_string "abc")
+       ()
+    |> ok_or_fail "put reader object");
+  let invalid_read =
+    Simulator.Object.get conn ~bucket ~key:(object_key "reader")
+      ~consume:(fun reader ->
+        let bytes = Bytes.create 2 in
+        Simulator.Reader.read reader bytes ~off:1 ~len:2)
+      ()
+  in
+  expect_body_error "invalid response read" invalid_read
+
+let test_simulator_response_body_exception_runs_cleanup () =
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials:creds in
+  let bucket = bucket_name "exception-cleanup-bucket" in
+  ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
+  ignore
+    (Simulator.Object.put conn ~bucket ~key:(object_key "reader")
+       ~body:(Simulator.Body.of_string "abc")
+       ()
+    |> ok_or_fail "put reader object");
+  let callback_exn = Failure "simulator consumer exploded" in
+  let escaped = ref None in
+  (try
+     ignore
+       (Simulator.Object.get conn ~bucket ~key:(object_key "reader")
+          ~consume:(fun reader ->
+            escaped := Some reader;
+            let bytes = Bytes.create 1 in
+            ignore
+              (Simulator.Reader.read reader bytes ~off:0 ~len:1
+                : (int, Awskit.Error.t) result);
+            raise callback_exn)
+          ()
+         : (unit Object.Get.result, Awskit.Error.t) result);
+     Alcotest.fail "expected consumer exception"
+   with
+  | exn when Stdlib.( == ) exn callback_exn -> ()
+  | exn -> Alcotest.failf "unexpected exception: %s" (Printexc.to_string exn));
+  match !escaped with
+  | None -> Alcotest.fail "expected escaped reader"
+  | Some reader -> (
+      let bytes = Bytes.create 1 in
+      match Simulator.Reader.read reader bytes ~off:0 ~len:1 with
+      | Error error when is_body_error error -> ()
+      | Error error ->
+          Alcotest.failf "unexpected cleanup read error: %a" Error.pp error
+      | Ok _ -> Alcotest.fail "escaped reader read succeeded after exception")
+
+let test_simulator_response_body_reader_cannot_escape_scope () =
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~clock () in
+  let conn = Simulator.connect store ~credentials:creds in
+  let bucket = bucket_name "escaped-reader-bucket" in
+  ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
+  ignore
+    (Simulator.Object.put conn ~bucket ~key:(object_key "reader")
+       ~body:(Simulator.Body.of_string "abc")
+       ()
+    |> ok_or_fail "put reader object");
+  let escaped = ref None in
+  (match
+     Simulator.Object.get conn ~bucket ~key:(object_key "reader")
+       ~consume:(fun reader ->
+         escaped := Some reader;
+         Ok ())
+       ()
+   with
+  | Ok _ -> ()
+  | Error error -> Alcotest.failf "unexpected get error: %a" Error.pp error);
+  match !escaped with
+  | None -> Alcotest.fail "expected escaped reader"
+  | Some reader -> (
+      let bytes = Bytes.create 1 in
+      match Simulator.Reader.read reader bytes ~off:0 ~len:1 with
+      | Error error when is_body_error error -> ()
+      | Error error ->
+          Alcotest.failf "unexpected escaped reader error: %a" Error.pp error
+      | Ok _ -> Alcotest.fail "escaped reader read succeeded")
 
 let test_simulator_multipart_upload_part_stream_error_does_not_store_part () =
   let clock = Simulator.Clock.create ~now:test_time () in
@@ -818,6 +928,13 @@ let suite =
         Alcotest.test_case
           "simulator stream request body rejects length mismatch" `Quick
           test_simulator_stream_request_body_rejects_length_mismatch;
+        Alcotest.test_case
+          "simulator runtime invalid body bounds return body errors" `Quick
+          test_simulator_runtime_invalid_body_bounds_return_body_errors;
+        Alcotest.test_case "simulator response body exception runs cleanup"
+          `Quick test_simulator_response_body_exception_runs_cleanup;
+        Alcotest.test_case "simulator response body reader cannot escape scope"
+          `Quick test_simulator_response_body_reader_cannot_escape_scope;
         Alcotest.test_case
           "simulator multipart upload part stream error does not store part"
           `Quick
