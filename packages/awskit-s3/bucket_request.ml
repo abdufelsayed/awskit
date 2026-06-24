@@ -1,7 +1,14 @@
-open Common
 open Headers
 open Response
 open Tagging_xml
+module Error = S3_error
+
+let invalid = S3_error_context.invalid
+let decode_with_context = S3_error_context.decode_with_context
+let return_s3_error = S3_error_context.return_s3_error
+let validate_bucket = S3_validation.validate_bucket
+let validate_tags = S3_validation.validate_tags
+
 module Create_bucket = Bucket.Create
 module Delete_bucket = Bucket.Delete
 module Head_bucket = Bucket.Head

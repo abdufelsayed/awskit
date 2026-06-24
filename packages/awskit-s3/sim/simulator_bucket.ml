@@ -1,9 +1,12 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_state
 open Simulator_error
 open Simulator_store
 open Simulator_runtime
+module Bucket_model = Awskit_s3.Bucket
+module Bucket_name = Awskit_s3.Bucket_name
+module Error = Awskit_s3.Error
+module Tag = Awskit_s3.Tag
 
 module Bucket = struct
   type connection = t
@@ -31,7 +34,7 @@ module Bucket = struct
               public_access_block = None;
               ownership_controls = None;
             };
-          Ok { Bucket.Create.response = response 200 }
+          Ok { Bucket_model.Create.response = response 200 }
         end
 
   let delete conn ~bucket ?options:_ () =
@@ -42,7 +45,7 @@ module Bucket = struct
           Error (service ~status:409 ~code:"BucketNotEmpty" ())
         else begin
           remove_bucket (store conn) bucket;
-          Ok { Bucket.Delete.response = response 204 }
+          Ok { Bucket_model.Delete.response = response 204 }
         end
 
   let head conn ~bucket ?options:_ () =
@@ -51,7 +54,7 @@ module Bucket = struct
     | Ok _ ->
         Ok
           {
-            Bucket.Head.name = Bucket_name.of_string_exn bucket;
+            Bucket_model.Head.name = Bucket_name.of_string_exn bucket;
             region = Some (Runtime.Endpoint.region conn);
             response = response 200;
           }
@@ -67,16 +70,16 @@ module Bucket = struct
       buckets_seq (store conn)
       |> Seq.map (fun (name, state) ->
           {
-            Bucket.name = Bucket_name.of_string_exn name;
+            Bucket_model.name = Bucket_name.of_string_exn name;
             creation_date = Some state.created_at;
           })
       |> List.of_seq
-      |> List.sort (fun (a : Bucket.info) b ->
+      |> List.sort (fun (a : Bucket_model.info) b ->
           String.compare
             (Bucket_name.to_string a.name)
             (Bucket_name.to_string b.name))
     in
-    Ok { Bucket.List_buckets.buckets; response = response 200 }
+    Ok { Bucket_model.List_buckets.buckets; response = response 200 }
 
   let get_location conn ~bucket ?options:_ () =
     match require_bucket conn bucket with
@@ -84,7 +87,7 @@ module Bucket = struct
     | Ok _ ->
         Ok
           {
-            Bucket.Get_location.region = Runtime.Endpoint.region conn;
+            Bucket_model.Get_location.region = Runtime.Endpoint.region conn;
             response = response 200;
           }
 
@@ -114,7 +117,7 @@ module Bucket = struct
 
   module Versioning = struct
     let validate_status = function
-      | Bucket.Versioning.Status.Enabled | Suspended -> Ok ()
+      | Bucket_model.Versioning.Status.Enabled | Suspended -> Ok ()
       | Unknown value ->
           invalid ~field:"status"
             "unknown bucket versioning status %S cannot be sent" value
@@ -125,7 +128,7 @@ module Bucket = struct
       | Ok state ->
           Ok
             {
-              Bucket.Versioning.status = state.versioning;
+              Bucket_model.Versioning.status = state.versioning;
               response = response 200;
             }
 
@@ -146,7 +149,10 @@ module Bucket = struct
       | Error error -> Error error
       | Ok state ->
           Ok
-            { Bucket.Tagging.tags = state.bucket_tags; response = response 200 }
+            {
+              Bucket_model.Tagging.tags = state.bucket_tags;
+              response = response 200;
+            }
 
     let put conn ~bucket ?options:_ ~tags () =
       match require_bucket conn bucket with
@@ -177,7 +183,7 @@ module Bucket = struct
                 (service ~status:404
                    ~code:"ServerSideEncryptionConfigurationNotFoundError" ())
           | Some config ->
-              Ok { Bucket.Encryption.config; response = response 200 })
+              Ok { Bucket_model.Encryption.config; response = response 200 })
 
     let put conn ~bucket ?options:_ ~config () =
       match require_bucket conn bucket with
@@ -201,7 +207,8 @@ module Bucket = struct
       | Ok state -> (
           match state.cors with
           | None -> Error (no_such_key ())
-          | Some config -> Ok { Bucket.Cors.config; response = response 200 })
+          | Some config ->
+              Ok { Bucket_model.Cors.config; response = response 200 })
 
     let put conn ~bucket ?options:_ ~config () =
       match require_bucket conn bucket with
@@ -226,7 +233,11 @@ module Bucket = struct
           match state.public_access_block with
           | None -> Error (no_such_key ())
           | Some config ->
-              Ok { Bucket.Public_access_block.config; response = response 200 })
+              Ok
+                {
+                  Bucket_model.Public_access_block.config;
+                  response = response 200;
+                })
 
     let put conn ~bucket ?options:_ ~config () =
       match require_bucket conn bucket with
@@ -244,7 +255,7 @@ module Bucket = struct
   end
 
   module Ownership_controls = struct
-    let validate_config (config : Bucket.Ownership_controls.config) =
+    let validate_config (config : Bucket_model.Ownership_controls.config) =
       match config.object_ownership with
       | Bucket_owner_enforced | Bucket_owner_preferred | Object_writer -> Ok ()
       | Unknown value ->
@@ -258,7 +269,11 @@ module Bucket = struct
           match state.ownership_controls with
           | None -> Error (no_such_key ())
           | Some config ->
-              Ok { Bucket.Ownership_controls.config; response = response 200 })
+              Ok
+                {
+                  Bucket_model.Ownership_controls.config;
+                  response = response 200;
+                })
 
     let put conn ~bucket ?options:_ ~config () =
       match require_bucket conn bucket with

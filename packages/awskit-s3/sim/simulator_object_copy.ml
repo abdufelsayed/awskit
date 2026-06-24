@@ -1,10 +1,10 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_headers
 open Simulator_state
 open Simulator_error
 open Simulator_store
 open Simulator_checksum
+module Object = Awskit_s3.Object
 
 let validate_opt f = function None -> Ok () | Some value -> f value
 

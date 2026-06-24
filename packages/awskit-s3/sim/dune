@@ -1,7 +1,12 @@
+(copy_files ../awskit_s3_header_helpers.ml)
+
+(copy_files ../awskit_s3_header_helpers.mli)
+
 (library
  (name awskit_s3_sim)
  (public_name awskit-s3-sim)
  (private_modules
+  awskit_s3_header_helpers
   simulator_bucket
   simulator_checksum
   simulator_error

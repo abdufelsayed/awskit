@@ -1,4 +1,8 @@
-open Common
+module Xml = S3_xml
+
+let ( let* ) = S3_result.( let* )
+let invalid = S3_error_context.invalid
+
 open Headers
 open Bucket_xml_support
 

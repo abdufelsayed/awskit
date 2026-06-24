@@ -1,5 +1,11 @@
-open Common
 module Object = Object
+
+let ( let* ) = S3_result.( let* )
+let result_exn = S3_result.result_exn
+let invalid = S3_error_context.invalid
+let has_ctl_or_del = S3_string.has_ctl_or_del
+let validate_metadata = S3_validation.validate_metadata
+let validate_tags = S3_validation.validate_tags
 
 module Upload_id = struct
   type t = string

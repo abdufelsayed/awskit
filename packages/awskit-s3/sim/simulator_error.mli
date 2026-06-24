@@ -1,5 +1,3 @@
-open Awskit_s3
-
 val service :
   ?message:string ->
   ?headers:(string * string) list ->

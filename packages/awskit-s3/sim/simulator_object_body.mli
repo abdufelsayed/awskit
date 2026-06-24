@@ -1,8 +1,6 @@
-open Awskit_s3
-
 val ranged_body :
   string ->
-  Range.t option ->
+  Awskit_s3.Range.t option ->
   (string * int * (string * string) list, Awskit.Error.t) result
 
 val request_body_result :

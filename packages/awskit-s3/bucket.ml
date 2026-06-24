@@ -1,5 +1,3 @@
-open Common
-
 type info = { name : Bucket_name.t; creation_date : Ptime.t option }
 
 module Create = struct

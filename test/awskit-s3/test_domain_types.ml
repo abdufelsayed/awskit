@@ -44,6 +44,9 @@ let qcheck_seed = 0xA5111
 let to_alcotest = Awskit_test.Qcheck.to_alcotest ~seed:qcheck_seed
 let qstring gen = QCheck.make ~print:(fun value -> value) gen
 
+let equal_string_pair (left_key, left_value) (right_key, right_value) =
+  String.equal left_key right_key && String.equal left_value right_value
+
 let valid_bucket_gen =
   let open QCheck.Gen in
   let* len = int_range 3 63 in
@@ -162,7 +165,8 @@ let prop_metadata_round_trips =
        metadata_entries_gen)
     (fun entries ->
       match Metadata.of_list entries with
-      | Ok metadata -> List.equal ( = ) (Metadata.to_list metadata) entries
+      | Ok metadata ->
+          List.equal equal_string_pair (Metadata.to_list metadata) entries
       | Error _ -> false)
 
 let prop_metadata_duplicate_keys_fail_case_insensitively =
@@ -296,6 +300,25 @@ let test_metadata_collection () =
     "metadata preserves insertion order"
     [ ("source", "api"); ("trace", "abc123") ]
     (Metadata.to_list metadata);
+  let same =
+    expect_ok "same metadata"
+      (Metadata.of_list [ ("source", "api"); ("trace", "abc123") ])
+  in
+  let reordered =
+    expect_ok "reordered metadata"
+      (Metadata.of_list [ ("trace", "abc123"); ("source", "api") ])
+  in
+  let recased =
+    expect_ok "recased metadata"
+      (Metadata.of_list [ ("Source", "api"); ("trace", "abc123") ])
+  in
+  Alcotest.(check bool) "metadata equal" true (Metadata.equal metadata same);
+  Alcotest.(check bool)
+    "metadata equality is order-sensitive" false
+    (Metadata.equal metadata reordered);
+  Alcotest.(check bool)
+    "metadata equality uses exact key spelling" false
+    (Metadata.equal metadata recased);
   let metadata =
     expect_ok "metadata add" (Metadata.add ~key:"team" ~value:"sdk" metadata)
   in

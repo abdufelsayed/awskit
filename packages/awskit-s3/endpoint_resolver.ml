@@ -1,4 +1,8 @@
-open Common
+module Endpoint = Awskit.Endpoint
+module Region = Awskit.Region
+
+let ( let* ) = S3_result.( let* )
+let invalid = S3_error_context.invalid
 
 type addressing_style = Endpoint_config.addressing_style
 type endpoint_variant = Endpoint_config.endpoint_variant

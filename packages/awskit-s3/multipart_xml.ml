@@ -1,4 +1,7 @@
-open Common
+module Xml = S3_xml
+
+let option_map_result = S3_result.option_map
+
 open Response
 
 let checksum_xml_name = function

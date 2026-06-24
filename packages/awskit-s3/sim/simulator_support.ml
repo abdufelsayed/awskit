@@ -1,4 +1,7 @@
-open Awskit_s3
+module Bucket_name = Awskit_s3.Bucket_name
+module Metadata = Awskit_s3.Metadata
+module Object_key = Awskit_s3.Object_key
+module Tag = Awskit_s3.Tag
 
 let ( let* ) result f =
   match result with Ok value -> f value | Error _ as error -> error
@@ -12,7 +15,8 @@ let decode fmt = Fmt.kstr Awskit.Error.Producer.decode fmt
 
 let is_prefix ~prefix value =
   let prefix_len = String.length prefix in
-  String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
+  String.length value >= prefix_len
+  && String.equal (String.sub value 0 prefix_len) prefix
 
 let is_suffix ~suffix value =
   let suffix_len = String.length suffix in
@@ -32,7 +36,7 @@ let int_of_string_opt value =
 let ptime_to_header value = Ptime.to_rfc3339 value
 
 let validate_header_value ~field value =
-  if value = "" then invalid ~field "%s must be non-empty" field
+  if String.equal value "" then invalid ~field "%s must be non-empty" field
   else if has_ctl_or_del value then
     invalid ~field "%s contains control characters" field
   else Ok ()

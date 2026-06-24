@@ -299,7 +299,7 @@ module Make (Client : SUBJECT) = struct
     else
       Alcotest.(check bool)
         "bucket appears in list" true
-        (List.mem bucket_string buckets);
+        (List.exists (String.equal bucket_string) buckets);
     let location =
       Client.Bucket.get_location conn ~bucket () |> run_result "location"
     in

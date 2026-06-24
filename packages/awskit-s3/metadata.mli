@@ -33,4 +33,7 @@ val pp : Format.formatter -> t -> unit
 (** Pretty-print metadata as raw key/value pairs. *)
 
 val equal : t -> t -> bool
-(** Compare two metadata collections. *)
+(** Compare two metadata collections in insertion order.
+
+    Equality is order-sensitive. Keys compare by their exact unprefixed string
+    spelling and values compare by their exact header value spelling. *)

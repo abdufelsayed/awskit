@@ -1,4 +1,3 @@
-open Awskit_s3
 module Clock = Simulator_state.Clock
 
 type config = Simulator_state.config = { max_list_keys : int }
@@ -40,15 +39,15 @@ type operation_record = Simulator_state.operation_record = {
 }
 
 type object_metadata = Simulator_inspect.object_metadata = {
-  etag : Object.Etag.t option;
+  etag : Awskit_s3.Object.Etag.t option;
   size : int64 option;
   last_modified : Ptime.t option;
 }
 
 let history = Simulator_inspect.history
 let clear_history = Simulator_inspect.clear_history
-let bucket_to_string = Bucket_name.to_string
-let key_to_string = Object_key.to_string
+let bucket_to_string = Awskit_s3.Bucket_name.to_string
+let key_to_string = Awskit_s3.Object_key.to_string
 
 let object_metadata store ~bucket ~key =
   Simulator_inspect.object_metadata store ~bucket:(bucket_to_string bucket)

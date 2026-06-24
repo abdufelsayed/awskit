@@ -509,17 +509,20 @@ let next_response_body ?(chunk_size = 8192) reader =
     | Ok 0 -> Ok None
     | Ok n -> Ok (Some (Bytes.sub buffer ~pos:0 ~len:n))
 
-let rec discard_reader reader ~remaining ~max_response_drain_bytes =
+let discard_reader reader ~remaining ~max_response_drain_bytes =
   let buffer = Bytes.create 8192 in
-  let len = if remaining <= 0 then 1 else min (Bytes.length buffer) remaining in
-  match read_response_body reader buffer ~off:0 ~len with
-  | Error _ as error -> error
-  | Ok 0 -> Ok ()
-  | Ok n ->
-      if n > remaining then Error (drain_limit_error max_response_drain_bytes)
-      else
-        discard_reader reader ~remaining:(remaining - n)
-          ~max_response_drain_bytes
+  let rec loop remaining =
+    let len =
+      if remaining <= 0 then 1 else min (Bytes.length buffer) remaining
+    in
+    match read_response_body reader buffer ~off:0 ~len with
+    | Error _ as error -> error
+    | Ok 0 -> Ok ()
+    | Ok n ->
+        if n > remaining then Error (drain_limit_error max_response_drain_bytes)
+        else loop (remaining - n)
+  in
+  loop remaining
 
 let discard_response_body_reader (reader : response_body_reader)
     (body : response_body) =

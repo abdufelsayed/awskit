@@ -1,5 +1,5 @@
-open Common
-
+let ( let* ) = S3_result.( let* )
+let invalid = S3_error_context.invalid
 let min_part_size = 5 * 1024 * 1024
 let default_part_size = 8 * 1024 * 1024
 let default_multipart_threshold = Int64.mul 8L (Int64.mul 1024L 1024L)

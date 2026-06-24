@@ -20,6 +20,8 @@ let add_span label time span =
   | Some time -> time
   | None -> Alcotest.failf "%s: timestamp outside supported range" label
 
+let contains_string expected = List.exists (String.equal expected)
+
 let multipart_upload ?(bucket = bucket_name "bucket")
     ?(key = object_key "large.bin")
     ?(upload_id = Multipart.Upload_id.of_string_exn "upload-1") () =
@@ -375,7 +377,7 @@ let test_presigned_put_checksum_headers () =
   let signed_headers = signed_headers_or_fail (Presigned.reveal_url result) in
   Alcotest.(check bool)
     "signed checksum value" true
-    (List.mem "x-amz-checksum-sha1" signed_headers)
+    (contains_string "x-amz-checksum-sha1" signed_headers)
 
 let test_presigned_expected_bucket_owner_headers () =
   let owner = account_id "123456789012" in
@@ -397,7 +399,7 @@ let test_presigned_expected_bucket_owner_headers () =
     (header "x-amz-expected-bucket-owner" (Presigned.signed_headers get));
   Alcotest.(check bool)
     "get signed expected owner" true
-    (List.mem "x-amz-expected-bucket-owner"
+    (contains_string "x-amz-expected-bucket-owner"
        (signed_headers_or_fail (Presigned.reveal_url get)));
   let head_options =
     {
@@ -416,7 +418,7 @@ let test_presigned_expected_bucket_owner_headers () =
     (header "x-amz-expected-bucket-owner" (Presigned.signed_headers head));
   Alcotest.(check bool)
     "head signed expected owner" true
-    (List.mem "x-amz-expected-bucket-owner"
+    (contains_string "x-amz-expected-bucket-owner"
        (signed_headers_or_fail (Presigned.reveal_url head)));
   let put_options =
     {
@@ -435,7 +437,7 @@ let test_presigned_expected_bucket_owner_headers () =
     (header "x-amz-expected-bucket-owner" (Presigned.signed_headers put));
   Alcotest.(check bool)
     "put signed expected owner" true
-    (List.mem "x-amz-expected-bucket-owner"
+    (contains_string "x-amz-expected-bucket-owner"
        (signed_headers_or_fail (Presigned.reveal_url put)));
   let upload = multipart_upload () in
   let upload_part_options =
@@ -457,7 +459,7 @@ let test_presigned_expected_bucket_owner_headers () =
        (Presigned.signed_headers upload_part));
   Alcotest.(check bool)
     "upload-part signed expected owner" true
-    (List.mem "x-amz-expected-bucket-owner"
+    (contains_string "x-amz-expected-bucket-owner"
        (signed_headers_or_fail (Presigned.reveal_url upload_part)));
   let delete_options =
     {
@@ -476,7 +478,7 @@ let test_presigned_expected_bucket_owner_headers () =
     (header "x-amz-expected-bucket-owner" (Presigned.signed_headers delete));
   Alcotest.(check bool)
     "delete signed expected owner" true
-    (List.mem "x-amz-expected-bucket-owner"
+    (contains_string "x-amz-expected-bucket-owner"
        (signed_headers_or_fail (Presigned.reveal_url delete)))
 
 let test_presigned_upload_part () =
@@ -516,7 +518,7 @@ let test_presigned_upload_part () =
   let signed_headers = signed_headers_or_fail (Presigned.reveal_url result) in
   Alcotest.(check bool)
     "signed checksum value" true
-    (List.mem "x-amz-checksum-sha256" signed_headers)
+    (contains_string "x-amz-checksum-sha256" signed_headers)
 
 let test_presigned_rejects_duplicate_signed_headers () =
   let options =

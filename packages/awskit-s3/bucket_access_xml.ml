@@ -1,4 +1,8 @@
-open Common
+module Xml = S3_xml
+
+let ( let* ) = S3_result.( let* )
+let decode = S3_error_context.decode
+
 open Bucket_xml_support
 
 module Public_access_block = struct

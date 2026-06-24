@@ -1,4 +1,3 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_state
 
@@ -112,14 +111,17 @@ module Runtime = struct
 
   let response_body ?read_fault body : response_body = { body; read_fault }
 
-  let rec discard_reader reader =
+  let discard_reader reader =
     let buffer = Bytes.create 8192 in
-    match
-      read_response_body reader buffer ~off:0 ~len:(Bytes.length buffer)
-    with
-    | Error _ as error -> error
-    | Ok 0 -> Ok ()
-    | Ok _ -> discard_reader reader
+    let rec loop () =
+      match
+        read_response_body reader buffer ~off:0 ~len:(Bytes.length buffer)
+      with
+      | Error _ as error -> error
+      | Ok 0 -> Ok ()
+      | Ok _ -> loop ()
+    in
+    loop ()
 
   let with_response_body (body : response_body) ~consume =
     let reader =
@@ -242,6 +244,6 @@ module Runtime = struct
   module S3_endpoint = struct
     type nonrec connection = connection
 
-    let s3_endpoint_config _ = default_endpoint_config
+    let s3_endpoint_config _ = Awskit_s3.default_endpoint_config
   end
 end

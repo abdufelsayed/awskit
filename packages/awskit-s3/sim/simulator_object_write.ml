@@ -1,4 +1,3 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_headers
 open Simulator_state
@@ -7,6 +6,7 @@ open Simulator_store
 open Simulator_checksum
 open Simulator_runtime
 open Simulator_object_body
+module Object = Awskit_s3.Object
 
 let validate_opt f = function None -> Ok () | Some value -> f value
 let s3_uri ~bucket ~key = Fmt.str "s3://%s/%s" bucket key

@@ -1,4 +1,3 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_state
 

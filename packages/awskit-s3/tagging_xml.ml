@@ -1,4 +1,6 @@
-open Common
+module Xml = S3_xml
+
+let ( let* ) = S3_result.( let* )
 
 let xml_tags tags =
   Xml.el "Tagging"

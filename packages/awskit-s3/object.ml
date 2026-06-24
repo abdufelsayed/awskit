@@ -1,4 +1,7 @@
-open Common
+let ( let* ) = S3_result.( let* )
+let result_exn = S3_result.result_exn
+let invalid = S3_error_context.invalid
+let has_ctl_or_del = S3_string.has_ctl_or_del
 
 module Etag = struct
   type t = string

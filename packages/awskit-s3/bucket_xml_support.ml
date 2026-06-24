@@ -1,5 +1,7 @@
-open Common
+module Xml = S3_xml
 
+let ( let* ) = S3_result.( let* )
+let validate_header_value = S3_validation.validate_header_value
 let xml_body node = Xml.to_string node
 let bool_text value = if value then "true" else "false"
 

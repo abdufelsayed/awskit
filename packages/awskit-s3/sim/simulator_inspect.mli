@@ -1,7 +1,5 @@
-open Awskit_s3
-
 type object_metadata = {
-  etag : Object.Etag.t option;
+  etag : Awskit_s3.Object.Etag.t option;
   size : int64 option;
   last_modified : Ptime.t option;
 }
@@ -26,4 +24,4 @@ val info_of_object :
   ?content_length:int ->
   Awskit.Response.t ->
   Simulator_state.stored_object ->
-  Object.Get.info
+  Awskit_s3.Object.Get.info

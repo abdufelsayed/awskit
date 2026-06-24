@@ -1,4 +1,10 @@
-open Common
+module Xml = S3_xml
+
+let ( let* ) = S3_result.( let* )
+let invalid = S3_error_context.invalid
+let decode = S3_error_context.decode
+let non_negative_int_of_string_opt = S3_parse.non_negative_int_of_string_opt
+
 open Bucket_xml_support
 
 let validate_rule (rule : Bucket.Cors.rule) =

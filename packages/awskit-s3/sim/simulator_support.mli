@@ -1,5 +1,3 @@
-open Awskit_s3
-
 val ( let* ) :
   ('a, Awskit.Error.t) result ->
   ('a -> ('b, Awskit.Error.t) result) ->

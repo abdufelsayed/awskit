@@ -1,4 +1,6 @@
-module S3 = Awskit_s3
+module Bucket_name = Awskit_s3.Bucket_name
+module Object = Awskit_s3.Object
+module Object_key = Awskit_s3.Object_key
 
 type listing_entry =
   | Object of string * Simulator_state.stored_object
@@ -58,11 +60,11 @@ let decode_marker encoded =
     loop 0
 
 let encode_continuation_token marker =
-  S3.Object.List.Continuation_token.of_string_exn
+  Object.List.Continuation_token.of_string_exn
     (continuation_token_prefix ^ encode_marker marker)
 
 let decode_continuation_token token =
-  let value = S3.Object.List.Continuation_token.to_string token in
+  let value = Object.List.Continuation_token.to_string token in
   if Simulator_support.is_prefix ~prefix:continuation_token_prefix value then
     let encoded =
       String.sub value
@@ -77,14 +79,14 @@ let find_sub ~sub value =
   let value_len = String.length value in
   let rec loop index =
     if sub_len = 0 || index + sub_len > value_len then None
-    else if String.sub value index sub_len = sub then Some index
+    else if String.equal (String.sub value index sub_len) sub then Some index
     else loop (index + 1)
   in
   loop 0
 
 let visible_objects (bucket_state : Simulator_state.bucket_state)
-    (options : S3.Object.List.options) =
-  let prefix = Option.map S3.Object_key.Prefix.to_string options.prefix in
+    (options : Object.List.options) =
+  let prefix = Option.map Object_key.Prefix.to_string options.prefix in
   Hashtbl.to_seq bucket_state.objects
   |> Seq.filter_map (function
     | key, Simulator_state.Stored_object obj -> (
@@ -97,15 +99,15 @@ let visible_objects (bucket_state : Simulator_state.bucket_state)
   |> List.of_seq
   |> List.sort (fun (a, _) (b, _) -> String.compare a b)
 
-let common_prefix_for_key (options : S3.Object.List.options) key =
+let common_prefix_for_key (options : Object.List.options) key =
   match options.delimiter with
   | None -> None
   | Some delimiter -> (
       let prefix =
         Option.value ~default:""
-          (Option.map S3.Object_key.Prefix.to_string options.prefix)
+          (Option.map Object_key.Prefix.to_string options.prefix)
       in
-      let delimiter = S3.Object.List.Delimiter.to_string delimiter in
+      let delimiter = Object.List.Delimiter.to_string delimiter in
       let rest =
         String.sub key (String.length prefix)
           (String.length key - String.length prefix)
@@ -121,10 +123,10 @@ let entry_of_object options (key, obj) =
   | Some prefix -> Common_prefix prefix
   | None -> Object (key, obj)
 
-let marker_from_options (options : S3.Object.List.options) =
+let marker_from_options (options : Object.List.options) =
   match options.continuation_token with
   | Some token -> Some (decode_continuation_token token)
-  | None -> Option.map S3.Object_key.to_string options.start_after
+  | None -> Option.map Object_key.to_string options.start_after
 
 let entry_after_marker marker entry =
   match marker with
@@ -179,8 +181,8 @@ let page_entries bucket_state options ~max_keys =
   let state = loop state (visible_objects bucket_state options) in
   (List.rev state.selected_rev, state.selected_count, state.is_truncated)
 
-let page ~default_max_keys ~bucket bucket_state
-    (options : S3.Object.List.options) ~response =
+let page ~default_max_keys ~bucket bucket_state (options : Object.List.options)
+    ~response =
   let max_keys = Option.value ~default:default_max_keys options.max_keys in
   let selected, selected_count, is_truncated =
     page_entries bucket_state options ~max_keys
@@ -199,7 +201,7 @@ let page ~default_max_keys ~bucket bucket_state
         | Object (key, (obj : Simulator_state.stored_object)) ->
             Some
               {
-                S3.Object.List.key = S3.Object_key.of_string_exn key;
+                Object.List.key = Object_key.of_string_exn key;
                 size = Some (Int64.of_int (String.length obj.body));
                 etag = Some obj.etag;
                 last_modified = Some obj.last_modified;
@@ -212,12 +214,11 @@ let page ~default_max_keys ~bucket bucket_state
     List.filter_map
       (function
         | Object _ -> None
-        | Common_prefix prefix ->
-            Some (S3.Object_key.Prefix.of_string_exn prefix))
+        | Common_prefix prefix -> Some (Object_key.Prefix.of_string_exn prefix))
       selected
   in
   {
-    S3.Object.List.bucket = Some (S3.Bucket_name.of_string_exn bucket);
+    Object.List.bucket = Some (Bucket_name.of_string_exn bucket);
     prefix = options.prefix;
     delimiter = options.delimiter;
     objects;

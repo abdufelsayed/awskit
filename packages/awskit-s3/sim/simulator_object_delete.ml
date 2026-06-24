@@ -1,8 +1,9 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_error
 open Simulator_state
 open Simulator_store
+module Object = Awskit_s3.Object
+module Object_key = Awskit_s3.Object_key
 
 let delete_result ?delete_marker ?version_id () =
   {

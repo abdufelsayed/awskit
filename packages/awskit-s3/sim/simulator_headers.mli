@@ -1,5 +1,3 @@
-open Awskit_s3
-
 val add_opt_account_id_header :
   string ->
   Awskit_s3.Account_id.t option ->

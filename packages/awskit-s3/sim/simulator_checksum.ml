@@ -1,6 +1,6 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_headers
+module Object = Awskit_s3.Object
 
 let etag body =
   Object.Etag.of_string_exn

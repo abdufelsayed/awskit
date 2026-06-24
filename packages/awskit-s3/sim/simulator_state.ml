@@ -1,5 +1,12 @@
-open Awskit_s3
 open Simulator_support
+module Bucket = Awskit_s3.Bucket
+module Content_type = Awskit_s3.Content_type
+module Metadata = Awskit_s3.Metadata
+module Multipart = Awskit_s3.Multipart
+module Object = Awskit_s3.Object
+module Policy = Awskit_s3.Policy
+module Storage_class = Awskit_s3.Storage_class
+module Tag = Awskit_s3.Tag
 
 module Clock = struct
   type t = { mutable now : Ptime.t }

@@ -1,4 +1,7 @@
-open Common
+module Xml = S3_xml
+
+let ( let* ) = S3_result.( let* )
+let ptime_of_string = S3_time.of_string
 
 let create_config region =
   Xml.el "CreateBucketConfiguration"
@@ -26,8 +29,8 @@ let parse_list body =
 let parse_location body =
   let* nodes = Xml.decode_root body ~name:"LocationConstraint" in
   let value = String.trim (Xml.text_content nodes) in
-  let value = if value = "" then "us-east-1" else value in
-  let value = if value = "EU" then "eu-west-1" else value in
+  let value = if String.equal value "" then "us-east-1" else value in
+  let value = if String.equal value "EU" then "eu-west-1" else value in
   match Awskit.Region.of_string value with
   | Ok region -> Ok region
   | Error error ->

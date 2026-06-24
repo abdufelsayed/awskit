@@ -10,6 +10,12 @@ let content_type value = Awskit_s3.Content_type.of_string_exn value
 let tag_set tags = Awskit_s3.Tag.Set.of_list_exn tags
 let bucket_of_string value = Awskit_s3.Bucket_name.of_string_exn value
 let object_key value = Awskit_s3.Object_key.of_string_exn value
+let contains_string expected = List.exists (String.equal expected)
+
+let compare_string_pair (left_key, left_value) (right_key, right_value) =
+  match String.compare left_key right_key with
+  | 0 -> String.compare left_value right_value
+  | value -> value
 
 let getenv_default name default =
   match Sys.getenv_opt name with
@@ -534,10 +540,10 @@ let test_object_versioning () =
       in
       Alcotest.(check bool)
         "listed v1" true
-        (List.mem (Object.Version_id.to_string v1) listed_versions);
+        (contains_string (Object.Version_id.to_string v1) listed_versions);
       Alcotest.(check bool)
         "listed v2" true
-        (List.mem (Object.Version_id.to_string v2) listed_versions);
+        (contains_string (Object.Version_id.to_string v2) listed_versions);
       let markers =
         await "list delete markers"
           (S3.Object.Versions.delete_markers conn ~bucket ~options:list_options
@@ -551,7 +557,7 @@ let test_object_versioning () =
       in
       Alcotest.(check bool)
         "listed delete marker" true
-        (List.mem (Object.Version_id.to_string marker) listed_markers);
+        (contains_string (Object.Version_id.to_string marker) listed_markers);
       let version_two_options =
         { Object.Get.default_options with version_id = Some v2 }
       in
@@ -606,7 +612,7 @@ let test_bucket_config_roundtrip () =
         (Awskit_s3.Tag.Set.to_list tagging.tags
         |> List.map (fun tag ->
             (Awskit_s3.Tag.key tag, Awskit_s3.Tag.value tag))
-        |> List.sort compare);
+        |> List.sort compare_string_pair);
       ignore
         (await "delete bucket tags" (S3.Bucket.Tagging.delete conn ~bucket ())))
 

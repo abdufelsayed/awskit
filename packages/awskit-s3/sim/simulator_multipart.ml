@@ -1,4 +1,3 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_headers
 open Simulator_state
@@ -6,8 +5,10 @@ open Simulator_error
 open Simulator_store
 open Simulator_checksum
 open Simulator_runtime
-module Multipart_model = Multipart
-module Object_model = Object
+module Bucket_name = Awskit_s3.Bucket_name
+module Multipart_model = Awskit_s3.Multipart
+module Object_key = Awskit_s3.Object_key
+module Object_model = Awskit_s3.Object
 
 module Multipart = struct
   type connection = t
@@ -16,7 +17,7 @@ module Multipart = struct
 
   let validate_opt f = function None -> Ok () | Some value -> f value
 
-  let validate_create_options (options : Multipart.Create.options) =
+  let validate_create_options (options : Multipart_model.Create.options) =
     let* () = validate_metadata options.metadata in
     let* () = validate_tags options.tags in
     let* () =
@@ -44,7 +45,7 @@ module Multipart = struct
 
   let create_upload conn ~bucket ~key ?options () =
     let options =
-      Option.value ~default:Multipart.Create.default_options options
+      Option.value ~default:Multipart_model.Create.default_options options
     in
     match validate_bucket_key bucket key with
     | Error error -> Error error
@@ -78,8 +79,11 @@ module Multipart = struct
                             parts = Hashtbl.create 17;
                             created_at = now conn;
                           };
-                        Ok { Multipart.Create.upload; response = response 200 })
-                )))
+                        Ok
+                          {
+                            Multipart_model.Create.upload;
+                            response = response 200;
+                          }))))
 
   let request_body_result body =
     let descriptor = Runtime.Request_body.descriptor body in
@@ -95,7 +99,7 @@ module Multipart = struct
 
   let upload_part conn ~upload ~part_number ~body ?options () =
     let options =
-      Option.value ~default:Multipart.Upload_part.default_options options
+      Option.value ~default:Multipart_model.Upload_part.default_options options
     in
     let bucket = upload_handle_bucket upload in
     let key = upload_handle_key upload in
@@ -135,17 +139,17 @@ module Multipart = struct
                         in
                         Ok
                           {
-                            Multipart.Upload_part.part;
+                            Multipart_model.Upload_part.part;
                             checksum;
                             response =
                               response 200
                                 ~headers:
-                                  (("etag", Object.Etag.to_string etag)
+                                  (("etag", Object_model.Etag.to_string etag)
                                   :: checksum_response_headers checksum);
                           }))))
 
-  let validate_complete_options (options : Multipart.Complete.options) =
-    Multipart.Complete.options
+  let validate_complete_options (options : Multipart_model.Complete.options) =
+    Multipart_model.Complete.options
       ?expected_bucket_owner:options.expected_bucket_owner
       ?checksum:options.checksum ?checksum_type:options.checksum_type
       ?multipart_object_size:options.multipart_object_size ()
@@ -203,8 +207,11 @@ module Multipart = struct
                   match validate_part_checksum stored part with
                   | Error _ as error -> error
                   | Ok () ->
+                      let has_more_parts =
+                        match rest with [] -> false | _ :: _ -> true
+                      in
                       if
-                        rest <> []
+                        has_more_parts
                         && String.length stored.body < complete_min_part_size
                       then invalid_part_size ()
                       else
@@ -223,7 +230,7 @@ module Multipart = struct
         match loop None 0L parts with
         | Error _ as error -> error
         | Ok total -> (
-            match options.Multipart.Complete.multipart_object_size with
+            match options.Multipart_model.Complete.multipart_object_size with
             | Some expected ->
                 if Int64.equal expected total then Ok ()
                 else invalid_object_size ()
@@ -231,7 +238,7 @@ module Multipart = struct
 
   let complete_upload conn ~upload ?options ~parts () =
     let options =
-      Option.value ~default:Multipart.Complete.default_options options
+      Option.value ~default:Multipart_model.Complete.default_options options
     in
     let bucket = upload_handle_bucket upload in
     let key = upload_handle_key upload in
@@ -265,7 +272,7 @@ module Multipart = struct
                         let etag = etag body in
                         let checksum =
                           match checksum_for_value options.checksum with
-                          | { Object.Checksum.values = []; _ } ->
+                          | { Object_model.Checksum.values = []; _ } ->
                               let checksum =
                                 checksum_for_algorithm ~body
                                   upload.checksum_algorithm
@@ -304,7 +311,7 @@ module Multipart = struct
                           (upload_key upload_id);
                         Ok
                           {
-                            Multipart.Complete.etag = Some etag;
+                            Multipart_model.Complete.etag = Some etag;
                             version_id = obj.version_id;
                             checksum;
                             response =
@@ -331,9 +338,10 @@ module Multipart = struct
             | None ->
                 Hashtbl.remove bucket_state.multipart_uploads
                   (upload_key upload_id);
-                Ok { Multipart.Abort.response = response 204 }))
+                Ok { Multipart_model.Abort.response = response 204 }))
 
-  let validate_list_parts_options (options : Multipart.List_parts.options) =
+  let validate_list_parts_options (options : Multipart_model.List_parts.options)
+      =
     match options.max_parts with
     | Some value when value <= 0 ->
         invalid ~field:"max_parts" "max_parts must be greater than zero"
@@ -343,7 +351,7 @@ module Multipart = struct
 
   let list_parts conn ~upload ?options () =
     let options =
-      Option.value ~default:Multipart.List_parts.default_options options
+      Option.value ~default:Multipart_model.List_parts.default_options options
     in
     let bucket = upload_handle_bucket upload in
     let key = upload_handle_key upload in
@@ -394,7 +402,7 @@ module Multipart = struct
                       List.map
                         (fun part ->
                           {
-                            Multipart.List_parts.part_number =
+                            Multipart_model.List_parts.part_number =
                               Multipart_model.Part_number.of_int_exn
                                 part.part_number;
                             etag = Some part.etag;
@@ -406,7 +414,7 @@ module Multipart = struct
                     in
                     Ok
                       {
-                        Multipart.List_parts.parts;
+                        Multipart_model.List_parts.parts;
                         is_truncated;
                         next_part_number_marker;
                         checksum_type = upload.checksum_type;
@@ -420,16 +428,17 @@ module Multipart = struct
       | Some _ ->
           invalid ~field:"max_pages" "max_pages must be greater than zero"
 
-    let options_for_page (base : Multipart.List_parts.options)
+    let options_for_page (base : Multipart_model.List_parts.options)
         part_number_marker =
-      { base with Multipart.List_parts.part_number_marker }
+      { base with Multipart_model.List_parts.part_number_marker }
 
     let fold_pages conn ~upload ?options ?max_pages ~init ~f () =
       match validate_max_pages max_pages with
       | Error error -> Error error
       | Ok () ->
           let base =
-            Option.value ~default:Multipart.List_parts.default_options options
+            Option.value ~default:Multipart_model.List_parts.default_options
+              options
           in
           let rec loop part_number_marker page_count acc =
             let options = options_for_page base part_number_marker in
@@ -463,7 +472,7 @@ module Multipart = struct
 
     let parts conn ~upload ?options ?max_pages () =
       fold_pages conn ~upload ?options ?max_pages ~init:[]
-        ~f:(fun parts (page : Multipart.List_parts.page) ->
+        ~f:(fun parts (page : Multipart_model.List_parts.page) ->
           Ok (List.rev_append page.parts parts))
         ()
       |> Result.map List.rev

@@ -1,4 +1,5 @@
 let buffer_size = 128 * 1024
+let temp_counter = Atomic.make 0
 
 let body_error action path exn =
   Awskit.Error.Producer.body
@@ -80,8 +81,10 @@ let validate_download_target path
 let temp_download_path path attempt =
   let dir = Filename.dirname path in
   let base = Filename.basename path in
+  let id = Atomic.fetch_and_add temp_counter 1 in
   Filename.concat dir
-    (Fmt.str ".%s.awskit-download.%d.%d.tmp" base (Unix.getpid ()) attempt)
+    (Fmt.str ".%s.awskit-download.%d.%08x.%d.tmp" base (Unix.getpid ()) id
+       attempt)
 
 let remove_temp_download path =
   Lwt.catch

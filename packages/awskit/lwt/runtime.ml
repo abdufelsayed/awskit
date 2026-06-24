@@ -644,20 +644,21 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         ~limit:(Int64.of_int max_response_drain_bytes)
         "response body exceeded max_response_drain_bytes"
 
-    let rec drain_reader reader ~remaining ~max_response_drain_bytes =
+    let drain_reader reader ~remaining ~max_response_drain_bytes =
       let buffer = Bytes.create 8192 in
-      let len =
-        if remaining <= 0 then 1 else min (Bytes.length buffer) remaining
+      let rec loop remaining =
+        let len =
+          if remaining <= 0 then 1 else min (Bytes.length buffer) remaining
+        in
+        Lwt.bind (read_response_body reader buffer ~off:0 ~len) (function
+          | Error _ as error -> Lwt.return error
+          | Ok 0 -> Lwt.return_ok ()
+          | Ok n ->
+              if n > remaining then
+                Lwt.return_error (drain_limit_error max_response_drain_bytes)
+              else loop (remaining - n))
       in
-      Lwt.bind (read_response_body reader buffer ~off:0 ~len) (function
-        | Error _ as error -> Lwt.return error
-        | Ok 0 -> Lwt.return_ok ()
-        | Ok n ->
-            if n > remaining then
-              Lwt.return_error (drain_limit_error max_response_drain_bytes)
-            else
-              drain_reader reader ~remaining:(remaining - n)
-                ~max_response_drain_bytes)
+      loop remaining
 
     let drain_response_body_reader reader (body : response_body) =
       with_timeout_result ~sleep:body.sleep body.timeout_policy `Drain

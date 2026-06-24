@@ -903,7 +903,7 @@ end
 module Credentials = Awskit.Credentials
 module Endpoint = Awskit.Endpoint
 module Region = Awskit.Region
-module Error = Common.Error
+module Error = S3_error
 module Bucket_name = Bucket_name
 module Object_key = Object_key
 module Account_id = Account_id
@@ -1031,8 +1031,8 @@ module Make (R : RUNTIME) = struct
     let service_error response body =
       let error =
         match body with
-        | None -> Common.Xml.empty_service_error
-        | Some body -> Common.Xml.service_error body
+        | None -> S3_xml.empty_service_error
+        | Some body -> S3_xml.service_error body
       in
       Awskit.Error.Producer.service
         ~status:(Awskit.Response.status response)

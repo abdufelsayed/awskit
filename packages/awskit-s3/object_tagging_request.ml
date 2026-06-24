@@ -1,6 +1,9 @@
-open Common
 open Headers
 open Tagging_xml
+
+let return_s3_error = S3_error_context.return_s3_error
+let validate_bucket_key = S3_validation.validate_bucket_key
+let validate_tags = S3_validation.validate_tags
 
 module Make (C : Request_context.S) = struct
   open C

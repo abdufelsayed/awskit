@@ -1,4 +1,3 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_state
 open Simulator_error
@@ -7,6 +6,8 @@ open Simulator_checksum
 open Simulator_runtime
 open Simulator_inspect
 open Simulator_object_body
+module Error = Awskit_s3.Error
+module Object = Awskit_s3.Object
 
 let object_read_info (obj : stored_object) ~status ~content_length
     ~range_headers =

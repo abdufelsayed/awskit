@@ -1,4 +1,11 @@
-open Common
+module Xml = S3_xml
+module Metadata_headers = S3_metadata_headers
+
+let ( let* ) = S3_result.( let* )
+let decode_with_context = S3_error_context.decode_with_context
+let option_map_result = S3_result.option_map
+let ptime_of_string = S3_time.of_string
+
 module Put_object = Object.Put
 module Get_object = Object.Get
 module Delete_object = Object.Delete

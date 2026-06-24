@@ -1,7 +1,10 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_state
 open Simulator_error
+module Bucket = Awskit_s3.Bucket
+module Multipart = Awskit_s3.Multipart
+module Object = Awskit_s3.Object
+module Object_key = Awskit_s3.Object_key
 
 let bucket_state store bucket = find_bucket store bucket
 

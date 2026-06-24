@@ -1,8 +1,9 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_state
 open Simulator_store
 open Simulator_checksum
+module Object = Awskit_s3.Object
+module Object_key = Awskit_s3.Object_key
 
 type version_entry =
   | Object_version of Object.Versions.object_version
@@ -154,7 +155,7 @@ let find_sub ~sub value =
   let value_len = String.length value in
   let rec loop index =
     if sub_len = 0 || index + sub_len > value_len then None
-    else if String.sub value index sub_len = sub then Some index
+    else if String.equal (String.sub value index sub_len) sub then Some index
     else loop (index + 1)
   in
   loop 0
@@ -197,7 +198,7 @@ let dedupe_listing_entries entries =
           (List.rev acc)
     | Common_prefix prefix :: rest ->
         let prefix_text = Object_key.Prefix.to_string prefix in
-        if List.mem prefix_text seen then dedupe seen acc rest
+        if List.exists (String.equal prefix_text) seen then dedupe seen acc rest
         else dedupe (prefix_text :: seen) (Common_prefix prefix :: acc) rest
     | (Version_entry _ as entry) :: rest -> dedupe seen (entry :: acc) rest
   in

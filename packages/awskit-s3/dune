@@ -2,6 +2,7 @@
  (name awskit_s3)
  (public_name awskit-s3)
  (private_modules
+  awskit_s3_header_helpers
   bucket_access_xml
   bucket_cors_xml
   bucket_encryption_xml
@@ -9,7 +10,6 @@
   bucket_result_xml
   bucket_versioning_xml
   bucket_xml_support
-  common
   headers
   multipart_request
   multipart_xml
@@ -21,7 +21,16 @@
   presigned_request
   request_context
   response
+  s3_error_context
+  s3_error
+  s3_metadata_headers
+  s3_parse
+  s3_result
+  s3_string
+  s3_time
+  s3_xml
   s3_utf8
+  s3_validation
   streaming
   tagging_xml)
  (libraries

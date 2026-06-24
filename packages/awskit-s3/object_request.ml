@@ -1,6 +1,16 @@
-open Common
 open Headers
 open Response
+module Error = S3_error
+module Metadata_headers = S3_metadata_headers
+
+let decode = S3_error_context.decode
+let invalid = S3_error_context.invalid
+let return_s3_error = S3_error_context.return_s3_error
+let validate_bucket = S3_validation.validate_bucket
+let validate_bucket_key = S3_validation.validate_bucket_key
+let validate_metadata = S3_validation.validate_metadata
+let validate_tags = S3_validation.validate_tags
+
 module Put_object = Object.Put
 module Get_object = Object.Get
 module Head_object = Object.Head

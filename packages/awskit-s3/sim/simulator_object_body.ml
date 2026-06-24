@@ -1,7 +1,7 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_error
 open Simulator_runtime
+module Range = Awskit_s3.Range
 
 let invalid_range () = service ~status:416 ~code:"InvalidRange" ()
 
@@ -12,15 +12,15 @@ let ranged_body body = function
       let length64 = Int64.of_int length in
       let bounds =
         match Range.view range with
-        | Bytes (start, finish) ->
+        | Range.Bytes (start, finish) ->
             if Int64.compare start length64 >= 0 then None
             else
               let finish = Int64.min finish (Int64.sub length64 1L) in
               Some (start, finish)
-        | From start ->
+        | Range.From start ->
             if Int64.compare start length64 >= 0 then None
             else Some (start, Int64.sub length64 1L)
-        | Suffix suffix ->
+        | Range.Suffix suffix ->
             if length = 0 then None
             else
               let start =

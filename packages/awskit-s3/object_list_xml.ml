@@ -1,4 +1,10 @@
-open Common
+module Xml = S3_xml
+
+let ( let* ) = S3_result.( let* )
+let ptime_of_string = S3_time.of_string
+let non_negative_int_of_string_opt = S3_parse.non_negative_int_of_string_opt
+let non_negative_int64_of_string_opt = S3_parse.non_negative_int64_of_string_opt
+
 module List_objects_v2 = Object.List
 
 let parse_result ~path name parse value =

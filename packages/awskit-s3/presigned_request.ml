@@ -1,4 +1,4 @@
-open Common
+let with_s3_operation = S3_error_context.with_s3_operation
 
 module Make (C : Request_context.S) = struct
   open C

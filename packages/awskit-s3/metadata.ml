@@ -62,4 +62,7 @@ let pp fmt metadata =
     (Fmt.Dump.pair Fmt.Dump.string Fmt.Dump.string)
     fmt (to_list metadata)
 
-let equal left right = List.equal ( = ) (to_list left) (to_list right)
+let equal_entry left right =
+  String.equal left.key right.key && Header_value.equal left.value right.value
+
+let equal left right = List.equal equal_entry left right

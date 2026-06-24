@@ -1,4 +1,8 @@
-open Common
+module Endpoint = Awskit.Endpoint
+module Region = Awskit.Region
+
+let ( let* ) = S3_result.( let* )
+let int_of_string_opt = S3_parse.int_of_string_opt
 
 type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
 

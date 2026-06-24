@@ -1,7 +1,19 @@
-open Common
 open Headers
 open Response
 open Multipart_xml
+module Metadata_headers = S3_metadata_headers
+module Xml = S3_xml
+
+let decode = S3_error_context.decode
+let invalid = S3_error_context.invalid
+let return_s3_error = S3_error_context.return_s3_error
+let int_of_string_opt = S3_parse.int_of_string_opt
+let non_negative_int64_of_string_opt = S3_parse.non_negative_int64_of_string_opt
+let ptime_of_string = S3_time.of_string
+let validate_bucket_key = S3_validation.validate_bucket_key
+let validate_metadata = S3_validation.validate_metadata
+let validate_tags = S3_validation.validate_tags
+
 module Create_multipart_upload = Multipart.Create
 module Upload_part = Multipart.Upload_part
 module Complete_multipart_upload = Multipart.Complete

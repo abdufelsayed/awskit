@@ -1,4 +1,4 @@
-open Common
+module Error = S3_error
 
 module type RUNTIME = sig
   include Awskit.Runtime.S

@@ -1,5 +1,3 @@
-open Awskit_s3
-
 module Clock : sig
   type t
 
@@ -15,18 +13,18 @@ val default_config : config
 
 type stored_object = {
   mutable body : string;
-  mutable etag : Object.Etag.t;
-  mutable version_id : Object.Version_id.t option;
-  mutable content_type : Content_type.t option;
-  mutable metadata : Metadata.t;
-  mutable storage_class : Storage_class.t option;
-  mutable tags : Tag.Set.t;
-  mutable checksum : Object.Checksum.response;
+  mutable etag : Awskit_s3.Object.Etag.t;
+  mutable version_id : Awskit_s3.Object.Version_id.t option;
+  mutable content_type : Awskit_s3.Content_type.t option;
+  mutable metadata : Awskit_s3.Metadata.t;
+  mutable storage_class : Awskit_s3.Storage_class.t option;
+  mutable tags : Awskit_s3.Tag.Set.t;
+  mutable checksum : Awskit_s3.Object.Checksum.response;
   mutable last_modified : Ptime.t;
 }
 
 type stored_delete_marker = {
-  version_id : Object.Version_id.t;
+  version_id : Awskit_s3.Object.Version_id.t;
   last_modified : Ptime.t;
 }
 
@@ -37,19 +35,19 @@ type stored_version =
 type stored_part = {
   part_number : int;
   body : string;
-  etag : Object.Etag.t;
-  checksum : Object.Checksum.response;
+  etag : Awskit_s3.Object.Etag.t;
+  checksum : Awskit_s3.Object.Checksum.response;
   last_modified : Ptime.t;
 }
 
 type multipart_upload = {
-  upload : Multipart.Upload.created Multipart.Upload.t;
-  content_type : Content_type.t option;
-  metadata : Metadata.t;
-  storage_class : Storage_class.t option;
-  tags : Tag.Set.t;
-  checksum_algorithm : Object.Checksum.Algorithm.t option;
-  checksum_type : Object.Checksum.Type.t option;
+  upload : Awskit_s3.Multipart.Upload.created Awskit_s3.Multipart.Upload.t;
+  content_type : Awskit_s3.Content_type.t option;
+  metadata : Awskit_s3.Metadata.t;
+  storage_class : Awskit_s3.Storage_class.t option;
+  tags : Awskit_s3.Tag.Set.t;
+  checksum_algorithm : Awskit_s3.Object.Checksum.Algorithm.t option;
+  checksum_type : Awskit_s3.Object.Checksum.Type.t option;
   parts : (int, stored_part) Hashtbl.t;
   created_at : Ptime.t;
 }
@@ -59,13 +57,14 @@ type bucket_state = {
   objects : (string, stored_version) Hashtbl.t;
   versions : (string, stored_version list) Hashtbl.t;
   multipart_uploads : (string, multipart_upload) Hashtbl.t;
-  mutable policy : Policy.t option;
-  mutable bucket_tags : Tag.Set.t;
-  mutable versioning : Bucket.Versioning.Status.t option;
-  mutable encryption : Bucket.Encryption.config option;
-  mutable cors : Bucket.Cors.config option;
-  mutable public_access_block : Bucket.Public_access_block.config option;
-  mutable ownership_controls : Bucket.Ownership_controls.config option;
+  mutable policy : Awskit_s3.Policy.t option;
+  mutable bucket_tags : Awskit_s3.Tag.Set.t;
+  mutable versioning : Awskit_s3.Bucket.Versioning.Status.t option;
+  mutable encryption : Awskit_s3.Bucket.Encryption.config option;
+  mutable cors : Awskit_s3.Bucket.Cors.config option;
+  mutable public_access_block :
+    Awskit_s3.Bucket.Public_access_block.config option;
+  mutable ownership_controls : Awskit_s3.Bucket.Ownership_controls.config option;
 }
 
 type operation =
@@ -115,8 +114,8 @@ val now : t -> Ptime.t
 val record_operation :
   ?faulted:bool -> t -> operation -> string -> string option -> unit
 
-val allocate_upload_id : t -> Multipart.Upload_id.t
-val allocate_version_id : t -> Object.Version_id.t
+val allocate_upload_id : t -> Awskit_s3.Multipart.Upload_id.t
+val allocate_version_id : t -> Awskit_s3.Object.Version_id.t
 val append_faults : t -> fault list -> unit
 val clear_faults : t -> unit
 val enable_random_faults : t -> seed:int -> prob:float -> unit

@@ -1,7 +1,8 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_error
 open Simulator_store
+module Object = Awskit_s3.Object
+module Tag = Awskit_s3.Tag
 
 module Tagging = struct
   let get conn ~bucket ~key ?options:_ () =
