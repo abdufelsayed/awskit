@@ -78,12 +78,18 @@ type response_body = {
   time_clock : time_clock;
   timeout_policy : Awskit.Timeout.policy;
   max_response_drain_bytes : int;
+  bodiless : bool;
+      (* True when the response carries no message body per RFC 7230 §3.3.3
+         (a response to HEAD, or status 1xx/204/304). The framing headers may
+         still advertise a Content-Length, so we must NOT read the body flow
+         or the read blocks until the timeout. *)
 }
 
 type response_body_reader = {
   body : Cohttp_eio.Body.t;
   time_clock : time_clock;
   timeout_policy : Awskit.Timeout.policy;
+  bodiless : bool;
   mutable active : bool;
   mutable chunk : string;
   mutable offset : int;
@@ -374,12 +380,20 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
   | `Http, _ | `Https, Some _ ->
       let client = Cohttp_eio.Client.make ~https:conn.https net in
       let meth = to_cohttp_meth request.method_ in
-      let make_response_body body =
+      (* A response to HEAD, or a 1xx/204/304 status, has no message body even
+         if Content-Length is present; reading it would block until timeout. *)
+      let is_head = match request.method_ with `HEAD -> true | _ -> false in
+      let response_is_bodiless status =
+        is_head || status = 204 || status = 304
+        || (status >= 100 && status < 200)
+      in
+      let make_response_body ~status body =
         {
           body;
           time_clock = conn.time_clock;
           timeout_policy = conn.timeout_policy;
           max_response_drain_bytes = conn.max_response_drain_bytes;
+          bodiless = response_is_bodiless status;
         }
       in
       let successful_status status = status >= 200 && status < 300 in
@@ -427,7 +441,7 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
                           early_result :=
                             Some
                               (call_f (to_aws_response response)
-                                 (make_response_body body));
+                                 (make_response_body ~status body));
                           raise Early_response
                   in
                   match !request_body_escaped_exn with
@@ -438,7 +452,7 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
                       | Ok () ->
                           Log.debug (fun m -> m "HTTP %d" status);
                           call_f (to_aws_response response)
-                            (make_response_body body))))
+                            (make_response_body ~status body))))
         with
         | Early_response as exn -> raise exn
         | Callback_raised exn -> raise exn
@@ -510,6 +524,7 @@ let read_response_body reader bytes ~off ~len =
   if not reader.active then Error inactive_reader_error
   else if invalid_read_bounds bytes ~off ~len then
     Error (Awskit.Error.Producer.body "invalid read bounds")
+  else if reader.bodiless then Ok 0
   else
     match
       with_timeout_result reader.time_clock reader.timeout_policy `Response_body
@@ -579,6 +594,7 @@ let with_response_body (body : response_body) ~consume =
       body = body.body;
       time_clock = body.time_clock;
       timeout_policy = body.timeout_policy;
+      bodiless = body.bodiless;
       active = true;
       chunk = "";
       offset = 0;
@@ -607,6 +623,7 @@ let discard_response_body (body : response_body) =
       body = body.body;
       time_clock = body.time_clock;
       timeout_policy = body.timeout_policy;
+      bodiless = body.bodiless;
       active = true;
       chunk = "";
       offset = 0;
