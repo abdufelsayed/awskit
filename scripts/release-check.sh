@@ -6,7 +6,7 @@ set -eu
 
 cleanup_minio() {
   if [ "${MINIO_STARTED:-0}" = "1" ]; then
-    docker compose down
+    docker compose down -v
   fi
 }
 

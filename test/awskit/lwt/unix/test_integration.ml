@@ -697,6 +697,24 @@ let close_socket fd =
       | Unix.Unix_error (Unix.EBADF, _, _) | Lwt.Canceled -> Lwt.return_unit
       | exn -> Lwt.fail exn)
 
+let read_raw_request_headers fd =
+  let bytes = Stdlib.Bytes.create 4096 in
+  let max_header_bytes = 16 * 1024 in
+  let rec loop headers =
+    if String.is_substring headers ~substring:"\r\n\r\n" then Lwt.return_unit
+    else if String.length headers > max_header_bytes then
+      Lwt.fail (Failure "raw HTTP request headers exceeded test limit")
+    else
+      Lwt.bind
+        (Lwt_unix.read fd bytes 0 (Stdlib.Bytes.length bytes))
+        (fun read ->
+          if read = 0 then Lwt.fail End_of_file
+          else
+            let chunk = Stdlib.Bytes.sub_string bytes 0 read in
+            loop (headers ^ chunk))
+  in
+  loop ""
+
 let write_all fd value =
   let bytes = Stdlib.Bytes.of_string value in
   let length = Stdlib.Bytes.length bytes in
@@ -745,7 +763,9 @@ let with_raw_http_server handle f =
           (fun () ->
             Lwt.bind (Lwt_unix.accept socket) (fun (client, _) ->
                 Lwt.finalize
-                  (fun () -> handle client)
+                  (fun () ->
+                    Lwt.bind (read_raw_request_headers client) (fun () ->
+                        handle client))
                   (fun () -> close_socket client)))
           (function
             | Unix.Unix_error (Unix.EBADF, _, _) | Lwt.Canceled ->
@@ -767,18 +787,24 @@ let container_getenv_for_uri uri name =
   else None
 
 let test_default_metadata_http_rejects_large_body () =
-  let content_length = 1_048_576 + 1 in
-  let resolution =
-    Lwt_main.run
-      (with_raw_http_server
-         (fun client -> write_raw_response ~content_length client "")
-         (fun uri ->
-           let getenv = container_getenv_for_uri uri in
-           let provider =
-             Awskit_lwt_unix.Credentials.container_provider ~getenv ()
-           in
-           Awskit_lwt_unix.Credentials.Provider.resolve provider))
+  let getenv =
+    getenv_of_assoc
+      [
+        ("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "/v2/credentials/task-role");
+      ]
   in
+  let http_call ~meth:_ ~headers:_ _uri =
+    Lwt.return_ok
+      {
+        Awskit_lwt_unix.Credentials.status = 200;
+        headers = [];
+        body = String.make (1_048_576 + 1) 'x';
+      }
+  in
+  let provider =
+    Awskit_lwt_unix.Credentials.container_provider ~getenv ~http_call ()
+  in
+  let resolution = resolve_provider provider in
   match resolution with
   | Failed error when is_body_error error -> ()
   | Failed error ->

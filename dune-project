@@ -31,7 +31,6 @@
   ptime
   (fmt
    (>= 0.11.0))
-  logs
   ppx_deriving
   ppx_sexp_conv
   (dune-release :with-dev-setup)

@@ -125,7 +125,7 @@ opam exec -- dune build
 opam exec -- dune test
 opam exec -- dune build @check-fast
 opam exec -- dune build @check-protocol
-opam exec -- dune build @doc @examples
+opam exec -- dune build @examples @doc
 opam exec -- dune build @opam
 git diff --check
 ```

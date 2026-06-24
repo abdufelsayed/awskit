@@ -99,7 +99,9 @@ injection. It is not live AWS coverage and is not a wire-protocol authority.
 policy. Applications own TLS configuration, CA roots, RNG initialization, and
 platform policy. Operations return plain results. It also exposes local-path
 helpers under [Body] and [Reader], plus managed local-file helpers under
-[Object.Transfer].
+[Object.Transfer]. Examples that call [Awskit_unix] also need the
+[awskit-unix] package, but [awskit-s3-eio] itself does not provide a ready
+Eio Unix aggregate adapter.
 
 {2 awskit-s3-lwt}
 

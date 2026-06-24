@@ -52,11 +52,16 @@ dependencies.
 {1 Quick Start}
 
 For Eio S3 applications, install the Eio adapter and pass an HTTPS policy when
-creating the client:
+creating the client. Add [awskit-unix] only when using Unix credential helpers
+such as [Awskit_unix.Credentials.default_chain]:
 
 {[
-opam install awskit-s3-eio eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
+opam install awskit-s3-eio awskit-unix eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
 ]}
+
+[awskit-s3-eio] does not provide a ready Eio Unix aggregate adapter.
+Applications own HTTPS transport, TLS configuration, CA roots, RNG
+initialization, and platform policy.
 
 For Lwt + Unix S3 applications, install the ready-to-use Unix adapter:
 

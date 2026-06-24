@@ -49,7 +49,7 @@ Commit the `dune-project` and generated `*.opam` changes together.
 Run:
 
 ```sh
-opam exec -- dune build @doc @examples
+opam exec -- dune build @examples @doc
 ```
 
 For release validation, `scripts/release-check.sh` also checks documentation

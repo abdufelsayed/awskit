@@ -31,7 +31,7 @@ they actually use. From a source checkout, install dependencies and build with
 Dune:
 
 ```sh
-opam install . --deps-only --with-test
+opam install . --deps-only --with-test --with-doc
 opam exec -- dune build
 ```
 
@@ -49,8 +49,11 @@ opam install awskit-s3-lwt-unix
 ```
 
 Use `awskit-s3-eio` when your application already runs on Eio and can provide
-an HTTPS connector. Use `awskit-s3-lwt-unix` when you want a ready-to-use Lwt
-client that can read the standard AWS environment and profile configuration.
+an HTTPS connector. Add `awskit-unix` only when you want the Unix credential
+helpers used in the example below; the Eio S3 adapter still leaves HTTPS
+transport and TLS policy with the caller. Use `awskit-s3-lwt-unix` when you
+want a ready-to-use Lwt client that can read the standard AWS environment and
+profile configuration.
 
 ## Packages
 
@@ -111,8 +114,12 @@ exceptions are not converted into SDK errors.
 Install the Eio S3 adapter:
 
 ```sh
-opam install awskit-s3-eio eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
+opam install awskit-s3-eio awskit-unix eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
 ```
+
+This installs `awskit-unix` for `Awskit_unix.Credentials.default_chain`.
+`awskit-s3-eio` itself remains caller-owned for HTTPS transport, TLS
+configuration, CA roots, RNG initialization, and platform policy.
 
 Add the libraries to your Dune file:
 
@@ -393,7 +400,7 @@ let download_stream s3 ~bucket ~key =
 Install dependencies and run the build and test suite:
 
 ```sh
-opam install . --deps-only --with-test
+opam install . --deps-only --with-test --with-doc
 opam exec -- dune build
 opam exec -- dune test
 opam exec -- dune build @examples @doc
@@ -403,7 +410,7 @@ Optional MinIO contract tests:
 
 ```sh
 docker compose up -d
-opam exec -- dune build @minio-contract
+opam exec -- dune build --force @minio-contract
 ```
 
 The MinIO contract runner defaults to `http://127.0.0.1:9000` with the

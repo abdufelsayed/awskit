@@ -637,7 +637,8 @@ A typical direct-upload multipart flow is:
 
 Eio S3 connections require explicit [region], [credentials], and [https]. This
 example reuses the [Https] helper from the endpoint configuration example
-above.
+above and [Awskit_unix.Credentials.default_chain] from the [awskit-unix]
+package for Unix credential loading.
 
 {[
 let credentials =
@@ -763,7 +764,7 @@ run the opt-in alias:
 
 {[
 docker compose up -d
-dune build @minio-contract
+opam exec -- dune build --force @minio-contract
 ]}
 
 The contract runner defaults to [http://127.0.0.1:9000] with the

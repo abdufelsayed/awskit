@@ -109,6 +109,16 @@ module Credentials = struct
         (validation ~field
            (Printf.sprintf "metadata service returned HTTP %d" response.status))
 
+  let expect_metadata_body_size response =
+    if String.length response.body > metadata_max_response_bytes then
+      Error (metadata_response_too_large ())
+    else Ok response
+
+  let expect_metadata_success ~field response =
+    let open Result_syntax in
+    let* response = expect_success ~field response in
+    expect_metadata_body_size response
+
   let json_member_string ~field json name =
     match Yojson.Basic.Util.member name json with
     | `String value when not (String.equal value "") -> Ok value
@@ -296,7 +306,8 @@ module Credentials = struct
                     | Error error -> Lwt.return (Fetch_failed error)
                     | Ok response -> (
                         match
-                          expect_success ~field:"container credentials" response
+                          expect_metadata_success ~field:"container credentials"
+                            response
                         with
                         | Error error -> Lwt.return (Fetch_failed error)
                         | Ok response ->
@@ -314,7 +325,10 @@ module Credentials = struct
       (http_call ~meth:`PUT ~headers (imds_base_uri "api/token"))
       (function
         | Ok response when response.status >= 200 && response.status < 300 ->
-            Lwt.return (Lookup_resolved (Some response.body))
+            Lwt.return
+              (match expect_metadata_body_size response with
+              | Ok response -> Lookup_resolved (Some response.body)
+              | Error error -> Lookup_failed error)
         | Ok response
           when response.status = 403
                || response.status = 404
@@ -358,7 +372,9 @@ module Credentials = struct
       (function
       | Error error -> Lwt.return (Lookup_failed error)
       | Ok response -> (
-          match expect_success ~field:"instance metadata role" response with
+          match
+            expect_metadata_success ~field:"instance metadata role" response
+          with
           | Error error -> Lwt.return (Lookup_failed error)
           | Ok response -> (
               match first_non_empty_line response.body with
@@ -377,7 +393,8 @@ module Credentials = struct
         | Error error -> Lwt.return (Lookup_failed error)
         | Ok response -> (
             match
-              expect_success ~field:"instance metadata credentials" response
+              expect_metadata_success ~field:"instance metadata credentials"
+                response
             with
             | Error error -> Lwt.return (Lookup_failed error)
             | Ok response ->
