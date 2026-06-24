@@ -18,11 +18,19 @@ type endpoint_variant =
 (** AWS S3 endpoint variant. *)
 
 type tls_policy = [ `Https_required | `Http_local_only | `Http_unsafe ]
-(** TLS policy for explicit S3-compatible endpoints. [`Http_unsafe] is for
-    controlled tests or non-production networks only. *)
+(** TLS policy for explicit endpoints.
+
+    [`Http_local_only] permits plaintext only for loopback/local test endpoints.
+    [`Http_unsafe] permits plaintext for any endpoint and should be limited to
+    controlled tests or non-production networks. *)
 
 type feature_policy = [ `Aws_strict | `S3_compatible ]
-(** Feature policy for endpoint-specific S3 behavior. *)
+(** Feature policy for endpoint-specific behavior.
+
+    [`Aws_strict] keeps AWS S3 validation and feature assumptions.
+    [`S3_compatible] relaxes only the compatibility checks modeled by awskit; it
+    is not a guarantee that every third-party S3-compatible service supports
+    every S3 operation. *)
 
 type t
 (** Opaque endpoint configuration. *)
@@ -45,7 +53,11 @@ val s3_compatible :
   feature_policy:feature_policy ->
   unit ->
   (t, Awskit.Error.t) result
-(** Build an explicit S3-compatible endpoint policy. *)
+(** Build an explicit endpoint policy for S3-compatible services.
+
+    [endpoint] is the base service endpoint, [signing_region] is the SigV4
+    credential-scope region, and [addressing_style] controls path-style versus
+    virtual-hosted bucket addressing. *)
 
 val local_plaintext :
   endpoint:Awskit.Endpoint.t ->
@@ -62,7 +74,9 @@ val unsafe_plaintext :
   addressing_style:addressing_style ->
   unit ->
   t
-(** Build a deliberately unsafe plaintext endpoint policy. *)
+(** Build a deliberately unsafe plaintext endpoint policy.
+
+    Prefer {!val:local_plaintext} for loopback/local tests. *)
 
 val addressing_style : t -> addressing_style
 (** Return the configured addressing-style preference. *)

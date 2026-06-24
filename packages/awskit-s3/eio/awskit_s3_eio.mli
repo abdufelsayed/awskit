@@ -29,10 +29,10 @@ val create :
     for plain HTTP endpoints such as local tests; applications targeting HTTPS
     should pass a connector compatible with [Cohttp_eio.Client.make ~https].
     [region] and [credentials] are explicit. Use [endpoint_config] for AWS
-    endpoint variants, local S3-compatible tests, or custom S3-compatible
-    endpoints. [retry_policy] defaults to [Awskit.Retry.default].
-    [max_response_drain_bytes] controls how much response body the runtime
-    drains after successful consumers. *)
+    endpoint variants, local S3-compatible tests, or explicit endpoints that use
+    S3-compatible signing/addressing rules. [retry_policy] defaults to
+    [Awskit.Retry.default]. [max_response_drain_bytes] controls how much
+    response body the runtime drains after successful consumers. *)
 
 module Body : sig
   include Awskit_s3.BODY with type 'a io := 'a and type t = Runtime.request_body
@@ -44,7 +44,7 @@ module Body : sig
     (t, Awskit_s3.Error.t) result
   (** Build a non-replayable request body from an existing Eio source flow.
       [content_length] must match the produced bytes, and the flow must remain
-      valid until the request finishes. *)
+      valid until the request finishes. The caller owns and closes the flow. *)
 
   val of_path :
     ?on_progress:(int64 -> unit) ->
@@ -65,14 +65,16 @@ module Reader : sig
     'flow Eio.Flow.sink ->
     t ->
     (unit, Awskit_s3.Error.t) result
-  (** Stream a response body into an existing Eio sink flow. *)
+  (** Stream a response body into an existing Eio sink flow. The caller owns and
+      closes the flow. *)
 
   val to_path :
     ?on_progress:(int64 -> unit) ->
     _ Eio.Path.t ->
     t ->
     (unit, Awskit_s3.Error.t) result
-  (** Stream a response body into a private [0o600] file. *)
+  (** Stream a response body into a private [0o600] temporary file, then publish
+      it at the target path when the copy succeeds. *)
 end
 
 module Object : sig
@@ -106,7 +108,8 @@ module Object : sig
       unit ->
       (Awskit_s3.Transfer.download_result, Awskit_s3.Error.t) result
     (** Download an object to a local file, using ranged [GetObject] requests at
-        or above the multipart threshold. *)
+        or above the multipart threshold. The selected overwrite policy controls
+        whether an existing target is replaced or rejected before transport. *)
 
     val multipart_upload_file :
       t ->

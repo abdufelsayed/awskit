@@ -26,10 +26,20 @@ module Prefix : sig
       records for "no prefix" rather than constructing an empty prefix value. *)
 
   val of_string : string -> (t, Awskit.Error.t) result
+  (** Validate a non-empty listing prefix. *)
+
   val of_string_exn : string -> t
+  (** Like {!val:of_string}, but raises [Awskit.Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
+
   val to_string : t -> string
+  (** Return the prefix string. *)
+
   val pp : Format.formatter -> t -> unit
+  (** Pretty-print the prefix. *)
+
   val equal : t -> t -> bool
+  (** Compare two prefixes. *)
 end
 
 module Delimiter : sig
@@ -37,8 +47,18 @@ module Delimiter : sig
   (** Object listing delimiter. *)
 
   val of_string : string -> (t, Awskit.Error.t) result
+  (** Validate a non-empty listing delimiter. *)
+
   val of_string_exn : string -> t
+  (** Like {!val:of_string}, but raises [Awskit.Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
+
   val to_string : t -> string
+  (** Return the delimiter string. *)
+
   val pp : Format.formatter -> t -> unit
+  (** Pretty-print the delimiter. *)
+
   val equal : t -> t -> bool
+  (** Compare two delimiters. *)
 end

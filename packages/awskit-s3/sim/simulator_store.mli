@@ -1,16 +1,21 @@
+(** Internal store helpers for simulator state. *)
+
 val bucket_state :
   Simulator_state.store -> string -> Simulator_state.bucket_state option
+(** Look up a bucket without recording an operation. *)
 
 val require_bucket :
   Simulator_state.t ->
   string ->
   (Simulator_state.bucket_state, Awskit.Error.t) result
+(** Look up a bucket or return an S3 [NoSuchBucket] service error. *)
 
 val require_object :
   Simulator_state.t ->
   string ->
   string ->
   (Simulator_state.stored_object, Awskit.Error.t) result
+(** Require the current object or return an S3 not-found service error. *)
 
 val versioning_enabled : Simulator_state.bucket_state -> bool
 val versioning_suspended : Simulator_state.bucket_state -> bool
@@ -22,6 +27,8 @@ val store_object :
   string ->
   Simulator_state.stored_object ->
   Simulator_state.stored_object
+(** Store an object as the current version, preserving history when bucket
+    versioning requires it. *)
 
 val find_version :
   Simulator_state.bucket_state ->
@@ -69,6 +76,7 @@ val delete_marker_error :
   current:bool -> Simulator_state.stored_delete_marker -> Awskit.Error.t
 
 val object_size : Simulator_state.stored_object -> int64
+(** Return the stored object body length in bytes. *)
 
 val ensure_write_preconditions :
   Simulator_state.stored_object option ->
@@ -94,6 +102,7 @@ val ensure_copy_source_preconditions :
   (unit, Awskit.Error.t) result
 
 val upload_key : Awskit_s3.Multipart.Upload_id.t -> string
+(** Return the simulator table key for a multipart upload id. *)
 
 val require_multipart_upload :
   Simulator_state.t ->
@@ -105,3 +114,4 @@ val require_multipart_upload :
   result
 
 val next_upload_id : Simulator_state.t -> Awskit_s3.Multipart.Upload_id.t
+(** Allocate the next deterministic multipart upload id. *)

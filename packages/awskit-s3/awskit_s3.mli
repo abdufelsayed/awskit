@@ -24,12 +24,27 @@ end
 
 module type BODY = sig
   type +'a io
+
   type t
+  (** Runtime request body descriptor.
+
+      Values may be replayable, such as in-memory or file-backed bodies, or
+      one-shot, such as bodies backed by a caller-owned stream. *)
+
   type writer
+  (** Scoped writer passed to streaming body callbacks.
+
+      The writer is valid only while the callback supplied to {!val:of_stream}
+      is running. Do not store it or use it after the callback returns. *)
 
   val empty : t
+  (** Empty replayable body with content length [0]. *)
+
   val of_string : string -> t
+  (** Build a replayable in-memory body from a string. *)
+
   val of_bytes : bytes -> t
+  (** Build a replayable in-memory body from bytes. *)
 
   val of_stream :
     content_length:int64 ->
@@ -40,28 +55,49 @@ module type BODY = sig
 
       [replayable] must be [true] only when retrying the request can recreate
       the same bytes by invoking [write] again. Negative content lengths are
-      rejected before a request is sent. *)
+      rejected before a request is sent. The supplied writer is scoped to one
+      invocation of [write]. *)
 
   val content_length : t -> int64 option
+  (** Return the known content length for the body, when available. *)
+
   val replayable : t -> bool
+  (** Return whether the body can be safely written again for retries. *)
 
   module Writer : sig
     type t = writer
 
     val write_string : t -> string -> (unit, Awskit.Error.t) result io
+    (** Write one string chunk to a streaming request body. *)
+
     val write_bytes : t -> bytes -> (unit, Awskit.Error.t) result io
+    (** Write one bytes chunk to a streaming request body. *)
 
     val write_subbytes :
       t -> bytes -> off:int -> len:int -> (unit, Awskit.Error.t) result io
+    (** Write the slice [bytes.{off .. off + len - 1}] to a streaming request
+        body. *)
   end
 end
 
 module type READER = sig
   type +'a io
+
   type t
+  (** Scoped response body reader.
+
+      Readers passed to object [consume] callbacks are valid only until the
+      callback returns. Drain, copy, or decode the body inside that callback. *)
 
   val read : t -> bytes -> off:int -> len:int -> (int, Awskit.Error.t) result io
+  (** Read up to [len] bytes into [bytes] starting at [off].
+
+      Returns [Ok 0] at end of body. *)
+
   val next : ?chunk_size:int -> t -> (bytes option, Awskit.Error.t) result io
+  (** Read the next fresh chunk, or [None] at end of body.
+
+      [chunk_size] must be positive when supplied. *)
 
   val fold :
     ?chunk_size:int ->
@@ -69,21 +105,27 @@ module type READER = sig
     init:'a ->
     f:('a -> bytes -> ('a, Awskit.Error.t) result io) ->
     ('a, Awskit.Error.t) result io
+  (** Fold over response-body chunks until end of body or the callback returns
+      an error. *)
 
   val iter :
     ?chunk_size:int ->
     t ->
     f:(bytes -> (unit, Awskit.Error.t) result io) ->
     (unit, Awskit.Error.t) result io
+  (** Iterate over response-body chunks until end of body or the callback
+      returns an error. *)
 
   val to_bytes :
     ?chunk_size:int -> max_bytes:int64 -> t -> (bytes, Awskit.Error.t) result io
+  (** Drain the body into memory as bytes, failing if it exceeds [max_bytes]. *)
 
   val to_string :
     ?chunk_size:int ->
     max_bytes:int64 ->
     t ->
     (string, Awskit.Error.t) result io
+  (** Drain the body into a string, failing if it exceeds [max_bytes]. *)
 end
 
 module type OBJECT = sig
@@ -112,8 +154,8 @@ module type OBJECT = sig
   (** Upload an object body with [PutObject].
 
       [body] must carry an accurate request-body descriptor. S3 uploads require
-      a known content length in this library; runtime helpers such as
-      [Runtime.Request_body.of_string] and [of_bytes] satisfy that contract. *)
+      a known content length in this library; adapter body constructors such as
+      [Body.of_string] and [Body.of_bytes] satisfy that contract. *)
 
   val put_string :
     connection ->
@@ -885,8 +927,10 @@ module type S = sig
        and type request_body = request_body
        and type response_body_reader = response_body_reader
 
+  (** Request-body constructors for this runtime adapter. *)
   module Body : BODY with type 'a io = 'a io and type t = request_body
 
+  (** Response-body readers for object [consume] callbacks. *)
   module Reader :
     READER with type 'a io = 'a io and type t = response_body_reader
 
@@ -916,17 +960,38 @@ module Region = Awskit.Region
 
 module Error : sig
   type t = Awskit.Error.t
+  (** Structured Awskit error value. *)
 
   val pp : Format.formatter -> t -> unit
+  (** Pretty-print an error. *)
+
   val equal : t -> t -> bool
+  (** Compare two errors structurally. *)
+
   val to_string_hum : t -> string
+  (** Render an error for humans. *)
+
   val service_code : t -> string option
+  (** Return the S3 service error code, when the error came from a modeled
+      service response. *)
+
   val is_not_found : t -> bool
+  (** Return [true] for S3 not-found errors recognized by lookup helpers. *)
+
   val is_no_such_bucket : t -> bool
+  (** Return [true] for [NoSuchBucket] service errors. *)
+
   val is_no_such_key : t -> bool
+  (** Return [true] for [NoSuchKey] service errors. *)
+
   val is_precondition_failed : t -> bool
+  (** Return [true] for failed conditional request preconditions. *)
+
   val is_conditional_request_conflict : t -> bool
+  (** Return [true] for S3 conditional-write conflicts. *)
+
   val is_conditional_failure : t -> bool
+  (** Return [true] for any conditional request failure recognized by S3. *)
 end
 
 module Bucket_name = Bucket_name
@@ -950,8 +1015,17 @@ val endpoint_config :
   ?endpoint_variant:endpoint_variant ->
   unit ->
   endpoint_config
+(** Build an AWS S3 endpoint resolver from addressing and endpoint variant
+    preferences.
+
+    Use {!Awskit_s3.Endpoint_config.s3_compatible},
+    {!Awskit_s3.Endpoint_config.local_plaintext}, or
+    {!Awskit_s3.Endpoint_config.unsafe_plaintext} before passing
+    [~endpoint_config] to an adapter when targeting an explicit non-AWS
+    endpoint. *)
 
 val default_endpoint_config : endpoint_config
+(** Default AWS S3 regional HTTPS endpoint resolver. *)
 
 module Object = Object
 module Bucket = Bucket

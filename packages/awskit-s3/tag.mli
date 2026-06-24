@@ -33,7 +33,18 @@ module Set : sig
       allows at most ten tags and treats keys case-sensitively. *)
 
   val empty : t
+  (** Empty tag set. *)
+
   val of_list : tag list -> (t, Awskit.Error.t) result
+  (** Validate a tag set from tags in insertion order.
+
+      Duplicate keys are rejected case-sensitively, and S3's ten-tag limit is
+      enforced. *)
+
   val of_list_exn : tag list -> t
+  (** Like {!val:of_list}, but raises [Awskit.Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
+
   val to_list : t -> tag list
+  (** Return tags in insertion order. *)
 end

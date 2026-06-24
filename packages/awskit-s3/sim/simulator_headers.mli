@@ -1,3 +1,5 @@
+(** Internal simulator aliases for shared S3 header construction helpers. *)
+
 val add_opt_account_id_header :
   string ->
   Awskit_s3.Account_id.t option ->

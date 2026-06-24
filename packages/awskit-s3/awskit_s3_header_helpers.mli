@@ -1,3 +1,8 @@
+(** Functorized internal helpers for S3 request header construction.
+
+    This interface is shared by the main S3 library and simulator so both
+    surfaces validate and render headers with the same domain rules. *)
+
 module type DOMAIN = sig
   module Account_id : sig
     type t

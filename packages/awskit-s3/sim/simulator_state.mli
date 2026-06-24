@@ -1,3 +1,9 @@
+(** Internal mutable state for {!module:Awskit_s3_sim}.
+
+    The public simulator API exposes deterministic inspection helpers; this
+    module keeps the ordering policy centralized for the operation
+    implementations. *)
+
 module Clock : sig
   type t
 
@@ -104,12 +110,27 @@ val find_bucket : store -> string -> bucket_state option
 val bucket_exists : store -> string -> bool
 val add_bucket : store -> string -> bucket_state -> unit
 val remove_bucket : store -> string -> unit
+
 val buckets : store -> (string * bucket_state) list
+(** Return buckets sorted lexicographically by bucket name. *)
+
 val buckets_seq : store -> (string * bucket_state) Seq.t
+(** Lazily traverse buckets in lexicographic bucket-name order. *)
+
 val objects : bucket_state -> (string * stored_version) list
+(** Return current object entries sorted lexicographically by key. *)
+
 val versions : bucket_state -> (string * stored_version list) list
+(** Return version histories sorted lexicographically by key.
+
+    The per-key version lists keep the simulator's stored order. *)
+
 val parts : multipart_upload -> stored_part list
+(** Return multipart parts sorted by part number. *)
+
 val history : store -> operation_record list
+(** Return operation history in chronological order. *)
+
 val clear_history : store -> unit
 
 type fault = Slow_down | Internal_error | Connection_reset | Response_lost
@@ -125,8 +146,14 @@ val record_operation :
 
 val allocate_upload_id : t -> Awskit_s3.Multipart.Upload_id.t
 val allocate_version_id : t -> Awskit_s3.Object.Version_id.t
+
 val append_faults : t -> fault list -> unit
+(** Append explicit faults to the FIFO fault queue. *)
+
 val clear_faults : t -> unit
 val enable_random_faults : t -> seed:int -> prob:float -> unit
 val disable_random_faults : t -> unit
+
 val take_fault : t -> fault option
+(** Consume the next explicit FIFO fault, or a deterministic random fault when
+    random faults are enabled. *)

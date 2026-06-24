@@ -1,3 +1,5 @@
+(** Internal simulator [GetObject] and [HeadObject] operations. *)
+
 val get :
   Simulator_state.t ->
   bucket:string ->

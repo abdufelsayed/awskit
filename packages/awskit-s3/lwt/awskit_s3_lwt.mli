@@ -32,9 +32,10 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
       enabled, custom Lwt backends must pass real [sleep] and [random_float]
       capabilities or use [Awskit.Retry.disabled]. Explicit timeout policies
       with configured spans also require [sleep]. Use [endpoint_config] for AWS
-      endpoint variants, local S3-compatible tests, or custom S3-compatible
-      endpoints. [max_response_drain_bytes] controls how much response body the
-      runtime drains after successful consumers. *)
+      endpoint variants, local S3-compatible tests, or explicit endpoints that
+      use S3-compatible signing/addressing rules. [max_response_drain_bytes]
+      controls how much response body the runtime drains after successful
+      consumers. *)
 
   module Body : sig
     include
@@ -44,6 +45,10 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
 
     val of_lwt_stream :
       content_length:int64 -> string Lwt_stream.t -> (t, Awskit.Error.t) result
+    (** Build a non-replayable request body from an existing Lwt stream.
+
+        [content_length] must match the bytes yielded by the stream, and the
+        stream must remain valid until the request finishes. *)
   end
 
   module Reader :

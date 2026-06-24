@@ -56,28 +56,31 @@ val store : t -> store
 (** Direct-style runtime used by the simulator. *)
 module Runtime : Awskit_s3.RUNTIME with type 'a t = 'a and type connection = t
 
+(** In-memory simulator request bodies. *)
 module Body :
   Awskit_s3.BODY with type 'a io := 'a and type t = Runtime.request_body
 
+(** In-memory simulator response-body readers. *)
 module Reader :
   Awskit_s3.READER
     with type 'a io := 'a
      and type t = Runtime.response_body_reader
 
+(** Deterministic fault kinds that can be injected before operations. *)
 type fault = Slow_down | Internal_error | Connection_reset | Response_lost
 
 val inject_fault : t -> fault -> unit
-(** Queue one fault for the next applicable operation. *)
+(** Queue one fault for the next applicable operation. Explicit faults are
+    consumed FIFO. *)
 
 val inject_faults : t -> fault list -> unit
-(** Queue several faults in order. *)
+(** Queue several faults in order. Explicit faults are consumed FIFO. *)
 
 val clear_faults : t -> unit
 (** Remove queued faults. *)
 
 val enable_random_faults : t -> seed:int -> prob:float -> unit
-(** Enable deterministic pseudo-random fault injection with probability [prob].
-*)
+(** Enable deterministic pseudo-random faults with probability [prob]. *)
 
 val disable_random_faults : t -> unit
 (** Disable random fault injection. Queued explicit faults are unchanged. *)
@@ -121,7 +124,7 @@ val object_metadata :
 (** Return metadata for the current object version, if present. *)
 
 val keys : store -> bucket:Awskit_s3.Bucket_name.t -> string list
-(** Return current object keys in a bucket. *)
+(** Return current object keys in a bucket in lexicographic order. *)
 
 val history : store -> operation_record list
 (** Return recorded operations in chronological order. *)
@@ -131,8 +134,9 @@ val clear_history : store -> unit
 
 val objects_as_strings :
   store -> bucket:Awskit_s3.Bucket_name.t -> (string * string) list
-(** Return current bucket objects whose bodies can be decoded as strings. *)
+(** Return current object bodies as strings in deterministic key order. *)
 
+(** Object operations against the in-memory simulator store. *)
 module Object :
   Awskit_s3.OBJECT
     with type connection := t
@@ -140,13 +144,17 @@ module Object :
      and type request_body := Body.t
      and type response_body_reader := Reader.t
 
+(** Bucket operations against the in-memory simulator store. *)
 module Bucket : Awskit_s3.BUCKET with type connection := t and type 'a io := 'a
 
+(** Multipart operations against the in-memory simulator store. *)
 module Multipart :
   Awskit_s3.MULTIPART
     with type connection := t
      and type 'a io := 'a
      and type request_body := Body.t
 
+(** Presigned request artifact helpers using the simulator connection's
+    credentials and deterministic clock. *)
 module Presigned :
   Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a

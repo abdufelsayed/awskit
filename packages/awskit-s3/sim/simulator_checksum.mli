@@ -1,3 +1,5 @@
+(** Internal checksum helpers for simulator responses. *)
+
 val etag : string -> Awskit_s3.Object.Etag.t
 val empty_checksum : Awskit_s3.Object.Checksum.response
 

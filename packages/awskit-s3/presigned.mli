@@ -86,6 +86,7 @@ module Put_object : sig
   (** Presigned [PUT Object] options. *)
 
   val default_options : options
+  (** Default presigned [PUT Object] options. *)
 end
 
 module Get_object : sig
@@ -106,6 +107,7 @@ module Get_object : sig
   (** Presigned [GET Object] options. *)
 
   val default_options : options
+  (** Default presigned [GET Object] options. *)
 end
 
 module Head_object : sig
@@ -126,6 +128,7 @@ module Head_object : sig
   (** Presigned [HEAD Object] options. *)
 
   val default_options : options
+  (** Default presigned [HEAD Object] options. *)
 end
 
 module Upload_part : sig
@@ -143,6 +146,7 @@ module Upload_part : sig
   (** Presigned [UploadPart] options. *)
 
   val default_options : options
+  (** Default presigned [UploadPart] options. *)
 end
 
 module Delete_object : sig
@@ -158,6 +162,7 @@ module Delete_object : sig
   (** Presigned [DELETE Object] options. *)
 
   val default_options : options
+  (** Default presigned [DELETE Object] options. *)
 end
 
 type endpoint_config = Endpoint_resolver.t
@@ -168,8 +173,12 @@ val endpoint_config :
   ?endpoint_variant:endpoint_variant ->
   unit ->
   endpoint_config
-(** Build AWS endpoint configuration for presigning. Use
-    {!Awskit_s3.Endpoint_config} for local or S3-compatible endpoints. *)
+(** Build AWS endpoint configuration for presigning.
+
+    Use {!Awskit_s3.Endpoint_config.s3_compatible},
+    {!Awskit_s3.Endpoint_config.local_plaintext}, or
+    {!Awskit_s3.Endpoint_config.unsafe_plaintext} for explicit non-AWS endpoints
+    before calling the [_with_endpoint_config] functions. *)
 
 val get_object :
   region:string ->

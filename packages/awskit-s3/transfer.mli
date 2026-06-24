@@ -105,9 +105,13 @@ type put_upload_result = {
 
 type multipart_upload_result = {
   upload : Multipart.Upload.caller_owned Multipart.Upload.t;
+      (** Caller-owned handle describing the upload that was completed. *)
   parts : Multipart.Part.t list;
+      (** Completed parts in ascending part-number order. *)
   complete : Multipart.Complete.result;
+      (** Metadata returned by [CompleteMultipartUpload]. *)
   bytes_transferred : int64;
+      (** Number of local file bytes streamed into multipart part requests. *)
 }
 (** Result of a completed multipart upload. *)
 
@@ -218,19 +222,48 @@ val download_options_exn :
     carrying the structured validation error on validation failure. *)
 
 val upload_multipart_threshold : upload_options -> int64
+(** Return the upload multipart-selection threshold in bytes. *)
+
 val upload_part_size : upload_options -> int
+(** Return the upload multipart part size in bytes. *)
+
 val upload_concurrency : upload_options -> int
+(** Return the maximum in-flight upload part operation count. *)
+
 val upload_put_options : upload_options -> Object.Put.options
+(** Return options used by single-request [PutObject] uploads. *)
+
 val upload_create_options : upload_options -> Multipart.Create.options
+(** Return options used by [CreateMultipartUpload]. *)
+
 val upload_part_options : upload_options -> Multipart.Upload_part.options
+(** Return options used by each [UploadPart]. *)
+
 val upload_complete_options : upload_options -> Multipart.Complete.options
+(** Return options used by [CompleteMultipartUpload]. *)
+
 val upload_abort_options : upload_options -> Multipart.Abort.options
+(** Return options used when aborting an Awskit-created multipart upload after a
+    helper failure. *)
+
 val upload_list_parts_options : upload_options -> Multipart.List_parts.options
+(** Return options used to verify a caller-owned upload before resumed multipart
+    transfer. *)
+
 val download_multipart_threshold : download_options -> int64
+(** Return the download ranged-transfer threshold in bytes. *)
+
 val download_part_size : download_options -> int
+(** Return the range size in bytes for ranged downloads. *)
+
 val download_concurrency : download_options -> int
+(** Return the maximum in-flight ranged [GetObject] operation count. *)
+
 val download_overwrite : download_options -> overwrite
+(** Return the local target overwrite policy. *)
+
 val download_get_options : download_options -> Object.Get.options
+(** Return options used by single-request and ranged [GetObject] downloads. *)
 
 val validate_upload_options : upload_options -> (unit, Awskit.Error.t) result
 (** Validate upload thresholds, part size, concurrency, and nested options. *)

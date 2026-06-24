@@ -27,7 +27,8 @@ val entries : t -> entry list
 (** Return typed metadata entries in insertion order. *)
 
 val add : key:string -> value:string -> t -> (t, Awskit.Error.t) result
-(** Add one metadata entry, rejecting invalid or duplicate keys. *)
+(** Add one metadata entry at the end of the collection, rejecting invalid or
+    duplicate keys. *)
 
 val pp : Format.formatter -> t -> unit
 (** Pretty-print metadata as raw key/value pairs. *)

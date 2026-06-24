@@ -1,3 +1,5 @@
+(** Internal simulator service-error and fault helpers. *)
+
 val service :
   ?message:string ->
   ?headers:(string * string) list ->
