@@ -54,7 +54,7 @@ let parse_result ~response body =
     | Ok ("DeleteResult", nodes) -> Ok nodes
     | Ok (actual, _) ->
         Error
-          (Awskit.Error.Producer.decode
+          (Xml.decode_with_context ~what:"DeleteResult XML"
              (Fmt.str "expected DeleteResult XML, got %s" actual))
   in
   let* deleted =

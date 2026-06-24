@@ -61,7 +61,9 @@ module Make (C : Request_context.S) = struct
                     validate_opt validate_checksum_type options.checksum_type )
                 with
                 | Error error, _ | _, Error error -> Error error
-                | Ok (), Ok () -> Ok ())))
+                | Ok (), Ok () ->
+                    validate_encryption_request options.server_side_encryption))
+        )
 
   let validate_complete_options (options : Complete_multipart_upload.options) =
     Complete_multipart_upload.options

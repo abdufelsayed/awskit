@@ -188,6 +188,9 @@ module Make (Domain : DOMAIN) (Config : CONFIG) : sig
   val validate_storage_class :
     Domain.Storage_class.t -> (unit, Awskit.Error.t) result
 
+  val validate_encryption_request :
+    Domain.Object.Encryption.request option -> (unit, Awskit.Error.t) result
+
   val checksum_value_headers :
     Domain.Object.Checksum.value option -> (string * string) list
 

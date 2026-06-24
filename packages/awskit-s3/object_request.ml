@@ -55,15 +55,22 @@ module Make (C : Request_context.S) = struct
             | Ok () -> (
                 match validate_opt validate_checksum_value options.checksum with
                 | Error _ as error -> error
-                | Ok () ->
-                    validate_common_headers
-                      ?content_type:
-                        (Option.map Content_type.to_string options.content_type)
-                      ?cache_control:(header_value options.cache_control)
-                      ?content_encoding:(header_value options.content_encoding)
-                      ?content_disposition:
-                        (header_value options.content_disposition)
-                      ())))
+                | Ok () -> (
+                    match
+                      validate_encryption_request options.server_side_encryption
+                    with
+                    | Error _ as error -> error
+                    | Ok () ->
+                        validate_common_headers
+                          ?content_type:
+                            (Option.map Content_type.to_string
+                               options.content_type)
+                          ?cache_control:(header_value options.cache_control)
+                          ?content_encoding:
+                            (header_value options.content_encoding)
+                          ?content_disposition:
+                            (header_value options.content_disposition)
+                          ()))))
 
   let validate_copy_options (options : Copy_object.options) =
     match validate_opt validate_storage_class options.storage_class with
@@ -75,9 +82,13 @@ module Make (C : Request_context.S) = struct
         | Error _ as error -> error
         | Ok () -> (
             match options.metadata_directive with
-            | Some (`Replace metadata) ->
-                S3_validation.validate_metadata metadata
-            | Some `Copy | None -> Ok ()))
+            | Some (`Replace metadata) -> (
+                match S3_validation.validate_metadata metadata with
+                | Error _ as error -> error
+                | Ok () ->
+                    validate_encryption_request options.server_side_encryption)
+            | Some `Copy | None ->
+                validate_encryption_request options.server_side_encryption))
 
   let validate_list_max_keys = function
     | None -> Ok ()

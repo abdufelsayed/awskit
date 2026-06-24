@@ -38,6 +38,7 @@ let test_object_checksum_headers_and_response () =
               ("etag", "\"etag\"");
               ("x-amz-checksum-sha1", "provided-sha1");
               ("x-amz-checksum-sha256", "provided-sha256");
+              ("x-amz-checksum-blake3", "future-blake3");
               ("x-amz-checksum-type", "COMPOSITE");
             ]
           "";
@@ -68,6 +69,8 @@ let test_object_checksum_headers_and_response () =
     "provided-sha1" put.checksum;
   check_checksum "put response sha256" Object.Checksum.Algorithm.Sha256
     "provided-sha256" put.checksum;
+  check_checksum "put response future checksum"
+    (Object.Checksum.Algorithm.Unknown "BLAKE3") "future-blake3" put.checksum;
   Alcotest.(check bool)
     "checksum type" true
     (put.checksum.checksum_type = Some Object.Checksum.Type.Composite);
@@ -432,9 +435,34 @@ let test_object_get_rejects_malformed_content_range () =
       ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
       ()
   with
-  | Error error when is_decode_error error -> ()
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions Content-Range response header" true
+        (string_contains text ~substring:"Content-Range response header")
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected malformed Content-Range decode error"
+
+let test_object_put_rejects_invalid_sse_kms_key_id () =
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  let options =
+    {
+      Object.Put.default_options with
+      server_side_encryption =
+        Some
+          (`Aws_kms { key_id = Some "bad\nkey"; bucket_key_enabled = Some true });
+    }
+  in
+  match
+    Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file")
+      ~body:(Recording_s3.Body.of_string "hello")
+      ~options ()
+  with
+  | Error error when is_validation_field "sse_kms_key_id" error ->
+      Alcotest.(check int) "transport not called" 0 (List.length conn.calls)
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected invalid SSE-KMS key id validation"
 
 let test_object_head_parses_int64_content_length () =
   let large_content_length = 9_223_372_036_854_775_807L in
@@ -614,6 +642,22 @@ let test_delete_objects_embedded_error () =
   | Error error ->
       Alcotest.failf "unexpected delete objects error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected embedded delete objects error"
+
+let test_delete_objects_wrong_root_mentions_result_context () =
+  let conn = Recording_runtime.connect [ response 200 "<NotDeleteResult/>" ] in
+  let object_ = Object.Delete_many.object_ ~key:(object_key "file") () in
+  match
+    Recording_s3.Object.delete_objects conn ~bucket:(bucket_name "my-bucket")
+      ~objects:[ object_ ] ()
+  with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions DeleteResult XML" true
+        (string_contains text ~substring:"DeleteResult XML")
+  | Error error ->
+      Alcotest.failf "unexpected delete objects error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected wrong-root delete result decode error"
 
 let test_delete_objects_rejects_invalid_count () =
   let conn = Recording_runtime.connect [] in
@@ -1592,6 +1636,24 @@ let test_copy_object_rejects_malformed_result_fields () =
       | Ok _ -> Alcotest.failf "%s: expected decode error" label)
     cases
 
+let test_copy_object_wrong_root_mentions_result_context () =
+  let conn =
+    Recording_runtime.connect [ response 200 "<NotCopyObjectResult/>" ]
+  in
+  match
+    Recording_s3.Object.copy conn ~source_bucket:(bucket_name "my-bucket")
+      ~source_key:(object_key "file")
+      ~destination_bucket:(bucket_name "my-bucket")
+      ~destination_key:(object_key "copy") ()
+  with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions CopyObjectResult XML" true
+        (string_contains text ~substring:"CopyObjectResult XML")
+  | Error error -> Alcotest.failf "unexpected copy error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected wrong-root copy result decode error"
+
 let test_object_checksum_mode_and_expected_owner_headers () =
   let expected_owner = account_id "123456789012" in
   let copy_body =
@@ -1728,6 +1790,8 @@ let suite =
           test_object_convenience_get_validates_max_bytes;
         Alcotest.test_case "object get rejects malformed content range" `Quick
           test_object_get_rejects_malformed_content_range;
+        Alcotest.test_case "object put rejects invalid sse kms key id" `Quick
+          test_object_put_rejects_invalid_sse_kms_key_id;
         Alcotest.test_case "object head parses int64 content length" `Quick
           test_object_head_parses_int64_content_length;
         Alcotest.test_case "object head accepts HTTP-date Last-Modified" `Quick
@@ -1740,6 +1804,8 @@ let suite =
           test_delete_objects_response_decode;
         Alcotest.test_case "delete objects embedded error" `Quick
           test_delete_objects_embedded_error;
+        Alcotest.test_case "delete objects wrong root mentions result context"
+          `Quick test_delete_objects_wrong_root_mentions_result_context;
         Alcotest.test_case "delete objects rejects invalid count" `Quick
           test_delete_objects_rejects_invalid_count;
         Alcotest.test_case "object version id queries" `Quick
@@ -1811,6 +1877,8 @@ let suite =
           test_copy_object_non_retryable_embedded_error_is_final;
         Alcotest.test_case "copy object rejects malformed result fields" `Quick
           test_copy_object_rejects_malformed_result_fields;
+        Alcotest.test_case "copy object wrong root mentions result context"
+          `Quick test_copy_object_wrong_root_mentions_result_context;
         Alcotest.test_case "object checksum mode and expected owner headers"
           `Quick test_object_checksum_mode_and_expected_owner_headers;
       ] );

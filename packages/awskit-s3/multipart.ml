@@ -96,6 +96,8 @@ module Part = struct
     | Some { Object.Checksum.algorithm = Unknown value; _ } ->
         S3_error_context.invalid ~field:"checksum_algorithm"
           "unknown checksum algorithm %S cannot be sent" value
+    | Some { Object.Checksum.value; _ } ->
+        S3_validation.validate_header_value ~field:"checksum_value" value
     | _ -> Ok ()
 
   let create ?checksum ?size ~part_number ~etag () =
@@ -208,6 +210,8 @@ module Upload_part = struct
     | Some { Object.Checksum.algorithm = Unknown value; _ } ->
         S3_error_context.invalid ~field:"checksum_algorithm"
           "unknown checksum algorithm %S cannot be sent" value
+    | Some { Object.Checksum.value; _ } ->
+        S3_validation.validate_header_value ~field:"checksum_value" value
     | _ -> Ok ()
 
   let options ?checksum ?expected_bucket_owner () =
@@ -245,6 +249,8 @@ module Complete = struct
     | Some { Object.Checksum.algorithm = Unknown value; _ } ->
         S3_error_context.invalid ~field:"checksum_algorithm"
           "unknown checksum algorithm %S cannot be sent" value
+    | Some { Object.Checksum.value; _ } ->
+        S3_validation.validate_header_value ~field:"checksum_value" value
     | _ -> Ok ()
 
   let validate_checksum_type = function

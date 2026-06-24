@@ -415,6 +415,9 @@ let put_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
     ~bucket ~key ?options () =
   let options = Option.value ~default:Put_object.default_options options in
   let* () = validate_opt Headers.validate_checksum_value options.checksum in
+  let* () =
+    Headers.validate_encryption_request options.server_side_encryption
+  in
   let headers =
     option_content_type_header "content-type" options.content_type
     @ Headers.checksum_value_headers options.checksum
@@ -487,6 +490,9 @@ let put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
   let options = Option.value ~default:Put_object.default_options options in
   let* () = validate_opt Headers.validate_checksum_value options.checksum in
+  let* () =
+    Headers.validate_encryption_request options.server_side_encryption
+  in
   let headers =
     option_content_type_header "content-type" options.content_type
     @ Headers.checksum_value_headers options.checksum

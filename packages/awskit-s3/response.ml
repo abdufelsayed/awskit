@@ -49,26 +49,48 @@ let response_version response =
                (Awskit.Error.to_string_hum error)))
 
 let response_checksum response =
-  let find algorithm header =
+  let checksum_headers =
+    [
+      (Object.Checksum.Algorithm.Crc32, "x-amz-checksum-crc32");
+      (Crc32c, "x-amz-checksum-crc32c");
+      (Crc64nvme, "x-amz-checksum-crc64nvme");
+      (Md5, "x-amz-checksum-md5");
+      (Sha1, "x-amz-checksum-sha1");
+      (Sha256, "x-amz-checksum-sha256");
+      (Sha512, "x-amz-checksum-sha512");
+      (Xxhash64, "x-amz-checksum-xxhash64");
+      (Xxhash3, "x-amz-checksum-xxhash3");
+      (Xxhash128, "x-amz-checksum-xxhash128");
+    ]
+  in
+  let find (algorithm, header) =
     match Awskit.Response.header response header with
     | None -> None
-    | Some value -> Some (Object.Checksum.value_exn ~algorithm ~value)
+    | Some value -> Some (Object.Checksum.response_value ~algorithm ~value)
   in
-  let values =
-    [
-      find Object.Checksum.Algorithm.Crc32 "x-amz-checksum-crc32";
-      find Crc32c "x-amz-checksum-crc32c";
-      find Crc64nvme "x-amz-checksum-crc64nvme";
-      find Md5 "x-amz-checksum-md5";
-      find Sha1 "x-amz-checksum-sha1";
-      find Sha256 "x-amz-checksum-sha256";
-      find Sha512 "x-amz-checksum-sha512";
-      find Xxhash64 "x-amz-checksum-xxhash64";
-      find Xxhash3 "x-amz-checksum-xxhash3";
-      find Xxhash128 "x-amz-checksum-xxhash128";
-    ]
-    |> List.filter_map Fun.id
+  let prefix = "x-amz-checksum-" in
+  let prefix_length = String.length prefix in
+  let known_header name =
+    List.exists (fun (_, header) -> String.equal name header) checksum_headers
+    || String.equal name "x-amz-checksum-type"
   in
+  let unknown_values =
+    Awskit.Response.headers response
+    |> List.filter_map (fun (name, value) ->
+        let name = String.lowercase_ascii name in
+        if S3_string.is_prefix ~prefix name && not (known_header name) then
+          let algorithm =
+            String.sub name prefix_length (String.length name - prefix_length)
+            |> String.uppercase_ascii
+          in
+          if String.equal algorithm "" then None
+          else
+            Some
+              (Object.Checksum.response_value ~algorithm:(Unknown algorithm)
+                 ~value)
+        else None)
+  in
+  let values = List.filter_map find checksum_headers @ unknown_values in
   {
     Object.Checksum.values;
     checksum_type =
@@ -119,8 +141,15 @@ let response_content_type response =
                (Awskit.Error.to_string_hum error)))
 
 let response_content_range response =
-  S3_result.option_map Range.Content_range.of_header
-    (Awskit.Response.header response "content-range")
+  match Awskit.Response.header response "content-range" with
+  | None -> Ok None
+  | Some value -> (
+      match Range.Content_range.of_header value with
+      | Ok range -> Ok (Some range)
+      | Error error ->
+          Error
+            (Awskit.Error.Producer.with_context
+               "decoding Content-Range response header" error))
 
 let response_time_header response name =
   match Awskit.Response.header response name with
@@ -231,5 +260,5 @@ let copy_result response body =
         }
   | Ok (actual, _) ->
       Error
-        (Awskit.Error.Producer.decode
+        (Xml.decode_with_context ~what:"CopyObjectResult XML"
            (Fmt.str "expected CopyObjectResult XML, got %s" actual))

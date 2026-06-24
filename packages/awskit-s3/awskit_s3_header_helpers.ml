@@ -237,13 +237,23 @@ module Make (Domain : DOMAIN) (Config : CONFIG) = struct
     | _ -> Ok ()
 
   let validate_checksum_value (checksum : Domain.Object.Checksum.value) =
-    validate_checksum_algorithm checksum.algorithm
+    let* () = validate_checksum_algorithm checksum.algorithm in
+    Config.validate_header_value ~field:"checksum_value" checksum.value
 
   let validate_storage_class = function
     | Domain.Storage_class.Unknown value ->
         invalid ~field:"storage_class" "unknown storage class %S cannot be sent"
           value
     | _ -> Ok ()
+
+  let validate_encryption_request = function
+    | None | Some `AES256 -> Ok ()
+    | Some (`Aws_kms kms) -> (
+        let kms : Domain.Object.Encryption.kms = kms in
+        match kms.key_id with
+        | None -> Ok ()
+        | Some key_id ->
+            Config.validate_header_value ~field:"sse_kms_key_id" key_id)
 
   let checksum_value_headers = function
     | None -> []

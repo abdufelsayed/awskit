@@ -62,12 +62,16 @@ module Ownership_controls = struct
   let parse body response =
     let* nodes = Xml.decode_root body ~name:"OwnershipControls" in
     match Xml.child "Rule" nodes with
-    | None -> Error (S3_error_context.decode "missing ownership controls rule")
+    | None ->
+        Xml.decode_field_error ~path:"OwnershipControls"
+          "missing required <Rule>"
     | Some rule -> (
+        let path = "OwnershipControls.Rule" in
         match Xml.child_text "ObjectOwnership" rule with
-        | None -> Error (S3_error_context.decode "missing ObjectOwnership")
+        | None ->
+            Xml.decode_field_error ~path "missing required <ObjectOwnership>"
         | Some "" ->
-            Error (S3_error_context.decode "invalid object ownership %S" "")
+            Xml.decode_field_error ~path "invalid object ownership %S" ""
         | Some value ->
             let object_ownership =
               Bucket.Ownership_controls.Object_ownership.of_string value

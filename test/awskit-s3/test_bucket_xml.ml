@@ -308,6 +308,23 @@ let test_bucket_empty_observed_enum_fields_are_decode_errors () =
         ~bucket:(bucket_name "my-bucket") ())
     "object ownership"
 
+let test_ownership_controls_missing_rule_mentions_xml_context () =
+  let conn =
+    Recording_runtime.connect [ response 200 "<OwnershipControls/>" ]
+  in
+  match
+    Recording_s3.Bucket.Ownership_controls.get conn
+      ~bucket:(bucket_name "my-bucket") ()
+  with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions OwnershipControls" true
+        (string_contains text ~substring:"OwnershipControls")
+  | Error error ->
+      Alcotest.failf "unexpected ownership controls error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected missing ownership rule decode error"
+
 let test_bucket_observed_unknown_writes_rejected () =
   let versioning_conn = Recording_runtime.connect [ response 200 "" ] in
   (match
@@ -404,6 +421,8 @@ let suite =
           test_bucket_cors_rejects_malformed_max_age;
         Alcotest.test_case "bucket empty observed enum fields are decode errors"
           `Quick test_bucket_empty_observed_enum_fields_are_decode_errors;
+        Alcotest.test_case "ownership missing rule mentions xml context" `Quick
+          test_ownership_controls_missing_rule_mentions_xml_context;
         Alcotest.test_case "bucket observed unknown writes rejected" `Quick
           test_bucket_observed_unknown_writes_rejected;
         Alcotest.test_case "decode error mentions XML document" `Quick

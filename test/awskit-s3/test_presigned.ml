@@ -550,6 +550,22 @@ let test_presigned_rejects_header_newline () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected header validation error"
 
+let test_presigned_rejects_invalid_sse_kms_key_id () =
+  let options =
+    {
+      Presigned.Put_object.default_options with
+      server_side_encryption =
+        Some (`Aws_kms { key_id = Some "bad\nkey"; bucket_key_enabled = None });
+    }
+  in
+  match
+    Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ~options ()
+  with
+  | Error error when is_validation_field "sse_kms_key_id" error -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected invalid SSE-KMS key id validation"
+
 let test_presigned_folds_signed_header_whitespace () =
   let options =
     {
@@ -659,6 +675,8 @@ let suite =
           test_presigned_rejects_duplicate_signed_headers;
         Alcotest.test_case "presigned rejects header newline" `Quick
           test_presigned_rejects_header_newline;
+        Alcotest.test_case "presigned rejects invalid sse kms key id" `Quick
+          test_presigned_rejects_invalid_sse_kms_key_id;
         Alcotest.test_case "presigned folds signed header whitespace" `Quick
           test_presigned_folds_signed_header_whitespace;
         Alcotest.test_case "presigned rejects unknown checksum" `Quick

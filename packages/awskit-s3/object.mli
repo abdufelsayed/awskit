@@ -101,6 +101,11 @@ module Checksum : sig
   (** Like {!val:value}, but raises [Awskit.Error.Awskit_error] carrying the
       structured validation error on validation failure. *)
 
+  val response_value : algorithm:Algorithm.t -> value:string -> value
+  (** Wrap a checksum value observed in S3 response metadata. This preserves
+      response-only future algorithms; request builders revalidate values before
+      sending them. *)
+
   type response = { values : value list; checksum_type : Type.t option }
   (** Modeled checksum headers returned by object and multipart operations. *)
 

@@ -256,6 +256,20 @@ let test_account_content_and_header_values () =
   expect_error_field "cache-control"
     (Header_value.of_string ~field:"cache-control" "")
 
+let test_checksum_values_validate_header_payloads () =
+  let checksum =
+    expect_ok "checksum value"
+      (Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Sha256
+         ~value:"provided-sha256")
+  in
+  Alcotest.(check string)
+    "checksum round trips" "provided-sha256" checksum.value;
+  expect_error_field "checksum_value"
+    (Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Sha256 ~value:"");
+  expect_error_field "checksum_value"
+    (Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Sha256
+       ~value:"bad\nchecksum")
+
 let test_storage_class_values () =
   let cases =
     [
@@ -437,7 +451,20 @@ let test_multipart_domain_values () =
     (Multipart.Part.create ~part_number:first ~etag ~size:(-1L) ());
   expect_error_field "checksum_algorithm"
     (Object.Checksum.value
-       ~algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE") ~value:"checksum")
+       ~algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE") ~value:"checksum");
+  let response_checksum =
+    Object.Checksum.response_value ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:"bad\nchecksum"
+  in
+  expect_error_field "checksum_value"
+    (Object.Put.options ~checksum:response_checksum ());
+  expect_error_field "checksum_value"
+    (Multipart.Part.create ~checksum:response_checksum ~part_number:first ~etag
+       ());
+  expect_error_field "checksum_value"
+    (Multipart.Upload_part.options ~checksum:response_checksum ());
+  expect_error_field "checksum_value"
+    (Multipart.Complete.options ~checksum:response_checksum ())
 
 let suite =
   [
@@ -475,6 +502,8 @@ let suite =
           test_object_key_prefix_and_delimiter;
         Alcotest.test_case "account content and header values" `Quick
           test_account_content_and_header_values;
+        Alcotest.test_case "checksum values validate header payloads" `Quick
+          test_checksum_values_validate_header_payloads;
         Alcotest.test_case "storage class values" `Quick
           test_storage_class_values;
         Alcotest.test_case "metadata collection validation" `Quick

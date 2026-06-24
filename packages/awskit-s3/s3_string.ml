@@ -3,6 +3,12 @@ let is_prefix ~prefix value =
   String.length value >= prefix_len
   && String.equal (String.sub value 0 prefix_len) prefix
 
+let drop_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  if is_prefix ~prefix value then
+    Some (String.sub value prefix_len (String.length value - prefix_len))
+  else None
+
 let is_suffix ~suffix value =
   let suffix_len = String.length suffix in
   let len = String.length value in

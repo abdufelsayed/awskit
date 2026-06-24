@@ -262,6 +262,25 @@ let test_complete_multipart_non_retryable_embedded_error_is_final () =
   Alcotest.(check int) "attempts" 1 (List.length conn.calls);
   Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
 
+let test_complete_multipart_wrong_root_mentions_result_context () =
+  let conn =
+    Recording_runtime.connect [ response 200 "<NotCompleteMultipartUpload/>" ]
+  in
+  let upload = upload_handle () in
+  let part = complete_part 1 in
+  match
+    Recording_s3.Multipart.complete_upload conn ~upload ~parts:[ part ] ()
+  with
+  | Error error -> (
+      let text = Awskit.Error.to_string_hum error in
+      match Awskit.Error.kind error with
+      | Decode _ ->
+          Alcotest.(check bool)
+            "mentions CompleteMultipartUploadResult XML" true
+            (string_contains text ~substring:"CompleteMultipartUploadResult XML")
+      | _ -> Alcotest.failf "unexpected complete error: %a" Error.pp error)
+  | Ok _ -> Alcotest.fail "expected wrong-root complete result decode error"
+
 let test_abort_multipart_result_and_absent_error () =
   let absent_body =
     {|<Error><Code>NoSuchUpload</Code><Message>upload not found</Message></Error>|}
@@ -369,6 +388,8 @@ let suite =
           test_complete_multipart_retryable_embedded_error_retries_then_succeeds;
         Alcotest.test_case "complete multipart non-retryable embedded error"
           `Quick test_complete_multipart_non_retryable_embedded_error_is_final;
+        Alcotest.test_case "complete multipart wrong root mentions context"
+          `Quick test_complete_multipart_wrong_root_mentions_result_context;
         Alcotest.test_case "abort multipart result and absent upload error"
           `Quick test_abort_multipart_result_and_absent_error;
         Alcotest.test_case "complete revalidates public option record" `Quick

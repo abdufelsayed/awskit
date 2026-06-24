@@ -103,10 +103,16 @@ module Checksum = struct
     | Algorithm.Unknown algorithm ->
         S3_error_context.invalid ~field:"checksum_algorithm"
           "unknown checksum algorithm %S cannot be sent" algorithm
-    | _ -> Ok { algorithm; value }
+    | _ ->
+        let* () =
+          S3_validation.validate_header_value ~field:"checksum_value" value
+        in
+        Ok { algorithm; value }
 
   let value_exn ~algorithm ~value:checksum =
     S3_result.result_exn (value ~algorithm ~value:checksum)
+
+  let response_value ~algorithm ~value = { algorithm; value }
 
   type response = { values : value list; checksum_type : Type.t option }
 
@@ -246,6 +252,8 @@ module Put = struct
     | Some { Checksum.algorithm = Unknown value; _ } ->
         S3_error_context.invalid ~field:"checksum_algorithm"
           "unknown checksum algorithm %S cannot be sent" value
+    | Some { Checksum.value; _ } ->
+        S3_validation.validate_header_value ~field:"checksum_value" value
     | _ -> Ok ()
 
   let options ?content_type ?(metadata = Metadata.empty) ?storage_class
