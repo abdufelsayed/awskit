@@ -1,9 +1,6 @@
 module Xml = S3_xml
 
 let ( let* ) = S3_result.( let* )
-let ptime_of_string = S3_time.of_string
-let non_negative_int_of_string_opt = S3_parse.non_negative_int_of_string_opt
-let non_negative_int64_of_string_opt = S3_parse.non_negative_int64_of_string_opt
 
 module List_objects_v2 = Object.List
 
@@ -50,14 +47,14 @@ let parse_page ~response body =
         let* key_text = Xml.required_child_text ~path "Key" nodes in
         let* key = parse_result ~path "Key" Object_key.of_string key_text in
         let* size =
-          Xml.optional_child_parse ~path "Size" non_negative_int64_of_string_opt
-            nodes
+          Xml.optional_child_parse ~path "Size"
+            S3_parse.non_negative_int64_of_string_opt nodes
         in
         let* etag =
           Xml.optional_child_result ~path "ETag" Object.Etag.of_string nodes
         in
         let* last_modified =
-          Xml.optional_child_parse ~path "LastModified" ptime_of_string nodes
+          Xml.optional_child_parse ~path "LastModified" S3_time.of_string nodes
         in
         let* storage_class = optional_storage_class ~path nodes in
         Ok
@@ -72,7 +69,7 @@ let parse_page ~response body =
   in
   let* key_count =
     Xml.optional_child_parse ~path:"ListBucketResult" "KeyCount"
-      non_negative_int_of_string_opt nodes
+      S3_parse.non_negative_int_of_string_opt nodes
   in
   let* is_truncated =
     Xml.optional_child_parse ~path:"ListBucketResult" "IsTruncated"

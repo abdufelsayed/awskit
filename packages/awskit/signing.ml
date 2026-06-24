@@ -13,8 +13,10 @@ let ptime_to_date_time (t : Ptime.t) =
   (datestamp, amz_date)
 
 let sha256_hex s = Digestif.SHA256.(digest_string s |> to_hex)
-let uri_encode = Aws_uri.encode
-let canonical_query_params = Aws_uri.canonical_query_params
+let uri_encode ?(encode_slash = true) value = Aws_uri.encode ~encode_slash value
+
+let canonical_query_params query_params =
+  Aws_uri.canonical_query_params query_params
 
 let normalize_header_value value =
   String.strip value
@@ -137,10 +139,8 @@ let sign_request_params ~credentials ~region ~service ~method_ ~path
                   signed_headers_str;
                 }))
 
-let result_exn = Aws_error.Producer.get_ok_exn
-
 let sign_request_params_exn ~credentials ~region ~service ~method_ ~path
     ~query_params ~headers ~payload_hash ~now =
-  result_exn
+  Aws_error.Producer.get_ok_exn
     (sign_request_params ~credentials ~region ~service ~method_ ~path
        ~query_params ~headers ~payload_hash ~now)

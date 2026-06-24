@@ -3,17 +3,6 @@ open Response
 open Multipart_xml
 module Metadata_headers = S3_metadata_headers
 module Xml = S3_xml
-
-let decode = S3_error_context.decode
-let invalid = S3_error_context.invalid
-let return_s3_error = S3_error_context.return_s3_error
-let int_of_string_opt = S3_parse.int_of_string_opt
-let non_negative_int64_of_string_opt = S3_parse.non_negative_int64_of_string_opt
-let ptime_of_string = S3_time.of_string
-let validate_bucket_key = S3_validation.validate_bucket_key
-let validate_metadata = S3_validation.validate_metadata
-let validate_tags = S3_validation.validate_tags
-
 module Create_multipart_upload = Multipart.Create
 module Upload_part = Multipart.Upload_part
 module Complete_multipart_upload = Multipart.Complete
@@ -30,12 +19,12 @@ module Make (C : Request_context.S) = struct
   type nonrec request_body = request_body
 
   let part_number_of_string_opt value =
-    match int_of_string_opt value with
+    match S3_parse.int_of_string_opt value with
     | Some value -> Result.to_option (Multipart.Part_number.of_int value)
     | _ -> None
 
   let part_number_marker_of_string_opt value =
-    match int_of_string_opt value with
+    match S3_parse.int_of_string_opt value with
     | Some value -> Result.to_option (Multipart.Part_number_marker.of_int value)
     | _ -> None
 
@@ -49,18 +38,18 @@ module Make (C : Request_context.S) = struct
     let* result = response in
     return_result return_error return_ok result
 
-  let bucket_string = Bucket_name.to_string
-  let key_string = Object_key.to_string
-  let upload_bucket upload = Multipart.Upload.bucket upload |> bucket_string
-  let upload_key upload = Multipart.Upload.key upload |> key_string
+  let upload_bucket upload =
+    Multipart.Upload.bucket upload |> Bucket_name.to_string
+
+  let upload_key upload = Multipart.Upload.key upload |> Object_key.to_string
   let upload_id upload = Multipart.Upload.upload_id upload
   let complete_min_part_size = 5_242_880L
 
   let validate_create_options (options : Create_multipart_upload.options) =
-    match validate_metadata options.metadata with
+    match S3_validation.validate_metadata options.metadata with
     | Error _ as error -> error
     | Ok () -> (
-        match validate_tags options.tags with
+        match S3_validation.validate_tags options.tags with
         | Error _ as error -> error
         | Ok () -> (
             match validate_opt validate_storage_class options.storage_class with
@@ -83,10 +72,11 @@ module Make (C : Request_context.S) = struct
 
   let validate_complete_parts ?multipart_object_size parts =
     let invalid_part_size () =
-      invalid ~field:"parts" "non-final multipart parts must be at least 5 MiB"
+      S3_error_context.invalid ~field:"parts"
+        "non-final multipart parts must be at least 5 MiB"
     in
     let invalid_object_size () =
-      invalid ~field:"multipart_object_size"
+      S3_error_context.invalid ~field:"multipart_object_size"
         "multipart object size does not match completed part sizes"
     in
     let rec loop previous total all_sizes_known = function
@@ -105,7 +95,8 @@ module Make (C : Request_context.S) = struct
             | Some prev -> part_number <= prev
             | None -> false
           then
-            invalid ~field:"part_number" "parts must be sorted by part_number"
+            S3_error_context.invalid ~field:"part_number"
+              "parts must be sorted by part_number"
           else
             match (rest, Multipart.Part.size part) with
             | _ :: _, Some size
@@ -120,7 +111,9 @@ module Make (C : Request_context.S) = struct
                 loop (Some part_number) total all_sizes_known rest)
     in
     match parts with
-    | [] -> invalid ~field:"parts" "complete requires at least one part"
+    | [] ->
+        S3_error_context.invalid ~field:"parts"
+          "complete requires at least one part"
     | parts -> loop None 0L true parts
 
   let create_upload_result ~typed_bucket ~typed_key response body =
@@ -128,7 +121,7 @@ module Make (C : Request_context.S) = struct
     | Error _ as error -> error
     | Ok nodes -> (
         match Xml.child_text "UploadId" nodes with
-        | None -> Error (decode "missing UploadId")
+        | None -> Error (S3_error_context.decode "missing UploadId")
         | Some upload_id -> (
             match Multipart.Upload_id.of_string upload_id with
             | Error _ as error -> error
@@ -144,16 +137,16 @@ module Make (C : Request_context.S) = struct
   let create_upload conn ~bucket ~key ?options () =
     let typed_bucket = bucket in
     let typed_key = key in
-    let bucket = bucket_string typed_bucket in
-    let key = key_string typed_key in
+    let bucket = Bucket_name.to_string typed_bucket in
+    let key = Object_key.to_string typed_key in
     let options =
       Option.value ~default:Create_multipart_upload.default_options options
     in
     let return_error =
-      return_s3_error return_error ~operation:"CreateMultipartUpload" ~bucket
-        ~key
+      S3_error_context.return_s3_error return_error
+        ~operation:"CreateMultipartUpload" ~bucket ~key
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         match validate_create_options options with
@@ -195,7 +188,8 @@ module Make (C : Request_context.S) = struct
     let upload_id = upload_id upload in
     let options = Option.value ~default:Upload_part.default_options options in
     let return_error =
-      return_s3_error return_error ~operation:"UploadPart" ~bucket ~key
+      S3_error_context.return_s3_error return_error ~operation:"UploadPart"
+        ~bucket ~key
     in
     let handle_response ~content_length response body =
       let* discarded = discard_response_body body in
@@ -204,7 +198,9 @@ module Make (C : Request_context.S) = struct
       | Ok () -> (
           match response_etag response with
           | Error error -> return_error error
-          | Ok None -> return_error (decode "missing multipart part etag")
+          | Ok None ->
+              return_error
+                (S3_error_context.decode "missing multipart part etag")
           | Ok (Some etag) -> (
               let checksum = response_checksum response in
               let part_checksum =
@@ -241,7 +237,7 @@ module Make (C : Request_context.S) = struct
                ~payload_hash:descriptor.payload_hash body
                ~f:(handle_response ~content_length))
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         match validate_opt validate_checksum_value options.checksum with
@@ -266,10 +262,10 @@ module Make (C : Request_context.S) = struct
       Option.value ~default:Complete_multipart_upload.default_options options
     in
     let return_error =
-      return_s3_error return_error ~operation:"CompleteMultipartUpload" ~bucket
-        ~key
+      S3_error_context.return_s3_error return_error
+        ~operation:"CompleteMultipartUpload" ~bucket ~key
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         match validate_complete_options options with
@@ -351,10 +347,10 @@ module Make (C : Request_context.S) = struct
       Option.value ~default:Abort_multipart_upload.default_options options
     in
     let return_error =
-      return_s3_error return_error ~operation:"AbortMultipartUpload" ~bucket
-        ~key
+      S3_error_context.return_s3_error return_error
+        ~operation:"AbortMultipartUpload" ~bucket ~key
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         match object_request conn ~bucket ~key with
@@ -386,9 +382,10 @@ module Make (C : Request_context.S) = struct
     let upload_id = upload_id upload in
     let options = Option.value ~default:List_parts.default_options options in
     let return_error =
-      return_s3_error return_error ~operation:"ListParts" ~bucket ~key
+      S3_error_context.return_s3_error return_error ~operation:"ListParts"
+        ~bucket ~key
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         match validate_list_parts_options options with
@@ -460,7 +457,8 @@ module Make (C : Request_context.S) = struct
                                              match
                                                Xml.optional_child_parse ~path
                                                  "Size"
-                                                 non_negative_int64_of_string_opt
+                                                 S3_parse
+                                                 .non_negative_int64_of_string_opt
                                                  nodes
                                              with
                                              | Error _ as error -> error
@@ -468,7 +466,7 @@ module Make (C : Request_context.S) = struct
                                                  match
                                                    Xml.optional_child_parse
                                                      ~path "LastModified"
-                                                     ptime_of_string nodes
+                                                     S3_time.of_string nodes
                                                  with
                                                  | Error _ as error -> error
                                                  | Ok last_modified -> (
@@ -527,14 +525,15 @@ module Make (C : Request_context.S) = struct
       | None -> Ok ()
       | Some value when value > 0 -> Ok ()
       | Some _ ->
-          invalid ~field:"max_pages" "max_pages must be greater than zero"
+          S3_error_context.invalid ~field:"max_pages"
+            "max_pages must be greater than zero"
 
     let options_for_page (base : List_parts.options) part_number_marker =
       { base with List_parts.part_number_marker }
 
     let fold_pages conn ~upload ?options ?max_pages ~init ~f () =
       let return_context_error =
-        return_s3_error return_error ~operation:"ListParts"
+        S3_error_context.return_s3_error return_error ~operation:"ListParts"
           ~bucket:(upload_bucket upload) ~key:(upload_key upload)
       in
       match validate_max_pages max_pages with
@@ -562,7 +561,7 @@ module Make (C : Request_context.S) = struct
                           | Some marker -> loop (Some marker) page_count acc
                           | None ->
                               return_context_error
-                                (decode
+                                (S3_error_context.decode
                                    "truncated list-parts response missing \
                                     NextPartNumberMarker"))))
           in

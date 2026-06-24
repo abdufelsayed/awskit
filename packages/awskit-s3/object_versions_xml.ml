@@ -1,8 +1,6 @@
 module Xml = S3_xml
 
 let ( let* ) = S3_result.( let* )
-let ptime_of_string = S3_time.of_string
-let non_negative_int64_of_string_opt = S3_parse.non_negative_int64_of_string_opt
 
 module List_object_versions = Object.Versions
 
@@ -84,14 +82,14 @@ let parse_page ~response body =
           Xml.optional_child_parse ~path "IsLatest" Response.parse_bool nodes
         in
         let* last_modified =
-          Xml.optional_child_parse ~path "LastModified" ptime_of_string nodes
+          Xml.optional_child_parse ~path "LastModified" S3_time.of_string nodes
         in
         let* etag =
           Xml.optional_child_result ~path "ETag" Object.Etag.of_string nodes
         in
         let* size =
-          Xml.optional_child_parse ~path "Size" non_negative_int64_of_string_opt
-            nodes
+          Xml.optional_child_parse ~path "Size"
+            S3_parse.non_negative_int64_of_string_opt nodes
         in
         let* storage_class = optional_storage_class ~path nodes in
         Ok
@@ -120,7 +118,7 @@ let parse_page ~response body =
           Xml.optional_child_parse ~path "IsLatest" Response.parse_bool nodes
         in
         let* last_modified =
-          Xml.optional_child_parse ~path "LastModified" ptime_of_string nodes
+          Xml.optional_child_parse ~path "LastModified" S3_time.of_string nodes
         in
         Ok
           {

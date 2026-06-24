@@ -3,16 +3,9 @@ type t = string
 let field = "content_type"
 let invalid message = Error (Awskit.Error.Producer.validation ~field message)
 
-let has_ctl_or_del value =
-  String.exists
-    (fun c ->
-      let code = Char.code c in
-      code < 0x20 || code = 0x7F)
-    value
-
 let of_string value =
   if value = "" then invalid "content_type must be non-empty"
-  else if has_ctl_or_del value then
+  else if S3_string.has_ctl_or_del value then
     invalid "content_type contains control characters"
   else Ok value
 

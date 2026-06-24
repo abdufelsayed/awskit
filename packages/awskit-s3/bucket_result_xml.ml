@@ -1,7 +1,6 @@
 module Xml = S3_xml
 
 let ( let* ) = S3_result.( let* )
-let ptime_of_string = S3_time.of_string
 
 let create_config region =
   Xml.el "CreateBucketConfiguration"
@@ -22,7 +21,7 @@ let parse_list body =
             Xml.decode_field_error ~path "%s" (Awskit.Error.to_string_hum error)
       in
       let* creation_date =
-        Xml.optional_child_parse ~path "CreationDate" ptime_of_string nodes
+        Xml.optional_child_parse ~path "CreationDate" S3_time.of_string nodes
       in
       Ok { Bucket.name; creation_date })
 

@@ -1,10 +1,6 @@
 open Headers
 open Tagging_xml
 
-let return_s3_error = S3_error_context.return_s3_error
-let validate_bucket_key = S3_validation.validate_bucket_key
-let validate_tags = S3_validation.validate_tags
-
 module Make (C : Request_context.S) = struct
   open C
 
@@ -23,19 +19,17 @@ module Make (C : Request_context.S) = struct
     |> add_opt_account_id_header "x-amz-expected-bucket-owner"
          options.Object.Tagging.expected_bucket_owner
 
-  let bucket_string = Bucket_name.to_string
-  let key_string = Object_key.to_string
-
   let get conn ~bucket ~key ?options () =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+    let bucket = Bucket_name.to_string bucket in
+    let key = Object_key.to_string key in
     let options =
       Option.value ~default:Object.Tagging.default_options options
     in
     let return_error =
-      return_s3_error return_error ~operation:"GetObjectTagging" ~bucket ~key
+      S3_error_context.return_s3_error return_error
+        ~operation:"GetObjectTagging" ~bucket ~key
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         match object_request conn ~bucket ~key with
@@ -56,18 +50,19 @@ module Make (C : Request_context.S) = struct
                             (parse_tags body)))))
 
   let put conn ~bucket ~key ?options ~tags () =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+    let bucket = Bucket_name.to_string bucket in
+    let key = Object_key.to_string key in
     let options =
       Option.value ~default:Object.Tagging.default_options options
     in
     let return_error =
-      return_s3_error return_error ~operation:"PutObjectTagging" ~bucket ~key
+      S3_error_context.return_s3_error return_error
+        ~operation:"PutObjectTagging" ~bucket ~key
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        match validate_tags tags with
+        match S3_validation.validate_tags tags with
         | Error error -> return_error error
         | Ok () -> (
             let body = xml_tags tags in
@@ -95,15 +90,16 @@ module Make (C : Request_context.S) = struct
                        | Ok () -> return_ok response))))
 
   let delete conn ~bucket ~key ?options () =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+    let bucket = Bucket_name.to_string bucket in
+    let key = Object_key.to_string key in
     let options =
       Option.value ~default:Object.Tagging.default_options options
     in
     let return_error =
-      return_s3_error return_error ~operation:"DeleteObjectTagging" ~bucket ~key
+      S3_error_context.return_s3_error return_error
+        ~operation:"DeleteObjectTagging" ~bucket ~key
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         match object_request conn ~bucket ~key with

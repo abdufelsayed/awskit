@@ -1,22 +1,19 @@
 module Object = Object
 
 let ( let* ) = S3_result.( let* )
-let result_exn = S3_result.result_exn
-let invalid = S3_error_context.invalid
-let has_ctl_or_del = S3_string.has_ctl_or_del
-let validate_metadata = S3_validation.validate_metadata
-let validate_tags = S3_validation.validate_tags
 
 module Upload_id = struct
   type t = string
 
   let of_string value =
-    if value = "" then invalid ~field:"upload_id" "upload id must be non-empty"
-    else if has_ctl_or_del value then
-      invalid ~field:"upload_id" "upload id contains control characters"
+    if value = "" then
+      S3_error_context.invalid ~field:"upload_id" "upload id must be non-empty"
+    else if S3_string.has_ctl_or_del value then
+      S3_error_context.invalid ~field:"upload_id"
+        "upload id contains control characters"
     else Ok value
 
-  let of_string_exn value = result_exn (of_string value)
+  let of_string_exn value = S3_result.result_exn (of_string value)
   let to_string value = value
   let pp fmt value = Format.pp_print_string fmt value
   let equal = String.equal
@@ -27,12 +24,14 @@ module Part_number = struct
 
   let of_int value =
     if value <= 0 then
-      invalid ~field:"part_number" "part number must be positive"
+      S3_error_context.invalid ~field:"part_number"
+        "part number must be positive"
     else if value > 10_000 then
-      invalid ~field:"part_number" "part number must be <= 10000"
+      S3_error_context.invalid ~field:"part_number"
+        "part number must be <= 10000"
     else Ok value
 
-  let of_int_exn value = result_exn (of_int value)
+  let of_int_exn value = S3_result.result_exn (of_int value)
   let to_int value = value
   let pp fmt value = Format.pp_print_int fmt value
   let equal = Int.equal
@@ -43,13 +42,14 @@ module Part_number_marker = struct
 
   let of_int value =
     if value < 0 then
-      invalid ~field:"part_number_marker"
+      S3_error_context.invalid ~field:"part_number_marker"
         "part number marker must be non-negative"
     else if value > 10_000 then
-      invalid ~field:"part_number_marker" "part number marker must be <= 10000"
+      S3_error_context.invalid ~field:"part_number_marker"
+        "part number marker must be <= 10000"
     else Ok value
 
-  let of_int_exn value = result_exn (of_int value)
+  let of_int_exn value = S3_result.result_exn (of_int value)
   let to_int value = value
   let pp fmt value = Format.pp_print_int fmt value
   let equal = Int.equal
@@ -74,7 +74,7 @@ module Upload = struct
     Ok (resume ~bucket ~key ~upload_id)
 
   let of_strings_exn ~bucket ~key ~upload_id =
-    result_exn (of_strings ~bucket ~key ~upload_id)
+    S3_result.result_exn (of_strings ~bucket ~key ~upload_id)
 
   let bucket upload = upload.bucket
   let key upload = upload.key
@@ -94,20 +94,20 @@ module Part = struct
 
   let validate_checksum = function
     | Some { Object.Checksum.algorithm = Unknown value; _ } ->
-        invalid ~field:"checksum_algorithm"
+        S3_error_context.invalid ~field:"checksum_algorithm"
           "unknown checksum algorithm %S cannot be sent" value
     | _ -> Ok ()
 
   let create ?checksum ?size ~part_number ~etag () =
     match size with
     | Some size when Int64.compare size 0L < 0 ->
-        invalid ~field:"size" "part size must be non-negative"
+        S3_error_context.invalid ~field:"size" "part size must be non-negative"
     | _ ->
         let* () = validate_checksum checksum in
         Ok { part_number; etag; checksum; size }
 
   let create_exn ?checksum ?size ~part_number ~etag () =
-    result_exn (create ?checksum ?size ~part_number ~etag ())
+    S3_result.result_exn (create ?checksum ?size ~part_number ~etag ())
 
   let part_number part = part.part_number
   let etag part = part.etag
@@ -146,27 +146,27 @@ module Create = struct
 
   let validate_checksum_algorithm = function
     | Some (Object.Checksum.Algorithm.Unknown value) ->
-        invalid ~field:"checksum_algorithm"
+        S3_error_context.invalid ~field:"checksum_algorithm"
           "unknown checksum algorithm %S cannot be sent" value
     | _ -> Ok ()
 
   let validate_checksum_type = function
     | Some (Object.Checksum.Type.Unknown value) ->
-        invalid ~field:"checksum_type" "unknown checksum type %S cannot be sent"
-          value
+        S3_error_context.invalid ~field:"checksum_type"
+          "unknown checksum type %S cannot be sent" value
     | _ -> Ok ()
 
   let validate_storage_class = function
     | Some (Storage_class.Unknown value) ->
-        invalid ~field:"storage_class" "unknown storage class %S cannot be sent"
-          value
+        S3_error_context.invalid ~field:"storage_class"
+          "unknown storage class %S cannot be sent" value
     | _ -> Ok ()
 
   let options ?content_type ?(metadata = Metadata.empty) ?storage_class
       ?(tags = Tag.Set.empty) ?checksum_algorithm ?checksum_type
       ?server_side_encryption ?expected_bucket_owner () =
-    let* () = validate_metadata metadata in
-    let* () = validate_tags tags in
+    let* () = S3_validation.validate_metadata metadata in
+    let* () = S3_validation.validate_tags tags in
     let* () = validate_storage_class storage_class in
     let* () = validate_checksum_algorithm checksum_algorithm in
     let* () = validate_checksum_type checksum_type in
@@ -185,7 +185,7 @@ module Create = struct
   let options_exn ?content_type ?metadata ?storage_class ?tags
       ?checksum_algorithm ?checksum_type ?server_side_encryption
       ?expected_bucket_owner () =
-    result_exn
+    S3_result.result_exn
       (options ?content_type ?metadata ?storage_class ?tags ?checksum_algorithm
          ?checksum_type ?server_side_encryption ?expected_bucket_owner ())
 end
@@ -206,7 +206,7 @@ module Upload_part = struct
 
   let validate_checksum = function
     | Some { Object.Checksum.algorithm = Unknown value; _ } ->
-        invalid ~field:"checksum_algorithm"
+        S3_error_context.invalid ~field:"checksum_algorithm"
           "unknown checksum algorithm %S cannot be sent" value
     | _ -> Ok ()
 
@@ -215,7 +215,7 @@ module Upload_part = struct
     Ok { checksum; expected_bucket_owner }
 
   let options_exn ?checksum ?expected_bucket_owner () =
-    result_exn (options ?checksum ?expected_bucket_owner ())
+    S3_result.result_exn (options ?checksum ?expected_bucket_owner ())
 end
 
 module Complete = struct
@@ -243,14 +243,14 @@ module Complete = struct
 
   let validate_checksum = function
     | Some { Object.Checksum.algorithm = Unknown value; _ } ->
-        invalid ~field:"checksum_algorithm"
+        S3_error_context.invalid ~field:"checksum_algorithm"
           "unknown checksum algorithm %S cannot be sent" value
     | _ -> Ok ()
 
   let validate_checksum_type = function
     | Some (Object.Checksum.Type.Unknown value) ->
-        invalid ~field:"checksum_type" "unknown checksum type %S cannot be sent"
-          value
+        S3_error_context.invalid ~field:"checksum_type"
+          "unknown checksum type %S cannot be sent" value
     | _ -> Ok ()
 
   let options ?expected_bucket_owner ?checksum ?checksum_type
@@ -260,7 +260,7 @@ module Complete = struct
     let* () =
       match multipart_object_size with
       | Some size when Int64.compare size 0L < 0 ->
-          invalid ~field:"multipart_object_size"
+          S3_error_context.invalid ~field:"multipart_object_size"
             "multipart object size must be non-negative"
       | _ -> Ok ()
     in
@@ -268,7 +268,7 @@ module Complete = struct
 
   let options_exn ?expected_bucket_owner ?checksum ?checksum_type
       ?multipart_object_size () =
-    result_exn
+    S3_result.result_exn
       (options ?expected_bucket_owner ?checksum ?checksum_type
          ?multipart_object_size ())
 end
@@ -281,7 +281,7 @@ module Abort = struct
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
-    result_exn (options ?expected_bucket_owner ())
+    S3_result.result_exn (options ?expected_bucket_owner ())
 end
 
 module List_parts = struct
@@ -318,13 +318,14 @@ module List_parts = struct
     | None -> Ok ()
     | Some value when value > 0 && value <= 1000 -> Ok ()
     | Some _ ->
-        invalid ~field:"max_parts" "max_parts must be between 1 and 1000"
+        S3_error_context.invalid ~field:"max_parts"
+          "max_parts must be between 1 and 1000"
 
   let options ?max_parts ?part_number_marker ?expected_bucket_owner () =
     let* () = validate_max_parts max_parts in
     Ok { max_parts; part_number_marker; expected_bucket_owner }
 
   let options_exn ?max_parts ?part_number_marker ?expected_bucket_owner () =
-    result_exn
+    S3_result.result_exn
       (options ?max_parts ?part_number_marker ?expected_bucket_owner ())
 end

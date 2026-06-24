@@ -1,5 +1,4 @@
 let ( let* ) = S3_result.( let* )
-let invalid = S3_error_context.invalid
 let min_part_size = 5 * 1024 * 1024
 let default_part_size = 8 * 1024 * 1024
 let default_multipart_threshold = Int64.mul 8L (Int64.mul 1024L 1024L)
@@ -104,20 +103,22 @@ let default_download_options =
 
 let validate_common ~multipart_threshold ~concurrency =
   if Int64.compare multipart_threshold 0L < 0 then
-    invalid ~field:"multipart_threshold" "multipart_threshold must be >= 0"
+    S3_error_context.invalid ~field:"multipart_threshold"
+      "multipart_threshold must be >= 0"
   else if concurrency <= 0 then
-    invalid ~field:"concurrency" "concurrency must be positive"
+    S3_error_context.invalid ~field:"concurrency" "concurrency must be positive"
   else Ok ()
 
 let validate_upload_part_size part_size =
   if part_size < min_part_size then
-    invalid ~field:"part_size"
+    S3_error_context.invalid ~field:"part_size"
       "part_size must be at least 5 MiB for S3 multipart upload"
   else Ok ()
 
 let validate_download_part_size part_size =
   if part_size <= 0 then
-    invalid ~field:"part_size" "download part_size must be positive"
+    S3_error_context.invalid ~field:"part_size"
+      "download part_size must be positive"
   else Ok ()
 
 let planned_part_count ~content_length ~part_size =
@@ -133,39 +134,40 @@ let validate_upload_options (options : upload_options) =
   in
   let* () = validate_upload_part_size options.part_size in
   if Option.is_some options.create_options.checksum_algorithm then
-    invalid ~field:"create_options.checksum_algorithm"
+    S3_error_context.invalid ~field:"create_options.checksum_algorithm"
       "multipart file helpers do not compute per-part checksums"
   else if Option.is_some options.create_options.checksum_type then
-    invalid ~field:"create_options.checksum_type"
+    S3_error_context.invalid ~field:"create_options.checksum_type"
       "multipart file helpers do not compute per-part checksums"
   else if Option.is_some options.upload_part_options.checksum then
-    invalid ~field:"upload_part_options.checksum"
+    S3_error_context.invalid ~field:"upload_part_options.checksum"
       "multipart file helpers require per-part checksum values from low-level \
        multipart calls"
   else if Option.is_some options.complete_options.checksum then
-    invalid ~field:"complete_options.checksum"
+    S3_error_context.invalid ~field:"complete_options.checksum"
       "multipart file helpers do not compute complete-object checksums"
   else if Option.is_some options.complete_options.checksum_type then
-    invalid ~field:"complete_options.checksum_type"
+    S3_error_context.invalid ~field:"complete_options.checksum_type"
       "multipart file helpers do not compute complete-object checksums"
   else Ok ()
 
 let validate_multipart_part_count ~content_length ~part_size =
   if Int64.compare content_length 0L < 0 then
-    invalid ~field:"content_length" "content_length must be non-negative"
+    S3_error_context.invalid ~field:"content_length"
+      "content_length must be non-negative"
   else if part_size <= 0 then
-    invalid ~field:"part_size" "part_size must be positive"
+    S3_error_context.invalid ~field:"part_size" "part_size must be positive"
   else
     let part_count = planned_part_count ~content_length ~part_size in
     if Int64.compare part_count (Int64.of_int max_parts) > 0 then
-      invalid ~field:"part_count"
+      S3_error_context.invalid ~field:"part_count"
         "multipart file transfer would exceed 10000 parts"
     else Ok ()
 
 let validate_upload_multipart_selection (options : upload_options) =
   match options.put_options.checksum with
   | Some _ ->
-      invalid ~field:"put_options.checksum"
+      S3_error_context.invalid ~field:"put_options.checksum"
         "optimized multipart file upload cannot use a single object checksum"
   | None -> Ok ()
 
@@ -185,13 +187,15 @@ module Plan = struct
 
   let validate_non_negative_content_length content_length =
     if Int64.compare content_length 0L < 0 then
-      invalid ~field:"content_length" "content_length must be non-negative"
+      S3_error_context.invalid ~field:"content_length"
+        "content_length must be non-negative"
     else Ok ()
 
   let validate_part_count ~content_length ~part_size =
     let count = planned_part_count ~content_length ~part_size in
     if Int64.compare count (Int64.of_int max_parts) > 0 then
-      invalid ~field:"part_count" "file transfer would exceed 10000 parts"
+      S3_error_context.invalid ~field:"part_count"
+        "file transfer would exceed 10000 parts"
     else Ok ()
 
   let build_part_seq ~content_length ~part_size ~make =
@@ -214,7 +218,7 @@ module Plan = struct
   let upload_part_seq ~content_length ~part_size =
     let* () = validate_non_negative_content_length content_length in
     if Int64.equal content_length 0L then
-      invalid ~field:"content_length"
+      S3_error_context.invalid ~field:"content_length"
         "multipart upload planning requires a non-empty file"
     else
       let* () = validate_upload_part_size part_size in
@@ -253,7 +257,7 @@ let validate_download_options (options : download_options) =
   let* () = validate_download_part_size options.part_size in
   match options.get_options.range with
   | Some _ ->
-      invalid ~field:"get_options.range"
+      S3_error_context.invalid ~field:"get_options.range"
         "optimized download_file does not accept a caller-supplied range"
   | None -> Ok ()
 

@@ -10,15 +10,3 @@ val ranged_body :
 val request_body_result :
   Simulator_runtime.Runtime.request_body -> (string, Awskit.Error.t) result
 (** Materialize a simulator request body as a string. *)
-
-val consume_string :
-  max_bytes:int64 ->
-  Simulator_runtime.Runtime.response_body_reader ->
-  (string, Awskit.Error.t) result
-(** Consume a simulator response body as a bounded string. *)
-
-val consume_bytes :
-  max_bytes:int64 ->
-  Simulator_runtime.Runtime.response_body_reader ->
-  (bytes, Awskit.Error.t) result
-(** Consume a simulator response body as bounded bytes. *)

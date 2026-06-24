@@ -37,21 +37,3 @@ val exists :
   ?options:Awskit_s3.Object.Head.options ->
   unit ->
   (bool, Awskit.Error.t) result
-
-val get_as_string :
-  Simulator_state.t ->
-  bucket:string ->
-  key:string ->
-  max_bytes:int64 ->
-  ?options:Awskit_s3.Object.Get.options ->
-  unit ->
-  (string Awskit_s3.Object.Get.result, Awskit.Error.t) result
-
-val get_as_bytes :
-  Simulator_state.t ->
-  bucket:string ->
-  key:string ->
-  max_bytes:int64 ->
-  ?options:Awskit_s3.Object.Get.options ->
-  unit ->
-  (bytes Awskit_s3.Object.Get.result, Awskit.Error.t) result

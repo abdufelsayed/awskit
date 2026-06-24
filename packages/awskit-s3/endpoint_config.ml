@@ -2,7 +2,6 @@ module Endpoint = Awskit.Endpoint
 module Region = Awskit.Region
 
 let ( let* ) = S3_result.( let* )
-let int_of_string_opt = S3_parse.int_of_string_opt
 
 type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
 
@@ -48,7 +47,7 @@ let is_localhost = function
           rest <> []
           && List.for_all
                (fun part ->
-                 match int_of_string_opt part with
+                 match S3_parse.int_of_string_opt part with
                  | Some value -> value >= 0 && value <= 255
                  | None -> false)
                rest

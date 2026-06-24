@@ -2,7 +2,6 @@ module Endpoint = Awskit.Endpoint
 module Region = Awskit.Region
 
 let ( let* ) = S3_result.( let* )
-let invalid = S3_error_context.invalid
 
 type addressing_style = Endpoint_config.addressing_style
 type endpoint_variant = Endpoint_config.endpoint_variant
@@ -36,12 +35,12 @@ let resolved_style t endpoint bucket =
       bucket_has_dot bucket )
   with
   | true, true ->
-      invalid ~field:"bucket"
+      S3_error_context.invalid ~field:"bucket"
         "S3 Transfer Acceleration cannot be used with dotted bucket names"
   | true, false -> (
       match Endpoint_config.addressing_style t with
       | `Path ->
-          invalid ~field:"addressing_style"
+          S3_error_context.invalid ~field:"addressing_style"
             "S3 Transfer Acceleration requires virtual-hosted addressing"
       | `Auto | `Virtual_hosted -> Ok `Virtual_hosted)
   | false, _ -> (
@@ -49,7 +48,7 @@ let resolved_style t endpoint bucket =
       | `Path -> Ok `Path
       | `Virtual_hosted
         when Endpoint.scheme endpoint = `Https && bucket_has_dot bucket ->
-          invalid ~field:"addressing_style"
+          S3_error_context.invalid ~field:"addressing_style"
             "virtual-hosted HTTPS endpoints cannot be used with dotted bucket \
              names"
       | `Virtual_hosted -> Ok `Virtual_hosted

@@ -154,9 +154,3 @@ let exists conn ~bucket ~key ?options () =
   | Ok _ -> Ok true
   | Error error when Error.is_no_such_key error -> Ok false
   | Error error -> Error error
-
-let get_as_string conn ~bucket ~key ~max_bytes ?options () =
-  get conn ~bucket ~key ?options ~consume:(consume_string ~max_bytes) ()
-
-let get_as_bytes conn ~bucket ~key ~max_bytes ?options () =
-  get conn ~bucket ~key ?options ~consume:(consume_bytes ~max_bytes) ()

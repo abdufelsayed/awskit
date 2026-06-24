@@ -17,7 +17,6 @@ let invalid ?field message =
   Error (Aws_error.Producer.validation ?field message)
 
 let decode message = Error (Aws_error.Producer.decode message)
-let result_exn = Aws_error.Producer.get_ok_exn
 
 let validate_status status =
   if status >= 100 && status <= 599 then Ok ()
@@ -70,7 +69,9 @@ let create ~status ?(headers = []) () =
               host_id = header_in headers "x-amz-id-2";
             })
 
-let create_exn ~status ?headers () = result_exn (create ~status ?headers ())
+let create_exn ~status ?headers () =
+  Aws_error.Producer.get_ok_exn (create ~status ?headers ())
+
 let status t = t.status
 let headers t = t.headers
 let header t name = header_in t.headers name

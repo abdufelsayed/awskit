@@ -1,7 +1,4 @@
 module Xml = S3_xml
-
-let option_map_result = S3_result.option_map
-
 open Response
 
 let checksum_xml_name = function
@@ -61,7 +58,7 @@ let complete_result response body =
   | Ok ("Error", _) -> Error (embedded_service_error response body)
   | Ok ("CompleteMultipartUploadResult", nodes) -> (
       let etag = Xml.child_text "ETag" nodes in
-      let etag = option_map_result Object.Etag.of_string etag in
+      let etag = S3_result.option_map Object.Etag.of_string etag in
       let version_id = response_version response in
       match (etag, version_id) with
       | Error error, _ | _, Error error -> Error error

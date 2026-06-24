@@ -62,10 +62,8 @@ let create ~scheme ~host ?port () =
       | Error _ as error -> error
       | Ok () -> Ok { scheme; host; port })
 
-let result_exn = Aws_error.Producer.get_ok_exn
-
 let create_exn ~scheme ~host ?port () =
-  result_exn (create ~scheme ~host ?port ())
+  Aws_error.Producer.get_ok_exn (create ~scheme ~host ?port ())
 
 let split_scheme input =
   match String.substr_index input ~pattern:"://" with
@@ -135,11 +133,17 @@ let of_string input =
           | Error _ as error -> error
           | Ok (host, port) -> create ~scheme ~host ?port ())
 
-let of_string_exn input = result_exn (of_string input)
+let of_string_exn input = Aws_error.Producer.get_ok_exn (of_string input)
 let http ~host ?port () = create ~scheme:`Http ~host ?port ()
-let http_exn ~host ?port () = result_exn (http ~host ?port ())
+
+let http_exn ~host ?port () =
+  Aws_error.Producer.get_ok_exn (http ~host ?port ())
+
 let https ~host ?port () = create ~scheme:`Https ~host ?port ()
-let https_exn ~host ?port () = result_exn (https ~host ?port ())
+
+let https_exn ~host ?port () =
+  Aws_error.Producer.get_ok_exn (https ~host ?port ())
+
 let scheme t = t.scheme
 let host t = t.host
 let port t = t.port

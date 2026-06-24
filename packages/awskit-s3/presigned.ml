@@ -3,7 +3,6 @@ module Object = Object
 module Endpoint_resolver = Endpoint_resolver
 
 let ( let* ) = S3_result.( let* )
-let invalid = S3_error_context.invalid
 
 type addressing_style = Endpoint_config.addressing_style
 type endpoint_variant = Endpoint_config.endpoint_variant
@@ -175,7 +174,8 @@ let validate_unique_header_names headers =
     | (name, _) :: rest ->
         let name = String.lowercase_ascii name in
         if List.exists (String.equal name) seen then
-          invalid ~field:"header" "duplicate signed header: %s" name
+          S3_error_context.invalid ~field:"header" "duplicate signed header: %s"
+            name
         else loop (name :: seen) rest
   in
   loop [] headers
@@ -193,18 +193,21 @@ let validate_opt f = function None -> Ok () | Some value -> f value
 
 let expires_seconds span =
   if Ptime.Span.compare span Ptime.Span.zero <= 0 then
-    invalid ~field:"expires_in" "expires_in must be positive"
+    S3_error_context.invalid ~field:"expires_in" "expires_in must be positive"
   else if Ptime.Span.compare span max_expires_span > 0 then
-    invalid ~field:"expires_in" "expires_in must be <= %d seconds" max_expires
+    S3_error_context.invalid ~field:"expires_in"
+      "expires_in must be <= %d seconds" max_expires
   else
     match Ptime.Span.to_int_s span with
     | None ->
-        invalid ~field:"expires_in" "expires_in is outside supported range"
+        S3_error_context.invalid ~field:"expires_in"
+          "expires_in is outside supported range"
     | Some seconds when seconds <= 0 ->
-        invalid ~field:"expires_in" "expires_in must be at least 1 second"
+        S3_error_context.invalid ~field:"expires_in"
+          "expires_in must be at least 1 second"
     | Some seconds when seconds > max_expires ->
-        invalid ~field:"expires_in" "expires_in must be <= %d seconds"
-          max_expires
+        S3_error_context.invalid ~field:"expires_in"
+          "expires_in must be <= %d seconds" max_expires
     | Some seconds -> Ok seconds
 
 let credentials_expire_too_soon credentials =
@@ -251,9 +254,9 @@ let safe_uri_of_url url =
 
 let validate_part_number part_number =
   if part_number <= 0 then
-    invalid ~field:"part_number" "part number must be positive"
+    S3_error_context.invalid ~field:"part_number" "part number must be positive"
   else if part_number > 10_000 then
-    invalid ~field:"part_number" "part number must be <= 10000"
+    S3_error_context.invalid ~field:"part_number" "part number must be <= 10000"
   else Ok ()
 
 let parse_region region = Awskit.Region.of_string region

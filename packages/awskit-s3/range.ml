@@ -4,7 +4,6 @@ type t = view
 let invalid ?field message =
   Error (Awskit.Error.Producer.validation ?field message)
 
-let result_exn = Awskit.Error.Producer.get_ok_exn
 let ( let* ) = Result.bind
 
 let non_negative ~field value =
@@ -24,21 +23,22 @@ let bytes ~start ~finish =
               "finish must be greater than or equal to start"
           else Ok (Bytes (start, finish)))
 
-let bytes_exn ~start ~finish = result_exn (bytes ~start ~finish)
+let bytes_exn ~start ~finish =
+  Awskit.Error.Producer.get_ok_exn (bytes ~start ~finish)
 
 let from start =
   match non_negative ~field:"range start" start with
   | Error _ as error -> error
   | Ok () -> Ok (From start)
 
-let from_exn start = result_exn (from start)
+let from_exn start = Awskit.Error.Producer.get_ok_exn (from start)
 
 let suffix length =
   if Int64.compare length 0L <= 0 then
     invalid ~field:"range suffix" "suffix length must be positive"
   else Ok (Suffix length)
 
-let suffix_exn length = result_exn (suffix length)
+let suffix_exn length = Awskit.Error.Producer.get_ok_exn (suffix length)
 
 let to_header = function
   | Bytes (start, finish) -> Fmt.str "bytes=%Ld-%Ld" start finish

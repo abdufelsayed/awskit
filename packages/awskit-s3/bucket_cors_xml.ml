@@ -1,9 +1,6 @@
 module Xml = S3_xml
 
 let ( let* ) = S3_result.( let* )
-let invalid = S3_error_context.invalid
-let decode = S3_error_context.decode
-let non_negative_int_of_string_opt = S3_parse.non_negative_int_of_string_opt
 
 open Bucket_xml_support
 
@@ -18,12 +15,17 @@ let validate_rule (rule : Bucket.Cors.rule) =
       ]
   in
   match (rule.allowed_origins, rule.allowed_methods) with
-  | [], _ -> invalid ~field:"cors" "CORS rule must include an allowed origin"
-  | _, [] -> invalid ~field:"cors" "CORS rule must include an allowed method"
+  | [], _ ->
+      S3_error_context.invalid ~field:"cors"
+        "CORS rule must include an allowed origin"
+  | _, [] ->
+      S3_error_context.invalid ~field:"cors"
+        "CORS rule must include an allowed method"
   | _ -> (
       match rule.max_age_seconds with
       | Some value when value < 0 ->
-          invalid ~field:"cors" "max_age_seconds must be non-negative"
+          S3_error_context.invalid ~field:"cors"
+            "max_age_seconds must be non-negative"
       | _ -> Ok ())
 
 let validate_config (config : Bucket.Cors.config) =
@@ -56,7 +58,7 @@ let xml (config : Bucket.Cors.config) =
 let parse_method value =
   match Bucket.Cors.Method.of_string value with
   | Some method_ -> Ok method_
-  | None -> Error (decode "invalid CORS method %S" value)
+  | None -> Error (S3_error_context.decode "invalid CORS method %S" value)
 
 let parse_methods values =
   let rec loop acc = function
@@ -73,7 +75,7 @@ let parse_rule nodes =
   in
   let* max_age_seconds =
     Xml.optional_child_parse ~path:"CORSRule" "MaxAgeSeconds"
-      non_negative_int_of_string_opt nodes
+      S3_parse.non_negative_int_of_string_opt nodes
   in
   Ok
     {

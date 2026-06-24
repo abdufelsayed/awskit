@@ -1,18 +1,16 @@
 let ( let* ) = S3_result.( let* )
-let result_exn = S3_result.result_exn
-let invalid = S3_error_context.invalid
-let has_ctl_or_del = S3_string.has_ctl_or_del
 
 module Etag = struct
   type t = string
 
   let of_string value =
-    if value = "" then invalid ~field:"etag" "etag must be non-empty"
-    else if has_ctl_or_del value then
-      invalid ~field:"etag" "etag contains control characters"
+    if value = "" then
+      S3_error_context.invalid ~field:"etag" "etag must be non-empty"
+    else if S3_string.has_ctl_or_del value then
+      S3_error_context.invalid ~field:"etag" "etag contains control characters"
     else Ok value
 
-  let of_string_exn value = result_exn (of_string value)
+  let of_string_exn value = S3_result.result_exn (of_string value)
   let to_string value = value
   let pp fmt value = Format.pp_print_string fmt value
   let equal = String.equal
@@ -23,12 +21,14 @@ module Version_id = struct
 
   let of_string value =
     if value = "" then
-      invalid ~field:"version_id" "version id must be non-empty"
-    else if has_ctl_or_del value then
-      invalid ~field:"version_id" "version id contains control characters"
+      S3_error_context.invalid ~field:"version_id"
+        "version id must be non-empty"
+    else if S3_string.has_ctl_or_del value then
+      S3_error_context.invalid ~field:"version_id"
+        "version id contains control characters"
     else Ok value
 
-  let of_string_exn value = result_exn (of_string value)
+  let of_string_exn value = S3_result.result_exn (of_string value)
   let to_string value = value
   let pp fmt value = Format.pp_print_string fmt value
   let equal = String.equal
@@ -101,12 +101,12 @@ module Checksum = struct
   let value ~algorithm ~value =
     match algorithm with
     | Algorithm.Unknown algorithm ->
-        invalid ~field:"checksum_algorithm"
+        S3_error_context.invalid ~field:"checksum_algorithm"
           "unknown checksum algorithm %S cannot be sent" algorithm
     | _ -> Ok { algorithm; value }
 
   let value_exn ~algorithm ~value:checksum =
-    result_exn (value ~algorithm ~value:checksum)
+    S3_result.result_exn (value ~algorithm ~value:checksum)
 
   type response = { values : value list; checksum_type : Type.t option }
 
@@ -238,13 +238,13 @@ module Put = struct
 
   let validate_storage_class = function
     | Some (Storage_class.Unknown value) ->
-        invalid ~field:"storage_class" "unknown storage class %S cannot be sent"
-          value
+        S3_error_context.invalid ~field:"storage_class"
+          "unknown storage class %S cannot be sent" value
     | _ -> Ok ()
 
   let validate_checksum_value = function
     | Some { Checksum.algorithm = Unknown value; _ } ->
-        invalid ~field:"checksum_algorithm"
+        S3_error_context.invalid ~field:"checksum_algorithm"
           "unknown checksum algorithm %S cannot be sent" value
     | _ -> Ok ()
 
@@ -470,13 +470,13 @@ module Copy = struct
 
   let validate_storage_class = function
     | Some (Storage_class.Unknown value) ->
-        invalid ~field:"storage_class" "unknown storage class %S cannot be sent"
-          value
+        S3_error_context.invalid ~field:"storage_class"
+          "unknown storage class %S cannot be sent" value
     | _ -> Ok ()
 
   let validate_checksum_algorithm = function
     | Some (Checksum.Algorithm.Unknown value) ->
-        invalid ~field:"checksum_algorithm"
+        S3_error_context.invalid ~field:"checksum_algorithm"
           "unknown checksum algorithm %S cannot be sent" value
     | _ -> Ok ()
 
@@ -572,7 +572,9 @@ module Versions = struct
   let validate_max_keys = function
     | None -> Ok ()
     | Some value when value > 0 && value <= 1000 -> Ok ()
-    | Some _ -> invalid ~field:"max_keys" "max_keys must be between 1 and 1000"
+    | Some _ ->
+        S3_error_context.invalid ~field:"max_keys"
+          "max_keys must be between 1 and 1000"
 
   let options ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
       ?expected_bucket_owner () =
@@ -600,14 +602,14 @@ module List = struct
 
     let of_string value =
       if value = "" then
-        invalid ~field:"continuation_token"
+        S3_error_context.invalid ~field:"continuation_token"
           "continuation token must be non-empty"
-      else if has_ctl_or_del value then
-        invalid ~field:"continuation_token"
+      else if S3_string.has_ctl_or_del value then
+        S3_error_context.invalid ~field:"continuation_token"
           "continuation token contains control characters"
       else Ok value
 
-    let of_string_exn value = result_exn (of_string value)
+    let of_string_exn value = S3_result.result_exn (of_string value)
     let to_string value = value
     let pp fmt value = Format.pp_print_string fmt value
     let equal = String.equal
@@ -663,7 +665,9 @@ module List = struct
   let validate_max_keys = function
     | None -> Ok ()
     | Some value when value > 0 && value <= 1000 -> Ok ()
-    | Some _ -> invalid ~field:"max_keys" "max_keys must be between 1 and 1000"
+    | Some _ ->
+        S3_error_context.invalid ~field:"max_keys"
+          "max_keys must be between 1 and 1000"
 
   let options ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
       ?expected_bucket_owner () =

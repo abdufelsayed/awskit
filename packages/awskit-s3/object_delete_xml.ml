@@ -1,17 +1,16 @@
 module Xml = S3_xml
 
 let ( let* ) = S3_result.( let* )
-let invalid = S3_error_context.invalid
 
 module Delete_objects = Object.Delete_many
 
 let validate_objects objects =
   let count = List.length objects in
   if count = 0 then
-    invalid ~field:"objects"
+    S3_error_context.invalid ~field:"objects"
       "delete objects request must contain at least one object"
   else if count > Delete_objects.max_objects then
-    invalid ~field:"objects"
+    S3_error_context.invalid ~field:"objects"
       "delete objects request must contain at most %d objects"
       Delete_objects.max_objects
   else Ok ()

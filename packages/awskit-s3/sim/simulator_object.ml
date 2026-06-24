@@ -370,16 +370,5 @@ module Object = struct
            ())
   end
 
-  let put_string conn ~bucket ~key ?options body =
-    put conn ~bucket ~key ?options
-      ~body:(Runtime.Request_body.of_string body)
-      ()
-
-  let put_bytes conn ~bucket ~key ?options body =
-    put conn ~bucket ~key ?options ~body:(Runtime.Request_body.of_bytes body) ()
-
-  let get_as_string = Simulator_object_read.get_as_string
-  let get_as_bytes = Simulator_object_read.get_as_bytes
-
   module Tagging = Simulator_object_tagging.Tagging
 end

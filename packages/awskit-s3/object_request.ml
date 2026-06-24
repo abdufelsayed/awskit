@@ -2,15 +2,6 @@ open Headers
 open Response
 module Error = S3_error
 module Metadata_headers = S3_metadata_headers
-
-let decode = S3_error_context.decode
-let invalid = S3_error_context.invalid
-let return_s3_error = S3_error_context.return_s3_error
-let validate_bucket = S3_validation.validate_bucket
-let validate_bucket_key = S3_validation.validate_bucket_key
-let validate_metadata = S3_validation.validate_metadata
-let validate_tags = S3_validation.validate_tags
-
 module Put_object = Object.Put
 module Get_object = Object.Get
 module Head_object = Object.Head
@@ -53,10 +44,10 @@ module Make (C : Request_context.S) = struct
     | Error error -> return_error error
 
   let validate_put_options (options : Put_object.options) =
-    match validate_metadata options.metadata with
+    match S3_validation.validate_metadata options.metadata with
     | Error _ as error -> error
     | Ok () -> (
-        match validate_tags options.tags with
+        match S3_validation.validate_tags options.tags with
         | Error _ as error -> error
         | Ok () -> (
             match validate_opt validate_storage_class options.storage_class with
@@ -84,16 +75,16 @@ module Make (C : Request_context.S) = struct
         | Error _ as error -> error
         | Ok () -> (
             match options.metadata_directive with
-            | Some (`Replace metadata) -> validate_metadata metadata
+            | Some (`Replace metadata) ->
+                S3_validation.validate_metadata metadata
             | Some `Copy | None -> Ok ()))
-
-  let bucket_string = Bucket_name.to_string
-  let key_string = Object_key.to_string
 
   let validate_list_max_keys = function
     | None -> Ok ()
     | Some value when value >= 1 && value <= 1000 -> Ok ()
-    | Some _ -> invalid ~field:"max_keys" "max_keys must be between 1 and 1000"
+    | Some _ ->
+        S3_error_context.invalid ~field:"max_keys"
+          "max_keys must be between 1 and 1000"
 
   let validate_list_options (options : List_objects_v2.options) =
     validate_list_max_keys options.max_keys
@@ -103,18 +94,19 @@ module Make (C : Request_context.S) = struct
 
   let validate_max_bytes max_bytes =
     if Int64.compare max_bytes 0L < 0 then
-      invalid ~field:"max_bytes" "max_bytes must be non-negative, got %Ld"
-        max_bytes
+      S3_error_context.invalid ~field:"max_bytes"
+        "max_bytes must be non-negative, got %Ld" max_bytes
     else Ok ()
 
   let put conn ~bucket ~key ?options ~body () =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+    let bucket = Bucket_name.to_string bucket in
+    let key = Object_key.to_string key in
     let options = Option.value ~default:Put_object.default_options options in
     let return_error =
-      return_s3_error return_error ~operation:"PutObject" ~bucket ~key
+      S3_error_context.return_s3_error return_error ~operation:"PutObject"
+        ~bucket ~key
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         match validate_put_options options with
@@ -177,13 +169,14 @@ module Make (C : Request_context.S) = struct
     put conn ~bucket ~key ?options ~body:(R.Request_body.of_bytes contents) ()
 
   let get conn ~bucket ~key ?options ~consume () =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+    let bucket = Bucket_name.to_string bucket in
+    let key = Object_key.to_string key in
     let options = Option.value ~default:Get_object.default_options options in
     let return_error =
-      return_s3_error return_error ~operation:"GetObject" ~bucket ~key
+      S3_error_context.return_s3_error return_error ~operation:"GetObject"
+        ~bucket ~key
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         let headers =
@@ -221,8 +214,9 @@ module Make (C : Request_context.S) = struct
 
   let get_string conn ~bucket ~key ?options ~max_bytes () =
     let return_error =
-      return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(bucket_string bucket) ~key:(key_string key)
+      S3_error_context.return_s3_error return_error ~operation:"GetObject"
+        ~bucket:(Bucket_name.to_string bucket)
+        ~key:(Object_key.to_string key)
     in
     match validate_max_bytes max_bytes with
     | Error error -> return_error error
@@ -231,8 +225,9 @@ module Make (C : Request_context.S) = struct
 
   let get_bytes conn ~bucket ~key ?options ~max_bytes () =
     let return_error =
-      return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(bucket_string bucket) ~key:(key_string key)
+      S3_error_context.return_s3_error return_error ~operation:"GetObject"
+        ~bucket:(Bucket_name.to_string bucket)
+        ~key:(Object_key.to_string key)
     in
     match validate_max_bytes max_bytes with
     | Error error -> return_error error
@@ -240,13 +235,14 @@ module Make (C : Request_context.S) = struct
         get conn ~bucket ~key ?options ~consume:(read_bytes ~max_bytes) ()
 
   let find conn ~bucket ~key ?options ~consume () =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+    let bucket = Bucket_name.to_string bucket in
+    let key = Object_key.to_string key in
     let options = Option.value ~default:Get_object.default_options options in
     let return_error =
-      return_s3_error return_error ~operation:"GetObject" ~bucket ~key
+      S3_error_context.return_s3_error return_error ~operation:"GetObject"
+        ~bucket ~key
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         let headers =
@@ -284,8 +280,9 @@ module Make (C : Request_context.S) = struct
 
   let find_string conn ~bucket ~key ?options ~max_bytes () =
     let return_error =
-      return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(bucket_string bucket) ~key:(key_string key)
+      S3_error_context.return_s3_error return_error ~operation:"GetObject"
+        ~bucket:(Bucket_name.to_string bucket)
+        ~key:(Object_key.to_string key)
     in
     match validate_max_bytes max_bytes with
     | Error error -> return_error error
@@ -294,8 +291,9 @@ module Make (C : Request_context.S) = struct
 
   let find_bytes conn ~bucket ~key ?options ~max_bytes () =
     let return_error =
-      return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(bucket_string bucket) ~key:(key_string key)
+      S3_error_context.return_s3_error return_error ~operation:"GetObject"
+        ~bucket:(Bucket_name.to_string bucket)
+        ~key:(Object_key.to_string key)
     in
     match validate_max_bytes max_bytes with
     | Error error -> return_error error
@@ -303,13 +301,14 @@ module Make (C : Request_context.S) = struct
         find conn ~bucket ~key ?options ~consume:(read_bytes ~max_bytes) ()
 
   let head conn ~bucket ~key ?options () =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+    let bucket = Bucket_name.to_string bucket in
+    let key = Object_key.to_string key in
     let options = Option.value ~default:Head_object.default_options options in
     let return_error =
-      return_s3_error return_error ~operation:"HeadObject" ~bucket ~key
+      S3_error_context.return_s3_error return_error ~operation:"HeadObject"
+        ~bucket ~key
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         let headers =
@@ -359,13 +358,14 @@ module Make (C : Request_context.S) = struct
     | Error error -> return_error error
 
   let delete conn ~bucket ~key ?options () =
-    let bucket = bucket_string bucket in
-    let key = key_string key in
+    let bucket = Bucket_name.to_string bucket in
+    let key = Object_key.to_string key in
     let options = Option.value ~default:Delete_object.default_options options in
     let return_error =
-      return_s3_error return_error ~operation:"DeleteObject" ~bucket ~key
+      S3_error_context.return_s3_error return_error ~operation:"DeleteObject"
+        ~bucket ~key
     in
-    match validate_bucket_key bucket key with
+    match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
         let headers =
@@ -395,14 +395,15 @@ module Make (C : Request_context.S) = struct
             return_result return_error return_ok result)
 
   let delete_objects conn ~bucket ~objects ?options () =
-    let bucket = bucket_string bucket in
+    let bucket = Bucket_name.to_string bucket in
     let options =
       Option.value ~default:Delete_objects.default_options options
     in
     let return_error =
-      return_s3_error return_error ~operation:"DeleteObjects" ~bucket
+      S3_error_context.return_s3_error return_error ~operation:"DeleteObjects"
+        ~bucket
     in
-    match validate_bucket bucket with
+    match S3_validation.validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
         match Object_delete_xml.validate_objects objects with
@@ -443,23 +444,25 @@ module Make (C : Request_context.S) = struct
 
   let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
       ?options () =
-    let source_bucket = bucket_string source_bucket in
-    let source_key = key_string source_key in
-    let destination_bucket = bucket_string destination_bucket in
-    let destination_key = key_string destination_key in
+    let source_bucket = Bucket_name.to_string source_bucket in
+    let source_key = Object_key.to_string source_key in
+    let destination_bucket = Bucket_name.to_string destination_bucket in
+    let destination_key = Object_key.to_string destination_key in
     let options = Option.value ~default:Copy_object.default_options options in
     let source_error =
-      return_s3_error return_error ~operation:"CopyObject" ~bucket:source_bucket
-        ~key:source_key
+      S3_error_context.return_s3_error return_error ~operation:"CopyObject"
+        ~bucket:source_bucket ~key:source_key
     in
     let return_error =
-      return_s3_error return_error ~operation:"CopyObject"
+      S3_error_context.return_s3_error return_error ~operation:"CopyObject"
         ~bucket:destination_bucket ~key:destination_key
     in
-    match validate_bucket_key source_bucket source_key with
+    match S3_validation.validate_bucket_key source_bucket source_key with
     | Error error -> source_error error
     | Ok () -> (
-        match validate_bucket_key destination_bucket destination_key with
+        match
+          S3_validation.validate_bucket_key destination_bucket destination_key
+        with
         | Error error -> return_error error
         | Ok () -> (
             let copy_source =
@@ -528,14 +531,15 @@ module Make (C : Request_context.S) = struct
                     return_result return_error return_ok result)))
 
   let list_versions conn ~bucket ?options () =
-    let bucket = bucket_string bucket in
+    let bucket = Bucket_name.to_string bucket in
     let options =
       Option.value ~default:List_object_versions.default_options options
     in
     let return_error =
-      return_s3_error return_error ~operation:"ListObjectVersions" ~bucket
+      S3_error_context.return_s3_error return_error
+        ~operation:"ListObjectVersions" ~bucket
     in
-    match validate_bucket bucket with
+    match S3_validation.validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
         match validate_list_versions_options options with
@@ -584,14 +588,15 @@ module Make (C : Request_context.S) = struct
                 return_result return_error return_ok result))
 
   let list conn ~bucket ?options () =
-    let bucket = bucket_string bucket in
+    let bucket = Bucket_name.to_string bucket in
     let options =
       Option.value ~default:List_objects_v2.default_options options
     in
     let return_error =
-      return_s3_error return_error ~operation:"ListObjectsV2" ~bucket
+      S3_error_context.return_s3_error return_error ~operation:"ListObjectsV2"
+        ~bucket
     in
-    match validate_bucket bucket with
+    match S3_validation.validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
         match validate_list_options options with
@@ -646,11 +651,14 @@ module Make (C : Request_context.S) = struct
       | None -> Ok ()
       | Some value when value > 0 -> Ok ()
       | Some _ ->
-          invalid ~field:"max_pages" "max_pages must be greater than zero"
+          S3_error_context.invalid ~field:"max_pages"
+            "max_pages must be greater than zero"
 
     let validate_required_max_pages value =
       if value > 0 then Ok ()
-      else invalid ~field:"max_pages" "max_pages must be greater than zero"
+      else
+        S3_error_context.invalid ~field:"max_pages"
+          "max_pages must be greater than zero"
 
     let max_pages_exceeded max_pages =
       Awskit.Error.Producer.validation ~field:"max_pages"
@@ -669,8 +677,8 @@ module Make (C : Request_context.S) = struct
 
     let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
       let return_context_error =
-        return_s3_error return_error ~operation:"ListObjectsV2"
-          ~bucket:(bucket_string bucket)
+        S3_error_context.return_s3_error return_error ~operation:"ListObjectsV2"
+          ~bucket:(Bucket_name.to_string bucket)
       in
       match validate_max_pages max_pages with
       | Error error -> return_context_error error
@@ -700,7 +708,7 @@ module Make (C : Request_context.S) = struct
                           | Some token -> loop (Some token) page_count acc
                           | None ->
                               return_context_error
-                                (decode
+                                (S3_error_context.decode
                                    "truncated list response missing \
                                     NextContinuationToken"))))
           in
@@ -715,8 +723,8 @@ module Make (C : Request_context.S) = struct
 
     let collect_pages conn ~bucket ?options ~max_pages ~init ~f () =
       let return_context_error =
-        return_s3_error return_error ~operation:"ListObjectsV2"
-          ~bucket:(bucket_string bucket)
+        S3_error_context.return_s3_error return_error ~operation:"ListObjectsV2"
+          ~bucket:(Bucket_name.to_string bucket)
       in
       match validate_required_max_pages max_pages with
       | Error error -> return_context_error error
@@ -743,7 +751,7 @@ module Make (C : Request_context.S) = struct
                       | Some token -> loop (Some token) page_count acc
                       | None ->
                           return_context_error
-                            (decode
+                            (S3_error_context.decode
                                "truncated list response missing \
                                 NextContinuationToken")))
           in
@@ -787,11 +795,14 @@ module Make (C : Request_context.S) = struct
       | None -> Ok ()
       | Some value when value > 0 -> Ok ()
       | Some _ ->
-          invalid ~field:"max_pages" "max_pages must be greater than zero"
+          S3_error_context.invalid ~field:"max_pages"
+            "max_pages must be greater than zero"
 
     let validate_required_max_pages value =
       if value > 0 then Ok ()
-      else invalid ~field:"max_pages" "max_pages must be greater than zero"
+      else
+        S3_error_context.invalid ~field:"max_pages"
+          "max_pages must be greater than zero"
 
     let max_pages_exceeded max_pages =
       Awskit.Error.Producer.validation ~field:"max_pages"
@@ -808,8 +819,9 @@ module Make (C : Request_context.S) = struct
 
     let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
       let return_context_error =
-        return_s3_error return_error ~operation:"ListObjectVersions"
-          ~bucket:(bucket_string bucket)
+        S3_error_context.return_s3_error return_error
+          ~operation:"ListObjectVersions"
+          ~bucket:(Bucket_name.to_string bucket)
       in
       match validate_max_pages max_pages with
       | Error error -> return_context_error error
@@ -840,7 +852,7 @@ module Make (C : Request_context.S) = struct
                               loop options page_count acc
                           | None ->
                               return_context_error
-                                (decode
+                                (S3_error_context.decode
                                    "truncated version listing response missing \
                                     NextKeyMarker"))))
           in
@@ -855,8 +867,9 @@ module Make (C : Request_context.S) = struct
 
     let collect_pages conn ~bucket ?options ~max_pages ~init ~f () =
       let return_context_error =
-        return_s3_error return_error ~operation:"ListObjectVersions"
-          ~bucket:(bucket_string bucket)
+        S3_error_context.return_s3_error return_error
+          ~operation:"ListObjectVersions"
+          ~bucket:(Bucket_name.to_string bucket)
       in
       match validate_required_max_pages max_pages with
       | Error error -> return_context_error error
@@ -884,7 +897,7 @@ module Make (C : Request_context.S) = struct
                           loop options page_count acc
                       | None ->
                           return_context_error
-                            (decode
+                            (S3_error_context.decode
                                "truncated version listing response missing \
                                 NextKeyMarker")))
           in

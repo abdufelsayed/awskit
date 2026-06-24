@@ -11,8 +11,6 @@ let has_leading_or_trailing_ws s = not (String.equal s (String.strip s))
 let invalid ?field message =
   Error (Aws_error.Producer.validation ?field message)
 
-let result_exn = Aws_error.Producer.get_ok_exn
-
 module Method = struct
   type t = [ `GET | `PUT | `POST | `DELETE | `HEAD | `PATCH ]
 
@@ -34,7 +32,7 @@ module Method = struct
     | "PATCH" -> Ok `PATCH
     | _ -> invalid ~field:"method" (Fmt.str "unsupported HTTP method: %s" value)
 
-  let of_string_exn value = result_exn (of_string value)
+  let of_string_exn value = Aws_error.Producer.get_ok_exn (of_string value)
 end
 
 let validate_host host =
@@ -138,7 +136,7 @@ module Target = struct
                 | Ok () -> Ok { scheme; host; port; path; query })))
 
   let create_exn ~scheme ~host ?port ~path ?query () =
-    result_exn (create ~scheme ~host ?port ~path ?query ())
+    Aws_error.Producer.get_ok_exn (create ~scheme ~host ?port ~path ?query ())
 
   let authority t =
     match t.port with
@@ -163,7 +161,7 @@ let create ~method_ ~target ?(headers = []) () =
   | Ok () -> Ok { method_; target; headers }
 
 let create_exn ~method_ ~target ?headers () =
-  result_exn (create ~method_ ~target ?headers ())
+  Aws_error.Producer.get_ok_exn (create ~method_ ~target ?headers ())
 
 let with_headers t headers =
   match validate_headers headers with

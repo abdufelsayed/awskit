@@ -10,22 +10,11 @@ let invalid ?field fmt =
     (fun message -> Error (Awskit.Error.Producer.validation ?field message))
     fmt
 
-let has_ctl_or_del value =
-  String.exists
-    (fun c ->
-      let code = Char.code c in
-      code < 0x20 || code = 0x7F)
-    value
-
-let is_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
-
 let validate_key seen key =
   if key = "" then invalid ~field:"metadata" "metadata key must be non-empty"
-  else if has_ctl_or_del key then
+  else if S3_string.has_ctl_or_del key then
     invalid ~field:"metadata" "metadata key contains control characters"
-  else if is_prefix ~prefix (String.lowercase_ascii key) then
+  else if S3_string.is_prefix ~prefix (String.lowercase_ascii key) then
     invalid ~field:"metadata" "metadata keys must not include x-amz-meta-"
   else
     let lower = String.lowercase_ascii key in

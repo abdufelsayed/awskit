@@ -2,9 +2,6 @@ module Xml = S3_xml
 module Metadata_headers = S3_metadata_headers
 
 let ( let* ) = S3_result.( let* )
-let decode_with_context = S3_error_context.decode_with_context
-let option_map_result = S3_result.option_map
-let ptime_of_string = S3_time.of_string
 
 module Put_object = Object.Put
 module Get_object = Object.Get
@@ -24,7 +21,7 @@ let response_bool_header response name =
       | Some value -> Ok (Some value)
       | None ->
           Error
-            (decode_with_context
+            (S3_error_context.decode_with_context
                ~what:(Fmt.str "%s response header" name)
                (Fmt.str "invalid boolean value %S" value)))
 
@@ -36,7 +33,7 @@ let response_etag response =
       | Ok etag -> Ok (Some etag)
       | Error error ->
           Error
-            (decode_with_context ~what:"etag response header"
+            (S3_error_context.decode_with_context ~what:"etag response header"
                (Awskit.Error.to_string_hum error)))
 
 let response_version response =
@@ -47,7 +44,8 @@ let response_version response =
       | Ok version -> Ok (Some version)
       | Error error ->
           Error
-            (decode_with_context ~what:"x-amz-version-id response header"
+            (S3_error_context.decode_with_context
+               ~what:"x-amz-version-id response header"
                (Awskit.Error.to_string_hum error)))
 
 let response_checksum response =
@@ -103,7 +101,8 @@ let storage_class response =
   | None -> Ok None
   | Some "" ->
       Error
-        (decode_with_context ~what:"x-amz-storage-class response header"
+        (S3_error_context.decode_with_context
+           ~what:"x-amz-storage-class response header"
            "storage class must be non-empty")
   | Some value -> Ok (Some (Storage_class.of_string value))
 
@@ -115,22 +114,23 @@ let response_content_type response =
       | Ok content_type -> Ok (Some content_type)
       | Error error ->
           Error
-            (decode_with_context ~what:"Content-Type response header"
+            (S3_error_context.decode_with_context
+               ~what:"Content-Type response header"
                (Awskit.Error.to_string_hum error)))
 
 let response_content_range response =
-  option_map_result Range.Content_range.of_header
+  S3_result.option_map Range.Content_range.of_header
     (Awskit.Response.header response "content-range")
 
 let response_time_header response name =
   match Awskit.Response.header response name with
   | None -> Ok None
   | Some value -> (
-      match ptime_of_string value with
+      match S3_time.of_string value with
       | Some time -> Ok (Some time)
       | None ->
           Error
-            (decode_with_context
+            (S3_error_context.decode_with_context
                ~what:(Fmt.str "%s response header" name)
                (Fmt.str "invalid timestamp value %S" value)))
 
@@ -204,7 +204,7 @@ let copy_result response body =
       in
       let* last_modified =
         Xml.optional_child_parse ~path:"CopyObjectResult" "LastModified"
-          ptime_of_string nodes
+          S3_time.of_string nodes
       in
       let* version_id = response_version response in
       let* copy_source_version_id =
@@ -217,7 +217,7 @@ let copy_result response body =
             | Ok version -> Ok (Some version)
             | Error error ->
                 Error
-                  (decode_with_context
+                  (S3_error_context.decode_with_context
                      ~what:"x-amz-copy-source-version-id response header"
                      (Awskit.Error.to_string_hum error)))
       in

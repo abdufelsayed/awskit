@@ -1,5 +1,3 @@
-let with_s3_operation = S3_error_context.with_s3_operation
-
 module Make (C : Request_context.S) = struct
   open C
 
@@ -11,7 +9,8 @@ module Make (C : Request_context.S) = struct
   let return_result ~operation ~bucket ~key result =
     match result with
     | Ok _ as result -> result
-    | Error error -> Error (with_s3_operation ~operation ~bucket ~key error)
+    | Error error ->
+        Error (S3_error_context.with_s3_operation ~operation ~bucket ~key error)
 
   let with_credentials conn ~operation ~bucket ~key f =
     let* credentials = credentials conn in
@@ -20,8 +19,8 @@ module Make (C : Request_context.S) = struct
     match credentials with
     | Error error ->
         return_error
-          (with_s3_operation ~operation ~bucket:bucket_context ~key:key_context
-             error)
+          (S3_error_context.with_s3_operation ~operation ~bucket:bucket_context
+             ~key:key_context error)
     | Ok credentials ->
         return
           (return_result ~operation ~bucket:bucket_context ~key:key_context

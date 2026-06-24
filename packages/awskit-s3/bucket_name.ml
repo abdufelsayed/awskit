@@ -16,18 +16,6 @@ let reserved_prefixes = [ "xn--"; "sthree-"; "amzn-s3-demo-" ]
 let reserved_suffixes =
   [ "-s3alias"; "--ol-s3"; ".mrap"; "--x-s3"; "--table-s3" ]
 
-let is_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
-
-let is_suffix ~suffix value =
-  let suffix_len = String.length suffix in
-  let len = String.length value in
-  len >= suffix_len && String.sub value (len - suffix_len) suffix_len = suffix
-
-let int_of_string_opt value =
-  try Some (int_of_string value) with Failure _ -> None
-
 let is_lower = function 'a' .. 'z' -> true | _ -> false
 let is_digit = function '0' .. '9' -> true | _ -> false
 let is_alnum c = is_lower c || is_digit c
@@ -55,7 +43,7 @@ let has_adjacent_dot bucket =
 let decimal_octet value =
   value <> ""
   &&
-  match int_of_string_opt value with
+  match S3_parse.int_of_string_opt value with
   | Some n -> n >= 0 && n <= 255
   | None -> false
 
@@ -65,10 +53,14 @@ let looks_like_ipv4 bucket =
   | _ -> false
 
 let invalid_reserved_prefix bucket =
-  List.find_opt (fun prefix -> is_prefix ~prefix bucket) reserved_prefixes
+  List.find_opt
+    (fun prefix -> S3_string.is_prefix ~prefix bucket)
+    reserved_prefixes
 
 let invalid_reserved_suffix bucket =
-  List.find_opt (fun suffix -> is_suffix ~suffix bucket) reserved_suffixes
+  List.find_opt
+    (fun suffix -> S3_string.is_suffix ~suffix bucket)
+    reserved_suffixes
 
 let first_rule_violation bucket =
   if not (valid_length bucket) then Some "bucket must be 3-63 characters"
