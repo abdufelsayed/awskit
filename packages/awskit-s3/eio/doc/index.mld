@@ -1,0 +1,10 @@
+{0 awskit-s3-eio}
+
+Direct-style Eio S3 client.
+
+The public entrypoint is {!module:Awskit_s3_eio}. This package connects
+runtime-neutral S3 operations to the Awskit Eio runtime and returns plain result
+values in direct style.
+
+Applications provide the HTTPS policy and Eio environment explicitly. This
+package also owns Eio local-path body, reader, upload, and download helpers.

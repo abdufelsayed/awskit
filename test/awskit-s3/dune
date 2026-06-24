@@ -13,6 +13,7 @@
 
 (rule
  (alias protocol-pbt)
+ (package awskit-s3)
  (deps test_awskit_s3.exe)
  (action
   (progn

@@ -5,6 +5,7 @@
 
 (rule
  (alias simulator-contract)
+ (package awskit-s3-sim)
  (deps test_awskit_s3_sim.exe)
  (action
   (run ./test_awskit_s3_sim.exe)))

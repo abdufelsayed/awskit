@@ -4,10 +4,12 @@
 
 (alias
  (name examples)
+ (package awskit-s3-sim)
  (deps put_get.exe list_prefix.exe object_metadata.exe presign_summary.exe))
 
 (rule
  (alias simulator-contract)
+ (package awskit-s3-sim)
  (deps put_get.exe list_prefix.exe object_metadata.exe presign_summary.exe)
  (action
   (progn

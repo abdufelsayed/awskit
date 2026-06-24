@@ -1,0 +1,3 @@
+(documentation
+ (package awskit-s3-lwt)
+ (mld_files index))

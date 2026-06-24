@@ -5,5 +5,6 @@
 
 (rule
  (alias runtime-conformance)
+ (package awskit-s3)
  (action
   (run ./test_runtime_conformance.exe)))
