@@ -9,12 +9,12 @@ list. Rows describe current supported behavior only.
 
 ## Scope
 
-Supported object scope for this plan: PutObject, GetObject, HeadObject,
+Supported object scope for this release: PutObject, GetObject, HeadObject,
 DeleteObject, DeleteObjects, CopyObject, object tagging, metadata, tags, single
 Range reads, conditional headers, version ids, checksums already modeled by the
 public surface, and expected-owner guards.
 
-Supported bucket scope for this plan: CreateBucket, DeleteBucket, HeadBucket,
+Supported bucket scope for this release: CreateBucket, DeleteBucket, HeadBucket,
 GetBucketLocation, ListBuckets, and existing bucket tagging/configuration APIs
 only as wire-shape correction targets for the APIs already present.
 
@@ -50,12 +50,11 @@ S3-compatible-provider semantics.
 
 ## Existing Bucket Configuration Rows
 
-These rows exist to correct current wire shapes for APIs already present. They
-do not expand Awskit's supported S3 feature claims. They are not a mandate to
-turn this release into broad bucket-configuration work; use them when an
-already public bucket configuration path is touched, when an existing focused
-test is being corrected, or when fixture/evidence infrastructure needs a
-source-backed manifest row.
+These rows describe current wire shapes for APIs already present. They do not
+expand Awskit's supported S3 feature claims. Use them when an already public
+bucket configuration path is touched, when an existing focused test is being
+corrected, or when fixture/evidence infrastructure needs a source-backed
+manifest row.
 
 | Operation | API surface/current file | Method | Path/query | Request headers/body | Success/decode | Error/region behavior | Evidence/status |
 | --- | --- | --- | --- | --- | --- | --- | --- |

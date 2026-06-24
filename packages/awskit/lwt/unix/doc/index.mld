@@ -9,3 +9,24 @@ region sources.
 Use it at the application edge when a Lwt service client should load AWS
 configuration from environment variables, shared profile files, or supported
 metadata sources.
+
+{1 Defaults And Lifecycle}
+
+{!val:Awskit_lwt_unix.create} accepts explicit [region] and [credentials].
+When either is omitted, the adapter reads the standard Unix sources: static
+environment credentials, shared AWS profile files, ECS/container credentials,
+and EC2 instance metadata credentials for credentials, plus [AWS_REGION] then
+[AWS_DEFAULT_REGION] for the region.
+
+The credential provider chain stops on invalid configured sources and refreshes
+metadata credentials before expiration. IMDSv2 is preferred for EC2 metadata;
+tokenless IMDSv1 fallback is controlled by the [imdsv1_fallback] argument and
+[AWS_EC2_METADATA_V1_DISABLED].
+
+The runtime preserves Lwt cancellation and callback exceptions as native Lwt
+control flow. Response bodies are scoped to the operation callback; after a
+successful consumer returns, the runtime drains up to [max_response_drain_bytes]
+for connection reuse. Consumer errors take precedence over cleanup failures.
+
+Use {!module:Awskit_lwt.Make} from [awskit-lwt] when an application needs a
+custom Cohttp Lwt backend instead of the ready Unix client.

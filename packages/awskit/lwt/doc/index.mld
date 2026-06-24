@@ -8,3 +8,17 @@ for applications or libraries that need to choose their own Lwt HTTP backend.
 
 Use the [awskit-lwt-unix] package instead when a ready Unix-backed runtime is
 enough.
+
+{1 Runtime Shape}
+
+Use {!module:Awskit_lwt.Make} when the application owns the Cohttp client
+module, context, TLS setup, and credential source. Client creation requires an
+explicit region, credentials, and clock.
+
+When retries are enabled, custom Lwt runtimes must provide real [sleep] and
+[random_float] capabilities. Deterministic runtimes without those capabilities
+should pass [Awskit.Retry.disabled]. Timeout policies with configured spans also
+need [sleep], because the generic adapter uses it as the timeout clock.
+
+This package does not read environment variables, profile files, or metadata
+services by itself. Those Unix provider defaults are in [awskit-lwt-unix].

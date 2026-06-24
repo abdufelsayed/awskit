@@ -60,6 +60,12 @@ Small buffered object workflows can start with [Object.put_string],
 Direct [Runtime] access remains available for integrations and runtime authors
 that need the raw runtime body layer.
 
+Managed local-file transfers are adapter features, not core S3 features. They
+live in [Object.Transfer] for [awskit-s3-eio] and [awskit-s3-lwt-unix]. The
+generic [awskit-s3-lwt] package exposes streaming body and reader primitives
+over a caller-supplied Lwt HTTP backend, but it does not own Unix paths or
+managed transfer helpers.
+
 {1 Libraries}
 
 {2 awskit-s3}
@@ -106,7 +112,9 @@ Eio Unix aggregate adapter.
 {2 awskit-s3-lwt}
 
 [Awskit_s3_lwt] provides a functor over [Cohttp_lwt.S.Client].
-Operations return [Lwt.t].
+Operations return [Lwt.t]. It is the right package for custom Lwt HTTP
+backends; use [awskit-s3-lwt-unix] for Unix local-path body, reader, and
+managed transfer helpers.
 
 {2 awskit-s3-lwt-unix}
 
@@ -137,11 +145,12 @@ module Https = struct
     Some
       (fun uri raw ->
         let host =
-          Uri.host uri
-          |> Option.map (fun host ->
-                 Domain_name.(host_exn (of_string_exn host)))
+          match Uri.host uri with
+          | Some host -> Domain_name.host_exn (Domain_name.of_string_exn host)
+          | None -> invalid_arg "HTTPS URI is missing a host"
         in
-        Tls_eio.client_of_flow ?host tls_config raw)
+        (Tls_eio.client_of_flow tls_config ~host raw
+          :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Flow.two_way))
 end
 
 let run env =

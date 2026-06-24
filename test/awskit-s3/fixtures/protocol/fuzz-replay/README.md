@@ -6,3 +6,7 @@ target before it counts as fixed release evidence.
 
 Do not add long-running fuzzers to default builds. Add the minimized failure
 here, make the replay test fail, then fix the parser or validator.
+
+Each replay input has an expected sidecar describing the asserted error
+category and retry class. Keep those sidecars in sync with the public error
+classification, not with incidental printer wording.

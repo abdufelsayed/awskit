@@ -283,6 +283,13 @@ existing local target before issuing S3 requests. Retry and timeout policies are
 configured when the client is created, then applied to the S3 operations the
 transfer helper performs.
 
+Progress callbacks are part of the transfer operation. If a progress callback
+raises or the runtime is cancelled, the helper reports that interruption using
+the selected runtime's normal control flow. Multipart uploads created by Awskit
+are aborted when the helper fails before completion, including callback
+failures. Resumed caller-owned multipart uploads are left open on failure so the
+caller can retry or abort that upload explicitly.
+
 {2 Eio}
 
 {[
@@ -379,11 +386,12 @@ module Https = struct
     Some
       (fun uri raw ->
         let host =
-          Uri.host uri
-          |> Option.map (fun host ->
-                 Domain_name.(host_exn (of_string_exn host)))
+          match Uri.host uri with
+          | Some host -> Domain_name.host_exn (Domain_name.of_string_exn host)
+          | None -> invalid_arg "HTTPS URI is missing a host"
         in
-        Tls_eio.client_of_flow ?host tls_config raw)
+        (Tls_eio.client_of_flow tls_config ~host raw
+          :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Flow.two_way))
 end
 
 let https = Https.connector () in
