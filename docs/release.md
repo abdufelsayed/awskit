@@ -119,14 +119,19 @@ In particular:
 
 ## Merge, Tag, And Publish
 
-After the release PR is approved and green:
+After the release PR is approved, green, and merged, tag the release from the
+updated `main` branch:
 
 ```sh
 git checkout main
 git pull --ff-only
+git log -1 --oneline
 git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin vX.Y.Z
 ```
+
+Confirm the last commit is the merged release PR, or the expected squash commit,
+before creating the tag.
 
 Create the GitHub release from the `CHANGES.md` section for the version.
 
