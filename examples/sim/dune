@@ -5,3 +5,13 @@
 (alias
  (name examples)
  (deps put_get.exe list_prefix.exe object_metadata.exe presign_summary.exe))
+
+(rule
+ (alias simulator-contract)
+ (deps put_get.exe list_prefix.exe object_metadata.exe presign_summary.exe)
+ (action
+  (progn
+   (run ./put_get.exe)
+   (run ./list_prefix.exe)
+   (run ./object_metadata.exe)
+   (run ./presign_summary.exe))))

@@ -36,11 +36,119 @@ let strict_capabilities =
     suspended_versioning_null = true;
   }
 
+type capability_value =
+  | Boolean of bool
+  | Deleted_bucket_tags of [ `Empty_set | `Not_found ]
+  | Missing_version_delete of [ `Succeeds | `Invalid_argument ]
+
+type capability_summary = {
+  name : string;
+  actual : capability_value;
+  strict : capability_value;
+}
+
+let capability_value_to_string = function
+  | Boolean value -> Bool.to_string value
+  | Deleted_bucket_tags `Empty_set -> "empty_set"
+  | Deleted_bucket_tags `Not_found -> "not_found"
+  | Missing_version_delete `Succeeds -> "succeeds"
+  | Missing_version_delete `Invalid_argument -> "invalid_argument"
+
+let deleted_bucket_tags_equal left right =
+  match (left, right) with
+  | `Empty_set, `Empty_set | `Not_found, `Not_found -> true
+  | (`Empty_set | `Not_found), _ -> false
+
+let missing_version_delete_equal left right =
+  match (left, right) with
+  | `Succeeds, `Succeeds | `Invalid_argument, `Invalid_argument -> true
+  | (`Succeeds | `Invalid_argument), _ -> false
+
+let capability_value_equal left right =
+  match (left, right) with
+  | Boolean left, Boolean right -> Bool.equal left right
+  | Deleted_bucket_tags left, Deleted_bucket_tags right ->
+      deleted_bucket_tags_equal left right
+  | Missing_version_delete left, Missing_version_delete right ->
+      missing_version_delete_equal left right
+  | (Boolean _ | Deleted_bucket_tags _ | Missing_version_delete _), _ -> false
+
+let capability_summary capabilities =
+  let bool name actual strict =
+    { name; actual = Boolean actual; strict = Boolean strict }
+  in
+  [
+    bool "exclusive_bucket_list" capabilities.exclusive_bucket_list
+      strict_capabilities.exclusive_bucket_list;
+    bool "exact_policy_json" capabilities.exact_policy_json
+      strict_capabilities.exact_policy_json;
+    bool "response_checksums" capabilities.response_checksums
+      strict_capabilities.response_checksums;
+    bool "copy_returns_current_source_version"
+      capabilities.copy_returns_current_source_version
+      strict_capabilities.copy_returns_current_source_version;
+    bool "time_preconditions" capabilities.time_preconditions
+      strict_capabilities.time_preconditions;
+    bool "multipart_checksums" capabilities.multipart_checksums
+      strict_capabilities.multipart_checksums;
+    {
+      name = "deleted_bucket_tags";
+      actual = Deleted_bucket_tags capabilities.deleted_bucket_tags;
+      strict = Deleted_bucket_tags strict_capabilities.deleted_bucket_tags;
+    };
+    {
+      name = "missing_version_delete";
+      actual = Missing_version_delete capabilities.missing_version_delete;
+      strict = Missing_version_delete strict_capabilities.missing_version_delete;
+    };
+    bool "delete_preconditions" capabilities.delete_preconditions
+      strict_capabilities.delete_preconditions;
+    bool "bucket_encryption" capabilities.bucket_encryption
+      strict_capabilities.bucket_encryption;
+    bool "bucket_cors" capabilities.bucket_cors strict_capabilities.bucket_cors;
+    bool "bucket_public_access_block" capabilities.bucket_public_access_block
+      strict_capabilities.bucket_public_access_block;
+    bool "bucket_ownership_controls" capabilities.bucket_ownership_controls
+      strict_capabilities.bucket_ownership_controls;
+    bool "suspended_versioning_null" capabilities.suspended_versioning_null
+      strict_capabilities.suspended_versioning_null;
+  ]
+
+let capability_differs ({ actual; strict; _ } : capability_summary) =
+  not (capability_value_equal actual strict)
+
+let capability_differences capabilities =
+  List.filter capability_differs (capability_summary capabilities)
+
+let capability_names summaries =
+  List.map (fun (summary : capability_summary) -> summary.name) summaries
+
+let report_cleanup_failure_after_primary exn _backtrace =
+  Printf.eprintf "cleanup after test failure raised: %s\n%!"
+    (Printexc.to_string exn)
+
+let protect_with_cleanup
+    ?(on_cleanup_failure_after_primary = report_cleanup_failure_after_primary)
+    ~cleanup f =
+  match f () with
+  | value ->
+      cleanup ();
+      value
+  | exception primary_exn -> (
+      let primary_backtrace = Printexc.get_raw_backtrace () in
+      match cleanup () with
+      | () -> Printexc.raise_with_backtrace primary_exn primary_backtrace
+      | exception cleanup_exn ->
+          let cleanup_backtrace = Printexc.get_raw_backtrace () in
+          on_cleanup_failure_after_primary cleanup_exn cleanup_backtrace;
+          Printexc.raise_with_backtrace primary_exn primary_backtrace)
+
 module type SUBJECT = sig
   include S
 
   val bucket : Bucket_name.t
   val capabilities : capabilities
+  val expected_capability_differences : string list
   val fresh : unit -> connection
   val cleanup : connection -> unit io
   val run : 'a io -> 'a
@@ -57,8 +165,8 @@ module Make (Client : SUBJECT) = struct
 
   let with_fresh test =
     let conn = Client.fresh () in
-    Fun.protect
-      ~finally:(fun () -> Client.run (Client.cleanup conn))
+    protect_with_cleanup
+      ~cleanup:(fun () -> Client.run (Client.cleanup conn))
       (fun () -> test conn)
 
   let test_case name speed test =
@@ -77,6 +185,63 @@ module Make (Client : SUBJECT) = struct
     Client.run io |> expect_not_modified label
 
   let run_expect_validation label io = Client.run io |> expect_validation label
+
+  exception Harness_primary_failure
+  exception Harness_cleanup_failure
+
+  let test_cleanup_preserves_primary_failure () =
+    let cleanup_ran = ref false in
+    let cleanup_reported = ref false in
+    match
+      protect_with_cleanup
+        ~on_cleanup_failure_after_primary:(fun exn _backtrace ->
+          match exn with
+          | Harness_cleanup_failure -> cleanup_reported := true
+          | _ -> ())
+        ~cleanup:(fun () ->
+          cleanup_ran := true;
+          raise Harness_cleanup_failure)
+        (fun () -> raise Harness_primary_failure)
+    with
+    | exception Harness_primary_failure ->
+        Alcotest.(check bool) "cleanup ran" true !cleanup_ran;
+        Alcotest.(check bool) "cleanup reported" true !cleanup_reported
+    | exception exn ->
+        Alcotest.failf "unexpected exception: %s" (Printexc.to_string exn)
+    | _ -> Alcotest.fail "expected primary exception"
+
+  let test_cleanup_failure_visible_when_only_failure () =
+    match
+      protect_with_cleanup
+        ~cleanup:(fun () -> raise Harness_cleanup_failure)
+        (fun () -> ())
+    with
+    | exception Harness_cleanup_failure -> ()
+    | exception exn ->
+        Alcotest.failf "unexpected exception: %s" (Printexc.to_string exn)
+    | _ -> Alcotest.fail "expected cleanup exception"
+
+  let test_capability_profile () =
+    let actual =
+      capability_names (capability_differences Client.capabilities)
+    in
+    Alcotest.(check (list string))
+      "capability differences" Client.expected_capability_differences actual
+
+  let capability_difference_case ({ name; actual; strict } as summary) =
+    let actual_text = capability_value_to_string actual in
+    let strict_text = capability_value_to_string strict in
+    let case_name =
+      Printf.sprintf "%s actual=%s strict=%s" name actual_text strict_text
+    in
+    Alcotest.test_case case_name `Quick (fun () ->
+        Alcotest.(check bool)
+          "differs from strict" true
+          (capability_differs summary);
+        Alcotest.(check bool)
+          "declared difference" true
+          (List.exists (String.equal name)
+             Client.expected_capability_differences))
 
   let is_body_error error =
     let open Awskit.Error in
@@ -1360,8 +1525,24 @@ module Make (Client : SUBJECT) = struct
         test_multipart_completion_edges;
     ]
 
+  let harness_cases =
+    [
+      Alcotest.test_case "cleanup preserves primary failure" `Quick
+        test_cleanup_preserves_primary_failure;
+      Alcotest.test_case "cleanup failure fails when only failure" `Quick
+        test_cleanup_failure_visible_when_only_failure;
+    ]
+
+  let capability_cases =
+    Alcotest.test_case "profile matches declared differences" `Quick
+      test_capability_profile
+    :: List.map capability_difference_case
+         (capability_differences Client.capabilities)
+
   let suites =
     [
+      ("contract:harness", harness_cases);
+      ("contract:capabilities", capability_cases);
       ("contract:bucket", bucket_cases);
       ("contract:object", object_cases);
       ("contract:listing", listing_cases);

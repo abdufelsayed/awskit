@@ -55,6 +55,7 @@ module Simulator_subject = struct
 
   let bucket = bucket_name "contract-bucket"
   let capabilities = S3_contract.strict_capabilities
+  let expected_capability_differences = []
 
   let fresh () =
     let clock = Simulator.Clock.create ~now:test_time () in

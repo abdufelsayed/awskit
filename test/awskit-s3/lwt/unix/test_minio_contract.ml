@@ -92,48 +92,113 @@ let delete_object_version key version_id =
   | Some version_id -> Object.Delete_many.object_ ~key ~version_id ()
   | None -> delete_object_key key
 
-let cleanup_bucket conn ~bucket =
+let cleanup_context bucket error =
+  Awskit.Error.Producer.with_context
+    (Printf.sprintf "cleaning MinIO bucket %s"
+       (Awskit_s3.Bucket_name.to_string bucket))
+    error
+
+let delete_item_cleanup_error (error : Object.Delete_many.item_error) =
+  Awskit.Error.Producer.service ~status:200 ~code:error.code
+    ?message:error.message ~headers:[] ()
+  |> Awskit.Error.Producer.with_context
+       (Printf.sprintf "delete_objects item failed for key %s"
+          (Object_key.to_string error.key))
+
+let cleanup_delete_objects conn ~bucket objects =
+  let open Lwt.Syntax in
+  match objects with
+  | [] -> Lwt.return_ok ()
+  | _ -> (
+      let* result = S3.Object.delete_objects conn ~bucket ~objects () in
+      match result with
+      | Error error ->
+          Lwt.return_error
+            (Awskit.Error.Producer.with_context "deleting MinIO cleanup objects"
+               error)
+      | Ok ({ errors = []; _ } : Object.Delete_many.result) -> Lwt.return_ok ()
+      | Ok result ->
+          Lwt.return_error
+            (List.map delete_item_cleanup_error result.errors
+            |> Awskit.Error.Producer.multiple
+            |> Awskit.Error.Producer.with_context
+                 "deleting MinIO cleanup objects"))
+
+let cleanup_objects conn ~bucket =
   let open Lwt.Syntax in
   let* versions_result =
     S3.Object.Versions.pages conn ~bucket ~max_pages:100 ()
   in
-  (match versions_result with
-    | Ok pages ->
-        let objects =
-          List.concat_map
-            (fun (page : Object.Versions.page) ->
-              let versions =
-                List.map
-                  (fun (version : Object.Versions.object_version) ->
-                    delete_object_version version.key version.version_id)
-                  page.versions
-              in
-              let markers =
-                List.map
-                  (fun (marker : Object.Versions.delete_marker) ->
-                    delete_object_version marker.key marker.version_id)
-                  page.delete_markers
-              in
-              versions @ markers)
-            pages
-        in
-        if objects = [] then Lwt.return_unit
-        else
-          let* _ = S3.Object.delete_objects conn ~bucket ~objects () in
-          Lwt.return_unit
-    | Error _ -> (
-        let* keys_result = S3.Object.List.keys conn ~bucket ~max_pages:100 () in
-        match keys_result with
-        | Ok [] -> Lwt.return_unit
-        | Ok keys ->
-            let objects = List.map delete_object_key keys in
-            let* _ = S3.Object.delete_objects conn ~bucket ~objects () in
-            Lwt.return_unit
-        | Error _ -> Lwt.return_unit))
-  |> fun deleted ->
-  let* () = deleted in
-  let* _ = S3.Bucket.delete conn ~bucket () in
-  Lwt.return_unit
+  match versions_result with
+  | Ok pages ->
+      let objects =
+        List.concat_map
+          (fun (page : Object.Versions.page) ->
+            let versions =
+              List.map
+                (fun (version : Object.Versions.object_version) ->
+                  delete_object_version version.key version.version_id)
+                page.versions
+            in
+            let markers =
+              List.map
+                (fun (marker : Object.Versions.delete_marker) ->
+                  delete_object_version marker.key marker.version_id)
+                page.delete_markers
+            in
+            versions @ markers)
+          pages
+      in
+      cleanup_delete_objects conn ~bucket objects
+  | Error error when Awskit_s3.Error.is_no_such_bucket error -> Lwt.return_ok ()
+  | Error versions_error -> (
+      let* keys_result = S3.Object.List.keys conn ~bucket ~max_pages:100 () in
+      match keys_result with
+      | Ok keys ->
+          let objects = List.map delete_object_key keys in
+          cleanup_delete_objects conn ~bucket objects
+      | Error error when Awskit_s3.Error.is_no_such_bucket error ->
+          Lwt.return_ok ()
+      | Error keys_error ->
+          Lwt.return_error
+            (Awskit.Error.Producer.multiple [ versions_error; keys_error ]
+            |> Awskit.Error.Producer.with_context
+                 "listing MinIO cleanup objects"))
+
+let cleanup_bucket_result conn ~bucket =
+  let open Lwt.Syntax in
+  let* objects_result = cleanup_objects conn ~bucket in
+  let* bucket_result = S3.Bucket.delete conn ~bucket () in
+  match (objects_result, bucket_result) with
+  | Ok (), Ok _ -> Lwt.return_ok ()
+  | Ok (), Error error when Awskit_s3.Error.is_no_such_bucket error ->
+      Lwt.return_ok ()
+  | Ok (), Error error ->
+      Lwt.return_error
+        (Awskit.Error.Producer.with_context "deleting MinIO cleanup bucket"
+           error
+        |> cleanup_context bucket)
+  | Error error, Ok _ -> Lwt.return_error (cleanup_context bucket error)
+  | Error error, Error bucket_error
+    when Awskit_s3.Error.is_no_such_bucket bucket_error ->
+      Lwt.return_error (cleanup_context bucket error)
+  | Error object_error, Error bucket_error ->
+      Lwt.return_error
+        (Awskit.Error.Producer.multiple
+           [
+             object_error;
+             Awskit.Error.Producer.with_context "deleting MinIO cleanup bucket"
+               bucket_error;
+           ]
+        |> cleanup_context bucket)
+
+let cleanup_bucket conn ~bucket =
+  let open Lwt.Syntax in
+  let* result = cleanup_bucket_result conn ~bucket in
+  match result with
+  | Ok () -> Lwt.return_unit
+  | Error error ->
+      Alcotest.failf "MinIO cleanup failed: %a" Awskit_s3.Error.pp error
 
 let write_file path body =
   let channel = open_out_bin path in
@@ -171,14 +236,37 @@ let require_version label = function
 
 let version_string = Option.map Object.Version_id.to_string
 
+let cleanup_bucket_or_fail conn ~bucket =
+  match Lwt_main.run (cleanup_bucket_result conn ~bucket) with
+  | Ok () -> ()
+  | Error error ->
+      Alcotest.failf "MinIO cleanup failed: %a" Awskit_s3.Error.pp error
+
+let report_cleanup_after_primary_failure error =
+  Format.eprintf
+    "@[<v>MinIO cleanup failed after the primary test failure; preserving the \
+     primary failure.@;\
+     %a@]@."
+    Awskit_s3.Error.pp error
+
+let protect_with_bucket_cleanup conn ~bucket f =
+  match f () with
+  | value ->
+      cleanup_bucket_or_fail conn ~bucket;
+      value
+  | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      (match Lwt_main.run (cleanup_bucket_result conn ~bucket) with
+      | Ok () -> ()
+      | Error error -> report_cleanup_after_primary_failure error);
+      Printexc.raise_with_backtrace exn backtrace
+
 let with_bucket suffix f =
   let conn = connect () in
   let bucket = bucket_of_string (bucket_name_string suffix) in
-  Lwt_main.run (cleanup_bucket conn ~bucket);
+  cleanup_bucket_or_fail conn ~bucket;
   ignore (await "create bucket" (S3.Bucket.create conn ~bucket ()));
-  Fun.protect
-    ~finally:(fun () -> Lwt_main.run (cleanup_bucket conn ~bucket))
-    (fun () -> f conn ~bucket)
+  protect_with_bucket_cleanup conn ~bucket (fun () -> f conn ~bucket)
 
 module Minio_subject = struct
   type connection = S3.t
@@ -252,6 +340,24 @@ module Minio_subject = struct
       bucket_ownership_controls = false;
       suspended_versioning_null = false;
     }
+
+  let expected_capability_differences =
+    [
+      "exclusive_bucket_list";
+      "exact_policy_json";
+      "response_checksums";
+      "copy_returns_current_source_version";
+      "time_preconditions";
+      "multipart_checksums";
+      "deleted_bucket_tags";
+      "missing_version_delete";
+      "delete_preconditions";
+      "bucket_encryption";
+      "bucket_cors";
+      "bucket_public_access_block";
+      "bucket_ownership_controls";
+      "suspended_versioning_null";
+    ]
 
   let fresh () =
     let conn = connect () in
