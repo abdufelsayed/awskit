@@ -35,6 +35,10 @@
   ppx_sexp_conv
   (dune-release :with-dev-setup)
   (opam-publish :with-dev-setup)
+  (ocamlformat
+   (and
+    :with-dev-setup
+    (= 0.29.0)))
   (alcotest :with-test)
   (qcheck-core :with-test)
   (qcheck-alcotest :with-test)))

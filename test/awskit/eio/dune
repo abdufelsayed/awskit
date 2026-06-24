@@ -5,6 +5,7 @@
 
 (rule
  (alias runtime-conformance)
+ (package awskit-eio)
  (deps test_awskit_eio.exe)
  (action
   (run ./test_awskit_eio.exe test "integration:connection")))

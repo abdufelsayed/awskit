@@ -1,0 +1,10 @@
+{0 awskit-s3-lwt}
+
+Generic Lwt adapter for Awskit S3.
+
+The public entrypoint is {!module:Awskit_s3_lwt}. This package connects the
+runtime-neutral {!module:Awskit_s3} operation surface to a caller-supplied
+Awskit Lwt runtime.
+
+Use it when an application needs a custom Lwt HTTP backend. Use the
+[awskit-s3-lwt-unix] package when the ready Lwt + Unix S3 client is enough.

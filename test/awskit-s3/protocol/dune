@@ -22,6 +22,7 @@
 
 (rule
  (alias protocol-fixtures)
+ (package awskit-s3)
  (deps
   test_protocol_fixtures.exe
   (source_tree ../fixtures/protocol))
@@ -46,6 +47,7 @@
 
 (rule
  (alias protocol-pbt)
+ (package awskit-s3)
  (deps test_protocol_pbt.exe)
  (action
   (run ./test_protocol_pbt.exe test "pbt:protocol")))
@@ -67,6 +69,7 @@
 
 (rule
  (alias fuzz-replay)
+ (package awskit-s3)
  (deps
   test_fuzz_replay.exe
   (source_tree ../fixtures/protocol/fuzz-replay))

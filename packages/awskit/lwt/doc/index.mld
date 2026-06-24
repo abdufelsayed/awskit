@@ -1,0 +1,10 @@
+{0 awskit-lwt}
+
+Generic Lwt runtime adapter for Awskit.
+
+The public entrypoint is {!module:Awskit_lwt}. This package provides the Lwt
+runtime contract over a caller-supplied [Cohttp_lwt.S.Client]. It is intended
+for applications or libraries that need to choose their own Lwt HTTP backend.
+
+Use the [awskit-lwt-unix] package instead when a ready Unix-backed runtime is
+enough.

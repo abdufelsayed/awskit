@@ -1,0 +1,10 @@
+{0 awskit-s3-lwt-unix}
+
+Ready-to-use Lwt + Unix S3 client.
+
+The public entrypoint is {!module:Awskit_s3_lwt_unix}. This package combines the
+S3 operation surface with the ready Awskit Lwt Unix runtime.
+
+It can resolve credentials and region from the standard Unix sources exposed by
+[awskit-lwt-unix], and it also owns S3 local-file body, reader, upload, and
+download helpers.

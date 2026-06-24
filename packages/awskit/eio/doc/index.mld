@@ -1,0 +1,11 @@
+{0 awskit-eio}
+
+Direct-style Eio runtime adapter for Awskit.
+
+The public entrypoint is {!module:Awskit_eio}. Operations use plain result
+values in direct style, while response bodies remain scoped to the runtime
+callback.
+
+Applications own HTTPS transport policy, TLS configuration, CA roots, RNG
+initialization, and platform policy. Pass an explicit HTTPS connector for normal
+AWS endpoints, and use the plaintext helpers only for intentional local tests.

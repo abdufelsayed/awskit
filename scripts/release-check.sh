@@ -35,7 +35,7 @@ opam lint ./*.opam
 for package in "$@"; do
   opam pin add --yes --no-action "$package" .
 done
-opam install --yes --working-dir "$@"
+opam install --yes --working-dir --with-test --with-doc --with-dev-setup "$@"
 opam exec -- dune fmt
 opam exec -- dune runtest --force
 opam exec -- dune build @check-protocol

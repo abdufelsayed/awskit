@@ -1,0 +1,11 @@
+{0 awskit-lwt-unix}
+
+Ready-to-use Lwt + Unix runtime adapter for Awskit.
+
+The public entrypoint is {!module:Awskit_lwt_unix}. This package wires the
+generic Lwt runtime to Cohttp Lwt Unix and the standard Unix credential and
+region sources.
+
+Use it at the application edge when a Lwt service client should load AWS
+configuration from environment variables, shared profile files, or supported
+metadata sources.

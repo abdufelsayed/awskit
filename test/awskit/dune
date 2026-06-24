@@ -5,6 +5,7 @@
 
 (rule
  (alias protocol-pbt)
+ (package awskit)
  (deps test_awskit.exe)
  (action
   (progn

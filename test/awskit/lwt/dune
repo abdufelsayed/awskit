@@ -5,6 +5,7 @@
 
 (rule
  (alias runtime-conformance)
+ (package awskit-lwt)
  (deps test_awskit_lwt.exe)
  (action
   (run ./test_awskit_lwt.exe test "integration:connection")))

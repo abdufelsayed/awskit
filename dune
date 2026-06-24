@@ -6,9 +6,61 @@
 
 (alias
  (name check-protocol)
+ (package awskit)
+ (deps
+  (alias_rec protocol-pbt)))
+
+; Keep package-filtered @check-protocol usable for packages whose protocol
+; evidence is covered by another package-specific gate.
+
+(alias
+ (name check-protocol)
+ (package awskit-unix)
+ (deps dune-project))
+
+(alias
+ (name check-protocol)
+ (package awskit-s3)
  (deps
   (alias_rec protocol-pbt)
   (alias_rec protocol-fixtures)
   (alias_rec fuzz-replay)
-  (alias_rec simulator-contract)
   (alias_rec runtime-conformance)))
+
+(alias
+ (name check-protocol)
+ (package awskit-s3-sim)
+ (deps
+  (alias_rec simulator-contract)))
+
+(alias
+ (name check-protocol)
+ (package awskit-lwt)
+ (deps
+  (alias_rec runtime-conformance)))
+
+(alias
+ (name check-protocol)
+ (package awskit-lwt-unix)
+ (deps dune-project))
+
+(alias
+ (name check-protocol)
+ (package awskit-eio)
+ (deps
+  (alias_rec runtime-conformance)))
+
+(alias
+ (name check-protocol)
+ (package awskit-s3-lwt)
+ (deps dune-project))
+
+(alias
+ (name check-protocol)
+ (package awskit-s3-lwt-unix)
+ (deps dune-project))
+
+(alias
+ (name check-protocol)
+ (package awskit-s3-eio)
+ (deps dune-project))

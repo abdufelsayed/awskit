@@ -1,0 +1,11 @@
+{0 awskit-unix}
+
+Unix-specific helpers for Awskit applications.
+
+The public entrypoint is {!module:Awskit_unix}. This package owns local
+platform behavior such as environment variables, shared AWS profile files, and
+wall-clock access. It does not perform HTTP calls.
+
+Use this package when an application wants Unix credential or region sources
+while keeping the runtime-neutral {!module:Awskit} core free of platform
+dependencies.
