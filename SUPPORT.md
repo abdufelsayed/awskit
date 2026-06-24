@@ -49,28 +49,16 @@ branch until the next release replaces it.
 
 ## S3 Scope
 
-| Area | Status | Runtime coverage | Simulator coverage | MinIO coverage | Notes |
-| --- | --- | --- | --- | --- | --- |
-| Object put/get/head/delete/copy | supported | Lwt Unix, Eio, custom runtimes via `Awskit_s3.Make` | yes | yes, where contract tests cover it | Includes typed bucket/key values and structured results. |
-| Bounded string/bytes object helpers | supported | Lwt Unix, Eio, simulator | yes | yes, through object contracts | `max_bytes` is required for buffered downloads. |
-| Streaming bodies and readers | supported | Runtime adapters and custom runtimes | yes | partial | Response readers are scoped to the runtime callback. |
-| ListObjectsV2 and pagination helpers | supported | Lwt Unix, Eio, simulator | yes | yes, where contract tests cover it | Collection helpers require explicit `max_pages`. |
-| Basic bucket create/delete/head/list/location | supported | Lwt Unix, Eio, simulator | yes | partial | This does not mean S3 Lifecycle configuration. |
-| Metadata and object tags | supported | Lwt Unix, Eio, simulator | yes | partial | Validated typed values are used at the API boundary. |
-| Range reads | supported | Lwt Unix, Eio, simulator | yes | partial | Large downloads should use streaming consumers. |
-| Presigned request artifacts | supported | Standalone helpers and runtime-bound adapters | yes | fixture and unit evidence | Raw bearer URLs are exposed only through explicit reveal APIs. |
-| Multipart upload | supported | Lwt Unix, Eio, simulator | yes | partial | Includes typed upload handles and owned cleanup behavior. |
-| Local file transfer helpers | supported in Unix-capable adapters | Lwt Unix and Eio | no | partial | Filesystem helpers live in adapter packages, not in `awskit-s3` core. |
-| Credentials, signing, endpoints, retry, timeout, cancellation, cleanup | supported | Core and runtime adapters | yes | partial | Runtime conformance and protocol evidence define the shared laws. |
-| S3 bucket policy payloads | supported, scoped | Lwt Unix and Eio | partial | untested | Awskit validates and sends policy JSON; application IAM policy design is out of scope. |
-| Selected bucket configuration subresources | supported, scoped | Lwt Unix and Eio | partial | untested | Only modeled APIs with tests/docs are supported. This is not full S3 configuration coverage. |
-| Object lock and legal hold | unsupported | none | none | none | No support claim. |
-| Inventory, analytics, replication, lifecycle | unsupported | none | none | none | No support claim. |
-| Access points and directory buckets | unsupported | none | none | none | No support claim. |
-| Unmodeled server-side encryption variants | unsupported | none | none | none | Only modeled request/response values are in scope. |
-| Unmodeled ACL and policy edge cases | unsupported | none | none | none | No broad IAM/S3 policy coverage claim. |
-| Unlisted S3-compatible providers | unsupported | none | none | none | MinIO is the named local contract target only where stated. |
-| Live AWS account compatibility | untested by release gate | optional/manual only | no | no | Live AWS is not a release gate unless this policy is updated to promise live AWS coverage. |
+The detailed release-reader feature matrix lives in the generated S3 package
+documentation:
+[packages/awskit-s3/doc/support_matrix.mld](packages/awskit-s3/doc/support_matrix.mld).
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| Object put/get/head/delete/copy, buffered helpers, streaming readers, ListObjectsV2, version-aware object APIs, object tagging, metadata, ranges, modeled preconditions/checksums/storage class/encryption, bucket basics, selected bucket configuration subresources, presigned artifacts, multipart upload, and adapter-owned file transfer helpers | supported or supported, scoped | See the package S3 support matrix for package/runtime coverage, simulator evidence, MinIO capability-profile notes, and operation boundaries. |
+| Simulator | supported, scoped | Deterministic in-memory application-level evidence for tests and documentation workflows. It is not live AWS coverage or a wire-protocol authority. |
+| MinIO contract target | supported, scoped | MinIO is the named local S3-compatible contract target only where `@minio-contract` covers the behavior. Known capability-profile differences are documented in the package S3 support matrix. |
+| Access points, Object Lambda, S3 on Outposts, directory buckets, Object Lock/legal hold/retention/governance bypass, MFA delete, inventory, analytics, replication, lifecycle, metrics, notifications, logging, website hosting, requester-pays configuration, broad ACL/IAM/policy semantics, unmodeled SSE/checksum variants, arbitrary S3-compatible providers, and live AWS release-gate coverage | unsupported | No support claim for this release. Live AWS account checks remain optional/manual unless this policy is updated to promise them as a release gate. |
 
 ## S3-Compatible Storage
 

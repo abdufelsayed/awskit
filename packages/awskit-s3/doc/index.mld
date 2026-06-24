@@ -2,6 +2,7 @@
 
 AWS S3 client for bucket and object storage, multipart uploads, presigned
 request artifacts, and the supported bucket/object scope documented in
+{{!page-support_matrix}S3 Support Matrix} and
 {{:https://github.com/abdufelsayed/awskit/blob/main/SUPPORT.md}[SUPPORT.md]}.
 
 See {{:../awskit/index.html}[awskit]} for the pure core and runtime adapter
@@ -206,4 +207,7 @@ let run () =
 {ul
   {li {{!page-guides}S3 Guides} — objects, buffers, transfers, endpoint setup,
     buckets, multipart, presigning, and errors}
+  {li {{!page-support_matrix}S3 Support Matrix} — supported feature scope,
+    runtime coverage, simulator evidence, MinIO profile notes, and unsupported
+    S3 families}
 }

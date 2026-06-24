@@ -4,6 +4,7 @@ Guides for using [awskit-s3] with AWS S3 object and bucket workflows. The
 client is streaming-first, endpoint-configurable, and result-returning, so
 applications can make memory use, retries, and error handling explicit.
 The supported S3 scope is defined in
+{{!page-support_matrix}S3 Support Matrix} and
 {{:https://github.com/abdufelsayed/awskit/blob/main/SUPPORT.md}[SUPPORT.md]}.
 
 {1 Object Operations}
