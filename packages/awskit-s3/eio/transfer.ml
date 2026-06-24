@@ -90,11 +90,8 @@ let validate_download_target path
   | Awskit_s3.Transfer.Error_if_exists -> reject_existing_download_target path
 
 let descriptor ~content_length ~replayable =
-  {
-    Awskit.Body.Request.content_length = Some content_length;
-    payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-    replayable;
-  }
+  Awskit.Body.Request.descriptor_exn ~content_length
+    ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable ()
 
 let temp_download_path path attempt =
   match Eio.Path.split path with

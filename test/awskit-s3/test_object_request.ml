@@ -44,10 +44,8 @@ let test_object_checksum_headers_and_response () =
       ]
   in
   let checksum : Object.Checksum.value =
-    {
-      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
-      value = "provided-sha256";
-    }
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:"provided-sha256"
   in
   let options =
     {
@@ -1001,17 +999,12 @@ let test_object_unknown_storage_class_read_values () =
 
 let test_object_observed_only_write_values_rejected () =
   let unknown_storage = Storage_class.Unknown "FUTURE_CLASS" in
-  let unknown_checksum : Object.Checksum.value =
-    {
-      Object.Checksum.algorithm =
-        Object.Checksum.Algorithm.Unknown "FUTURE_CHECKSUM";
-      value = "checksum";
-    }
-  in
   expect_validation_field "put builder storage" "storage_class"
     (Object.Put.options ~storage_class:unknown_storage ());
-  expect_validation_field "put builder checksum" "checksum_algorithm"
-    (Object.Put.options ~checksum:unknown_checksum ());
+  expect_validation_field "checksum constructor" "checksum_algorithm"
+    (Object.Checksum.value
+       ~algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE_CHECKSUM")
+       ~value:"checksum");
   expect_validation_field "copy builder storage" "storage_class"
     (Object.Copy.options ~storage_class:unknown_storage ());
   expect_validation_field "copy builder checksum" "checksum_algorithm"

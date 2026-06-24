@@ -125,11 +125,9 @@ let test_s3_operation_context_for_validation_error () =
   let key = object_key "k" in
   ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
   let descriptor : Awskit.Body.Request.descriptor =
-    {
-      content_length = None;
-      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-      replayable = false;
-    }
+    Awskit.Body.Request.descriptor_exn
+      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false
+      ()
   in
   let body =
     Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->

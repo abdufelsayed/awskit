@@ -140,11 +140,9 @@ let test_non_replayable_request_body_not_retried () =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
   in
   let descriptor : Awskit.Body.Request.descriptor =
-    {
-      content_length = Some 4L;
-      payload_hash = Awskit.Body.Payload_hash.sha256_of_string "body";
-      replayable = false;
-    }
+    Awskit.Body.Request.descriptor_exn ~content_length:4L
+      ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string "body")
+      ~replayable:false ()
   in
   let conn =
     Recording_runtime.connect [ response 503 slow_down; response 200 "" ]
@@ -182,11 +180,9 @@ let test_retry_context_on_exhaustion () =
 
 let test_runtime_stream_request_body_error_propagates () =
   let descriptor : Awskit.Body.Request.descriptor =
-    {
-      content_length = Some 4L;
-      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-      replayable = false;
-    }
+    Awskit.Body.Request.descriptor_exn ~content_length:4L
+      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false
+      ()
   in
   let stream_error =
     Awskit.Error.Producer.body "runtime stream request body failed"
@@ -300,47 +296,23 @@ let test_retry_jitter_bounds () =
   | Ok _ -> Alcotest.fail "expected invalid jitter"
 
 let test_request_body_descriptor_validation () =
-  let invalid_descriptor : Awskit.Body.Request.descriptor =
-    {
-      content_length = Some (-1L);
-      payload_hash = Awskit.Body.Payload_hash.sha256_of_string "";
-      replayable = true;
-    }
-  in
-  let conn = Recording_runtime.connect [ response 200 "" ] in
-  let body =
-    Recording_runtime.stream_request_body invalid_descriptor
-      ~write:(fun _writer -> Ok ())
-  in
   (match
-     Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
-       ~key:(object_key "file") ~body ()
+     Awskit.Body.Request.descriptor ~content_length:(-1L)
+       ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string "")
+       ~replayable:true ()
    with
   | Error error when is_validation_field "content_length" error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected descriptor validation failure");
-  Alcotest.(check int) "object put not called" 0 (List.length conn.calls);
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
   let upload =
     Multipart.Upload.resume ~bucket:(bucket_name "my-bucket")
       ~key:(object_key "large.bin") ~upload_id
   in
-  (match
-     Recording_s3.Multipart.upload_part conn ~upload
-       ~part_number:(Multipart.Part_number.of_int_exn 1)
-       ~body ()
-   with
-  | Error error when is_validation_field "content_length" error -> ()
-  | Error error ->
-      Alcotest.failf "unexpected multipart error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected multipart descriptor validation failure");
-  Alcotest.(check int) "multipart put not called" 0 (List.length conn.calls);
   let unknown_length_descriptor : Awskit.Body.Request.descriptor =
-    {
-      content_length = None;
-      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-      replayable = false;
-    }
+    Awskit.Body.Request.descriptor_exn
+      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false
+      ()
   in
   let conn = Recording_runtime.connect [ response 200 "" ] in
   let body =

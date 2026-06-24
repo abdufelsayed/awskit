@@ -25,12 +25,10 @@ module Runtime = struct
   }
 
   let descriptor_for_string body =
-    {
-      Awskit.Body.Request.content_length =
-        Some (Int64.of_int (String.length body));
-      payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
-      replayable = true;
-    }
+    Awskit.Body.Request.descriptor_exn
+      ~content_length:(Int64.of_int (String.length body))
+      ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string body)
+      ~replayable:true ()
 
   let empty_request_body =
     { descriptor = descriptor_for_string ""; body = Ok "" }

@@ -630,11 +630,8 @@ let request_body_request =
   Awskit.Request.create_exn ~method_:`PUT ~target ()
 
 let stream_descriptor length =
-  {
-    Awskit.Body.Request.content_length = Some length;
-    payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-    replayable = false;
-  }
+  Awskit.Body.Request.descriptor_exn ~content_length:length
+    ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false ()
 
 let rec wait_until ?(attempts = 1_000) condition =
   if condition () || attempts <= 0 then Lwt.return_unit

@@ -7,7 +7,8 @@
 module Payload_hash : sig
   (** Payload hash value used for SigV4 signing and the [x-amz-content-sha256]
       header. *)
-  type t = Sha256_hex of string | Unsigned_payload
+  type t
+  (** Validated payload hash value. *)
 
   val of_sha256_hex : string -> (t, Error.t) result
   (** Validate and wrap a lowercase or uppercase SHA-256 hex digest. *)
@@ -28,7 +29,7 @@ module Payload_hash : sig
 end
 
 module Request : sig
-  type descriptor = {
+  type descriptor = private {
     content_length : int64 option;
         (** Exact body size when known. S3 upload operations currently require a
             known content length. *)
@@ -41,6 +42,24 @@ module Request : sig
   (** Request body facts known before a runtime writes the body. Service
       packages use this to sign requests and decide whether retry is possible.
   *)
+
+  val descriptor :
+    ?content_length:int64 ->
+    payload_hash:Payload_hash.t ->
+    replayable:bool ->
+    unit ->
+    (descriptor, Error.t) result
+  (** Build request body facts. Present [content_length] values must be
+      non-negative. *)
+
+  val descriptor_exn :
+    ?content_length:int64 ->
+    payload_hash:Payload_hash.t ->
+    replayable:bool ->
+    unit ->
+    descriptor
+  (** Like {!val:descriptor}, but raises [Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
 
   val validate_descriptor : descriptor -> (unit, Error.t) result
   (** Validate descriptor invariants such as non-negative lengths. *)

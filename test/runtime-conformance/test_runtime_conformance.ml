@@ -61,11 +61,9 @@ let test_request_body_of_bytes_owns_input () =
 
 let test_stream_request_body_preserves_descriptor () =
   let descriptor =
-    {
-      Awskit.Body.Request.content_length = Some 4L;
-      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-      replayable = false;
-    }
+    Awskit.Body.Request.descriptor_exn ~content_length:4L
+      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false
+      ()
   in
   let body =
     R.Request_body.of_stream descriptor ~write:(fun writer ->
@@ -85,11 +83,9 @@ let test_stream_request_body_preserves_descriptor () =
 
 let test_stream_request_body_length_mismatch_prevents_transport () =
   let descriptor =
-    {
-      Awskit.Body.Request.content_length = Some 4L;
-      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-      replayable = false;
-    }
+    Awskit.Body.Request.descriptor_exn ~content_length:4L
+      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false
+      ()
   in
   let body =
     R.Request_body.of_stream descriptor ~write:(fun writer ->

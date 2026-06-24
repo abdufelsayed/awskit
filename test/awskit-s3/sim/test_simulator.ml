@@ -18,11 +18,9 @@ let test_simulator_request_body_requires_known_length () =
     (Simulator.Bucket.create conn ~bucket:(bucket_name "test-bucket") ()
     |> ok_or_fail "bucket");
   let descriptor : Awskit.Body.Request.descriptor =
-    {
-      content_length = None;
-      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-      replayable = false;
-    }
+    Awskit.Body.Request.descriptor_exn
+      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false
+      ()
   in
   let body =
     Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
@@ -92,11 +90,9 @@ let test_simulator_stream_request_body_error_propagates () =
     Awskit.Error.Producer.body "simulator stream request body failed"
   in
   let descriptor : Awskit.Body.Request.descriptor =
-    {
-      content_length = Some 4L;
-      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-      replayable = false;
-    }
+    Awskit.Body.Request.descriptor_exn ~content_length:4L
+      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false
+      ()
   in
   let body =
     Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
@@ -128,11 +124,9 @@ let test_simulator_stream_request_body_rejects_length_mismatch () =
   let bucket = bucket_name "stream-length-bucket" in
   ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
   let descriptor : Awskit.Body.Request.descriptor =
-    {
-      content_length = Some 4L;
-      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-      replayable = false;
-    }
+    Awskit.Body.Request.descriptor_exn ~content_length:4L
+      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false
+      ()
   in
   let short_body =
     Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
@@ -187,11 +181,9 @@ let test_simulator_multipart_upload_part_stream_error_does_not_store_part () =
     Awskit.Error.Producer.body "simulator multipart request body failed"
   in
   let descriptor : Awskit.Body.Request.descriptor =
-    {
-      content_length = Some 4L;
-      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-      replayable = false;
-    }
+    Awskit.Body.Request.descriptor_exn ~content_length:4L
+      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false
+      ()
   in
   let body =
     Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
@@ -275,6 +267,31 @@ let test_simulator_public_surface () =
     [ ("after.txt", "after"); ("ok.txt", "hello") ]
     (Simulator.objects_as_strings store ~bucket:(bucket_name "test-bucket"))
 
+let test_simulator_config_constructor () =
+  (match Simulator.config ~max_list_keys:0 () with
+  | Error error when is_validation_field "max_list_keys" error -> ()
+  | Error error -> Alcotest.failf "unexpected config error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected config validation");
+  let config = Simulator.config_exn ~max_list_keys:2 () in
+  Alcotest.(check int) "config cap" 2 config.max_list_keys;
+  let clock = Simulator.Clock.create ~now:test_time () in
+  let store = Simulator.create_store ~config ~clock () in
+  let conn = Simulator.connect store ~credentials:creds in
+  let bucket = bucket_name "config-bucket" in
+  ignore (Simulator.Bucket.create conn ~bucket () |> ok_or_fail "create bucket");
+  List.iter
+    (fun key ->
+      ignore
+        (Simulator.Object.put_string conn ~bucket ~key:(object_key key)
+           ~contents:key ()
+        |> ok_or_fail ("put " ^ key)))
+    [ "a"; "b"; "c" ];
+  let page =
+    Simulator.Object.list conn ~bucket () |> ok_or_fail "list config cap"
+  in
+  Alcotest.(check int) "configured page size" 2 (List.length page.objects);
+  Alcotest.(check bool) "configured page truncates" true page.is_truncated
+
 let simulator_operation_name (_ : Simulator.operation_record) = function
   | `Put_object | `Get_object | `Head_object | `Delete_object | `List_objects_v2
   | `List_object_versions | `Copy_object | `Delete_objects
@@ -298,10 +315,8 @@ let test_simulator_history_uses_operation_names () =
 let test_simulator_buffer_roundtrip () =
   let conn = make_simulator () in
   let checksum : Object.Checksum.value =
-    {
-      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
-      value = "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=";
-    }
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:"LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ="
   in
   let put =
     Simulator.Object.put conn
@@ -429,25 +444,15 @@ let test_simulator_conveniences_validate_max_bytes_before_lookup () =
 
 let test_simulator_rejects_unknown_checksum_writes () =
   let conn = make_simulator () in
-  let checksum : Object.Checksum.value =
-    {
-      Object.Checksum.algorithm = Object.Checksum.Algorithm.Unknown "FUTURE";
-      value = "value";
-    }
-  in
   let expect_checksum_validation label = function
     | Error error when is_validation_field "checksum_algorithm" error -> ()
     | Error error ->
         Alcotest.failf "%s: unexpected error: %a" label Error.pp error
     | Ok _ -> Alcotest.failf "%s: expected checksum validation" label
   in
-  expect_checksum_validation "simulator put"
-    (Simulator.Object.put conn
-       ~bucket:(bucket_name "test-bucket")
-       ~key:(object_key "bad.txt")
-       ~options:{ Object.Put.default_options with checksum = Some checksum }
-       ~body:(Simulator.Body.of_string "body")
-       ());
+  expect_checksum_validation "checksum constructor"
+    (Object.Checksum.value
+       ~algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE") ~value:"value");
   let copy_options =
     {
       Object.Copy.default_options with
@@ -468,22 +473,11 @@ let test_simulator_rejects_unknown_checksum_writes () =
        ~destination_bucket:(bucket_name "test-bucket")
        ~destination_key:(object_key "copy.txt") ~options:copy_options ());
   let upload =
-    Simulator.Multipart.create_upload conn
+    Multipart.Upload.resume
       ~bucket:(bucket_name "test-bucket")
-      ~key:(object_key "bad.bin") ()
-    |> ok_or_fail "create upload"
+      ~key:(object_key "bad.bin")
+      ~upload_id:(Multipart.Upload_id.of_string_exn "upload-1")
   in
-  let upload_part_options =
-    {
-      Multipart.Upload_part.checksum = Some checksum;
-      expected_bucket_owner = None;
-    }
-  in
-  expect_checksum_validation "simulator upload part"
-    (Simulator.Multipart.upload_part conn ~upload:upload.upload
-       ~part_number:(Multipart.Part_number.of_int_exn 1)
-       ~body:(Simulator.Body.of_string "body")
-       ~options:upload_part_options ());
   let part =
     Multipart.Part.create_exn
       ~part_number:(Multipart.Part_number.of_int_exn 1)
@@ -492,24 +486,13 @@ let test_simulator_rejects_unknown_checksum_writes () =
   in
   let complete_options =
     {
-      Multipart.Complete.expected_bucket_owner = None;
-      checksum = Some checksum;
-      checksum_type = None;
-      multipart_object_size = None;
-    }
-  in
-  expect_checksum_validation "simulator complete checksum"
-    (Simulator.Multipart.complete_upload conn ~upload:upload.upload
-       ~options:complete_options ~parts:[ part ] ());
-  let complete_options =
-    {
       Multipart.Complete.default_options with
       checksum_type = Some (Object.Checksum.Type.Unknown "FUTURE");
     }
   in
   match
-    Simulator.Multipart.complete_upload conn ~upload:upload.upload
-      ~options:complete_options ~parts:[ part ] ()
+    Simulator.Multipart.complete_upload conn ~upload ~options:complete_options
+      ~parts:[ part ] ()
   with
   | Error error when is_validation_field "checksum_type" error -> ()
   | Error error ->
@@ -580,7 +563,8 @@ let test_simulator_multipart_complete_validates_part_checksums () =
     |> ok_or_fail "create checksum upload"
   in
   let checksum : Object.Checksum.value =
-    { algorithm = Object.Checksum.Algorithm.Sha256; value = "part-sha256" }
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:"part-sha256"
   in
   let uploaded =
     Simulator.Multipart.upload_part conn ~upload:upload.upload
@@ -591,7 +575,8 @@ let test_simulator_multipart_complete_validates_part_checksums () =
     |> ok_or_fail "upload checksummed part"
   in
   let wrong_checksum : Object.Checksum.value =
-    { algorithm = Object.Checksum.Algorithm.Sha256; value = "wrong-sha256" }
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:"wrong-sha256"
   in
   let wrong_part =
     Multipart.Part.create_exn
@@ -839,6 +824,8 @@ let suite =
           test_simulator_multipart_upload_part_stream_error_does_not_store_part;
         Alcotest.test_case "simulator public surface" `Quick
           test_simulator_public_surface;
+        Alcotest.test_case "simulator config constructor" `Quick
+          test_simulator_config_constructor;
         Alcotest.test_case "simulator history uses operation names" `Quick
           test_simulator_history_uses_operation_names;
         Alcotest.test_case "simulator in-memory roundtrip" `Quick

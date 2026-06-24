@@ -224,7 +224,8 @@ let test_public_operation_modules () =
       : Multipart.Create.options);
   ignore (Multipart.Upload_part.default_options : Multipart.Upload_part.options);
   let upload_checksum : Object.Checksum.value =
-    { algorithm = Object.Checksum.Algorithm.Sha256; value = "part-sha256" }
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:"part-sha256"
   in
   ignore
     (Multipart.Upload_part.options ~checksum:upload_checksum
@@ -251,20 +252,16 @@ let test_public_operation_modules () =
   ignore
     (Multipart.Complete.options
        ~checksum:
-         {
-           Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
-           value = "full-sha256";
-         }
+         (Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+            ~value:"full-sha256")
        ~checksum_type:Object.Checksum.Type.Composite
        ~multipart_object_size:5_242_880L ~expected_bucket_owner:owner ()
       : (Multipart.Complete.options, Error.t) result);
   ignore
     (Multipart.Complete.options_exn
        ~checksum:
-         {
-           Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
-           value = "full-sha256";
-         }
+         (Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+            ~value:"full-sha256")
        ~checksum_type:Object.Checksum.Type.Composite
        ~multipart_object_size:5_242_880L ~expected_bucket_owner:owner ()
       : Multipart.Complete.options);

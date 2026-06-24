@@ -355,10 +355,8 @@ let test_presigned_expiry_validation_boundaries () =
 
 let test_presigned_put_checksum_headers () =
   let checksum : Object.Checksum.value =
-    {
-      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha1;
-      value = "provided-sha1";
-    }
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha1
+      ~value:"provided-sha1"
   in
   let options =
     { Presigned.Put_object.default_options with checksum = Some checksum }
@@ -484,10 +482,8 @@ let test_presigned_expected_bucket_owner_headers () =
 let test_presigned_upload_part () =
   let upload = multipart_upload () in
   let checksum : Object.Checksum.value =
-    {
-      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
-      value = "provided-sha256";
-    }
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:"provided-sha256"
   in
   let options =
     { Presigned.Upload_part.default_options with checksum = Some checksum }
@@ -571,37 +567,14 @@ let test_presigned_folds_signed_header_whitespace () =
     (header "x-test" (Presigned.signed_headers result))
 
 let test_presigned_rejects_unknown_checksum () =
-  let checksum : Object.Checksum.value =
-    {
-      Object.Checksum.algorithm = Object.Checksum.Algorithm.Unknown "FUTURE";
-      value = "value";
-    }
-  in
-  let put_options =
-    { Presigned.Put_object.default_options with checksum = Some checksum }
-  in
-  (match
-     Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-       ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt")
-       ~options:put_options ()
-   with
-  | Error error when is_validation_field "checksum_algorithm" error -> ()
-  | Error error -> Alcotest.failf "unexpected put error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected presigned put checksum validation");
-  let upload = multipart_upload () in
-  let upload_part_options =
-    { Presigned.Upload_part.default_options with checksum = Some checksum }
-  in
   match
-    Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~upload
-      ~part_number:(Multipart.Part_number.of_int_exn 1)
-      ~options:upload_part_options ()
+    Object.Checksum.value
+      ~algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE") ~value:"value"
   with
   | Error error when is_validation_field "checksum_algorithm" error -> ()
   | Error error ->
-      Alcotest.failf "unexpected upload part error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected presigned upload-part checksum validation"
+      Alcotest.failf "unexpected checksum constructor error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected checksum constructor validation"
 
 let test_presigned_accepts_string_region_and_endpoint_config () =
   let upload = multipart_upload () in

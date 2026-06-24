@@ -97,6 +97,17 @@ module Checksum = struct
   end
 
   type value = { algorithm : Algorithm.t; value : string }
+
+  let value ~algorithm ~value =
+    match algorithm with
+    | Algorithm.Unknown algorithm ->
+        invalid ~field:"checksum_algorithm"
+          "unknown checksum algorithm %S cannot be sent" algorithm
+    | _ -> Ok { algorithm; value }
+
+  let value_exn ~algorithm ~value:checksum =
+    result_exn (value ~algorithm ~value:checksum)
+
   type response = { values : value list; checksum_type : Type.t option }
 
   type summary = {

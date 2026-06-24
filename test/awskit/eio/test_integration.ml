@@ -93,11 +93,8 @@ let test_runtime_bodies env =
        ~default:(-1L))
 
 let stream_descriptor length =
-  {
-    Awskit.Body.Request.content_length = Some length;
-    payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-    replayable = false;
-  }
+  Awskit.Body.Request.descriptor_exn ~content_length:length
+    ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false ()
 
 let is_body_error error =
   let open Awskit.Error in

@@ -20,22 +20,18 @@ let checksum_for_algorithm ~body = function
   | Some Object.Checksum.Algorithm.Sha1 ->
       checksum_response
         [
-          {
-            Object.Checksum.algorithm = Sha1;
-            value =
-              Digestif.SHA1.(digest_string body |> to_raw_string)
-              |> Base64.encode_exn;
-          };
+          Object.Checksum.value_exn ~algorithm:Sha1
+            ~value:
+              (Digestif.SHA1.(digest_string body |> to_raw_string)
+              |> Base64.encode_exn);
         ]
   | Some Sha256 ->
       checksum_response
         [
-          {
-            Object.Checksum.algorithm = Sha256;
-            value =
-              Digestif.SHA256.(digest_string body |> to_raw_string)
-              |> Base64.encode_exn;
-          };
+          Object.Checksum.value_exn ~algorithm:Sha256
+            ~value:
+              (Digestif.SHA256.(digest_string body |> to_raw_string)
+              |> Base64.encode_exn);
         ]
   | Some _ -> empty_checksum
 

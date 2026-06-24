@@ -189,12 +189,10 @@ let missing_https_connector_error =
      ~https:Awskit_eio.http_only and an explicit http:// endpoint."
 
 let descriptor_for_string body =
-  {
-    Awskit.Body.Request.content_length =
-      Some (String.length body |> Int64.of_int);
-    payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
-    replayable = true;
-  }
+  Awskit.Body.Request.descriptor_exn
+    ~content_length:(String.length body |> Int64.of_int)
+    ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string body)
+    ~replayable:true ()
 
 let empty_request_body =
   Source (descriptor_for_string "", Cohttp_eio.Body.of_string "")

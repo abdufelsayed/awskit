@@ -133,12 +133,10 @@ module Runtime = struct
   let s3_endpoint_config _ = Awskit_s3.default_endpoint_config
 
   let descriptor_for_string body =
-    {
-      Awskit.Body.Request.content_length =
-        Some (Int64.of_int (String.length body));
-      payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
-      replayable = true;
-    }
+    Awskit.Body.Request.descriptor_exn
+      ~content_length:(Int64.of_int (String.length body))
+      ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string body)
+      ~replayable:true ()
 
   let empty_request_body = Body (descriptor_for_string "", Ok "")
   let string_request_body value = Body (descriptor_for_string value, Ok value)
@@ -632,19 +630,20 @@ let remove_download_temps path =
   List.iter remove_file (download_temp_paths path)
 
 let check_body_descriptor label ~content_length ~replayable body =
-  let descriptor = Runtime.Request_body.descriptor body in
-  let open Awskit.Body.Request in
+  let body_descriptor = Runtime.Request_body.descriptor body in
   Alcotest.(check (option int64))
     (label ^ " content length")
-    (Some content_length) descriptor.content_length;
-  Alcotest.(check bool) (label ^ " replayable") replayable descriptor.replayable
+    (Some content_length) body_descriptor.content_length;
+  Alcotest.(check bool)
+    (label ^ " replayable") replayable body_descriptor.replayable
 
 let body_or_fail label = function
   | Ok body -> body
   | Error error -> Alcotest.failf "%s: %a" label Awskit_s3.Error.pp error
 
 let checksum_value : Awskit_s3.Object.Checksum.value =
-  { algorithm = Awskit_s3.Object.Checksum.Algorithm.Sha256; value = "checksum" }
+  Awskit_s3.Object.Checksum.value_exn
+    ~algorithm:Awskit_s3.Object.Checksum.Algorithm.Sha256 ~value:"checksum"
 
 let test_transfer_option_builders_reject_invalid_options _env () =
   check_validation_result "upload concurrency" "concurrency"

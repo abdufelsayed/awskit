@@ -1,7 +1,9 @@
 module Clock = Simulator_state.Clock
 
-type config = Simulator_state.config = { max_list_keys : int }
+type config = Simulator_state.config = private { max_list_keys : int }
 
+let config = Simulator_state.create_config
+let config_exn = Simulator_state.create_config_exn
 let default_config = Simulator_state.default_config
 
 type store = Simulator_state.store

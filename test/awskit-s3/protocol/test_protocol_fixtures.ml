@@ -401,7 +401,7 @@ let test_retry_decision_fixture () =
   check_fixture "retry decision trace" [ "retry"; "slow-down.expected" ] ~actual
 
 let checksum value : Object.Checksum.value =
-  { algorithm = Object.Checksum.Algorithm.Sha256; value }
+  Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256 ~value
 
 let test_multipart_complete_xml_fixture () =
   let upload =
