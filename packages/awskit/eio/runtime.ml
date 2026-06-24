@@ -455,28 +455,27 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
                       (Awskit.Error.Producer.transport ~retryable:true message))
             )
       in
+      let run_attempt () =
+        try
+          Eio.Switch.run ~name:"awskit http attempt" (fun call_sw ->
+              run_call ~call_sw)
+        with
+        | Early_response -> (
+            match !early_result with
+            | Some result -> result
+            | None -> Error (body_error "missing early response result"))
+        | Callback_raised exn -> raise exn
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> (
+            match !request_body_escaped_exn with
+            | Some escaped -> raise escaped
+            | None -> (
+                match !request_body_stream_error with
+                | Some error -> Error error
+                | None -> raise exn))
+      in
       with_timeout_result conn.time_clock conn.timeout_policy `Operation
-        (fun () ->
-          match request_body with
-          | Source _ -> run_call ~call_sw:conn.sw
-          | Stream _ -> (
-              try
-                Eio.Switch.run ~name:"awskit stream request body attempt"
-                  (fun request_body_sw -> run_call ~call_sw:request_body_sw)
-              with
-              | Early_response -> (
-                  match !early_result with
-                  | Some result -> result
-                  | None -> Error (body_error "missing early response result"))
-              | Callback_raised exn -> raise exn
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn -> (
-                  match !request_body_escaped_exn with
-                  | Some escaped -> raise escaped
-                  | None -> (
-                      match !request_body_stream_error with
-                      | Some error -> Error error
-                      | None -> raise exn))))
+        run_attempt
 
 type connection = conn
 type 'a t = 'a
@@ -510,12 +509,22 @@ let read_response_body reader bytes ~off ~len =
   else if invalid_read_bounds bytes ~off ~len then
     Error (Awskit.Error.Producer.body "invalid read bounds")
   else
-    with_timeout_result reader.time_clock reader.timeout_policy `Response_body
-      (fun () ->
-        try read_from_current reader bytes ~off ~len with
-        | End_of_file -> Ok 0
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Awskit.Error.Producer.body (Exn.to_string exn)))
+    match
+      with_timeout_result reader.time_clock reader.timeout_policy `Response_body
+        (fun () ->
+          try read_from_current reader bytes ~off ~len with
+          | End_of_file -> Ok 0
+          | Eio.Cancel.Cancelled _ as exn ->
+              close_response_body_reader reader;
+              raise exn
+          | exn ->
+              close_response_body_reader reader;
+              Error (Awskit.Error.Producer.body (Exn.to_string exn)))
+    with
+    | Error _ as error ->
+        close_response_body_reader reader;
+        error
+    | Ok _ as ok -> ok
 
 let next_response_body ?(chunk_size = 8192) reader =
   if chunk_size <= 0 then
@@ -548,13 +557,17 @@ let discard_response_body_reader (reader : response_body_reader)
       discard_reader reader ~remaining:body.max_response_drain_bytes
         ~max_response_drain_bytes:body.max_response_drain_bytes)
 
-let discard_response_body_after_exception reader body exn =
-  Eio.Cancel.protect (fun () ->
-      match discard_response_body_reader reader body with
-      | Ok () | Error _ -> ()
-      | exception _ -> ());
-  close_response_body_reader reader;
-  raise exn
+let discard_response_body_after_exception reader body = function
+  | Eio.Cancel.Cancelled _ as exn ->
+      close_response_body_reader reader;
+      raise exn
+  | exn ->
+      Eio.Cancel.protect (fun () ->
+          match discard_response_body_reader reader body with
+          | Ok () | Error _ -> ()
+          | exception _ -> ());
+      close_response_body_reader reader;
+      raise exn
 
 let with_response_body (body : response_body) ~consume =
   let reader =

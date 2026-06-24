@@ -570,6 +570,76 @@ let test_container_credentials_provider () =
         "container uri" "http://169.254.170.2/v2/credentials/task-role" uri
   | _ -> Alcotest.fail "unexpected container metadata request"
 
+let with_temp_fifo f =
+  let path = Stdlib.Filename.temp_file "awskit-token" ".fifo" in
+  Stdlib.Sys.remove path;
+  Unix.mkfifo path 0o600;
+  Exn.protect
+    ~f:(fun () -> f path)
+    ~finally:(fun () ->
+      try Stdlib.Sys.remove path with Sys_error _ | Unix.Unix_error _ -> ())
+
+let open_fifo_writer path =
+  let rec loop attempts =
+    match Unix.openfile path [ Unix.O_WRONLY; Unix.O_NONBLOCK ] 0 with
+    | fd -> Lwt.return fd
+    | exception Unix.Unix_error (Unix.ENXIO, _, _) when attempts > 0 ->
+        Lwt.bind (Lwt.pause ()) (fun () -> loop (attempts - 1))
+    | exception exn -> Lwt.fail exn
+  in
+  loop 1_000
+
+let test_container_token_file_read_cancellation_propagates () =
+  with_temp_fifo (fun token_file ->
+      let writer_fd = ref None in
+      Exn.protect
+        ~finally:(fun () ->
+          Option.iter !writer_fd ~f:(fun fd ->
+              try Unix.close fd with Unix.Unix_error _ -> ()))
+        ~f:(fun () ->
+          let getenv =
+            getenv_of_assoc
+              [
+                ( "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+                  "http://127.0.0.1/credentials" );
+                ("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE", token_file);
+              ]
+          in
+          let http_call ~meth:_ ~headers:_ _uri =
+            Alcotest.fail "metadata HTTP call should not be attempted"
+          in
+          let provider =
+            Awskit_lwt_unix.Credentials.container_provider ~getenv ~http_call ()
+          in
+          let observed =
+            Lwt_main.run
+              (let resolution =
+                 Awskit_lwt_unix.Credentials.Provider.resolve provider
+               in
+               Lwt.bind (open_fifo_writer token_file) (fun fd ->
+                   writer_fd := Some fd;
+                   Lwt.bind (Lwt.pause ()) (fun () ->
+                       Lwt.cancel resolution;
+                       Lwt.catch
+                         (fun () ->
+                           Lwt.map (fun result -> `Returned result) resolution)
+                         (fun exn -> Lwt.return (`Raised exn)))))
+          in
+          match observed with
+          | `Raised Lwt.Canceled -> ()
+          | `Raised exn ->
+              Alcotest.failf "unexpected exception: %s" (Exn.to_string exn)
+          | `Returned (Failed error) | `Returned (Invalid error) ->
+              Alcotest.failf "token file cancellation became SDK error: %a"
+                Awskit.Error.pp error
+          | `Returned (Resolved credentials) ->
+              Alcotest.failf "unexpected credentials: %s"
+                (Awskit.Credentials.access_key_id credentials)
+          | `Returned (Unavailable unavailable) ->
+              Alcotest.failf "unexpected unavailable credentials from %s: %s"
+                (provider_source_to_string unavailable.source)
+                unavailable.reason))
+
 let test_container_full_uri_rejects_untrusted_http () =
   let getenv =
     getenv_of_assoc
@@ -1276,6 +1346,8 @@ let suite () =
           test_default_lwt_unix_provider_stops_on_explicit_empty_profile_files;
         Alcotest.test_case "container credentials provider" `Quick
           test_container_credentials_provider;
+        Alcotest.test_case "container token file cancellation propagates" `Quick
+          test_container_token_file_read_cancellation_propagates;
         Alcotest.test_case "container full uri rejects untrusted http" `Quick
           test_container_full_uri_rejects_untrusted_http;
         Alcotest.test_case "container metadata HTTP 500 fails provider" `Quick

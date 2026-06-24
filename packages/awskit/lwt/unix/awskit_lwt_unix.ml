@@ -222,10 +222,13 @@ module Credentials = struct
       (fun () ->
         Lwt.bind (Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read)
           (fun contents -> Lwt.return_ok (trim contents)))
-      (fun exn ->
-        Lwt.return_error
-          (validation ~field:path
-             (Printf.sprintf "failed to read file: %s" (Printexc.to_string exn))))
+      (function
+        | Lwt.Canceled -> Lwt.fail Lwt.Canceled
+        | exn ->
+            Lwt.return_error
+              (validation ~field:path
+                 (Printf.sprintf "failed to read file: %s"
+                    (Printexc.to_string exn))))
 
   let getenv_opt name = Stdlib.Sys.getenv_opt name
 
