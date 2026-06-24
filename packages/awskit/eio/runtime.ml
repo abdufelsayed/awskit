@@ -87,6 +87,7 @@ type response_body_reader = {
   mutable active : bool;
   mutable chunk : string;
   mutable offset : int;
+  mutable eof : bool;
 }
 
 type request_body_bridge = {
@@ -497,6 +498,7 @@ let rec read_from_current reader bytes ~off ~len =
     reader.offset <- reader.offset + copied;
     Ok copied
   end
+  else if reader.eof then Ok 0
   else
     let buffer = Cstruct.create 0x8000 in
     let read = Eio.Flow.single_read reader.body buffer in
@@ -513,7 +515,9 @@ let read_response_body reader bytes ~off ~len =
       with_timeout_result reader.time_clock reader.timeout_policy `Response_body
         (fun () ->
           try read_from_current reader bytes ~off ~len with
-          | End_of_file -> Ok 0
+          | End_of_file ->
+              reader.eof <- true;
+              Ok 0
           | Eio.Cancel.Cancelled _ as exn ->
               close_response_body_reader reader;
               raise exn
@@ -578,6 +582,7 @@ let with_response_body (body : response_body) ~consume =
       active = true;
       chunk = "";
       offset = 0;
+      eof = false;
     }
   in
   match consume reader with
@@ -605,6 +610,7 @@ let discard_response_body (body : response_body) =
       active = true;
       chunk = "";
       offset = 0;
+      eof = false;
     }
     body
 

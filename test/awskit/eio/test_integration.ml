@@ -330,6 +330,57 @@ let request_body_request_for_endpoint endpoint =
   in
   Awskit.Request.create_exn ~method_:`PUT ~target ()
 
+let with_eio_chunked_keep_alive_response_server env ~response_body test =
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let listening_socket =
+    try
+      Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:1
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+    with exn when listener_bind_denied_by_sandbox exn -> Alcotest.skip ()
+  in
+  let port =
+    match Eio.Net.listening_addr listening_socket with
+    | `Tcp (_, port) -> port
+    | _ -> Alcotest.fail "expected TCP listening socket"
+  in
+  let hold_open, resolve_hold_open = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+      Eio.Net.accept_fork listening_socket ~sw
+        ~on_error:(fun _ -> ())
+        (fun flow _addr ->
+          let input = Eio.Buf_read.of_flow ~max_size:Int.max_value flow in
+          let rec read_headers () =
+            match Eio.Buf_read.line input with "" -> () | _ -> read_headers ()
+          in
+          read_headers ();
+          Eio.Buf_write.with_flow flow (fun output ->
+              Eio.Buf_write.string output
+                (Fmt.str
+                   "HTTP/1.1 200 test\r\n\
+                    Transfer-Encoding: chunked\r\n\
+                    Connection: keep-alive\r\n\
+                    \r\n\
+                    %x\r\n\
+                    %s\r\n\
+                    0\r\n\
+                    \r\n"
+                   (String.length response_body)
+                   response_body);
+              Eio.Buf_write.flush output;
+              Eio.Promise.await hold_open)));
+  let endpoint = Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port () in
+  let release_server () =
+    ignore (Eio.Promise.try_resolve resolve_hold_open () : bool)
+  in
+  match test endpoint with
+  | result ->
+      release_server ();
+      result
+  | exception exn ->
+      release_server ();
+      raise exn
+
 let test_https_request_requires_connector env =
   Eio.Switch.run @@ fun sw ->
   let conn = request_conn env sw in
@@ -353,6 +404,23 @@ let test_https_request_requires_connector env =
 let read_response_body_to_string body =
   Awskit_eio.Runtime.Response_body.with_reader body ~consume:(fun reader ->
       Ok (read_all reader (Buffer.create 128)))
+
+let test_no_read_past_response_eof env =
+  let timeout_policy = Awskit.Timeout.create_exn ~drain:tiny_span () in
+  with_eio_chunked_keep_alive_response_server env ~response_body:"hello"
+    (fun endpoint ->
+      Eio.Switch.run @@ fun sw ->
+      let conn = request_conn ~timeout_policy env sw in
+      let request = request_body_request_for_endpoint endpoint in
+      match
+        Awskit_eio.Runtime.Transport.with_response conn request
+          ~body:Awskit_eio.Runtime.Request_body.empty
+          ~consume:(fun _ response_body ->
+            read_response_body_to_string response_body)
+      with
+      | Ok payload -> Alcotest.(check string) "consumed body" "hello" payload
+      | Error error ->
+          Alcotest.failf "unexpected body read error: %a" Awskit.Error.pp error)
 
 let test_stream_request_body_emits_multiple_chunks env =
   let request_body = ref None in
@@ -881,6 +949,8 @@ let suite env =
         Alcotest.test_case "response read cancellation skips drain cleanup"
           `Quick (fun () ->
             test_response_read_cancellation_skips_drain_cleanup env);
+        Alcotest.test_case "does not read response body past EOF" `Quick
+          (fun () -> test_no_read_past_response_eof env);
         Alcotest.test_case "discard body limit" `Quick (fun () ->
             test_discard_response_body_enforces_limit env);
         Alcotest.test_case "scoped drain body limit" `Quick (fun () ->
