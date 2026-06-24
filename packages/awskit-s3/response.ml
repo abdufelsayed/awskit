@@ -22,12 +22,26 @@ let response_bool_header response name =
                (Fmt.str "invalid boolean value %S" value)))
 
 let response_etag response =
-  option_map_result Object.Etag.of_string
-    (Awskit.Response.header response "etag")
+  match Awskit.Response.header response "etag" with
+  | None -> Ok None
+  | Some value -> (
+      match Object.Etag.of_string value with
+      | Ok etag -> Ok (Some etag)
+      | Error error ->
+          Error
+            (decode_with_context ~what:"etag response header"
+               (Awskit.Error.to_string_hum error)))
 
 let response_version response =
-  option_map_result Object.Version_id.of_string
-    (Awskit.Response.header response "x-amz-version-id")
+  match Awskit.Response.header response "x-amz-version-id" with
+  | None -> Ok None
+  | Some value -> (
+      match Object.Version_id.of_string value with
+      | Ok version -> Ok (Some version)
+      | Error error ->
+          Error
+            (decode_with_context ~what:"x-amz-version-id response header"
+               (Awskit.Error.to_string_hum error)))
 
 let response_checksum response =
   let find algorithm header =
@@ -101,14 +115,29 @@ let response_content_range response =
   option_map_result Range.Content_range.of_header
     (Awskit.Response.header response "content-range")
 
+let response_time_header response name =
+  match Awskit.Response.header response name with
+  | None -> Ok None
+  | Some value -> (
+      match ptime_of_string value with
+      | Some time -> Ok (Some time)
+      | None ->
+          Error
+            (decode_with_context
+               ~what:(Fmt.str "%s response header" name)
+               (Fmt.str "invalid timestamp value %S" value)))
+
 let object_info response =
   let* etag = response_etag response in
   let* storage_class = storage_class response in
-  let* content_length = Awskit.Response.header_int response "content-length" in
+  let* content_length =
+    Awskit.Response.header_int64 response "content-length"
+  in
   let* version_id = response_version response in
   let* content_type = response_content_type response in
   let* content_range = response_content_range response in
   let* server_side_encryption = response_encryption response in
+  let* last_modified = response_time_header response "last-modified" in
   let* metadata =
     Metadata_headers.of_headers (Awskit.Response.headers response)
   in
@@ -116,12 +145,9 @@ let object_info response =
     {
       Get_object.etag;
       content_type;
-      content_length = Option.map Int64.of_int content_length;
+      content_length;
       content_range;
-      last_modified =
-        Option.bind
-          (Awskit.Response.header response "last-modified")
-          ptime_of_string;
+      last_modified;
       metadata;
       storage_class;
       version_id;
@@ -146,12 +172,17 @@ let delete_result response =
   let* delete_marker = response_bool_header response "x-amz-delete-marker" in
   Ok { Delete_object.delete_marker; version_id; response }
 
+let first_some first second =
+  match first with Some _ -> first | None -> second
+
 let embedded_service_error response body =
+  let error = Xml.service_error body in
   Awskit.Error.Producer.service
     ~status:(Awskit.Response.status response)
-    ?code:(Xml.service_code body) ?message:(Xml.service_message body)
-    ?request_id:(Awskit.Response.request_id response)
-    ?host_id:(Awskit.Response.host_id response)
+    ?code:error.code ?message:error.message
+    ?request_id:
+      (first_some (Awskit.Response.request_id response) error.request_id)
+    ?host_id:(first_some (Awskit.Response.host_id response) error.host_id)
     ~headers:(Awskit.Response.headers response)
     ~body ()
 
@@ -160,15 +191,28 @@ let copy_result response body =
   | Error _ as error -> error
   | Ok ("Error", _) -> Error (embedded_service_error response body)
   | Ok ("CopyObjectResult", nodes) ->
-      let etag = Xml.child_text "ETag" nodes in
-      let last_modified =
-        Option.bind (Xml.child_text "LastModified" nodes) ptime_of_string
+      let* etag =
+        Xml.optional_child_result ~path:"CopyObjectResult" "ETag"
+          Object.Etag.of_string nodes
       in
-      let* etag = option_map_result Object.Etag.of_string etag in
+      let* last_modified =
+        Xml.optional_child_parse ~path:"CopyObjectResult" "LastModified"
+          ptime_of_string nodes
+      in
       let* version_id = response_version response in
       let* copy_source_version_id =
-        option_map_result Object.Version_id.of_string
-          (Awskit.Response.header response "x-amz-copy-source-version-id")
+        match
+          Awskit.Response.header response "x-amz-copy-source-version-id"
+        with
+        | None -> Ok None
+        | Some value -> (
+            match Object.Version_id.of_string value with
+            | Ok version -> Ok (Some version)
+            | Error error ->
+                Error
+                  (decode_with_context
+                     ~what:"x-amz-copy-source-version-id response header"
+                     (Awskit.Error.to_string_hum error)))
       in
       Ok
         {

@@ -38,8 +38,9 @@ module Target : sig
     ?query:(string * string list) list ->
     unit ->
     (t, Error.t) result
-  (** Create a target. [path] must be absolute and [query] is not encoded until
-      signing or request serialization. *)
+  (** Create a target. [path] must be absolute and already encoded for
+      transport. [query] is kept structured and encoded during signing or
+      request serialization. *)
 
   val create_exn :
     scheme:Endpoint.Scheme.t ->
@@ -56,7 +57,8 @@ module Target : sig
   (** Host plus optional port. *)
 
   val path_and_query : t -> string
-  (** Render the path and canonical query string for transport. *)
+  (** Render the encoded path and structured query string for transport. Query
+      order is preserved; signing applies SigV4 canonical sorting separately. *)
 end
 
 type t = private {

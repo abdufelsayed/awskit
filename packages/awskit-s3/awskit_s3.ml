@@ -1025,13 +1025,21 @@ module Make (R : RUNTIME) = struct
 
     let discard_response_body = R.Response_body.discard
 
+    let first_some first second =
+      match first with Some _ -> first | None -> second
+
     let service_error response body =
+      let error =
+        match body with
+        | None -> Common.Xml.empty_service_error
+        | Some body -> Common.Xml.service_error body
+      in
       Awskit.Error.Producer.service
         ~status:(Awskit.Response.status response)
-        ?code:(Option.bind body Common.Xml.service_code)
-        ?message:(Option.bind body Common.Xml.service_message)
-        ?request_id:(Awskit.Response.request_id response)
-        ?host_id:(Awskit.Response.host_id response)
+        ?code:error.code ?message:error.message
+        ?request_id:
+          (first_some (Awskit.Response.request_id response) error.request_id)
+        ?host_id:(first_some (Awskit.Response.host_id response) error.host_id)
         ~headers:(Awskit.Response.headers response)
         ?body ()
 

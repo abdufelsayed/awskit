@@ -55,7 +55,7 @@ let test_object_checksum_headers_and_response () =
       checksum = Some checksum;
       content_type = Some (content_type "text/plain");
       metadata = Metadata.of_list_exn [ ("source", "unit-test") ];
-      tags = tag_set [ tag "env" "prod" ];
+      tags = tag_set [ tag "env name" "prod+stage"; tag "path/key" "x@y" ];
       expected_bucket_owner = Some (account_id "123456789012");
     }
   in
@@ -86,7 +86,7 @@ let test_object_checksum_headers_and_response () =
     "metadata" (Some "unit-test")
     (header "x-amz-meta-source" call.request.headers);
   Alcotest.(check (option string))
-    "tags" (Some "env=prod")
+    "tags" (Some "env%20name=prod%2Bstage&path%2Fkey=x%40y")
     (header "x-amz-tagging" call.request.headers);
   Alcotest.(check (option string))
     "no checksum algorithm header" None
@@ -437,6 +437,62 @@ let test_object_get_rejects_malformed_content_range () =
   | Error error when is_decode_error error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected malformed Content-Range decode error"
+
+let test_object_head_parses_int64_content_length () =
+  let large_content_length = 9_223_372_036_854_775_807L in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:
+            [
+              ("etag", "\"etag\"");
+              ("content-length", Int64.to_string large_content_length);
+            ]
+          "";
+      ]
+  in
+  let result =
+    Recording_s3.Object.head conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "huge.bin") ()
+    |> ok_or_fail "head huge object"
+  in
+  Alcotest.(check (option int64))
+    "content length" (Some large_content_length) result.content_length
+
+let test_object_head_rejects_malformed_known_headers () =
+  let cases =
+    [
+      ("etag", [ ("etag", ""); ("content-length", "0") ], "etag");
+      ( "last modified",
+        [
+          ("etag", "\"etag\"");
+          ("content-length", "0");
+          ("last-modified", "not-a-time");
+        ],
+        "last-modified" );
+      ( "content length",
+        [ ("etag", "\"etag\""); ("content-length", "-1") ],
+        "content-length" );
+    ]
+  in
+  List.iter
+    (fun (label, headers, field) ->
+      let conn = Recording_runtime.connect [ response 200 ~headers "" ] in
+      match
+        Recording_s3.Object.head conn ~bucket:(bucket_name "my-bucket")
+          ~key:(object_key "file") ()
+      with
+      | Error error when is_decode_error error ->
+          let text = Awskit.Error.to_string_hum error in
+          Alcotest.(check bool)
+            (label ^ " mentions field")
+            true
+            (string_contains text ~substring:field)
+      | Error error ->
+          Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+      | Ok _ -> Alcotest.failf "%s: expected decode error" label)
+    cases
 
 let test_delete_objects_request_body () =
   let conn = Recording_runtime.connect [ response 200 "<DeleteResult/>" ] in
@@ -1425,6 +1481,35 @@ let test_copy_object_embedded_error () =
   | Error error -> Alcotest.failf "unexpected copy error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected embedded copy error"
 
+let test_copy_object_rejects_malformed_result_fields () =
+  let cases =
+    [
+      ("etag", {|<CopyObjectResult><ETag></ETag></CopyObjectResult>|}, "ETag");
+      ( "last modified",
+        {|<CopyObjectResult><ETag>"copy"</ETag><LastModified>not-a-time</LastModified></CopyObjectResult>|},
+        "LastModified" );
+    ]
+  in
+  List.iter
+    (fun (label, body, field) ->
+      let conn = Recording_runtime.connect [ response 200 body ] in
+      match
+        Recording_s3.Object.copy conn ~source_bucket:(bucket_name "my-bucket")
+          ~source_key:(object_key "file")
+          ~destination_bucket:(bucket_name "my-bucket")
+          ~destination_key:(object_key "copy") ()
+      with
+      | Error error when is_decode_error error ->
+          let text = Awskit.Error.to_string_hum error in
+          Alcotest.(check bool)
+            (label ^ " mentions field")
+            true
+            (string_contains text ~substring:field)
+      | Error error ->
+          Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+      | Ok _ -> Alcotest.failf "%s: expected decode error" label)
+    cases
+
 let test_object_checksum_mode_and_expected_owner_headers () =
   let expected_owner = account_id "123456789012" in
   let copy_body =
@@ -1561,6 +1646,10 @@ let suite =
           test_object_convenience_get_validates_max_bytes;
         Alcotest.test_case "object get rejects malformed content range" `Quick
           test_object_get_rejects_malformed_content_range;
+        Alcotest.test_case "object head parses int64 content length" `Quick
+          test_object_head_parses_int64_content_length;
+        Alcotest.test_case "object head rejects malformed known headers" `Quick
+          test_object_head_rejects_malformed_known_headers;
         Alcotest.test_case "delete objects request body" `Quick
           test_delete_objects_request_body;
         Alcotest.test_case "delete objects response decode" `Quick
@@ -1632,6 +1721,8 @@ let suite =
           test_head_rejects_duplicate_metadata_headers_as_decode_error;
         Alcotest.test_case "copy object embedded error" `Quick
           test_copy_object_embedded_error;
+        Alcotest.test_case "copy object rejects malformed result fields" `Quick
+          test_copy_object_rejects_malformed_result_fields;
         Alcotest.test_case "object checksum mode and expected owner headers"
           `Quick test_object_checksum_mode_and_expected_owner_headers;
       ] );

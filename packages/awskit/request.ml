@@ -37,27 +37,6 @@ module Method = struct
   let of_string_exn value = result_exn (of_string value)
 end
 
-let encode_query_component value =
-  let buf = Buffer.create (String.length value) in
-  String.iter value ~f:(fun c ->
-      match c with
-      | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' | '~' | '.' ->
-          Buffer.add_char buf c
-      | c -> Buffer.add_string buf (Fmt.str "%%%02X" (Char.to_int c)));
-  Buffer.contents buf
-
-let query_to_string query =
-  query
-  |> List.concat_map ~f:(fun (key, values) ->
-      match values with
-      | [] -> [ (key, "") ]
-      | values -> List.map values ~f:(fun value -> (key, value)))
-  |> List.map ~f:(fun (key, value) ->
-      Fmt.str "%s=%s"
-        (encode_query_component key)
-        (encode_query_component value))
-  |> String.concat ~sep:"&"
-
 let validate_host host =
   if String.is_empty host then invalid ~field:"host" "host must be non-empty"
   else if has_leading_or_trailing_ws host then
@@ -167,7 +146,7 @@ module Target = struct
     | Some port -> Fmt.str "%s:%d" t.host port
 
   let path_and_query t =
-    match query_to_string t.query with
+    match Aws_uri.render_query_params t.query with
     | "" -> t.path
     | query -> t.path ^ "?" ^ query
 end

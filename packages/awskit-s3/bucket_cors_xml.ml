@@ -65,6 +65,10 @@ let parse_rule nodes =
   let* allowed_methods =
     parse_methods (Xml.child_texts "AllowedMethod" nodes)
   in
+  let* max_age_seconds =
+    Xml.optional_child_parse ~path:"CORSRule" "MaxAgeSeconds"
+      non_negative_int_of_string_opt nodes
+  in
   Ok
     {
       Bucket.Cors.id = Xml.child_text "ID" nodes;
@@ -72,8 +76,7 @@ let parse_rule nodes =
       allowed_methods;
       allowed_headers = Xml.child_texts "AllowedHeader" nodes;
       expose_headers = Xml.child_texts "ExposeHeader" nodes;
-      max_age_seconds =
-        Option.bind (Xml.child_text "MaxAgeSeconds" nodes) int_of_string_opt;
+      max_age_seconds;
     }
 
 let parse body response =

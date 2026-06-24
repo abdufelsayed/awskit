@@ -92,6 +92,18 @@ let header_int t name =
             (Fmt.str "expected non-negative integer response header %s, got %s"
                name value))
 
+let header_int64 t name =
+  match header t name with
+  | None -> Ok None
+  | Some value -> (
+      match Int64.of_string_opt value with
+      | Some parsed when Int64.(parsed >= 0L) -> Ok (Some parsed)
+      | _ ->
+          decode
+            (Fmt.str
+               "expected non-negative 64-bit integer response header %s, got %s"
+               name value))
+
 let is_success t = t.status >= 200 && t.status < 300
 let request_id t = t.request_id
 let host_id t = t.host_id

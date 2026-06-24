@@ -167,23 +167,11 @@ let pp fmt t =
     (Format.pp_print_option Ptime.pp)
     t.expires_at
 
-let canonical_headers headers =
-  headers
-  |> List.map (fun (key, value) ->
-      (String.lowercase_ascii key, String.trim value))
-  |> List.sort compare
-
-let signed_headers_str headers = String.concat ";" (List.map fst headers)
-
-let canonical_headers_str headers =
-  headers
-  |> List.map (fun (key, value) -> key ^ ":" ^ value ^ "\n")
-  |> String.concat ""
-
 let validate_unique_header_names headers =
   let rec loop seen = function
     | [] -> Ok ()
     | (name, _) :: rest ->
+        let name = String.lowercase_ascii name in
         if List.exists (String.equal name) seen then
           invalid ~field:"header" "duplicate signed header: %s" name
         else loop (name :: seen) rest
@@ -292,14 +280,18 @@ let generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
   let credential =
     Fmt.str "%s/%s" (Awskit.Credentials.access_key_id credentials) scope
   in
-  let request_headers = canonical_headers signed_headers in
-  let signed_header_values =
-    canonical_headers
-      (("host", Awskit.Endpoint.authority request.endpoint) :: signed_headers)
+  let raw_signed_header_values =
+    ("host", Awskit.Endpoint.authority request.endpoint) :: signed_headers
   in
-  let* () = Awskit.Request.validate_headers signed_header_values in
-  let* () = validate_unique_header_names signed_header_values in
-  let signed_headers_param = signed_headers_str signed_header_values in
+  let* () = Awskit.Request.validate_headers raw_signed_header_values in
+  let* () = validate_unique_header_names raw_signed_header_values in
+  let request_headers = Awskit.Signing.canonical_headers signed_headers in
+  let signed_header_values =
+    Awskit.Signing.canonical_headers raw_signed_header_values
+  in
+  let signed_headers_param =
+    Awskit.Signing.signed_header_names signed_header_values
+  in
   let query =
     [
       ("X-Amz-Algorithm", [ "AWS4-HMAC-SHA256" ]);
@@ -322,7 +314,7 @@ let generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
         method_to_string method_;
         Awskit.Signing.uri_encode ~encode_slash:false request.signing_path;
         query_string;
-        canonical_headers_str signed_header_values;
+        Awskit.Signing.canonical_headers_block signed_header_values;
         signed_headers_param;
         "UNSIGNED-PAYLOAD";
       ]

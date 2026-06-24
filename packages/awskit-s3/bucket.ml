@@ -48,11 +48,7 @@ end
 
 module Get_location = struct
   type options = { expected_bucket_owner : Account_id.t option }
-
-  type result = {
-    region : Awskit.Region.t option;
-    response : Awskit.Response.t;
-  }
+  type result = { region : Awskit.Region.t; response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }

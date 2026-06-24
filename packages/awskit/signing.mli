@@ -17,9 +17,16 @@ val canonical_query_params : (string * string list) list -> string
 (** Sort parameters by name/value and URI-encode keys and values. Each key may
     appear multiple times with different values. *)
 
-val canonical_query : string -> string
-(** Parse, sort, and URI-encode a raw query string. Prefer
-    {!val:canonical_query_params} when already holding structured parameters. *)
+val canonical_headers : (string * string) list -> (string * string) list
+(** Return SigV4 canonical headers: lower-case names, normalized whitespace,
+    sorted names, and comma-joined duplicate names. *)
+
+val signed_header_names : (string * string) list -> string
+(** Render the semicolon-separated signed header name list from canonical
+    headers. *)
+
+val canonical_headers_block : (string * string) list -> string
+(** Render canonical headers as the newline-terminated SigV4 header block. *)
 
 val sign_request_params :
   credentials:Credentials.t ->
@@ -51,34 +58,3 @@ val sign_request_params_exn :
   signed_headers
 (** Like {!val:sign_request_params}, but raises [Error.Awskit_error] carrying
     the structured error on signing or validation failure. *)
-
-val sign_request :
-  credentials:Credentials.t ->
-  region:Region.t ->
-  service:string ->
-  method_:Request.Method.t ->
-  path:string ->
-  query:string ->
-  headers:(string * string) list ->
-  payload_hash:Body.Payload_hash.t ->
-  now:Ptime.t ->
-  (signed_headers, Error.t) result
-(** Sign a request from a raw query string.
-
-    Prefer {!val:sign_request_params} when constructing requests from structured
-    parameters, because repeated query keys are represented without reparsing.
-*)
-
-val sign_request_exn :
-  credentials:Credentials.t ->
-  region:Region.t ->
-  service:string ->
-  method_:Request.Method.t ->
-  path:string ->
-  query:string ->
-  headers:(string * string) list ->
-  payload_hash:Body.Payload_hash.t ->
-  now:Ptime.t ->
-  signed_headers
-(** Like {!val:sign_request}, but raises [Error.Awskit_error] carrying the
-    structured error on signing or validation failure. *)

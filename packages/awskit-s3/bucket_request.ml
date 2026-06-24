@@ -199,13 +199,29 @@ module Make (C : Request_context.S) = struct
                    | Error error -> return_error error
                    | Ok () ->
                        let region =
-                         Option.bind
-                           (Awskit.Response.header response
-                              "x-amz-bucket-region") (fun value ->
-                             Result.to_option (Awskit.Region.of_string value))
+                         match
+                           Awskit.Response.header response "x-amz-bucket-region"
+                         with
+                         | None -> Ok None
+                         | Some value -> (
+                             match Awskit.Region.of_string value with
+                             | Ok region -> Ok (Some region)
+                             | Error error ->
+                                 Error
+                                   (decode_with_context
+                                      ~what:
+                                        "x-amz-bucket-region response header"
+                                      (Awskit.Error.to_string_hum error)))
                        in
-                       return_ok
-                         { Head_bucket.name = bucket_name; region; response })))
+                       return_result return_error return_ok
+                         (Result.map
+                            (fun region ->
+                              {
+                                Head_bucket.name = bucket_name;
+                                region;
+                                response;
+                              })
+                            region))))
 
   let exists conn ~bucket ?options () =
     let* result = head conn ~bucket ?options () in

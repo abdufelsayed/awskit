@@ -552,6 +552,22 @@ let test_presigned_rejects_header_newline () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected header validation error"
 
+let test_presigned_folds_signed_header_whitespace () =
+  let options =
+    {
+      Presigned.Put_object.default_options with
+      extra_signed_headers = [ ("x-test", "  one \t  two   three  ") ];
+    }
+  in
+  let result =
+    Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ~options ()
+    |> ok_or_fail "presigned folded header"
+  in
+  Alcotest.(check (option string))
+    "folded header" (Some "one two three")
+    (header "x-test" (Presigned.signed_headers result))
+
 let test_presigned_rejects_unknown_checksum () =
   let checksum : Object.Checksum.value =
     {
@@ -668,6 +684,8 @@ let suite =
           test_presigned_rejects_duplicate_signed_headers;
         Alcotest.test_case "presigned rejects header newline" `Quick
           test_presigned_rejects_header_newline;
+        Alcotest.test_case "presigned folds signed header whitespace" `Quick
+          test_presigned_folds_signed_header_whitespace;
         Alcotest.test_case "presigned rejects unknown checksum" `Quick
           test_presigned_rejects_unknown_checksum;
         Alcotest.test_case "presigned accepts string region endpoint config"

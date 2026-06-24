@@ -138,9 +138,9 @@ module Make (Client : SUBJECT) = struct
     let location =
       Client.Bucket.get_location conn ~bucket () |> run_result "location"
     in
-    Alcotest.(check (option string))
-      "location" (Some "us-east-1")
-      (Option.map Region.to_string location.region);
+    Alcotest.(check string)
+      "location" "us-east-1"
+      (Region.to_string location.region);
     ignore (Client.Bucket.delete conn ~bucket () |> run_result "delete bucket");
     Alcotest.(check bool)
       "deleted bucket" false

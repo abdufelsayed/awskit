@@ -63,7 +63,9 @@ let tags_header tags =
       Some
         (tags
         |> List.map (fun tag ->
-            Uri.pct_encode (Tag.key tag) ^ "=" ^ Uri.pct_encode (Tag.value tag))
+            Awskit.Signing.uri_encode (Tag.key tag)
+            ^ "="
+            ^ Awskit.Signing.uri_encode (Tag.value tag))
         |> String.concat "&")
 
 let checksum_header_name = function

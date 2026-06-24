@@ -29,8 +29,8 @@ let get_header key headers =
 
 let test_get_vanilla () =
   let result =
-    Signing.sign_request_exn ~credentials:creds ~region ~service:"service"
-      ~method_:`GET ~path:"/" ~query:""
+    Signing.sign_request_params_exn ~credentials:creds ~region
+      ~service:"service" ~method_:`GET ~path:"/" ~query_params:[]
       ~headers:[ ("host", "example.amazonaws.com") ]
       ~payload_hash:(Payload_hash.sha256_of_string "")
       ~now:test_time
@@ -50,22 +50,22 @@ let test_get_vanilla () =
 
 let test_get_query_order () =
   let sign q =
-    Signing.sign_request_exn ~credentials:creds ~region ~service:"service"
-      ~method_:`GET ~path:"/" ~query:q
+    Signing.sign_request_params_exn ~credentials:creds ~region
+      ~service:"service" ~method_:`GET ~path:"/" ~query_params:q
       ~headers:[ ("host", "example.amazonaws.com") ]
       ~payload_hash:(Payload_hash.sha256_of_string "")
       ~now:test_time
   in
   Alcotest.(check string)
     "query param order doesn't matter"
-    (get_auth (sign "b=2&a=1").headers)
-    (get_auth (sign "a=1&b=2").headers)
+    (get_auth (sign [ ("b", [ "2" ]); ("a", [ "1" ]) ]).headers)
+    (get_auth (sign [ ("a", [ "1" ]); ("b", [ "2" ]) ]).headers)
 
 let test_post_with_body () =
   let body = "Action=ListUsers&Version=2010-05-08" in
   let sign payload =
-    Signing.sign_request_exn ~credentials:creds ~region ~service:"service"
-      ~method_:`POST ~path:"/" ~query:""
+    Signing.sign_request_params_exn ~credentials:creds ~region
+      ~service:"service" ~method_:`POST ~path:"/" ~query_params:[]
       ~headers:
         [
           ("host", "example.amazonaws.com");
@@ -93,8 +93,8 @@ let test_session_token () =
       ~session_token:"FakeSessionToken" ()
   in
   let sign c =
-    Signing.sign_request_exn ~credentials:c ~region ~service:"service"
-      ~method_:`GET ~path:"/" ~query:""
+    Signing.sign_request_params_exn ~credentials:c ~region ~service:"service"
+      ~method_:`GET ~path:"/" ~query_params:[]
       ~headers:[ ("host", "example.amazonaws.com") ]
       ~payload_hash:(Payload_hash.sha256_of_string "")
       ~now:test_time
@@ -117,8 +117,8 @@ let test_session_token () =
 
 let test_header_case () =
   let sign h =
-    Signing.sign_request_exn ~credentials:creds ~region ~service:"service"
-      ~method_:`GET ~path:"/" ~query:""
+    Signing.sign_request_params_exn ~credentials:creds ~region
+      ~service:"service" ~method_:`GET ~path:"/" ~query_params:[]
       ~headers:[ ("host", h) ]
       ~payload_hash:(Payload_hash.sha256_of_string "")
       ~now:test_time
@@ -130,8 +130,8 @@ let test_header_case () =
 
 let test_header_whitespace () =
   let sign h =
-    Signing.sign_request_exn ~credentials:creds ~region ~service:"service"
-      ~method_:`GET ~path:"/" ~query:""
+    Signing.sign_request_params_exn ~credentials:creds ~region
+      ~service:"service" ~method_:`GET ~path:"/" ~query_params:[]
       ~headers:[ ("host", h) ]
       ~payload_hash:(Payload_hash.sha256_of_string "")
       ~now:test_time
@@ -143,8 +143,8 @@ let test_header_whitespace () =
 
 let test_duplicate_host_rejected () =
   match
-    Signing.sign_request ~credentials:creds ~region ~service:"service"
-      ~method_:`GET ~path:"/" ~query:""
+    Signing.sign_request_params ~credentials:creds ~region ~service:"service"
+      ~method_:`GET ~path:"/" ~query_params:[]
       ~headers:
         [
           ("host", "example.amazonaws.com"); ("Host", "duplicate.amazonaws.com");
@@ -164,8 +164,8 @@ let test_duplicate_host_rejected () =
 
 let test_path_encoding () =
   let result =
-    Signing.sign_request_exn ~credentials:creds ~region ~service:"s3"
-      ~method_:`GET ~path:"/bucket/my key.txt" ~query:""
+    Signing.sign_request_params_exn ~credentials:creds ~region ~service:"s3"
+      ~method_:`GET ~path:"/bucket/my key.txt" ~query_params:[]
       ~headers:[ ("host", "s3.amazonaws.com") ]
       ~payload_hash:(Payload_hash.sha256_of_string "")
       ~now:test_time
@@ -174,29 +174,23 @@ let test_path_encoding () =
     "signs path with special chars" true
     (not (String.equal (get_auth result.headers) ""))
 
-let test_sign_request_params_matches_raw_query () =
-  let query_params =
-    [ ("prefix", [ "folder/a b.txt" ]); ("max-keys", [ "10" ]) ]
-  in
-  let raw_query = "prefix=folder/a b.txt&max-keys=10" in
-  let from_raw =
-    Signing.sign_request_exn ~credentials:creds ~region ~service:"s3"
-      ~method_:`GET ~path:"/bucket" ~query:raw_query
-      ~headers:[ ("host", "s3.amazonaws.com") ]
-      ~payload_hash:(Payload_hash.sha256_of_string "")
-      ~now:test_time
-  in
-  let from_params =
+let test_sign_request_params_canonicalizes_structured_query () =
+  let sign query_params =
     Signing.sign_request_params_exn ~credentials:creds ~region ~service:"s3"
       ~method_:`GET ~path:"/bucket" ~query_params
       ~headers:[ ("host", "s3.amazonaws.com") ]
       ~payload_hash:(Payload_hash.sha256_of_string "")
       ~now:test_time
   in
+  let left =
+    sign [ ("prefix", [ "folder/a b.txt" ]); ("max-keys", [ "10" ]) ]
+  in
+  let right =
+    sign [ ("max-keys", [ "10" ]); ("prefix", [ "folder/a b.txt" ]) ]
+  in
   Alcotest.(check string)
-    "structured query matches raw query"
-    (get_auth from_raw.headers)
-    (get_auth from_params.headers)
+    "structured query order canonicalizes" (get_auth left.headers)
+    (get_auth right.headers)
 
 (* ── credentials ─────────────────────────────────────────────────── *)
 
@@ -242,7 +236,7 @@ let suite =
         Alcotest.test_case "query param order" `Quick test_get_query_order;
         Alcotest.test_case "path encoding" `Quick test_path_encoding;
         Alcotest.test_case "structured query params" `Quick
-          test_sign_request_params_matches_raw_query;
+          test_sign_request_params_canonicalizes_structured_query;
       ] );
     ( "integration:sigv4:post",
       [ Alcotest.test_case "body affects signature" `Quick test_post_with_body ]

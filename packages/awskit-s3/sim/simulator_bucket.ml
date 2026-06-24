@@ -84,7 +84,7 @@ module Bucket = struct
     | Ok _ ->
         Ok
           {
-            Bucket.Get_location.region = Some (Runtime.Endpoint.region conn);
+            Bucket.Get_location.region = Runtime.Endpoint.region conn;
             response = response 200;
           }
 

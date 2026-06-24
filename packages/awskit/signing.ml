@@ -13,42 +13,8 @@ let ptime_to_date_time (t : Ptime.t) =
   (datestamp, amz_date)
 
 let sha256_hex s = Digestif.SHA256.(digest_string s |> to_hex)
-
-let uri_encode ?(encode_slash = true) s =
-  let buf = Buffer.create (String.length s) in
-  String.iter s ~f:(fun c ->
-      match c with
-      | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' | '~' | '.' ->
-          Buffer.add_char buf c
-      | '/' when not encode_slash -> Buffer.add_char buf c
-      | c -> Buffer.add_string buf (Fmt.str "%%%02X" (Char.to_int c)));
-  Buffer.contents buf
-
-let parse_raw_query query =
-  if String.is_empty query then []
-  else
-    String.split query ~on:'&'
-    |> List.filter ~f:(fun piece -> not (String.is_empty piece))
-    |> List.map ~f:(fun pair ->
-        match String.lsplit2 pair ~on:'=' with
-        | Some (key, value) -> (key, [ value ])
-        | None -> (pair, [ "" ]))
-
-let canonical_query_params params =
-  let pairs =
-    List.concat_map params ~f:(fun (key, values) ->
-        match values with
-        | [] -> [ (key, "") ]
-        | values -> List.map values ~f:(fun value -> (key, value)))
-    |> List.map ~f:(fun (key, value) -> (uri_encode key, uri_encode value))
-    |> List.sort ~compare:(fun (key_a, value_a) (key_b, value_b) ->
-        let key_compare = String.compare key_a key_b in
-        if key_compare <> 0 then key_compare else String.compare value_a value_b)
-  in
-  String.concat ~sep:"&"
-    (List.map pairs ~f:(fun (key, value) -> key ^ "=" ^ value))
-
-let canonical_query query = canonical_query_params (parse_raw_query query)
+let uri_encode = Aws_uri.encode
+let canonical_query_params = Aws_uri.canonical_query_params
 
 let normalize_header_value value =
   String.strip value
@@ -56,7 +22,7 @@ let normalize_header_value value =
   |> List.filter ~f:(fun piece -> not (String.is_empty piece))
   |> String.concat ~sep:" "
 
-let canonicalize_headers headers =
+let canonical_headers headers =
   let grouped =
     List.map headers ~f:(fun (key, value) ->
         (String.lowercase key, normalize_header_value value))
@@ -69,6 +35,13 @@ let canonicalize_headers headers =
     | [] -> assert false
     | (key, value) :: rest ->
         (key, String.concat ~sep:"," (value :: List.map rest ~f:snd)))
+
+let signed_header_names headers =
+  String.concat ~sep:";" (List.map headers ~f:fst)
+
+let canonical_headers_block headers =
+  String.concat
+    (List.map headers ~f:(fun (key, value) -> key ^ ":" ^ value ^ "\n"))
 
 let validate_host_header headers =
   let hosts =
@@ -115,15 +88,9 @@ let sign_request_params ~credentials ~region ~service ~method_ ~path
           match validate_host_header base_headers with
           | Error _ as error -> error
           | Ok () ->
-              let sorted_headers = canonicalize_headers base_headers in
-              let signed_headers_str =
-                String.concat ~sep:";" (List.map sorted_headers ~f:fst)
-              in
-              let canonical_headers =
-                String.concat
-                  (List.map sorted_headers ~f:(fun (key, value) ->
-                       key ^ ":" ^ value ^ "\n"))
-              in
+              let sorted_headers = canonical_headers base_headers in
+              let signed_headers_str = signed_header_names sorted_headers in
+              let canonical_headers = canonical_headers_block sorted_headers in
               let canonical_request =
                 String.concat ~sep:"\n"
                   [
@@ -177,14 +144,3 @@ let sign_request_params_exn ~credentials ~region ~service ~method_ ~path
   result_exn
     (sign_request_params ~credentials ~region ~service ~method_ ~path
        ~query_params ~headers ~payload_hash ~now)
-
-let sign_request ~credentials ~region ~service ~method_ ~path ~query ~headers
-    ~payload_hash ~now =
-  sign_request_params ~credentials ~region ~service ~method_ ~path
-    ~query_params:(parse_raw_query query) ~headers ~payload_hash ~now
-
-let sign_request_exn ~credentials ~region ~service ~method_ ~path ~query
-    ~headers ~payload_hash ~now =
-  result_exn
-    (sign_request ~credentials ~region ~service ~method_ ~path ~query ~headers
-       ~payload_hash ~now)

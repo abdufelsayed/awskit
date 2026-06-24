@@ -242,6 +242,34 @@ let test_bucket_malformed_booleans_are_decode_errors () =
         ~bucket:(bucket_name "my-bucket") ())
     "BucketKeyEnabled"
 
+let test_bucket_cors_rejects_malformed_max_age () =
+  let cases =
+    [
+      ( "not-int",
+        {|<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin><AllowedMethod>GET</AllowedMethod><MaxAgeSeconds>not-int</MaxAgeSeconds></CORSRule></CORSConfiguration>|}
+      );
+      ( "negative",
+        {|<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin><AllowedMethod>GET</AllowedMethod><MaxAgeSeconds>-1</MaxAgeSeconds></CORSRule></CORSConfiguration>|}
+      );
+    ]
+  in
+  List.iter
+    (fun (label, body) ->
+      let conn = Recording_runtime.connect [ response 200 body ] in
+      match
+        Recording_s3.Bucket.Cors.get conn ~bucket:(bucket_name "my-bucket") ()
+      with
+      | Error error when is_decode_error error ->
+          let text = Awskit.Error.to_string_hum error in
+          Alcotest.(check bool)
+            (label ^ " mentions MaxAgeSeconds")
+            true
+            (string_contains text ~substring:"MaxAgeSeconds")
+      | Error error ->
+          Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+      | Ok _ -> Alcotest.failf "%s: expected MaxAgeSeconds decode error" label)
+    cases
+
 let test_bucket_empty_observed_enum_fields_are_decode_errors () =
   let check label call field =
     match call () with
@@ -372,6 +400,8 @@ let suite =
           test_bucket_forward_compatible_read_enums;
         Alcotest.test_case "bucket malformed booleans are decode errors" `Quick
           test_bucket_malformed_booleans_are_decode_errors;
+        Alcotest.test_case "bucket cors rejects malformed max age" `Quick
+          test_bucket_cors_rejects_malformed_max_age;
         Alcotest.test_case "bucket empty observed enum fields are decode errors"
           `Quick test_bucket_empty_observed_enum_fields_are_decode_errors;
         Alcotest.test_case "bucket observed unknown writes rejected" `Quick

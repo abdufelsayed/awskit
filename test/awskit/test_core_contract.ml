@@ -201,6 +201,18 @@ let test_request_response_contracts () =
   Alcotest.(check (result (option int) reject))
     "content length" (Ok (Some 42))
     (Awskit.Response.header_int response "content-length");
+  Alcotest.(check (result (option int64) reject))
+    "content length int64" (Ok (Some 42L))
+    (Awskit.Response.header_int64 response "content-length");
+  let large_content_length = 9_223_372_036_854_775_807L in
+  let large =
+    Awskit.Response.create_exn ~status:200
+      ~headers:[ ("content-length", Int64.to_string large_content_length) ]
+      ()
+  in
+  Alcotest.(check (result (option int64) reject))
+    "large content length int64" (Ok (Some large_content_length))
+    (Awskit.Response.header_int64 large "content-length");
   check_validation_error "bad response status"
     (Awskit.Response.create ~status:99 ());
   check_validation_error "bad response header"
@@ -236,17 +248,29 @@ let test_response_header_parse_failures_are_decode_errors () =
       Alcotest.failf "bad int header returned unexpected error: %a"
         Awskit.Error.pp error
   | Ok _ -> Alcotest.fail "expected malformed header decode error");
+  (match Awskit.Response.header_int64 malformed "content-length" with
+  | Error error when is_decode_error error -> ()
+  | Error error ->
+      Alcotest.failf "bad int64 header returned unexpected error: %a"
+        Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "expected malformed int64 header decode error");
   let negative =
     Awskit.Response.create_exn ~status:200
       ~headers:[ ("content-length", "-1") ]
       ()
   in
-  match Awskit.Response.header_int negative "content-length" with
+  (match Awskit.Response.header_int negative "content-length" with
   | Error error when is_decode_error error -> ()
   | Error error ->
       Alcotest.failf "negative int header returned unexpected error: %a"
         Awskit.Error.pp error
-  | Ok _ -> Alcotest.fail "expected negative header decode error"
+  | Ok _ -> Alcotest.fail "expected negative header decode error");
+  match Awskit.Response.header_int64 negative "content-length" with
+  | Error error when is_decode_error error -> ()
+  | Error error ->
+      Alcotest.failf "negative int64 header returned unexpected error: %a"
+        Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "expected negative int64 header decode error"
 
 let test_error_context_and_sexp () =
   let error =

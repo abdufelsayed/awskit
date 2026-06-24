@@ -35,6 +35,10 @@ val required_header : t -> string -> (string, Error.t) result
 val header_int : t -> string -> (int option, Error.t) result
 (** Parse an optional integer header. Invalid integer text is a decode error. *)
 
+val header_int64 : t -> string -> (int64 option, Error.t) result
+(** Parse an optional 64-bit integer header. Invalid integer text is a decode
+    error. *)
+
 val is_success : t -> bool
 (** [true] for HTTP 2xx statuses. *)
 

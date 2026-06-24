@@ -92,12 +92,12 @@ module Get_location : sig
   (** [GetBucketLocation] request options. *)
 
   type result = {
-    region : Awskit.Region.t option;
-        (** Bucket region, or [None] for S3's default-location encoding. *)
+    region : Awskit.Region.t;
+        (** Bucket region. S3's legacy empty default-location encoding is
+            normalized to [us-east-1]. *)
     response : Awskit.Response.t;  (** Raw response metadata. *)
   }
-  (** [GetBucketLocation] result metadata. [None] represents S3 responses that
-      encode the default region without a concrete location constraint. *)
+  (** [GetBucketLocation] result metadata. *)
 
   val default_options : options
   (** Default [GetBucketLocation] options: no owner guard. *)

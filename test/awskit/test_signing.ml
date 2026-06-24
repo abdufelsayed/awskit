@@ -101,15 +101,12 @@ let query_pair_gen =
 
 let test_canonical_query_sorted =
   QCheck.Test.make ~count:1000 ~name:"output is sorted"
-    QCheck.(
-      make
-        Gen.(
-          map
-            (fun pairs ->
-              String.concat "&" (List.map (fun (k, v) -> k ^ "=" ^ v) pairs))
-            (list_size (int_range 1 10) query_pair_gen)))
+    QCheck.(make Gen.(list_size (int_range 1 10) query_pair_gen))
     (fun query ->
-      let result = Signing.canonical_query query in
+      let result =
+        Signing.canonical_query_params
+          (List.map (fun (key, value) -> (key, [ value ])) query)
+      in
       let pairs = String.split_on_char '&' result in
       let rec is_sorted = function
         | [] | [ _ ] -> true
@@ -119,22 +116,17 @@ let test_canonical_query_sorted =
 
 let test_canonical_query_empty =
   QCheck.Test.make ~count:1 ~name:"empty in, empty out"
-    QCheck.(always "")
-    (fun s -> String.equal (Signing.canonical_query s) "")
+    QCheck.(always [])
+    (fun params -> String.equal (Signing.canonical_query_params params) "")
 
 let test_canonical_query_preserves_pairs =
   QCheck.Test.make ~count:1000 ~name:"preserves number of pairs"
-    QCheck.(
-      make
-        Gen.(
-          map
-            (fun pairs ->
-              ( pairs,
-                String.concat "&" (List.map (fun (k, v) -> k ^ "=" ^ v) pairs)
-              ))
-            (list_size (int_range 1 10) query_pair_gen)))
-    (fun (pairs, query) ->
-      let result = Signing.canonical_query query in
+    QCheck.(make Gen.(list_size (int_range 1 10) query_pair_gen))
+    (fun pairs ->
+      let result =
+        Signing.canonical_query_params
+          (List.map (fun (key, value) -> (key, [ value ])) pairs)
+      in
       let result_pairs = String.split_on_char '&' result in
       List.length pairs = List.length result_pairs)
 
@@ -145,8 +137,8 @@ let test_sign_deterministic =
     QCheck.(pair string string)
     (fun (path, payload) ->
       let sign () =
-        Signing.sign_request_exn ~credentials:creds ~region ~service:"s3"
-          ~method_:`GET ~path:("/" ^ path) ~query:""
+        Signing.sign_request_params_exn ~credentials:creds ~region ~service:"s3"
+          ~method_:`GET ~path:("/" ^ path) ~query_params:[]
           ~headers:[ ("host", "s3.amazonaws.com") ]
           ~payload_hash:(Payload_hash.sha256_of_string payload)
           ~now:fixed_time
@@ -164,8 +156,8 @@ let test_sign_has_required_headers =
     QCheck.(pair string string)
     (fun (path, payload) ->
       let result =
-        Signing.sign_request_exn ~credentials:creds ~region ~service:"s3"
-          ~method_:`GET ~path:("/" ^ path) ~query:""
+        Signing.sign_request_params_exn ~credentials:creds ~region ~service:"s3"
+          ~method_:`GET ~path:("/" ^ path) ~query_params:[]
           ~headers:[ ("host", "s3.amazonaws.com") ]
           ~payload_hash:(Payload_hash.sha256_of_string payload)
           ~now:fixed_time
@@ -181,8 +173,8 @@ let test_sign_signature_is_hex =
   QCheck.Test.make ~count:500 ~name:"signature is 64 hex chars" QCheck.string
     (fun payload ->
       let result =
-        Signing.sign_request_exn ~credentials:creds ~region ~service:"s3"
-          ~method_:`GET ~path:"/bucket/key" ~query:""
+        Signing.sign_request_params_exn ~credentials:creds ~region ~service:"s3"
+          ~method_:`GET ~path:"/bucket/key" ~query_params:[]
           ~headers:[ ("host", "s3.amazonaws.com") ]
           ~payload_hash:(Payload_hash.sha256_of_string payload)
           ~now:fixed_time
@@ -218,8 +210,8 @@ let test_sign_different_payloads =
     (fun (p1, p2) ->
       QCheck.assume (not (String.equal p1 p2));
       let sign payload =
-        Signing.sign_request_exn ~credentials:creds ~region ~service:"s3"
-          ~method_:`GET ~path:"/bucket/key" ~query:""
+        Signing.sign_request_params_exn ~credentials:creds ~region ~service:"s3"
+          ~method_:`GET ~path:"/bucket/key" ~query_params:[]
           ~headers:[ ("host", "s3.amazonaws.com") ]
           ~payload_hash:(Payload_hash.sha256_of_string payload)
           ~now:fixed_time
@@ -245,8 +237,8 @@ let expect_credentials label = function
 
 let test_sign_rejects_header_newline () =
   expect_validation "sign header newline"
-    (Signing.sign_request ~credentials:creds ~region ~service:"s3" ~method_:`GET
-       ~path:"/bucket/key" ~query:""
+    (Signing.sign_request_params ~credentials:creds ~region ~service:"s3"
+       ~method_:`GET ~path:"/bucket/key" ~query_params:[]
        ~headers:
          [ ("host", "s3.amazonaws.com"); ("x-test", "ok\r\nInjected: yes") ]
        ~payload_hash:(Payload_hash.sha256_of_string "")
@@ -259,8 +251,8 @@ let test_sign_rejects_expired_credentials () =
       ~secret_access_key:"SECRET" ?expires_at ()
   in
   expect_credentials "sign expired credentials"
-    (Signing.sign_request ~credentials ~region ~service:"s3" ~method_:`GET
-       ~path:"/bucket/key" ~query:""
+    (Signing.sign_request_params ~credentials ~region ~service:"s3"
+       ~method_:`GET ~path:"/bucket/key" ~query_params:[]
        ~headers:[ ("host", "s3.amazonaws.com") ]
        ~payload_hash:(Payload_hash.sha256_of_string "")
        ~now:fixed_time)

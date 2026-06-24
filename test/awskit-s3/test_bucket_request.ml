@@ -9,6 +9,11 @@ let service_headers error =
   | Service service -> service.headers
   | _ -> Alcotest.failf "expected service error: %a" Error.pp error
 
+let service_details error =
+  match Awskit.Error.kind error with
+  | Service service -> service
+  | _ -> Alcotest.failf "expected service error: %a" Error.pp error
+
 let check_query label expected (call : Recording_runtime.call) =
   Alcotest.(check (list (pair string (list string))))
     label expected call.request.target.query
@@ -83,6 +88,56 @@ let test_bucket_head_error_preserves_region_hints () =
       | Ok _ -> Alcotest.failf "expected status %d service error" status)
     [ 301; 307; 400; 403; 404 ]
 
+let test_bucket_head_rejects_malformed_region_hint () =
+  let conn =
+    Recording_runtime.connect
+      [ response 200 ~headers:[ ("x-amz-bucket-region", "") ] "" ]
+  in
+  match Recording_s3.Bucket.head conn ~bucket:(bucket_name "my-bucket") () with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions region header" true
+        (string_contains text ~substring:"x-amz-bucket-region")
+  | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected malformed region decode error"
+
+let test_service_error_extracts_body_fields () =
+  let body =
+    {|<Error><Code> SlowDown </Code><Message> reduce request rate </Message><RequestId>req-body</RequestId><HostId>host-body</HostId></Error>|}
+  in
+  let cases =
+    [
+      ("body ids", [], Some "req-body", Some "host-body");
+      ( "header ids",
+        [ ("x-amz-request-id", "req-header"); ("x-amz-id-2", "host-header") ],
+        Some "req-header",
+        Some "host-header" );
+    ]
+  in
+  List.iter
+    (fun (label, headers, request_id, host_id) ->
+      let conn =
+        Recording_runtime.connect ~retry_policy:Awskit.Retry.disabled
+          [ response 503 ~headers body ]
+      in
+      match
+        Recording_s3.Bucket.delete conn ~bucket:(bucket_name "my-bucket") ()
+      with
+      | Error error ->
+          let service = service_details error in
+          Alcotest.(check int) (label ^ " status") 503 service.status;
+          Alcotest.(check (option string))
+            (label ^ " code") (Some "SlowDown") service.code;
+          Alcotest.(check (option string))
+            (label ^ " message") (Some "reduce request rate") service.message;
+          Alcotest.(check (option string))
+            (label ^ " request id") request_id service.request_id;
+          Alcotest.(check (option string))
+            (label ^ " host id") host_id service.host_id
+      | Ok _ -> Alcotest.failf "%s: expected service error" label)
+    cases
+
 let test_bucket_list_parse () =
   let body =
     {|<ListAllMyBucketsResult><Buckets><Bucket><Name>alpha</Name><CreationDate>2026-04-08T12:00:00Z</CreationDate></Bucket><Bucket><Name>zeta</Name></Bucket></Buckets></ListAllMyBucketsResult>|}
@@ -108,6 +163,21 @@ let test_bucket_list_rejects_invalid_bucket_names () =
   | Error error ->
       Alcotest.failf "unexpected list decode error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected invalid bucket name decode error"
+
+let test_bucket_list_rejects_malformed_creation_date () =
+  let body =
+    {|<ListAllMyBucketsResult><Buckets><Bucket><Name>alpha</Name><CreationDate>not-a-time</CreationDate></Bucket></Buckets></ListAllMyBucketsResult>|}
+  in
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  match Recording_s3.Bucket.list conn with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions creation date" true
+        (string_contains text ~substring:"CreationDate")
+  | Error error ->
+      Alcotest.failf "unexpected list decode error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected malformed CreationDate decode error"
 
 let test_bucket_create_accepts_typed_region () =
   let conn = Recording_runtime.connect [ response 200 "" ] in
@@ -165,9 +235,9 @@ let test_bucket_fundamental_wire () =
       ~options:location_options ()
     |> ok_or_fail "get bucket location"
   in
-  Alcotest.(check (option string))
-    "location region" (Some "eu-west-1")
-    (Option.map Awskit.Region.to_string location.region);
+  Alcotest.(check string)
+    "location region" "eu-west-1"
+    (Awskit.Region.to_string location.region);
   ignore (Recording_s3.Bucket.list conn |> ok_or_fail "list buckets");
   match List.rev conn.calls with
   | [ create_default; create_regional; delete; location; list ] ->
@@ -203,6 +273,45 @@ let test_bucket_fundamental_wire () =
       Alcotest.(check string)
         "list host" "s3.us-east-1.amazonaws.com" list.request.target.host
   | _ -> Alcotest.fail "expected bucket fundamental calls"
+
+let test_bucket_location_default_and_legacy_region () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 "<LocationConstraint></LocationConstraint>";
+        response 200 "<LocationConstraint>EU</LocationConstraint>";
+      ]
+  in
+  let default_region =
+    Recording_s3.Bucket.get_location conn ~bucket:(bucket_name "my-bucket") ()
+    |> ok_or_fail "default location"
+  in
+  Alcotest.(check string)
+    "default region" "us-east-1"
+    (Awskit.Region.to_string default_region.region);
+  let eu =
+    Recording_s3.Bucket.get_location conn ~bucket:(bucket_name "my-bucket") ()
+    |> ok_or_fail "legacy EU location"
+  in
+  Alcotest.(check string)
+    "legacy EU region" "eu-west-1"
+    (Awskit.Region.to_string eu.region)
+
+let test_bucket_location_rejects_invalid_region () =
+  let conn =
+    Recording_runtime.connect
+      [ response 200 "<LocationConstraint>us&#x0A;west</LocationConstraint>" ]
+  in
+  match
+    Recording_s3.Bucket.get_location conn ~bucket:(bucket_name "my-bucket") ()
+  with
+  | Error error when is_decode_error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        "mentions location constraint" true
+        (string_contains text ~substring:"LocationConstraint")
+  | Error error -> Alcotest.failf "unexpected location error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected invalid location decode error"
 
 let test_bucket_expected_owner_headers () =
   let conn =
@@ -291,13 +400,23 @@ let suite =
           test_bucket_exists_uses_head;
         Alcotest.test_case "bucket head errors preserve region hints" `Quick
           test_bucket_head_error_preserves_region_hints;
+        Alcotest.test_case "bucket head rejects malformed region hint" `Quick
+          test_bucket_head_rejects_malformed_region_hint;
+        Alcotest.test_case "service error extracts body fields" `Quick
+          test_service_error_extracts_body_fields;
         Alcotest.test_case "bucket list parse" `Quick test_bucket_list_parse;
         Alcotest.test_case "bucket list rejects invalid bucket names" `Quick
           test_bucket_list_rejects_invalid_bucket_names;
+        Alcotest.test_case "bucket list rejects malformed creation date" `Quick
+          test_bucket_list_rejects_malformed_creation_date;
         Alcotest.test_case "bucket create accepts typed region" `Quick
           test_bucket_create_accepts_typed_region;
         Alcotest.test_case "bucket fundamental wire" `Quick
           test_bucket_fundamental_wire;
+        Alcotest.test_case "bucket location default and legacy region" `Quick
+          test_bucket_location_default_and_legacy_region;
+        Alcotest.test_case "bucket location rejects invalid region" `Quick
+          test_bucket_location_rejects_invalid_region;
         Alcotest.test_case "bucket expected owner headers" `Quick
           test_bucket_expected_owner_headers;
       ] );

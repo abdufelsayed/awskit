@@ -178,15 +178,40 @@ module Xml = struct
           (decode_with_context ~what:"XML document"
              (Fmt.str "expected %s root element, got %s" name actual))
 
-  let service_code body =
-    match root body with
-    | Error _ -> None
-    | Ok (_, nodes) -> child_text "Code" nodes
+  type service_error = {
+    code : string option;
+    message : string option;
+    request_id : string option;
+    host_id : string option;
+  }
 
-  let service_message body =
+  let empty_service_error =
+    { code = None; message = None; request_id = None; host_id = None }
+
+  let non_empty_child_text name nodes =
+    match child_text name nodes with
+    | None -> None
+    | Some value ->
+        let value = String.trim value in
+        if value = "" then None else Some value
+
+  let service_error body =
     match root body with
-    | Error _ -> None
-    | Ok (_, nodes) -> child_text "Message" nodes
+    | Error _ -> empty_service_error
+    | Ok (root_name, _) when root_name <> "Error" -> empty_service_error
+    | Ok (_, nodes) ->
+        {
+          code = non_empty_child_text "Code" nodes;
+          message = non_empty_child_text "Message" nodes;
+          request_id =
+            (match non_empty_child_text "RequestId" nodes with
+            | Some _ as request_id -> request_id
+            | None -> non_empty_child_text "RequestID" nodes);
+          host_id = non_empty_child_text "HostId" nodes;
+        }
+
+  let service_code body = (service_error body).code
+  let service_message body = (service_error body).message
 end
 
 module Error = struct
