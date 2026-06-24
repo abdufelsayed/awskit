@@ -100,17 +100,18 @@ service-specific. For S3, pass endpoint and addressing options directly to the
 
 {!module:Awskit.Signing} implements AWS Signature Version 4 without IO.
 
-Use [payload_hash] metadata instead of passing a raw body to signing:
+Use [payload_hash] metadata and structured query parameters instead of passing
+a raw body or pre-rendered query string to signing:
 
 {[
 let signed =
-  Awskit.Signing.sign_request
+  Awskit.Signing.sign_request_params
     ~credentials
     ~region
     ~service:"s3"
     ~method_:`PUT
     ~path:"/my-key"
-    ~query:""
+    ~query_params:[]
     ~headers:[ ("host", "my-bucket.s3.us-east-1.amazonaws.com") ]
     ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string "hello")
     ~now:Ptime.epoch

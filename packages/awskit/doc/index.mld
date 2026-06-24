@@ -137,13 +137,13 @@ let credentials =
 in
 let region = Awskit.Region.of_string_exn "us-east-1" in
 let payload_hash = Awskit.Body.Payload_hash.sha256_of_string "" in
-Awskit.Signing.sign_request
+Awskit.Signing.sign_request_params_exn
   ~credentials
   ~region
   ~service:"s3"
   ~method_:`GET
   ~path:"/my-key"
-  ~query:""
+  ~query_params:[]
   ~headers:[ ("host", "my-bucket.s3.us-east-1.amazonaws.com") ]
   ~payload_hash
   ~now:Ptime.epoch
