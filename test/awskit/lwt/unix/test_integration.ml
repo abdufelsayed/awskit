@@ -579,12 +579,25 @@ let with_temp_fifo f =
     ~finally:(fun () ->
       try Stdlib.Sys.remove path with Sys_error _ | Unix.Unix_error _ -> ())
 
-let open_fifo_writer path = Lwt_unix.openfile path [ Unix.O_WRONLY ] 0
+let close_unix_fd fd = try Unix.close fd with Unix.Unix_error _ -> ()
 
-let close_fifo_writer = function
+let close_lwt_unix_fd = function
   | None -> Lwt.return_unit
   | Some fd ->
       Lwt.catch (fun () -> Lwt_unix.close fd) (fun _ -> Lwt.return_unit)
+
+let rec wait_for_fifo_reader ?(attempts = 1_000) path =
+  let probe_reader_open () =
+    let fd = Unix.openfile path [ Unix.O_WRONLY; Unix.O_NONBLOCK ] 0 in
+    close_unix_fd fd
+  in
+  match probe_reader_open () with
+  | () -> Lwt.return_unit
+  | exception Unix.Unix_error (Unix.ENXIO, _, _) when attempts > 0 ->
+      Lwt.bind (Lwt_unix.sleep 0.001) (fun () ->
+          wait_for_fifo_reader ~attempts:(attempts - 1) path)
+  | exception Unix.Unix_error (Unix.ENXIO, _, _) ->
+      Lwt.fail (Failure "token file FIFO reader was not opened")
 
 let test_container_token_file_read_cancellation_propagates () =
   with_temp_fifo (fun token_file ->
@@ -602,40 +615,59 @@ let test_container_token_file_read_cancellation_propagates () =
       let provider =
         Awskit_lwt_unix.Credentials.container_provider ~getenv ~http_call ()
       in
+      (* Keep a writer open, then cancel only after the provider has opened the
+         FIFO reader and consumed partial bytes, leaving the read blocked on EOF. *)
       let observed =
         Lwt_main.run
-          (let resolution =
-             Awskit_lwt_unix.Credentials.Provider.resolve provider
+          (let guard =
+             Unix.openfile token_file [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0
            in
+           let guard_open = ref true in
            let writer_fd = ref None in
-           let writer_open = open_fifo_writer token_file in
-           let observe_resolution () =
-             Lwt.catch
-               (fun () -> Lwt.map (fun result -> `Returned result) resolution)
-               (fun exn -> Lwt.return (`Raised exn))
-           in
+           let resolution = ref None in
            Lwt.finalize
              (fun () ->
                Lwt.catch
                  (fun () ->
                    Lwt_unix.with_timeout 2.0 (fun () ->
-                       Lwt.bind writer_open (fun fd ->
+                       Lwt.bind
+                         (Lwt_unix.openfile token_file [ Unix.O_WRONLY ] 0)
+                         (fun fd ->
                            writer_fd := Some fd;
-                           Lwt.bind (Lwt.pause ()) (fun () ->
-                               Lwt.cancel resolution;
-                               observe_resolution ()))))
+                           close_unix_fd guard;
+                           guard_open := false;
+                           let promise =
+                             Awskit_lwt_unix.Credentials.Provider.resolve
+                               provider
+                           in
+                           resolution := Some promise;
+                           let observe_resolution () =
+                             Lwt.catch
+                               (fun () ->
+                                 Lwt.map
+                                   (fun result -> `Returned result)
+                                   promise)
+                               (fun exn -> Lwt.return (`Raised exn))
+                           in
+                           Lwt.bind (wait_for_fifo_reader token_file) (fun () ->
+                               Lwt.bind (Lwt_unix.write_string fd "TOKEN" 0 5)
+                                 (fun _ ->
+                                   Lwt.bind (Lwt.pause ()) (fun () ->
+                                       Lwt.cancel promise;
+                                       observe_resolution ()))))))
                  (function
                    | Lwt_unix.Timeout -> Lwt.return `Timed_out
                    | exn -> Lwt.return (`Raised exn)))
              (fun () ->
-               Lwt.cancel writer_open;
-               close_fifo_writer !writer_fd))
+               if !guard_open then close_unix_fd guard;
+               Option.iter !resolution ~f:Lwt.cancel;
+               close_lwt_unix_fd !writer_fd))
       in
       match observed with
       | `Raised Lwt.Canceled -> ()
       | `Raised exn ->
           Alcotest.failf "unexpected exception: %s" (Exn.to_string exn)
-      | `Timed_out -> Alcotest.fail "token file FIFO reader was not opened"
+      | `Timed_out -> Alcotest.fail "token file cancellation did not resolve"
       | `Returned (Failed error) | `Returned (Invalid error) ->
           Alcotest.failf "token file cancellation became SDK error: %a"
             Awskit.Error.pp error
