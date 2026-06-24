@@ -105,6 +105,9 @@ release packaging.
   transfer progress callback exceptions and cancellation consistently after
   owned cleanup, and added pre-transport validation for
   `Error_if_exists` downloads. (2ee158f)
+- Eio transfer uploads now stream chunks from the `Cstruct` buffer filled by
+  `single_read`, preventing stale or zeroed file data from being sent.
+  (#11, 53a7642; 27708c0)
 - High-level file uploads now use `PutObject` for empty regular files even when
   `multipart_threshold` is set to zero, avoiding an invalid empty multipart
   plan. (1388651)
@@ -119,6 +122,9 @@ release packaging.
 - Runtime constructors now return structured validation errors for invalid
   response drain limits, and Lwt/Eio response readers now reject reads after
   their `with_reader` scope exits. (15d40de)
+- Eio response readers now stop reading the underlying body flow after EOF,
+  preventing chunked keep-alive responses from stalling during scoped cleanup
+  drains. (#10, 21b8389)
 - Lwt request body producers are now canceled on transport exits, and Unix
   metadata credential HTTP now preserves cancellation, reports metadata
   timeouts as timeout errors, and bounds metadata response reads. (15d40de)
