@@ -774,6 +774,11 @@ let close_socket fd =
       | Unix.Unix_error (Unix.EBADF, _, _) | Lwt.Canceled -> Lwt.return_unit
       | exn -> Lwt.fail exn)
 
+let listener_bind_denied_by_sandbox = function
+  (* opam-repository macOS CI can deny local TCP listeners under sandbox.sh. *)
+  | Unix.Unix_error (Unix.EPERM, "bind", _) -> true
+  | _ -> false
+
 let read_raw_request_headers fd =
   let bytes = Stdlib.Bytes.create 4096 in
   let max_header_bytes = 16 * 1024 in
@@ -825,39 +830,45 @@ let write_raw_response ?content_length fd body =
 let with_raw_http_server handle f =
   let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
-  Lwt.bind
-    (Lwt_unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)))
+  Lwt.catch
     (fun () ->
-      Lwt_unix.listen socket 1;
-      let uri =
-        match Lwt_unix.getsockname socket with
-        | Unix.ADDR_INET (_, port) ->
-            Printf.sprintf "http://127.0.0.1:%d/credentials" port
-        | Unix.ADDR_UNIX _ -> Alcotest.fail "unexpected Unix socket"
-      in
-      let server =
-        Lwt.catch
-          (fun () ->
-            Lwt.bind (Lwt_unix.accept socket) (fun (client, _) ->
-                Lwt.finalize
-                  (fun () ->
-                    Lwt.bind (read_raw_request_headers client) (fun () ->
-                        handle client))
-                  (fun () -> close_socket client)))
-          (function
-            | Unix.Unix_error (Unix.EBADF, _, _) | Lwt.Canceled ->
-                Lwt.return_unit
-            | exn -> Lwt.fail exn)
-      in
-      Lwt.finalize
-        (fun () -> f uri)
+      Lwt.bind
+        (Lwt_unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)))
         (fun () ->
-          Lwt.cancel server;
-          Lwt.bind (close_socket socket) (fun () ->
-              Lwt.catch
-                (fun () -> server)
-                (function
-                  | Lwt.Canceled -> Lwt.return_unit | exn -> Lwt.fail exn))))
+          Lwt_unix.listen socket 1;
+          let uri =
+            match Lwt_unix.getsockname socket with
+            | Unix.ADDR_INET (_, port) ->
+                Printf.sprintf "http://127.0.0.1:%d/credentials" port
+            | Unix.ADDR_UNIX _ -> Alcotest.fail "unexpected Unix socket"
+          in
+          let server =
+            Lwt.catch
+              (fun () ->
+                Lwt.bind (Lwt_unix.accept socket) (fun (client, _) ->
+                    Lwt.finalize
+                      (fun () ->
+                        Lwt.bind (read_raw_request_headers client) (fun () ->
+                            handle client))
+                      (fun () -> close_socket client)))
+              (function
+                | Unix.Unix_error (Unix.EBADF, _, _) | Lwt.Canceled ->
+                    Lwt.return_unit
+                | exn -> Lwt.fail exn)
+          in
+          Lwt.finalize
+            (fun () -> f uri)
+            (fun () ->
+              Lwt.cancel server;
+              Lwt.bind (close_socket socket) (fun () ->
+                  Lwt.catch
+                    (fun () -> server)
+                    (function
+                      | Lwt.Canceled -> Lwt.return_unit | exn -> Lwt.fail exn)))))
+    (fun exn ->
+      Lwt.bind (close_socket socket) (fun () ->
+          if listener_bind_denied_by_sandbox exn then Alcotest.skip ()
+          else Lwt.fail exn))
 
 let container_getenv_for_uri uri name =
   if String.equal name "AWS_CONTAINER_CREDENTIALS_FULL_URI" then Some uri
