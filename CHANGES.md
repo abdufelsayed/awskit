@@ -1,164 +1,150 @@
 # 0.2.0
 
-This release updates S3 streaming, structured SDK errors, runtime cleanup, and
-release packaging.
+Awskit 0.2.0 is a breaking SDK hardening release. It moves the public API
+toward typed S3 values, scoped streaming bodies, structured diagnostics, and
+release evidence that downstream runtime authors can rely on.
 
 ## Breaking
 
-- Split the public runtime contract into named capabilities for IO, request and
-  response bodies, transport, clock, sleep, random, credentials, endpoint,
-  retry, and timeout. Custom runtimes should implement the grouped capability
-  modules accepted by `Awskit_s3.Make`. (6cce011)
-- Reworked object body APIs around adapter `Body` and `Reader` modules with
-  explicit stream replayability and bounded reads. Use `Object.put_string`,
-  `put_bytes`, `get_string`, `get_bytes`, `find_string`, and `find_bytes` for
-  bounded in-memory workflows; use `Object.put` with `Body`,
-  `Object.get ~consume` with scoped readers, and transfer helpers for larger
-  file workflows. (#5, 53a7642; 5815ba4; 73ef68f)
+- Split the custom-runtime contract into grouped capabilities for IO, request
+  and response bodies, transport, clock, sleep, random, credentials, endpoint,
+  retry, timeout, and S3 endpoint policy. Custom runtimes should implement the
+  grouped `Awskit.Runtime.S` and `Awskit_s3.RUNTIME` modules, including the
+  request-body `write_subbytes` hook. (4ec4e2d, 27708c0)
+- Runtime and S3 constructors now accept string `~region` and `~endpoint`
+  values where validation can fail, and return structured validation errors
+  instead of requiring callers to prebuild every core value. Eio callers now
+  supply their own HTTPS policy, and S3 clients use
+  `?endpoint_config:Awskit_s3.Endpoint_config.t` instead of raw endpoint,
+  scheme, addressing-style, and endpoint-variant option groups. (#8, c53921f;
+  2c19cd0; 6d09f89)
+- Reworked `Awskit.Error` into an opaque consumer API with constructors,
+  context tagging, and exception bridge helpers under
+  `Awskit.Error.Producer`. Public diagnostics are redacted by default, while
+  credential provider failures expose structured source and expiration
+  categories. (#7, ca7be3c; 129d1f4; 0cfa463; be75643)
+- Reworked S3 object bodies around adapter `Body` and `Reader` modules,
+  scoped response readers, explicit request-body replayability, and bounded
+  in-memory helpers. Use client `Object.put` and `Object.get ~consume` for
+  streaming workflows; use `put_string`, `put_bytes`, `get_string`,
+  `get_bytes`, `find_string`, and `find_bytes` for bounded string/bytes
+  workflows; use transfer helpers for file workflows. (#5, 53a7642; 754c1ba;
+  162d533; bebf0f4)
+- Standardized S3 operation APIs around typed bucket names, object keys,
+  metadata, tag sets, account IDs, content/header values, ranges, listing
+  pages, continuation tokens, operation option builders, and field-addressable
+  result records. Callers should construct domain values with the public S3
+  domain modules and operation `options`/`options_exn` builders instead of
+  passing raw strings or relying on tuple-style results. (138ab16, 9b8d90a,
+  c3c111b, ba454b1, 3a61109, 69d795c)
+- Bucket no-payload operations and `Object.exists` now take a trailing `unit`
+  argument when optional arguments are present, listing collection helpers
+  require explicit `max_pages` bounds, `Bucket.Get_location.result` returns a
+  concrete region, and raw query signing helpers were removed from
+  `Awskit.Signing`. (2c19cd0, c3c111b, ba454b1, 3a61109)
 - Reworked multipart upload APIs around typed upload handles, typed part
-  numbers, named operation results, ownership-aware transfer lifecycle, and
-  resume helpers that complete only from fresh `UploadPart` results.
-  (aab863c)
-- High-level Lwt Unix and Eio transfer progress callbacks now receive
-  `Awskit_s3.Transfer.progress` events instead of raw byte counts. Use
-  `progress.transferred` for the previous byte count, and inspect `direction`,
-  `phase`, `total`, and `part_number` for structured transfer context.
-  (2ee158f)
-- High-level transfer results now use named records for `Put`, `Multipart`,
-  `Get`, and `Ranged` outcomes. Inspect the nested S3 result metadata through
-  fields such as `put`, `complete`, and `info`, and use
-  `upload_bytes_transferred` or `download_bytes_transferred` for streamed byte
-  counts. (1388651)
-- Eio callers now provide their own HTTPS policy when creating runtime and S3
-  clients. (#8, c53921f)
-- Moved `Awskit.Error` constructors, context tagging, and exception bridge
-  helpers under `Awskit.Error.Producer`; application code should use the
-  top-level `Awskit.Error` consumer API. (0cfa463, be75643)
-- High-level runtime constructors now accept string `~region` and `~endpoint`
-  values and return structured validation errors when those values are invalid.
-  S3 constructors now take `?endpoint_config:Awskit_s3.Endpoint_config.t`
-  instead of raw `~endpoint`, `~scheme`, `~addressing_style`, and
-  `~endpoint_variant` groups. Use `Endpoint_config.aws`,
-  `Endpoint_config.local_plaintext`, `Endpoint_config.s3_compatible`, or
-  `Endpoint_config.unsafe_plaintext` to make endpoint policy explicit. Bucket
-  no-payload operations now require a trailing `unit` argument. (2c19cd0)
-- Standardized S3 object and bucket operation APIs around typed bucket names,
-  object keys, metadata, tag sets, owner guards, content/header values,
-  operation option builders, and field-addressable object get results. Callers
-  should construct domain values with `Bucket_name`, `Object_key`, `Metadata`,
-  `Tag.Set`, and operation `options`/`options_exn` builders instead of passing
-  raw strings or relying on tuple-style get results. (138ab16)
-- Removed flat S3 root operation aliases such as `Awskit_s3.Put_object`,
-  `Get_object`, `Head_object`, `List_objects_v2`, `List_object_versions`,
-  bucket operation aliases, and multipart operation aliases. Use canonical
-  domain modules such as `Awskit_s3.Object.Put`, `Object.Get`, `Object.List`,
-  `Object.Versions`, `Bucket.Create`, `Bucket.Head`,
-  `Multipart.Create`, and `Multipart.Upload_part`. (138ab16)
-- Presigned `HEAD Object` helpers now use `Presigned.Head_object.options`
-  instead of `Presigned.Get_object.options`. Presigned artifacts now expose
-  `request_headers` for the non-host headers callers should pass explicitly,
-  while `signed_headers` returns the full canonical signed-header set,
-  including `host`. (bd6f919)
-- Request builders, XML parsers, runtime internals, and adapter transfer helper
-  modules are now private implementation modules. Use the public `Awskit`,
-  `Awskit_s3`, and adapter APIs. (fc67929)
-- Moved the S3 signature-sharing module out of the installed public surface.
-  Runtime authors should use the public `Awskit_s3.RUNTIME`, `BODY`, `READER`,
-  operation module types, `S`, and `Make` surface directly; the root
-  `Awskit_s3` interface remains self-contained for downstream runtime
-  packages. (191d03e, 733c4bc)
-- S3 simulator implementation modules are now private. Use the public
-  `Awskit_s3_sim` root API for deterministic simulator stores, connections,
-  faults, history, inspection, and operation modules. (2aa5523)
+  numbers, completed-part values, ownership-aware cleanup, caller-owned resume
+  handles, and invariant-preserving transfer option values built through the
+  public constructors. (aab863c, c801d6f, 69d795c)
+- High-level Lwt Unix and Eio transfer callbacks now receive
+  `Awskit_s3.Transfer.progress` records instead of raw byte counts, and
+  transfer results now use named `Put`, `Multipart`, `Get`, and `Ranged`
+  records with byte-count accessors. `Body.of_stream` returns a result, and
+  `Reader.to_string` and `Reader.to_bytes` require `max_bytes`. (754c1ba,
+  2ee158f, 1388651, c801d6f, 27708c0)
+- Presigned requests now return safe opaque artifacts. Use `safe_uri` for logs,
+  `reveal_url` only for execution, and `request_headers` for the non-host
+  headers an HTTP client should pass explicitly. `HEAD Object` presigning now
+  uses `Presigned.Head_object.options`, and `signed_headers` includes the
+  canonical `host` header. (6d09f89, bd6f919)
+- Removed accidental public implementation surfaces: flat S3 root operation
+  aliases, request builders, XML parsers, runtime internals, adapter transfer
+  internals, the S3 signature-sharing implementation module, and simulator
+  implementation modules. Use the public `Awskit`, `Awskit_s3`, adapter, and
+  `Awskit_s3_sim` root APIs. (fc67929, 191d03e, 733c4bc, 5bd490d, c613de7,
+  2aa5523)
 
 ## Added
 
-- Added `Awskit.Timeout` policies and explicit retry budgets with runtime
-  supplied jitter randomness. (6cce011)
-- Exposed response-drain tuning through S3 Lwt, S3 Lwt Unix, and S3 Eio
-  constructors. (15d40de)
-- Added native streaming S3 upload and download APIs with adapter-level `Body`
-  and `Reader` modules, first-class bounded string/bytes object helpers, plus
-  unified multipart body handling. (#5, 53a7642; 5815ba4; 73ef68f)
-- Added live S3 SDK examples for put/get, listing, presigning, file transfer,
-  and object metadata workflows. (#6, 088b1ea)
-- Added structured SDK errors with operation, retry, decode, body, and S3
-  context, plus SDK exception helpers and option-returning object lookup
-  helpers. (#7, ca7be3c)
-- Added validated `Awskit_s3.Transfer` option builders, option accessors,
-  runtime-neutral upload/download planning helpers with property coverage,
-  structured transfer progress events, and a download overwrite policy.
-  (2ee158f)
+- Added `Awskit.Timeout` policies, explicit retry budgets, and runtime-supplied
+  retry jitter. (4ec4e2d)
+- Added `Awskit_s3.Endpoint_config` builders for AWS endpoints,
+  S3-compatible endpoints, local plaintext endpoints, and explicitly unsafe
+  plaintext endpoints. (6d09f89)
+- Added native S3 streaming upload and download APIs, adapter `Body` and
+  `Reader` modules, bounded string/bytes object helpers, option-returning
+  object lookup helpers, and reusable transfer option/planning helpers. (#5,
+  53a7642; #7, ca7be3c; 754c1ba; 2ee158f; 1388651)
+- Added structured SDK errors with operation, retry, decode, body, service,
+  timeout, cancellation, and S3 context, plus redacted human and S-expression
+  diagnostics. (#7, ca7be3c; 129d1f4)
+- Added live S3 examples for put/get, listing, presigning, file transfer, and
+  object metadata workflows, plus simulator-backed examples that run without
+  network credentials. (#6, 088b1ea; #8, c53921f; 475bf37; 5d4a677)
+- Added a public S3 support matrix covering supported object, bucket,
+  multipart, presign, transfer, endpoint, simulator, MinIO, and unsupported
+  feature boundaries. (cc18e20)
 
 ## Fixed
 
-- Generic Lwt runtimes now reject enabled retry policies unless the runtime
-  supplies real sleep and random capabilities. S3 retries now spend a
-  per-operation retry budget before sleeping. (6cce011)
-- Custom and simulator response bodies preserve consumer errors over cleanup
-  drain errors, while still reporting drain errors after successful consumers.
-  (6cce011)
-- Hardened scoped body cleanup and transfer helpers so consumer exceptions,
-  canceled multipart uploads, and ranged downloads preserve resource ownership
-  and object identity. (391b216, b251b54)
-- Reused the shared transfer planner from Lwt Unix and Eio helpers, propagated
-  transfer progress callback exceptions and cancellation consistently after
-  owned cleanup, and added pre-transport validation for
-  `Error_if_exists` downloads. (2ee158f)
-- Eio transfer uploads now stream chunks from the `Cstruct` buffer filled by
-  `single_read`, preventing stale or zeroed file data from being sent.
-  (#11, 53a7642; 27708c0)
-- High-level file uploads now use `PutObject` for empty regular files even when
-  `multipart_threshold` is set to zero, avoiding an invalid empty multipart
-  plan. (1388651)
-- Hardened S3 wire-format and request validation, rejecting malformed modeled
-  XML, invalid numeric fields, bad response headers, and invalid CopyObject
-  replacement metadata while preserving supported S3-compatible marker and
-  payload-hash forms. (6213acd, fa14e23, e83d337, 3732f9a)
-- Presigned requests now reject duplicate canonical signed-header names, S3
-  Transfer Acceleration endpoint resolution rejects path-style and dotted-bucket
-  combinations, and bracketed IPv6 loopback endpoints render valid URL
-  authorities. (bd6f919)
-- Runtime constructors now return structured validation errors for invalid
-  response drain limits, and Lwt/Eio response readers now reject reads after
-  their `with_reader` scope exits. (15d40de)
-- Eio response readers now stop reading the underlying body flow after EOF,
-  preventing chunked keep-alive responses from stalling during scoped cleanup
-  drains. (#10, 21b8389)
-- Lwt request body producers are now canceled on transport exits, and Unix
-  metadata credential HTTP now preserves cancellation, reports metadata
-  timeouts as timeout errors, and bounds metadata response reads. (15d40de)
-- Preserved Lwt timeout errors over request-body cleanup cancellation races.
-  (d804565)
+- Runtime cleanup now preserves consumer exceptions and native cancellation
+  while still draining or discarding response bodies, aborting owned multipart
+  uploads after failures, canceling Lwt request-body producers on transport
+  exits, closing Eio request-body switches per attempt, and classifying Unix
+  metadata credential timeouts and cancellation consistently. (4ec4e2d,
+  391b216, 15d40de, d804565, e995ac5)
+- Eio response readers now latch EOF so chunked keep-alive responses do not
+  block during cleanup drains after the final chunk has already been read.
+  (#10, f02497a)
+- Transfer helpers now share the runtime-neutral planner, preserve callback
+  exceptions and cancellation through owned cleanup, validate
+  `Error_if_exists` downloads before transport, use `PutObject` for empty file
+  uploads, stream file plans in bounded batches, avoid stale Eio upload chunks,
+  and cancel blocked Eio multipart siblings before cleanup or abort runs. (#11,
+  2ee158f; 1388651; c801d6f; 27708c0; 4a723ff)
+- Hardened S3 request and response validation for malformed modeled XML,
+  numeric fields, booleans, enum values, response headers, explicit checksum
+  values, SSE-KMS key IDs, CopyObject replacement metadata, duplicate presigned
+  signed headers, invalid S3 Transfer Acceleration combinations, and bracketed
+  IPv6 endpoint authorities. (6213acd, fa14e23, e83d337, 3732f9a, bd6f919,
+  ba454b1, 3a61109, a23f2ee)
+- Preserved supported compatibility behavior while tightening validation:
+  empty `ListObjectVersions` marker elements are treated as absent, supported
+  S3-compatible payload-hash forms remain accepted, future response-only
+  checksum and enum values are preserved when modeled, and unknown outbound
+  checksum/storage-class values are rejected before request construction.
+  (fa14e23, e83d337, ba454b1, a23f2ee, e8d7032)
+- S3 helpers now reuse the same lower request primitives as the primitive
+  operations, so `Object.find` shares `Object.get` request construction and
+  context behavior, presigned helpers share endpoint-config signing paths, and
+  `ListParts` collection helpers report `max_pages` truncation instead of
+  silently returning partial results. (bebf0f4)
+- Simulator behavior now matches the scoped reader and validation contracts
+  more closely: escaped readers fail after `with_reader`, stream request bodies
+  are materialized only when the operation executes, object and multipart
+  errors carry S3 operation/resource context, and outbound write validation
+  uses the shared header rules. (b5e5e4d, e8d7032)
 
 ## Documentation, CI, and Release
 
-- Added root support and security policies, simulator-backed no-network S3
-  examples, and CI/release gates for examples and documentation builds.
-  (475bf37)
-- Added PR template prompts for API/support impact review. (2aa5523)
-- Installed Eio HTTPS example-only dependencies in documentation/example CI and
-  local release validation without adding them to published package
-  dependencies. (d804565)
-- Included paginator property coverage in the `@protocol-pbt` evidence alias so
-  pagination PBT runs with the rest of the deterministic protocol checks.
-  (3187e10)
-- Expanded the `@runtime-conformance` evidence alias to run the existing Lwt,
-  Eio, simulator, and recording-runtime law suites directly. (107a815)
-- Expanded public API documentation across core Awskit modules, S3 operations,
-  adapter entrypoints, simulator APIs, and guide examples. (#3, 0e2021c)
-- Updated README and guide coverage for the v0.2.0 S3 streaming API, package
-  selection, client configuration, object and transfer workflows, and structured
-  error handling. (4a46fb0, 0fe12dc)
+- Expanded README, package guides, and odoc coverage for package selection,
+  runtime/client construction, S3 streaming, object workflows, transfers,
+  presigning, structured errors, simulator usage, and supported S3 feature
+  scope. (#3, 0e2021c; 4a46fb0; 0fe12dc; 703937e; 5d4a677; cf9f8bc;
+  b7f3158; 97288fa; cc18e20)
+- Added `SUPPORT.md`, `SECURITY.md`, a security threat model, maintainer
+  workflow docs, release gates, and PR templates for release, changelog, CI,
+  documentation, bugfix, breaking-change, and OCaml development work.
+  (475bf37, 2aa5523, ba1f090, d694da9, 17e5fff, 429d376)
 - Added CI coverage for release branch pushes, non-PR workflow events, and
   OCaml 4.14 non-Eio package builds. (058c0db, 8631060)
-- Added local release validation for distribution artifacts, generated package
-  documentation, and MinIO contract tests. (7c08cb7, bc860a0)
-- Added GitHub Pages publishing for package documentation on main pushes and
-  updated package documentation URLs to the Pages site. (d5abfa6)
-- Added maintainer workflow docs and PR templates for release, changelog, CI,
-  documentation, bugfix, breaking-change, and OCaml development work.
-  (ba1f090, d694da9, 17e5fff)
+- Expanded local and CI release evidence to cover examples, generated package
+  documentation, distribution artifacts, package-scoped release gates, MinIO
+  contracts, protocol fixtures, fuzz replay, paginator property tests, and
+  runtime-conformance suites. (7c08cb7, bc860a0, d804565, d523c8c, 3187e10,
+  107a815, 5009f56, be2e099, f569daa)
+- Added GitHub Pages publishing for generated package documentation on `main`
+  pushes and updated package documentation URLs to the Pages site. (d5abfa6)
 
 # 0.1.0
 
