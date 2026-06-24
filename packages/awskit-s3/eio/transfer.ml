@@ -435,21 +435,54 @@ struct
     in
     loop concurrency [] specs
 
-  let first_error_or_parts results =
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
-      | Error error :: _ -> Error error
-      | Ok part :: rest -> loop (part :: acc) rest
-    in
-    loop [] results
+  type 'a batch_outcome =
+    | Batch_result of ('a, Awskit_s3.Error.t) result
+    | Batch_raised of exn
 
-  let first_error_or_unit results =
-    let rec loop = function
-      | [] -> Ok ()
-      | Error error :: _ -> Error error
-      | Ok () :: rest -> loop rest
-    in
-    loop results
+  let joined_batch f batch =
+    Eio.Switch.run @@ fun sw ->
+    batch
+    |> List.map (fun item ->
+        Eio.Fiber.fork_promise ~sw (fun () ->
+            match f item with
+            | result -> Batch_result result
+            | exception (Eio.Cancel.Cancelled _ as exn) ->
+                Eio.Switch.fail sw exn;
+                Batch_raised exn
+            | exception exn -> Batch_raised exn))
+    |> List.map Eio.Promise.await_exn
+
+  let first_batch_error_or_parts outcomes =
+    match
+      List.find_map
+        (function Batch_raised exn -> Some exn | Batch_result _ -> None)
+        outcomes
+    with
+    | Some exn -> raise exn
+    | None ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | Batch_result (Error error) :: _ -> Error error
+          | Batch_result (Ok part) :: rest -> loop (part :: acc) rest
+          | Batch_raised _ :: _ -> assert false
+        in
+        loop [] outcomes
+
+  let first_batch_error_or_unit outcomes =
+    match
+      List.find_map
+        (function Batch_raised exn -> Some exn | Batch_result _ -> None)
+        outcomes
+    with
+    | Some exn -> raise exn
+    | None ->
+        let rec loop = function
+          | [] -> Ok ()
+          | Batch_result (Error error) :: _ -> Error error
+          | Batch_result (Ok ()) :: rest -> loop rest
+          | Batch_raised _ :: _ -> assert false
+        in
+        loop outcomes
 
   let upload_part_from_path conn ~upload ~options ~path
       (spec : Plan.upload_part) =
@@ -481,14 +514,8 @@ struct
       match batch with
       | [] -> Ok (List.rev acc)
       | _ ->
-          let results =
-            Eio.Switch.run @@ fun sw ->
-            batch
-            |> List.map (fun spec ->
-                Eio.Fiber.fork_promise ~sw (fun () -> upload_one spec))
-            |> List.map Eio.Promise.await_exn
-          in
-          let* parts = first_error_or_parts results in
+          let outcomes = joined_batch upload_one batch in
+          let* parts = first_batch_error_or_parts outcomes in
           loop (List.rev_append parts acc) rest
     in
     loop [] specs
@@ -732,14 +759,8 @@ struct
       match batch with
       | [] -> Ok parts
       | _ ->
-          let results =
-            Eio.Switch.run @@ fun sw ->
-            batch
-            |> List.map (fun spec ->
-                Eio.Fiber.fork_promise ~sw (fun () -> download_one spec))
-            |> List.map Eio.Promise.await_exn
-          in
-          let* () = first_error_or_unit results in
+          let outcomes = joined_batch download_one batch in
+          let* () = first_batch_error_or_unit outcomes in
           loop (parts + List.length batch) rest
     in
     loop 0 ranges

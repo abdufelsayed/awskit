@@ -95,6 +95,11 @@ module Runtime = struct
     mutable get_ranges : string list;
     mutable ranged_get_version_ids : string option list;
     mutable ranged_get_if_matches : string option list;
+    mutable active_upload_parts : int;
+    mutable block_upload_part_number : int option;
+    mutable blocked_upload_part_started : unit Eio.Promise.u option;
+    mutable blocked_upload_part_release : unit Eio.Promise.t option;
+    mutable abort_active_upload_part_count : int option;
   }
 
   type 'a t = 'a
@@ -315,6 +320,11 @@ let connection ?(response_body = "") ?head_etag ?head_version_id () =
     get_ranges = [];
     ranged_get_version_ids = [];
     ranged_get_if_matches = [];
+    active_upload_parts = 0;
+    block_upload_part_number = None;
+    blocked_upload_part_started = None;
+    blocked_upload_part_release = None;
+    abort_active_upload_part_count = None;
   }
 
 let recorded_uploaded_part_numbers conn =
@@ -535,25 +545,44 @@ module S3 = struct
       in
       conn.Runtime.uploaded_part_numbers <-
         part_number_int :: conn.Runtime.uploaded_part_numbers;
-      match conn.Runtime.fail_upload_part_number with
-      | Some failed when failed = part_number_int ->
-          Error (Awskit.Error.Producer.body "simulated upload-part failure")
-      | _ ->
-          let* body = Runtime.drain_request_body body in
-          let etag =
-            Awskit_s3.Object.Etag.of_string_exn
-              (Fmt.str "etag-%d" part_number_int)
-          in
-          let size = Int64.of_int (String.length body) in
-          let part =
-            Awskit_s3.Multipart.Part.create_exn ~part_number ~etag ~size ()
-          in
-          Ok
-            {
-              Awskit_s3.Multipart.Upload_part.part;
-              checksum = empty_checksum;
-              response = response 200;
-            }
+      let maybe_block () =
+        match conn.Runtime.block_upload_part_number with
+        | Some blocked when blocked = part_number_int ->
+            (match conn.Runtime.blocked_upload_part_started with
+            | None -> ()
+            | Some resolver ->
+                conn.Runtime.blocked_upload_part_started <- None;
+                ignore (Eio.Promise.try_resolve resolver () : bool));
+            Option.iter Eio.Promise.await
+              conn.Runtime.blocked_upload_part_release
+        | _ -> ()
+      in
+      conn.Runtime.active_upload_parts <- conn.Runtime.active_upload_parts + 1;
+      Fun.protect
+        ~finally:(fun () ->
+          conn.Runtime.active_upload_parts <-
+            conn.Runtime.active_upload_parts - 1)
+        (fun () ->
+          maybe_block ();
+          match conn.Runtime.fail_upload_part_number with
+          | Some failed when failed = part_number_int ->
+              Error (Awskit.Error.Producer.body "simulated upload-part failure")
+          | _ ->
+              let* body = Runtime.drain_request_body body in
+              let etag =
+                Awskit_s3.Object.Etag.of_string_exn
+                  (Fmt.str "etag-%d" part_number_int)
+              in
+              let size = Int64.of_int (String.length body) in
+              let part =
+                Awskit_s3.Multipart.Part.create_exn ~part_number ~etag ~size ()
+              in
+              Ok
+                {
+                  Awskit_s3.Multipart.Upload_part.part;
+                  checksum = empty_checksum;
+                  response = response 200;
+                })
 
     let complete_upload conn ~upload:_ ?options:_ ~parts () =
       conn.Runtime.complete_count <- conn.Runtime.complete_count + 1;
@@ -577,6 +606,8 @@ module S3 = struct
 
     let abort_upload conn ~upload:_ ?options:_ () =
       conn.Runtime.abort_count <- conn.Runtime.abort_count + 1;
+      conn.Runtime.abort_active_upload_part_count <-
+        Some conn.Runtime.active_upload_parts;
       if conn.Runtime.fail_abort_upload then
         Error (Awskit.Error.Producer.body "simulated abort failure")
       else Ok { Awskit_s3.Multipart.Abort.response = response 204 }
@@ -623,6 +654,10 @@ let with_umask mask f =
   Fun.protect ~finally:(fun () -> ignore (Unix.umask previous)) f
 
 let response_reader body = { Runtime.body; offset = 0 }
+
+type 'a observed = Returned of 'a | Raised of exn
+
+let observe f = try Returned (f ()) with exn -> Raised exn
 
 let download_temp_paths path =
   let dir = Filename.dirname path in
@@ -1097,6 +1132,69 @@ let test_multipart_upload_aborts_on_progress_cancellation env () =
             error
       | Ok _ -> Alcotest.fail "multipart upload succeeded despite cancellation")
 
+let test_multipart_upload_cancellation_cancels_blocked_sibling env () =
+  let native_path =
+    Filename.temp_file "awskit-eio-upload-multipart-blocked-progress-cancel"
+      ".bin"
+  in
+  write_file native_path
+    (String.make (Awskit_s3.Transfer.min_part_size * 2) 'c');
+  Fun.protect
+    ~finally:(fun () -> remove_file native_path)
+    (fun () ->
+      let conn = connection () in
+      let part1_started, wake_part1_started = Eio.Promise.create () in
+      let never_released, wake_never_released = Eio.Promise.create () in
+      conn.Runtime.block_upload_part_number <- Some 1;
+      conn.Runtime.blocked_upload_part_started <- Some wake_part1_started;
+      conn.Runtime.blocked_upload_part_release <- Some never_released;
+      let options =
+        Awskit_s3.Transfer.upload_options_exn
+          ~part_size:Awskit_s3.Transfer.min_part_size ~concurrency:2 ()
+      in
+      let on_progress (event : Awskit_s3.Transfer.progress) =
+        match event.part_number with
+        | Some part_number
+          when Awskit_s3.Multipart.Part_number.to_int part_number = 2 ->
+            raise (Eio.Cancel.Cancelled Exit)
+        | _ -> ()
+      in
+      let scenario =
+        Eio.Switch.run @@ fun sw ->
+        let transfer =
+          Eio.Fiber.fork_promise ~sw (fun () ->
+              observe (fun () ->
+                  Transfer.multipart_upload_file conn ~bucket ~key ~options
+                    ~on_progress
+                    ~path:(path_of_native env native_path)
+                    ()))
+        in
+        Eio.Promise.await part1_started;
+        try
+          `Observed
+            (Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 0.5 (fun () ->
+                 Eio.Promise.await_exn transfer))
+        with Eio.Time.Timeout ->
+          ignore (Eio.Promise.try_resolve wake_never_released () : bool);
+          `Timed_out
+      in
+      match scenario with
+      | `Observed (Raised (Eio.Cancel.Cancelled _)) ->
+          Alcotest.(check int) "abort count" 1 conn.Runtime.abort_count;
+          Alcotest.(check (option int))
+            "abort after sibling canceled" (Some 0)
+            conn.Runtime.abort_active_upload_part_count;
+          Alcotest.(check int) "active parts" 0 conn.Runtime.active_upload_parts
+      | `Observed (Raised exn) ->
+          Alcotest.failf "unexpected exception: %s" (Printexc.to_string exn)
+      | `Observed (Returned (Error error)) ->
+          Alcotest.failf "cancellation returned error: %a" Awskit_s3.Error.pp
+            error
+      | `Observed (Returned (Ok _)) ->
+          Alcotest.fail "multipart upload succeeded despite cancellation"
+      | `Timed_out ->
+          Alcotest.fail "cancellation waited behind a blocked sibling")
+
 let test_resume_multipart_upload_file env () =
   let native_path = Filename.temp_file "awskit-eio-resume-multipart" ".bin" in
   write_file native_path
@@ -1484,6 +1582,9 @@ let suite env =
         Alcotest.test_case "multipart upload aborts on progress cancellation"
           `Quick
           (test_multipart_upload_aborts_on_progress_cancellation env);
+        Alcotest.test_case "multipart upload cancellation cancels sibling"
+          `Quick
+          (test_multipart_upload_cancellation_cancels_blocked_sibling env);
         Alcotest.test_case "resume multipart upload" `Quick
           (test_resume_multipart_upload_file env);
         Alcotest.test_case "resume ignores mismatched listed part" `Quick
