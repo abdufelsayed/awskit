@@ -4,7 +4,8 @@ type signed_headers = {
   headers : (string * string) list;
   signed_headers_str : string;
 }
-(** [headers] includes [authorization], [x-amz-date], [x-amz-content-sha256],
+(** Result of signing structured request parameters. [headers] contains the
+    caller's headers plus [authorization], [x-amz-date], [x-amz-content-sha256],
     and [x-amz-security-token] when credentials include a session token. *)
 
 val ptime_to_date_time : Ptime.t -> string * string
@@ -19,7 +20,8 @@ val canonical_query_params : (string * string list) list -> string
 
 val canonical_headers : (string * string) list -> (string * string) list
 (** Return SigV4 canonical headers: lower-case names, normalized whitespace,
-    sorted names, and comma-joined duplicate names. *)
+    sorted names, and comma-joined duplicate names. This helper does not
+    validate header safety or enforce the single-[Host] signing requirement. *)
 
 val signed_header_names : (string * string) list -> string
 (** Render the semicolon-separated signed header name list from canonical
@@ -43,7 +45,8 @@ val sign_request_params :
 
     The returned header list includes the caller's headers plus SigV4 headers.
     Header validation rejects duplicate [Host] headers and unsafe header names
-    or values. *)
+    or values. Use this current structured API instead of building a raw query
+    string for signing. *)
 
 val sign_request_params_exn :
   credentials:Credentials.t ->

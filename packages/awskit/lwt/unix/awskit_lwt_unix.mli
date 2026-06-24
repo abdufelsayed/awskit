@@ -31,21 +31,28 @@ module Credentials : sig
     headers : (string * string) list;
     body : string;
   }
+  (** Buffered credential-metadata HTTP response used by injectable metadata
+      clients. *)
 
   type http_call =
     meth:Cohttp.Code.meth ->
     headers:(string * string) list ->
     Uri.t ->
     (http_response, Awskit.Error.t) result Lwt.t
+  (** Credential-metadata HTTP capability. The default implementation uses
+      [Cohttp_lwt_unix.Client], applies a 1s metadata timeout, caps buffered
+      metadata responses at 1 MiB, and preserves [Lwt.Canceled]. *)
 
   type imdsv1_fallback = [ `Enabled | `Disabled ]
+  (** Policy for tokenless EC2 instance metadata fallback. *)
 
   val local_provider :
     ?getenv:Awskit_unix.Credentials.Env.getenv ->
     ?home:string ->
     unit ->
     Provider.t
-  (** Static AWS environment variables, then shared AWS profile files. *)
+  (** Static AWS environment variables, then shared AWS profile files. This
+      provider performs only local Unix environment and file IO. *)
 
   val container_provider :
     ?getenv:Awskit_unix.Credentials.Env.getenv ->
@@ -56,7 +63,10 @@ module Credentials : sig
   (** ECS/container credential provider. Supports
       [AWS_CONTAINER_CREDENTIALS_RELATIVE_URI],
       [AWS_CONTAINER_CREDENTIALS_FULL_URI], [AWS_CONTAINER_AUTHORIZATION_TOKEN],
-      and [AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE]. *)
+      and [AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE]. Token-file reads preserve
+      native [Lwt.Canceled]. Plain HTTP full URIs are accepted only for loopback
+      or AWS container metadata hosts. Metadata credentials are cached until
+      five minutes before expiration. *)
 
   val instance_metadata_provider :
     ?getenv:Awskit_unix.Credentials.Env.getenv ->
@@ -68,7 +78,9 @@ module Credentials : sig
   (** EC2 instance profile credential provider using IMDSv2 when available.
       Tokenless IMDSv1 fallback is attempted only for IMDS token endpoint HTTP
       403, 404, or 405 responses. Set [imdsv1_fallback] to [`Disabled] or
-      [AWS_EC2_METADATA_V1_DISABLED=true] to reject tokenless fallback. *)
+      [AWS_EC2_METADATA_V1_DISABLED=true] to reject tokenless fallback.
+      [AWS_EC2_METADATA_DISABLED=true] makes the provider unavailable. Metadata
+      credentials are cached until five minutes before expiration. *)
 
   val default_provider :
     ?getenv:Awskit_unix.Credentials.Env.getenv ->
@@ -79,7 +91,9 @@ module Credentials : sig
     unit ->
     Provider.t
   (** AWS-style Unix credential chain: local static sources, container
-      credentials, then EC2 instance profile credentials. *)
+      credentials, then EC2 instance profile credentials. The chain continues
+      only when a provider is unavailable; invalid or failed configured sources
+      stop resolution. *)
 end
 
 val create :
@@ -122,7 +136,9 @@ val create :
       Maximum response body bytes to drain after callbacks (default: 64 MiB). If
       a response consumer succeeds but the remaining body exceeds this drain
       limit, the operation fails with a body-limit error. If the consumer fails,
-      the consumer error is returned.
+      the consumer error is returned. Response body read timeouts invalidate the
+      reader; native [Lwt.Canceled] from user callbacks and body reads is
+      preserved.
     @param imdsv1_fallback
       Controls tokenless IMDSv1 fallback when the default credential chain uses
       EC2 instance metadata credentials. *)

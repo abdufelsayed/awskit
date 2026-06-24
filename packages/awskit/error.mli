@@ -14,8 +14,12 @@
     application-facing consumer contract. *)
 
 type t
+(** Opaque structured error. Use the accessors below for classification and
+    diagnostics; use {!module:Producer} only at implementation boundaries. *)
 
 exception Awskit_error of t
+(** Raised by explicit [_exn] helpers. Non-exception APIs return {!type:t} in
+    their [Error] case. *)
 
 type validation = private { field : string option; message : string }
 (** Caller/input validation error. *)
@@ -91,12 +95,14 @@ type retry = private {
 }
 (** Retry context attached to the returned final error. *)
 
+(** Additional diagnostic context. Public accessors return redacted context. *)
 type context = private
   | Message of string
   | Operation of operation
   | Retry of retry
   | Sexp of Base.Sexp.t
 
+(** Coarse caller-handling class used by retry policy and applications. *)
 type retry_class =
   | Retryable
   | Throttled
@@ -122,7 +128,10 @@ type kind = private
   | Multiple of t list
 
 val kind : t -> kind
+(** Return the redacted top-level error kind. *)
+
 val context : t -> context list
+(** Return the redacted context stack, newest context first. *)
 
 val retry_class : t -> retry_class
 (** Coarse retry/handling classification. [retry_class] aggregates [Multiple]
@@ -132,15 +141,40 @@ val retry_class : t -> retry_class
     error. *)
 
 val is_validation : t -> bool
+(** [true] when [t] or a nested [Multiple] error contains validation failure. *)
+
 val is_credentials : t -> bool
+(** [true] when [t] or a nested [Multiple] error contains a credentials failure.
+*)
+
 val is_endpoint : t -> bool
+(** [true] when [t] or a nested [Multiple] error contains an endpoint failure.
+*)
+
 val is_transport : t -> bool
+(** [true] when [t] or a nested [Multiple] error contains a transport failure.
+*)
+
 val is_timeout : t -> bool
+(** [true] when [t] or a nested [Multiple] error contains a timeout. *)
+
 val is_cancelled : t -> bool
+(** [true] when [t] or a nested [Multiple] error contains SDK-level
+    cancellation. Runtime-native cancellation such as [Lwt.Canceled] may be
+    preserved as an exception instead of converted to [Cancelled]. *)
+
 val validation_field : t -> string option
+(** First validation field in [t], if one is available. *)
+
 val is_not_found : t -> bool
+(** [true] when {!val:retry_class} classifies [t] as [Not_found]. *)
+
 val service_code : t -> string option
+(** First AWS service error code in [t], if one is available. *)
+
 val service_status : t -> int option
+(** First AWS service HTTP status in [t], if one is available. *)
+
 val sexp_of_validation : validation -> Base.Sexp.t
 val sexp_of_credentials_error : credentials_error -> Base.Sexp.t
 val sexp_of_signing_error : signing_error -> Base.Sexp.t
@@ -158,12 +192,24 @@ val sexp_of_retry : retry -> Base.Sexp.t
 val sexp_of_context : context -> Base.Sexp.t
 val sexp_of_retry_class : retry_class -> Base.Sexp.t
 val sexp_of_kind : kind -> Base.Sexp.t
+
 val sexp_of_t : t -> Base.Sexp.t
+(** Render a redacted S-expression diagnostic. *)
+
 val pp : Format.formatter -> t -> unit
+(** Pretty-print a redacted human diagnostic. *)
+
 val pp_sexp : Format.formatter -> t -> unit
+(** Pretty-print the redacted S-expression diagnostic. *)
+
 val to_string_hum : t -> string
+(** Render a redacted human diagnostic string. *)
+
 val to_sexp_string_hum : t -> string
+(** Render a redacted S-expression diagnostic string. *)
+
 val equal : t -> t -> bool
+(** Structural equality on error values. *)
 
 module Unsafe_diagnostics : sig
   (** Explicit escape hatch for raw diagnostic material.
@@ -174,8 +220,14 @@ module Unsafe_diagnostics : sig
       logs or exception messages. *)
 
   val service_headers : t -> (string * string) list option
+  (** Raw service headers when [t] is a service error. *)
+
   val service_body : t -> string option
+  (** Raw service response body when [t] is a service error and the producer
+      supplied it. *)
+
   val to_sexp_unredacted : t -> Base.Sexp.t
+  (** Render an unredacted S-expression diagnostic. *)
 end
 
 module Producer : sig
@@ -187,12 +239,28 @@ module Producer : sig
       classify, and display returned errors instead. *)
 
   val validation : ?field:string -> string -> t
+  (** Construct a caller/input validation error. *)
+
   val credentials : ?source:string -> string -> t
+  (** Construct a credential discovery, loading, or validation error. *)
+
   val signing : string -> t
+  (** Construct a request signing error. *)
+
   val endpoint : ?uri:string -> string -> t
+  (** Construct an endpoint resolution or validation error. *)
+
   val transport : ?cause:string -> retryable:bool -> string -> t
+  (** Construct an HTTP/runtime transport error. Set [retryable] according to
+      whether retrying the same request may succeed. *)
+
   val timeout : ?operation:string -> string -> t
+  (** Construct a timeout error. [operation] should name the timeout phase or
+      SDK operation, not include request data. *)
+
   val cancelled : ?reason:string -> unit -> t
+  (** Construct an SDK-level cancellation error. Prefer preserving
+      runtime-native cancellation when an adapter can do so. *)
 
   val service :
     status:int ->
@@ -204,22 +272,45 @@ module Producer : sig
     ?body:string ->
     unit ->
     t
+  (** Construct an AWS service error response. Public diagnostics redact headers
+      and body. *)
 
   val decode : string -> t
+  (** Construct a response metadata or payload decoding error. *)
+
   val body : ?limit:int64 -> string -> t
+  (** Construct a request or response body error. [limit] records the enforced
+      byte limit when relevant. *)
 
   val retry_exhausted :
     attempts:int -> ?max_attempts:int -> ?last_error:t -> string -> t
+  (** Construct a retry exhaustion error, preserving the last observed failure
+      when available. *)
 
   val not_supported : ?feature:string -> string -> t
+  (** Construct an unsupported operation, feature, or runtime capability error.
+  *)
+
   val multiple : t list -> t
+  (** Combine multiple errors. Empty lists become a validation error; singleton
+      lists are returned unchanged. *)
+
   val with_context : string -> t -> t
+  (** Push a redacted message context onto an error. *)
+
   val with_sexp_context : Base.Sexp.t -> t -> t
+  (** Push a redacted structured context onto an error. *)
 
   val with_operation :
     ?service:string -> name:string -> ?resource:string -> unit -> t -> t
+  (** Push operation context onto an error. *)
 
   val with_retry : attempt:int -> ?max_attempts:int -> reason:string -> t -> t
+  (** Push retry-attempt context onto an error. *)
+
   val raise : t -> 'a
+  (** Raise [Awskit_error t]. *)
+
   val get_ok_exn : ('a, t) result -> 'a
+  (** Extract [Ok] or raise [Awskit_error] for [Error]. *)
 end

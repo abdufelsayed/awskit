@@ -31,7 +31,8 @@ module Credentials : sig
         empty. *)
 
     val optional : ?getenv:getenv -> string -> string option t
-    (** Read an optional environment variable. Returns [None] if unset. *)
+    (** Read an optional environment variable. Returns [None] if unset and a
+        validation error if set to the empty string. *)
   end
 
   val from_env :
@@ -62,20 +63,24 @@ module Credentials : sig
       - config file: [AWS_CONFIG_FILE], then [$HOME/.aws/config]
 
       Both [~/.aws/credentials] sections like [[dev]] and [~/.aws/config]
-      sections like [[profile dev]] are supported. Assume-role and other
-      non-static profile types are reported as unsupported. *)
+      sections like [[profile dev]] are supported. When both files contain
+      static credentials for the selected profile, the credentials file wins.
+      Assume-role and other non-static profile types are reported as
+      unsupported. *)
 
   val default_provider :
     ?getenv:Env.getenv -> ?home:string -> unit -> Awskit.Credentials.Provider.t
   (** Default local provider chain. Static environment variables are preferred
-      when present; otherwise shared AWS profile files are used. *)
+      when any AWS credential environment variable is present; otherwise shared
+      AWS profile files are used when configured or present. *)
 
   val default_chain :
     ?getenv:Env.getenv ->
     ?home:string ->
     unit ->
     (Awskit.Credentials.t, Awskit.Error.t) Result.t
-  (** Resolve {!val:default_provider}. *)
+  (** Resolve {!val:default_provider}, converting provider [Unavailable] into a
+      credentials error. *)
 end
 
 module Region : sig

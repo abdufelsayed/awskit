@@ -5,8 +5,14 @@
     replayable and whether a response body must be consumed before retrying. *)
 
 type t
+(** Immutable retry policy. *)
+
 type budget
+(** Immutable retry-budget configuration shared by attempts in a policy. *)
+
 type budget_state
+(** Per-operation mutable-in-the-value retry-budget state. Create a fresh state
+    for each SDK operation with {!val:initial_budget_state}. *)
 
 val create :
   ?max_attempts:int ->

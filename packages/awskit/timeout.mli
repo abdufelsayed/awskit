@@ -31,10 +31,12 @@ val create_exn :
   ?drain:Ptime.Span.t ->
   unit ->
   policy
-(** Exception-raising variant of {!create}. *)
+(** Like {!val:create}, but raises [Error.Awskit_error] carrying the structured
+    validation error on validation failure. *)
 
 val default : policy
-(** Conservative default policy. *)
+(** Conservative default policy. Currently enables [connect] and [drain]
+    timeouts and leaves the other phases disabled. *)
 
 val disabled : policy
 (** Policy with all timeout phases disabled. *)

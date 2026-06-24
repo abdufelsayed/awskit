@@ -7,7 +7,7 @@
         ~credentials ~endpoint:"http://127.0.0.1:9000" ()
       |> Result.get_ok
     in
-    conn
+    ignore conn
     ]} *)
 
 type 'flow https =
@@ -27,7 +27,8 @@ val http_only : 'flow https
 (** Direct-style runtime implementation used by service packages. *)
 module Runtime : sig
   type conn
-  (** Concrete Eio connection record used by {!type:Awskit_eio.t}. *)
+  (** Concrete Eio connection record used by {!type:Awskit_eio.t}. The value is
+      scoped by the [Eio.Switch.t] supplied to {!val:create}. *)
 
   include Awskit.Runtime.S with type 'a t = 'a and type connection = conn
 end
@@ -53,14 +54,16 @@ val create :
 
     [https] is forwarded to [Cohttp_eio.Client.make]. Use {!val:http_only} only
     with plain HTTP endpoints, such as local tests; HTTPS endpoints require a
-    connector supplied by the application. [clock] defaults to [env#clock].
-    Defaults to AWS HTTPS endpoints. Pass an explicit [endpoint] for local test
-    services or custom service endpoints. [region] and [endpoint] are parsed and
-    validated when the connection is created; validation failures are returned
-    as structured [Awskit.Error.t] values. Invalid [max_response_drain_bytes]
-    values are also returned as structured validation errors. [retry_policy]
-    defaults to [Awskit.Retry.default]. [random_float] defaults to a
-    connection-local random state for retry jitter. [timeout_policy] defaults to
+    connector supplied by the application. The returned connection must not
+    outlive [sw]. Native Eio cancellation is preserved rather than converted
+    into an SDK error. [clock] defaults to [env#clock]. Defaults to AWS HTTPS
+    endpoints. Pass an explicit [endpoint] for local test services or custom
+    service endpoints. [region] and [endpoint] are parsed and validated when the
+    connection is created; validation failures are returned as structured
+    [Awskit.Error.t] values. Invalid [max_response_drain_bytes] values are also
+    returned as structured validation errors. [retry_policy] defaults to
+    [Awskit.Retry.default]. [random_float] defaults to a connection-local random
+    state for retry jitter. [timeout_policy] defaults to
     [Awskit.Timeout.default]. [max_response_drain_bytes] defaults to 64 MiB. If
     a response consumer succeeds but the remaining body exceeds this drain
     limit, the operation fails with a body-limit error. If the consumer fails,

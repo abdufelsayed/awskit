@@ -26,13 +26,15 @@ module Credentials : sig
       | Failed of Awskit.Error.t
 
     type t
-    (** Asynchronous credential provider. *)
+    (** Asynchronous credential provider. Native [Lwt.Canceled] from the lookup
+        function is preserved. *)
 
     val create : (unit -> resolution Lwt.t) -> t
-    (** Wrap an asynchronous credential lookup function. *)
+    (** Wrap an asynchronous credential lookup function. The function is called
+        each time {!val:resolve} is called. *)
 
     val resolve : t -> resolution Lwt.t
-    (** Resolve credentials. *)
+    (** Resolve credentials from the provider. *)
 
     val static : credentials -> t
     (** Provider that always returns the same credentials. *)
@@ -83,9 +85,11 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
       its timeout clock. [max_response_drain_bytes] defaults to 64 MiB. If a
       response consumer succeeds but the remaining body exceeds this drain
       limit, the operation fails with a body-limit error. If the consumer fails,
-      the consumer error is returned. [operation] timeouts in [timeout_policy]
-      apply to one runtime transport operation; service-level retries get a
-      fresh operation timer for each attempt. *)
+      the consumer error is returned. Response body read timeouts invalidate the
+      reader; native [Lwt.Canceled] from user callbacks and body reads is
+      preserved. [operation] timeouts in [timeout_policy] apply to one runtime
+      transport operation; service-level retries get a fresh operation timer for
+      each attempt. *)
 
   val create_with_credentials_provider :
     ?ctx:Client.ctx ->
@@ -101,5 +105,6 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     unit ->
     (t, Awskit.Error.t) result
   (** Like {!val:create}, but resolves credentials through a provider for each
-      signed request. Use this for refreshable credential sources. *)
+      signed request. Use this for refreshable credential sources, including
+      provider chains that may return [Unavailable], [Invalid], or [Failed]. *)
 end
