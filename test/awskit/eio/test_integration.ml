@@ -116,14 +116,14 @@ let is_transport_error_with_message ~substring error =
   | Transport { message; _ } -> String.is_substring message ~substring
   | _ -> false
 
-let request_conn ?max_response_drain_bytes env sw =
+let request_conn ?timeout_policy ?max_response_drain_bytes env sw =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
   let region = "us-east-1" in
   Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region ~credentials
     ~clock:(fun () -> Ptime.epoch)
-    ?max_response_drain_bytes ()
+    ?timeout_policy ?max_response_drain_bytes ()
   |> conn_or_fail
 
 let test_create_rejects_invalid_region_string env =
@@ -280,6 +280,48 @@ let with_eio_early_response_server env ?(on_request_body = fun _ -> ())
               on_response_sent ())));
   let endpoint = Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port () in
   test endpoint
+
+let with_eio_stalled_response_server env test =
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let listening_socket =
+    try
+      Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:1
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+    with exn when listener_bind_denied_by_sandbox exn -> Alcotest.skip ()
+  in
+  let port =
+    match Eio.Net.listening_addr listening_socket with
+    | `Tcp (_, port) -> port
+    | _ -> Alcotest.fail "expected TCP listening socket"
+  in
+  let client_closed, wake_client_closed = Eio.Promise.create () in
+  let resolve_client_closed () =
+    ignore (Eio.Promise.try_resolve wake_client_closed () : bool)
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+      Eio.Net.accept_fork listening_socket ~sw
+        ~on_error:(fun _ -> ())
+        (fun flow _addr ->
+          let input = Eio.Buf_read.of_flow ~max_size:Int.max_value flow in
+          let rec read_headers () =
+            match Eio.Buf_read.line input with "" -> () | _ -> read_headers ()
+          in
+          read_headers ();
+          Eio.Buf_write.with_flow flow (fun output ->
+              Eio.Buf_write.string output
+                "HTTP/1.1 200 test\r\n\
+                 Content-Length: 1\r\n\
+                 Connection: close\r\n\
+                 \r\n";
+              Eio.Buf_write.flush output);
+          let buffer = Cstruct.create 1 in
+          match Eio.Flow.single_read flow buffer with
+          | _ -> resolve_client_closed ()
+          | exception End_of_file -> resolve_client_closed ()
+          | exception _ -> resolve_client_closed ()));
+  let endpoint = Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port () in
+  test ~client_closed endpoint
 
 let request_body_request_for_endpoint endpoint =
   let target =
@@ -554,6 +596,36 @@ let test_stream_request_body_success_response_body_is_scoped env =
             (String.length body);
           Alcotest.(check string) "response body" response_body body)
 
+let test_source_request_body_attempt_closes_after_callback_exception env =
+  let callback_exn = Failure "source body callback exploded" in
+  with_eio_stalled_response_server env (fun ~client_closed endpoint ->
+      Eio.Switch.run @@ fun sw ->
+      let clock = Eio.Stdenv.clock env in
+      let conn = request_conn env sw in
+      let request = request_body_request_for_endpoint endpoint in
+      let observed =
+        try
+          ignore
+            (Awskit_eio.Runtime.Transport.with_response conn request
+               ~body:Awskit_eio.Runtime.Request_body.empty
+               ~consume:(fun _response _body -> raise callback_exn)
+              : (unit, Awskit.Error.t) Result.t);
+          `Returned
+        with exn -> `Raised exn
+      in
+      (match observed with
+      | `Raised exn when Stdlib.( == ) exn callback_exn -> ()
+      | `Raised exn ->
+          Alcotest.failf "unexpected exception: %s" (Exn.to_string exn)
+      | `Returned -> Alcotest.fail "expected callback exception");
+      try
+        Eio.Time.with_timeout_exn clock 0.5 (fun () ->
+            Eio.Promise.await client_closed)
+      with Eio.Time.Timeout ->
+        Alcotest.fail
+          "source-body attempt kept response connection alive after callback \
+           exception")
+
 let test_callback_exception_is_not_transport_error env =
   let callback_exn = Failure "callback exploded" in
   with_eio_early_response_server env ~status:200 ~response_body:"ok"
@@ -682,6 +754,80 @@ let test_response_body_reader_cannot_escape_scope env =
       Alcotest.failf "unexpected read error: %a" Awskit.Error.pp error
   | Ok _ -> Alcotest.fail "escaped reader read succeeded"
 
+let test_response_read_timeout_interrupts_drain_cleanup env =
+  let drain_span = Ptime.Span.of_float_s 0.5 |> Option.value_exn in
+  let timeout_policy =
+    Awskit.Timeout.create_exn ~response_body:tiny_span ~drain:drain_span ()
+  in
+  with_eio_stalled_response_server env (fun ~client_closed:_ endpoint ->
+      Eio.Switch.run @@ fun sw ->
+      let clock = Eio.Stdenv.clock env in
+      let conn = request_conn ~timeout_policy env sw in
+      let request = request_body_request_for_endpoint endpoint in
+      let observed =
+        try
+          Eio.Time.with_timeout_exn clock 0.2 (fun () ->
+              Awskit_eio.Runtime.Transport.with_response conn request
+                ~body:Awskit_eio.Runtime.Request_body.empty
+                ~consume:(fun _ body ->
+                  Awskit_eio.Runtime.Response_body.with_reader body
+                    ~consume:(fun reader ->
+                      let bytes = Bytes.create 1 in
+                      Awskit_eio.Runtime.Response_body.read reader bytes ~off:0
+                        ~len:1)))
+          |> fun result -> `Returned result
+        with
+        | Eio.Time.Timeout -> `Timed_out
+        | exn -> `Raised exn
+      in
+      match observed with
+      | `Returned (Error error) when is_timeout_error error -> ()
+      | `Returned (Error error) ->
+          Alcotest.failf "expected timeout error, got: %a" Awskit.Error.pp error
+      | `Returned (Ok _) -> Alcotest.fail "expected response body timeout"
+      | `Raised exn ->
+          Alcotest.failf "unexpected exception: %s" (Exn.to_string exn)
+      | `Timed_out ->
+          Alcotest.fail "response body timeout waited for drain cleanup")
+
+let test_response_read_cancellation_skips_drain_cleanup env =
+  let drain_span = Ptime.Span.of_float_s 0.5 |> Option.value_exn in
+  let timeout_policy = Awskit.Timeout.create_exn ~drain:drain_span () in
+  with_eio_stalled_response_server env (fun ~client_closed:_ endpoint ->
+      Eio.Switch.run @@ fun sw ->
+      let clock = Eio.Stdenv.clock env in
+      let conn = request_conn ~timeout_policy env sw in
+      let request = request_body_request_for_endpoint endpoint in
+      let started = Eio.Time.now clock in
+      let observed =
+        try
+          Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+              ignore
+                (Awskit_eio.Runtime.Transport.with_response conn request
+                   ~body:Awskit_eio.Runtime.Request_body.empty
+                   ~consume:(fun _ body ->
+                     Awskit_eio.Runtime.Response_body.with_reader body
+                       ~consume:(fun _reader ->
+                         raise (Eio.Cancel.Cancelled Stdlib.Exit)))
+                  : (unit, Awskit.Error.t) Result.t));
+          `Returned
+        with
+        | Eio.Cancel.Cancelled _ -> `Canceled
+        | Eio.Time.Timeout -> `Timed_out
+        | exn -> `Raised exn
+      in
+      let elapsed = Eio.Time.now clock -. started in
+      match observed with
+      | `Canceled ->
+          Alcotest.(check bool)
+            "cancellation returned before drain timeout" true
+            Float.(elapsed < 0.2)
+      | `Raised exn ->
+          Alcotest.failf "unexpected exception: %s" (Exn.to_string exn)
+      | `Timed_out ->
+          Alcotest.fail "response body cancellation waited for drain cleanup"
+      | `Returned -> Alcotest.fail "expected response body cancellation")
+
 let suite env =
   [
     ( "integration:connection",
@@ -726,8 +872,18 @@ let suite env =
         Alcotest.test_case "stream request body success response body is scoped"
           `Quick (fun () ->
             test_stream_request_body_success_response_body_is_scoped env);
+        Alcotest.test_case
+          "source request body attempt closes after callback exception" `Quick
+          (fun () ->
+            test_source_request_body_attempt_closes_after_callback_exception env);
         Alcotest.test_case "callback exception is not transport error" `Quick
           (fun () -> test_callback_exception_is_not_transport_error env);
+        Alcotest.test_case "response read timeout interrupts drain cleanup"
+          `Quick (fun () ->
+            test_response_read_timeout_interrupts_drain_cleanup env);
+        Alcotest.test_case "response read cancellation skips drain cleanup"
+          `Quick (fun () ->
+            test_response_read_cancellation_skips_drain_cleanup env);
         Alcotest.test_case "discard body limit" `Quick (fun () ->
             test_discard_response_body_enforces_limit env);
         Alcotest.test_case "scoped drain body limit" `Quick (fun () ->
