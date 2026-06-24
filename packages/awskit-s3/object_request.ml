@@ -49,27 +49,33 @@ module Make (C : Request_context.S) = struct
         match validate_tags options.tags with
         | Error _ as error -> error
         | Ok () -> (
-            match validate_opt validate_checksum_value options.checksum with
+            match validate_opt validate_storage_class options.storage_class with
             | Error _ as error -> error
-            | Ok () ->
-                validate_common_headers
-                  ?content_type:
-                    (Option.map Content_type.to_string options.content_type)
-                  ?cache_control:(header_value options.cache_control)
-                  ?content_encoding:(header_value options.content_encoding)
-                  ?content_disposition:
-                    (header_value options.content_disposition)
-                  ()))
+            | Ok () -> (
+                match validate_opt validate_checksum_value options.checksum with
+                | Error _ as error -> error
+                | Ok () ->
+                    validate_common_headers
+                      ?content_type:
+                        (Option.map Content_type.to_string options.content_type)
+                      ?cache_control:(header_value options.cache_control)
+                      ?content_encoding:(header_value options.content_encoding)
+                      ?content_disposition:
+                        (header_value options.content_disposition)
+                      ())))
 
   let validate_copy_options (options : Copy_object.options) =
-    match
-      validate_opt validate_checksum_algorithm options.checksum_algorithm
-    with
+    match validate_opt validate_storage_class options.storage_class with
     | Error _ as error -> error
     | Ok () -> (
-        match options.metadata_directive with
-        | Some (`Replace metadata) -> validate_metadata metadata
-        | Some `Copy | None -> Ok ())
+        match
+          validate_opt validate_checksum_algorithm options.checksum_algorithm
+        with
+        | Error _ as error -> error
+        | Ok () -> (
+            match options.metadata_directive with
+            | Some (`Replace metadata) -> validate_metadata metadata
+            | Some `Copy | None -> Ok ()))
 
   let bucket_string = Bucket_name.to_string
   let key_string = Object_key.to_string
@@ -340,8 +346,8 @@ module Make (C : Request_context.S) = struct
     | Error error when is_head_object_missing error -> return_ok None
     | Error error -> return_error error
 
-  let exists conn ~bucket ~key =
-    let* result = head conn ~bucket ~key () in
+  let exists conn ~bucket ~key ?options () =
+    let* result = head conn ~bucket ~key ?options () in
     match result with
     | Ok _ -> return_ok true
     | Error error when is_head_object_missing error -> return_ok false

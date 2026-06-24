@@ -18,7 +18,9 @@ val response_version :
 val response_checksum : Awskit.Response.t -> Object.Checksum.response
 (** Parse modeled checksum response headers. *)
 
-val response_encryption : Awskit.Response.t -> Object.Encryption.response option
+val response_encryption :
+  Awskit.Response.t ->
+  (Object.Encryption.response option, Awskit.Error.t) result
 (** Parse server-side encryption response headers. *)
 
 val response_content_type :

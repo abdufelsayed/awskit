@@ -257,6 +257,41 @@ let test_account_content_and_header_values () =
   expect_error_field "cache-control"
     (Header_value.of_string ~field:"cache-control" "")
 
+let test_storage_class_values () =
+  let cases =
+    [
+      ("STANDARD", Storage_class.Standard);
+      ("REDUCED_REDUNDANCY", Storage_class.Reduced_redundancy);
+      ("STANDARD_IA", Storage_class.Standard_ia);
+      ("ONEZONE_IA", Storage_class.Onezone_ia);
+      ("INTELLIGENT_TIERING", Storage_class.Intelligent_tiering);
+      ("GLACIER", Storage_class.Glacier);
+      ("GLACIER_IR", Storage_class.Glacier_ir);
+      ("DEEP_ARCHIVE", Storage_class.Deep_archive);
+      ("OUTPOSTS", Storage_class.Outposts);
+      ("SNOW", Storage_class.Snow);
+      ("EXPRESS_ONEZONE", Storage_class.Express_onezone);
+      ("FSX_OPENZFS", Storage_class.Fsx_openzfs);
+      ("FSX_ONTAP", Storage_class.Fsx_ontap);
+    ]
+  in
+  List.iter
+    (fun (wire, storage_class) ->
+      Alcotest.(check string)
+        (wire ^ " render") wire
+        (Storage_class.to_string storage_class);
+      Alcotest.(check bool)
+        (wire ^ " parse") true
+        (Storage_class.of_string wire = storage_class))
+    cases;
+  let unknown = Storage_class.of_string "FUTURE_CLASS" in
+  Alcotest.(check string)
+    "unknown storage class round trips" "FUTURE_CLASS"
+    (Storage_class.to_string unknown);
+  Alcotest.(check bool)
+    "unknown constructor" true
+    (unknown = Storage_class.Unknown "FUTURE_CLASS")
+
 let test_metadata_collection () =
   let metadata =
     expect_ok "metadata"
@@ -428,6 +463,8 @@ let suite =
           test_object_key_prefix_and_delimiter;
         Alcotest.test_case "account content and header values" `Quick
           test_account_content_and_header_values;
+        Alcotest.test_case "storage class values" `Quick
+          test_storage_class_values;
         Alcotest.test_case "metadata collection validation" `Quick
           test_metadata_collection;
         Alcotest.test_case "tag and set validation" `Quick

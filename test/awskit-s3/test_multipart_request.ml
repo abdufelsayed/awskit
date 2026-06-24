@@ -72,6 +72,22 @@ let test_multipart_upload_part_checksum_headers () =
     "part number" (Some [ "1" ])
     (List.assoc_opt "partNumber" call.request.target.query)
 
+let test_multipart_unknown_storage_class_rejected () =
+  let unknown_storage = Storage_class.Unknown "FUTURE_CLASS" in
+  expect_validation_field "create builder storage" "storage_class"
+    (Multipart.Create.options ~storage_class:unknown_storage ());
+  let options =
+    {
+      Multipart.Create.default_options with
+      storage_class = Some unknown_storage;
+    }
+  in
+  let conn = Recording_runtime.connect [] in
+  expect_validation_field "create operation storage" "storage_class"
+    (Recording_s3.Multipart.create_upload conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "large.bin") ~options ());
+  check_no_requests "create not sent" conn
+
 let test_multipart_checksum_and_expected_owner_headers () =
   let expected_owner = account_id "123456789012" in
   let conn =
@@ -317,6 +333,8 @@ let suite =
       [
         Alcotest.test_case "multipart upload part checksum headers" `Quick
           test_multipart_upload_part_checksum_headers;
+        Alcotest.test_case "multipart unknown storage class rejected" `Quick
+          test_multipart_unknown_storage_class_rejected;
         Alcotest.test_case "multipart checksum and expected owner headers"
           `Quick test_multipart_checksum_and_expected_owner_headers;
         Alcotest.test_case "complete multipart embedded error" `Quick

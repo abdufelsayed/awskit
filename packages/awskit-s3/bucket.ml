@@ -75,14 +75,17 @@ module Versioning = struct
   type options = { expected_bucket_owner : Account_id.t option }
 
   module Status = struct
-    type t = Enabled | Suspended
+    type t = Enabled | Suspended | Unknown of string
 
-    let to_string = function Enabled -> "Enabled" | Suspended -> "Suspended"
+    let to_string = function
+      | Enabled -> "Enabled"
+      | Suspended -> "Suspended"
+      | Unknown value -> value
 
     let of_string = function
-      | "Enabled" -> Some Enabled
-      | "Suspended" -> Some Suspended
-      | _ -> None
+      | "Enabled" -> Enabled
+      | "Suspended" -> Suspended
+      | value -> Unknown value
   end
 
   type result = { status : Status.t option; response : Awskit.Response.t }
@@ -229,18 +232,23 @@ module Ownership_controls = struct
   type options = { expected_bucket_owner : Account_id.t option }
 
   module Object_ownership = struct
-    type t = Bucket_owner_enforced | Bucket_owner_preferred | Object_writer
+    type t =
+      | Bucket_owner_enforced
+      | Bucket_owner_preferred
+      | Object_writer
+      | Unknown of string
 
     let to_string = function
       | Bucket_owner_enforced -> "BucketOwnerEnforced"
       | Bucket_owner_preferred -> "BucketOwnerPreferred"
       | Object_writer -> "ObjectWriter"
+      | Unknown value -> value
 
     let of_string = function
-      | "BucketOwnerEnforced" -> Some Bucket_owner_enforced
-      | "BucketOwnerPreferred" -> Some Bucket_owner_preferred
-      | "ObjectWriter" -> Some Object_writer
-      | _ -> None
+      | "BucketOwnerEnforced" -> Bucket_owner_enforced
+      | "BucketOwnerPreferred" -> Bucket_owner_preferred
+      | "ObjectWriter" -> Object_writer
+      | value -> Unknown value
   end
 
   type config = { object_ownership : Object_ownership.t }

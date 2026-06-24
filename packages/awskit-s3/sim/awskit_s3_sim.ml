@@ -127,8 +127,9 @@ module Object = struct
     Raw.find_metadata conn ~bucket:(bucket_to_string bucket)
       ~key:(key_to_string key) ?options ()
 
-  let exists conn ~bucket ~key =
+  let exists conn ~bucket ~key ?options () =
     Raw.exists conn ~bucket:(bucket_to_string bucket) ~key:(key_to_string key)
+      ?options ()
 
   let delete conn ~bucket ~key ?options () =
     Raw.delete conn ~bucket:(bucket_to_string bucket) ~key:(key_to_string key)

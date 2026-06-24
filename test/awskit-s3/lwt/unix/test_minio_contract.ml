@@ -409,7 +409,7 @@ let test_object_versioning () =
       Alcotest.(check bool)
         "delete marker hides current" false
         (await "exists after delete marker"
-           (S3.Object.exists conn ~bucket ~key:(object_key "versioned.txt")));
+           (S3.Object.exists conn ~bucket ~key:(object_key "versioned.txt") ()));
       let list_options =
         Object.Versions.options_exn
           ~prefix:(Object_key.Prefix.of_string_exn "versioned.txt")

@@ -113,6 +113,12 @@ module Bucket = struct
   end
 
   module Versioning = struct
+    let validate_status = function
+      | Bucket.Versioning.Status.Enabled | Suspended -> Ok ()
+      | Unknown value ->
+          invalid ~field:"status"
+            "unknown bucket versioning status %S cannot be sent" value
+
     let get conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
@@ -126,9 +132,12 @@ module Bucket = struct
     let put conn ~bucket ?options:_ ~status () =
       match require_bucket conn bucket with
       | Error error -> Error error
-      | Ok state ->
-          state.versioning <- Some status;
-          Ok (response 200)
+      | Ok state -> (
+          match validate_status status with
+          | Error error -> Error error
+          | Ok () ->
+              state.versioning <- Some status;
+              Ok (response 200))
   end
 
   module Tagging = struct
@@ -235,6 +244,13 @@ module Bucket = struct
   end
 
   module Ownership_controls = struct
+    let validate_config (config : Bucket.Ownership_controls.config) =
+      match config.object_ownership with
+      | Bucket_owner_enforced | Bucket_owner_preferred | Object_writer -> Ok ()
+      | Unknown value ->
+          invalid ~field:"object_ownership"
+            "unknown object ownership %S cannot be sent" value
+
     let get conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
@@ -247,9 +263,12 @@ module Bucket = struct
     let put conn ~bucket ?options:_ ~config () =
       match require_bucket conn bucket with
       | Error error -> Error error
-      | Ok state ->
-          state.ownership_controls <- Some config;
-          Ok (response 200)
+      | Ok state -> (
+          match validate_config config with
+          | Error error -> Error error
+          | Ok () ->
+              state.ownership_controls <- Some config;
+              Ok (response 200))
 
     let delete conn ~bucket ?options:_ () =
       match require_bucket conn bucket with

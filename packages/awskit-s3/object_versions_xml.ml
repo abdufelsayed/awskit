@@ -37,10 +37,21 @@ let optional_key_marker ~path name nodes =
       Result.map Option.some
         (parse_result ~path name Object_key.of_string value)
 
+let optional_storage_class ~path nodes =
+  match Xml.child_text "StorageClass" nodes with
+  | None -> Ok None
+  | Some "" ->
+      Xml.decode_field_error ~path "<StorageClass> has invalid value %S" ""
+  | Some value -> Ok (Some (Storage_class.of_string value))
+
 let parse_owner nodes =
   match Xml.child "Owner" nodes with
   | None -> None
-  | Some nodes -> Xml.child_text "ID" nodes
+  | Some nodes ->
+      Object.Owner.create
+        ?id:(Xml.child_text "ID" nodes)
+        ?display_name:(Xml.child_text "DisplayName" nodes)
+        ()
 
 let parse_checksum_summary nodes =
   {
@@ -77,10 +88,7 @@ let parse_page ~response body =
           Xml.optional_child_parse ~path "Size" non_negative_int64_of_string_opt
             nodes
         in
-        let* storage_class =
-          Xml.optional_child_parse ~path "StorageClass" Storage_class.of_string
-            nodes
-        in
+        let* storage_class = optional_storage_class ~path nodes in
         Ok
           {
             List_object_versions.key;

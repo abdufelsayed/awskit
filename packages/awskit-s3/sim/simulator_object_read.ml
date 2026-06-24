@@ -148,8 +148,8 @@ let head conn ~bucket ~key ?options () =
                       in
                       Ok (info_of_object response obj)))))
 
-let exists conn ~bucket ~key =
-  match head conn ~bucket ~key () with
+let exists conn ~bucket ~key ?options () =
+  match head conn ~bucket ~key ?options () with
   | Ok _ -> Ok true
   | Error error when Error.is_no_such_key error -> Ok false
   | Error error -> Error error

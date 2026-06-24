@@ -37,7 +37,7 @@ val view : t -> view
 (** Return the structured range shape. *)
 
 module Content_range : sig
-  type t = {
+  type t = private {
     start : int64;
     finish : int64;
     complete_length : int64 option;

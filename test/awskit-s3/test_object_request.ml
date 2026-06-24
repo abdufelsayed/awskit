@@ -13,6 +13,12 @@ let is_validation_field field error =
   Awskit.Error.is_validation error
   && Awskit.Error.validation_field error = Some field
 
+let expect_validation_field label field = function
+  | Error error when is_validation_field field error -> ()
+  | Error error ->
+      Alcotest.failf "%s: unexpected validation error: %a" label Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected validation error" label
+
 let service_error ?code ?message status =
   Awskit.Error.Producer.service ~status ?code ?message ~headers:[] ()
 
@@ -771,7 +777,7 @@ let test_object_exists_missing_object_returns_false () =
   let conn = Recording_runtime.connect [ response 404 no_such_key_body ] in
   let exists =
     Recording_s3.Object.exists conn ~bucket:(bucket_name "my-bucket")
-      ~key:(object_key "missing")
+      ~key:(object_key "missing") ()
     |> ok_or_fail "object exists missing object"
   in
   Alcotest.(check bool) "exists" false exists;
@@ -783,7 +789,7 @@ let test_object_exists_missing_bucket_returns_error () =
   match
     Recording_s3.Object.exists conn
       ~bucket:(bucket_name "missing-bucket")
-      ~key:(object_key "file")
+      ~key:(object_key "file") ()
   with
   | Error error when Error.is_no_such_bucket error ->
       check_method "object exists missing bucket method" "HEAD"
@@ -791,6 +797,163 @@ let test_object_exists_missing_bucket_returns_error () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok false -> Alcotest.fail "expected missing bucket error, got false"
   | Ok true -> Alcotest.fail "expected missing bucket error"
+
+let test_object_exists_forwards_head_options () =
+  let etag = Object.Etag.of_string_exn "\"etag\"" in
+  let preconditions =
+    {
+      Object.Preconditions.Read.none with
+      if_match = Some (Object.Etag_condition.etag etag);
+    }
+  in
+  let options =
+    Object.Head.options_exn ~preconditions
+      ~version_id:(Object.Version_id.of_string_exn "version-1")
+      ~checksum_mode:Object.Checksum.Mode.Enabled
+      ~expected_bucket_owner:(account_id "123456789012")
+      ()
+  in
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  let exists =
+    Recording_s3.Object.exists conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file") ~options ()
+    |> ok_or_fail "exists forwards head options"
+  in
+  Alcotest.(check bool) "exists" true exists;
+  let call = Recording_runtime.last_call conn in
+  check_method "method" "HEAD" call.request;
+  Alcotest.(check (list (pair string (list string))))
+    "version query"
+    [ ("versionId", [ "version-1" ]) ]
+    call.request.target.query;
+  Alcotest.(check (option string))
+    "if-match" (Some "\"etag\"")
+    (header "if-match" call.request.headers);
+  Alcotest.(check (option string))
+    "checksum mode" (Some "ENABLED")
+    (header "x-amz-checksum-mode" call.request.headers);
+  Alcotest.(check (option string))
+    "expected owner" (Some "123456789012")
+    (header "x-amz-expected-bucket-owner" call.request.headers)
+
+let test_object_unknown_storage_class_read_values () =
+  let expect_unknown label = function
+    | Some (Storage_class.Unknown value) ->
+        Alcotest.(check string) label "FUTURE_CLASS" value
+    | Some storage_class ->
+        Alcotest.failf "%s: expected unknown storage class, got %s" label
+          (Storage_class.to_string storage_class)
+    | None -> Alcotest.failf "%s: expected storage class" label
+  in
+  let list_body =
+    {|<ListBucketResult><Contents><Key>a.txt</Key><StorageClass>FUTURE_CLASS</StorageClass></Contents></ListBucketResult>|}
+  in
+  let versions_body =
+    {|<ListVersionsResult><Version><Key>a.txt</Key><VersionId>v1</VersionId><StorageClass>FUTURE_CLASS</StorageClass><Owner><ID>owner-id</ID><DisplayName>owner-name</DisplayName></Owner></Version><DeleteMarker><Key>a.txt</Key><Owner><ID>marker-owner</ID><DisplayName>marker-name</DisplayName></Owner></DeleteMarker></ListVersionsResult>|}
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:
+            [ ("content-length", "0"); ("x-amz-storage-class", "FUTURE_CLASS") ]
+          "";
+        response 200
+          ~headers:
+            [ ("content-length", "0"); ("x-amz-storage-class", "FUTURE_CLASS") ]
+          "";
+        response 200 list_body;
+        response 200 versions_body;
+      ]
+  in
+  let get =
+    Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "a.txt")
+      ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
+      ()
+    |> ok_or_fail "get unknown storage class"
+  in
+  expect_unknown "get storage class" get.storage_class;
+  let head =
+    Recording_s3.Object.head conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "a.txt") ()
+    |> ok_or_fail "head unknown storage class"
+  in
+  expect_unknown "head storage class" head.storage_class;
+  let page =
+    Recording_s3.Object.list conn ~bucket:(bucket_name "my-bucket") ()
+    |> ok_or_fail "list unknown storage class"
+  in
+  (match page.objects with
+  | [ object_ ] -> expect_unknown "list storage class" object_.storage_class
+  | _ -> Alcotest.fail "expected one listed object");
+  let versions =
+    Recording_s3.Object.list_versions conn ~bucket:(bucket_name "my-bucket") ()
+    |> ok_or_fail "versions unknown storage class"
+  in
+  (match versions.versions with
+  | [ version ] -> (
+      expect_unknown "version storage class" version.storage_class;
+      match version.owner with
+      | Some
+          {
+            Object.Owner.id = Some "owner-id";
+            display_name = Some "owner-name";
+          } ->
+          ()
+      | _ -> Alcotest.fail "expected structured version owner")
+  | _ -> Alcotest.fail "expected one object version");
+  match versions.delete_markers with
+  | [ marker ] -> (
+      match marker.owner with
+      | Some
+          {
+            Object.Owner.id = Some "marker-owner";
+            display_name = Some "marker-name";
+          } ->
+          ()
+      | _ -> Alcotest.fail "expected structured marker owner")
+  | _ -> Alcotest.fail "expected one delete marker"
+
+let test_object_observed_only_write_values_rejected () =
+  let unknown_storage = Storage_class.Unknown "FUTURE_CLASS" in
+  let unknown_checksum : Object.Checksum.value =
+    {
+      Object.Checksum.algorithm =
+        Object.Checksum.Algorithm.Unknown "FUTURE_CHECKSUM";
+      value = "checksum";
+    }
+  in
+  expect_validation_field "put builder storage" "storage_class"
+    (Object.Put.options ~storage_class:unknown_storage ());
+  expect_validation_field "put builder checksum" "checksum_algorithm"
+    (Object.Put.options ~checksum:unknown_checksum ());
+  expect_validation_field "copy builder storage" "storage_class"
+    (Object.Copy.options ~storage_class:unknown_storage ());
+  expect_validation_field "copy builder checksum" "checksum_algorithm"
+    (Object.Copy.options
+       ~checksum_algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE_CHECKSUM")
+       ());
+  let put_options =
+    { Object.Put.default_options with storage_class = Some unknown_storage }
+  in
+  let put_conn = Recording_runtime.connect [] in
+  expect_validation_field "put operation storage" "storage_class"
+    (Recording_s3.Object.put put_conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ~options:put_options
+       ~body:(Recording_s3.Body.of_string "body")
+       ());
+  Alcotest.(check int) "put not sent" 0 (List.length put_conn.calls);
+  let copy_options =
+    { Object.Copy.default_options with storage_class = Some unknown_storage }
+  in
+  let copy_conn = Recording_runtime.connect [] in
+  expect_validation_field "copy operation storage" "storage_class"
+    (Recording_s3.Object.copy copy_conn ~source_bucket:(bucket_name "my-bucket")
+       ~source_key:(object_key "file")
+       ~destination_bucket:(bucket_name "my-bucket")
+       ~destination_key:(object_key "copy") ~options:copy_options ());
+  Alcotest.(check int) "copy not sent" 0 (List.length copy_conn.calls)
 
 let test_find_success_returns_some () =
   let conn =
@@ -1007,6 +1170,9 @@ let test_object_list_rejects_invalid_typed_fields () =
     ( "invalid common prefix",
       "<ListBucketResult><CommonPrefixes><Prefix></Prefix></CommonPrefixes></ListBucketResult>",
       "Prefix" );
+    ( "invalid storage class",
+      "<ListBucketResult><Contents><Key>a.txt</Key><StorageClass></StorageClass></Contents></ListBucketResult>",
+      "StorageClass" );
   ]
   |> List.iter (fun (label, body, field) ->
       expect_list_decode_error label body field)
@@ -1031,6 +1197,9 @@ let test_object_versions_rejects_invalid_typed_fields () =
     ( "invalid delete marker version id",
       "<ListVersionsResult><DeleteMarker><Key>a.txt</Key><VersionId></VersionId></DeleteMarker></ListVersionsResult>",
       "VersionId" );
+    ( "invalid storage class",
+      "<ListVersionsResult><Version><Key>a.txt</Key><StorageClass></StorageClass></Version></ListVersionsResult>",
+      "StorageClass" );
   ]
   |> List.iter (fun (label, body, field) ->
       expect_version_list_decode_error label body field)
@@ -1420,6 +1589,12 @@ let suite =
           test_object_exists_missing_object_returns_false;
         Alcotest.test_case "object exists missing bucket returns error" `Quick
           test_object_exists_missing_bucket_returns_error;
+        Alcotest.test_case "object exists forwards head options" `Quick
+          test_object_exists_forwards_head_options;
+        Alcotest.test_case "object unknown storage class read values" `Quick
+          test_object_unknown_storage_class_read_values;
+        Alcotest.test_case "object observed-only write values rejected" `Quick
+          test_object_observed_only_write_values_rejected;
         Alcotest.test_case "find success returns some" `Quick
           test_find_success_returns_some;
         Alcotest.test_case "find missing object returns none" `Quick

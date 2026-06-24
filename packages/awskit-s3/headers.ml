@@ -94,6 +94,12 @@ let validate_checksum_type = function
 let validate_checksum_value (checksum : Object.Checksum.value) =
   validate_checksum_algorithm checksum.algorithm
 
+let validate_storage_class = function
+  | Storage_class.Unknown value ->
+      invalid ~field:"storage_class" "unknown storage class %S cannot be sent"
+        value
+  | _ -> Ok ()
+
 let checksum_value_headers = function
   | None -> []
   | Some (checksum : Object.Checksum.value) -> (

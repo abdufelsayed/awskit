@@ -115,6 +115,17 @@ module Encryption : sig
   (** Encryption settings reported by S3. Unknown values are preserved. *)
 end
 
+module Owner : sig
+  type t = private { id : string option; display_name : string option }
+  (** S3 owner metadata returned by listing APIs. [id] is the canonical owner
+      identifier when S3 returns it. [display_name] is optional and is not
+      returned by all S3 regions. *)
+
+  val create : ?id:string -> ?display_name:string -> unit -> t option
+  (** Preserve a returned owner when S3 supplied at least one field. Empty
+      fields are treated as absent. *)
+end
+
 module Etag_condition : sig
   (** ETag condition used by object precondition records. *)
   type t = Any | Etag of Etag.t
@@ -583,7 +594,7 @@ module Versions : sig
     size : int64 option;  (** Object size in bytes. *)
     storage_class : Storage_class.t option;
         (** Storage class for this version. *)
-    owner : string option;  (** Owner id/display name when returned by S3. *)
+    owner : Owner.t option;  (** Owner metadata when returned by S3. *)
     checksum : Checksum.summary;  (** Checksum summary metadata. *)
   }
   (** One object version entry from [ListObjectVersions]. *)
@@ -594,7 +605,7 @@ module Versions : sig
     is_latest : bool option;
         (** Whether this delete marker is latest for the key. *)
     last_modified : Ptime.t option;  (** Delete marker timestamp. *)
-    owner : string option;  (** Owner id/display name when returned by S3. *)
+    owner : Owner.t option;  (** Owner metadata when returned by S3. *)
   }
   (** One delete marker entry from [ListObjectVersions]. *)
 

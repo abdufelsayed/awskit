@@ -168,6 +168,149 @@ let test_bucket_encryption_unknown_write_rejected () =
       Alcotest.failf "unexpected validation error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected unknown encryption write rejection"
 
+let test_bucket_forward_compatible_read_enums () =
+  let versioning_unknown =
+    {|<VersioningConfiguration><Status>FutureStatus</Status></VersioningConfiguration>|}
+  in
+  let versioning_absent = {|<VersioningConfiguration/>|} in
+  let ownership_unknown =
+    {|<OwnershipControls><Rule><ObjectOwnership>FutureOwnership</ObjectOwnership></Rule></OwnershipControls>|}
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 versioning_unknown;
+        response 200 versioning_absent;
+        response 200 ownership_unknown;
+      ]
+  in
+  let versioning =
+    Recording_s3.Bucket.Versioning.get conn ~bucket:(bucket_name "my-bucket") ()
+    |> ok_or_fail "unknown versioning parse"
+  in
+  Alcotest.(check bool)
+    "unknown versioning status" true
+    (versioning.status = Some (Bucket.Versioning.Status.Unknown "FutureStatus"));
+  let absent =
+    Recording_s3.Bucket.Versioning.get conn ~bucket:(bucket_name "my-bucket") ()
+    |> ok_or_fail "absent versioning parse"
+  in
+  Alcotest.(check bool)
+    "absent versioning status" true
+    (Option.is_none absent.status);
+  let ownership =
+    Recording_s3.Bucket.Ownership_controls.get conn
+      ~bucket:(bucket_name "my-bucket") ()
+    |> ok_or_fail "unknown ownership parse"
+  in
+  Alcotest.(check bool)
+    "unknown ownership" true
+    (ownership.config.object_ownership
+    = Bucket.Ownership_controls.Object_ownership.Unknown "FutureOwnership")
+
+let test_bucket_malformed_booleans_are_decode_errors () =
+  let public_access_block =
+    {|<PublicAccessBlockConfiguration><BlockPublicAcls>maybe</BlockPublicAcls></PublicAccessBlockConfiguration>|}
+  in
+  let encryption =
+    {|<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>maybe</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>|}
+  in
+  let check label call field =
+    match call () with
+    | Error error when is_decode_error error ->
+        let text = Awskit.Error.to_string_hum error in
+        Alcotest.(check bool)
+          (label ^ " mentions field")
+          true
+          (string_contains text ~substring:field)
+    | Error error ->
+        Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+    | Ok _ -> Alcotest.failf "%s: expected decode error" label
+  in
+  let public_access_conn =
+    Recording_runtime.connect [ response 200 public_access_block ]
+  in
+  check "public access block"
+    (fun () ->
+      Recording_s3.Bucket.Public_access_block.get public_access_conn
+        ~bucket:(bucket_name "my-bucket") ())
+    "BlockPublicAcls";
+  let encryption_conn = Recording_runtime.connect [ response 200 encryption ] in
+  check "bucket encryption"
+    (fun () ->
+      Recording_s3.Bucket.Encryption.get encryption_conn
+        ~bucket:(bucket_name "my-bucket") ())
+    "BucketKeyEnabled"
+
+let test_bucket_empty_observed_enum_fields_are_decode_errors () =
+  let check label call field =
+    match call () with
+    | Error error when is_decode_error error ->
+        let text = Awskit.Error.to_string_hum error in
+        Alcotest.(check bool)
+          (label ^ " mentions field")
+          true
+          (string_contains text ~substring:field)
+    | Error error ->
+        Alcotest.failf "%s: unexpected error: %a" label Error.pp error
+    | Ok _ -> Alcotest.failf "%s: expected decode error" label
+  in
+  let versioning_conn =
+    Recording_runtime.connect
+      [
+        response 200
+          {|<VersioningConfiguration><Status></Status></VersioningConfiguration>|};
+      ]
+  in
+  check "bucket versioning"
+    (fun () ->
+      Recording_s3.Bucket.Versioning.get versioning_conn
+        ~bucket:(bucket_name "my-bucket") ())
+    "Status";
+  let ownership_conn =
+    Recording_runtime.connect
+      [
+        response 200
+          {|<OwnershipControls><Rule><ObjectOwnership></ObjectOwnership></Rule></OwnershipControls>|};
+      ]
+  in
+  check "ownership controls"
+    (fun () ->
+      Recording_s3.Bucket.Ownership_controls.get ownership_conn
+        ~bucket:(bucket_name "my-bucket") ())
+    "object ownership"
+
+let test_bucket_observed_unknown_writes_rejected () =
+  let versioning_conn = Recording_runtime.connect [ response 200 "" ] in
+  (match
+     Recording_s3.Bucket.Versioning.put versioning_conn
+       ~bucket:(bucket_name "my-bucket")
+       ~status:(Bucket.Versioning.Status.Unknown "FutureStatus") ()
+   with
+  | Error error when is_validation_field "status" error -> ()
+  | Error error ->
+      Alcotest.failf "unexpected versioning validation error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected versioning unknown write rejection");
+  Alcotest.(check int)
+    "versioning not sent" 0
+    (List.length versioning_conn.calls);
+  let ownership_conn = Recording_runtime.connect [ response 200 "" ] in
+  let config =
+    {
+      Bucket.Ownership_controls.object_ownership =
+        Bucket.Ownership_controls.Object_ownership.Unknown "FutureOwnership";
+    }
+  in
+  (match
+     Recording_s3.Bucket.Ownership_controls.put ownership_conn
+       ~bucket:(bucket_name "my-bucket") ~config ()
+   with
+  | Error error when is_validation_field "object_ownership" error -> ()
+  | Error error ->
+      Alcotest.failf "unexpected ownership validation error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected ownership unknown write rejection");
+  Alcotest.(check int) "ownership not sent" 0 (List.length ownership_conn.calls)
+
 let test_decode_error_mentions_xml_document () =
   let conn = Recording_runtime.connect [ response 200 "<not xml" ] in
   match
@@ -225,6 +368,14 @@ let suite =
           test_bucket_encryption_unknown_read_values;
         Alcotest.test_case "bucket encryption unknown write rejected" `Quick
           test_bucket_encryption_unknown_write_rejected;
+        Alcotest.test_case "bucket forward compatible read enums" `Quick
+          test_bucket_forward_compatible_read_enums;
+        Alcotest.test_case "bucket malformed booleans are decode errors" `Quick
+          test_bucket_malformed_booleans_are_decode_errors;
+        Alcotest.test_case "bucket empty observed enum fields are decode errors"
+          `Quick test_bucket_empty_observed_enum_fields_are_decode_errors;
+        Alcotest.test_case "bucket observed unknown writes rejected" `Quick
+          test_bucket_observed_unknown_writes_rejected;
         Alcotest.test_case "decode error mentions XML document" `Quick
           test_decode_error_mentions_xml_document;
         Alcotest.test_case "decode root rejects wrong root" `Quick

@@ -18,6 +18,13 @@ let optional_non_empty_text_result ~path name parse nodes =
   | None | Some "" -> Ok None
   | Some value -> Result.map Option.some (parse_result ~path name parse value)
 
+let optional_storage_class ~path nodes =
+  match Xml.child_text "StorageClass" nodes with
+  | None -> Ok None
+  | Some "" ->
+      Xml.decode_field_error ~path "<StorageClass> has invalid value %S" ""
+  | Some value -> Ok (Some (Storage_class.of_string value))
+
 let parse_checksum_summary nodes =
   {
     Object.Checksum.algorithms =
@@ -46,10 +53,7 @@ let parse_page ~response body =
         let* last_modified =
           Xml.optional_child_parse ~path "LastModified" ptime_of_string nodes
         in
-        let* storage_class =
-          Xml.optional_child_parse ~path "StorageClass" Storage_class.of_string
-            nodes
-        in
+        let* storage_class = optional_storage_class ~path nodes in
         Ok
           {
             List_objects_v2.key;

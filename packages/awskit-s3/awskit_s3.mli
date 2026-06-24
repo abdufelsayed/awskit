@@ -236,10 +236,14 @@ module type OBJECT = sig
     connection ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
+    ?options:Object.Head.options ->
+    unit ->
     (bool, Awskit.Error.t) result io
   (** Return [false] for object-not-found responses and [true] for success.
 
-      Code-less [HeadObject] 404 responses are treated as absent objects. Coded
+      Accepts the same options as {!val:head}, including version id,
+      preconditions, checksum mode, and expected-owner guards. Code-less
+      [HeadObject] 404 responses are treated as absent objects. Coded
       [NoSuchBucket] responses and other service, auth, transport, and decode
       failures remain [Error]. *)
 

@@ -179,7 +179,7 @@ let test_exists_missing_object_returns_false () =
   match
     Simulator.Object.exists conn
       ~bucket:(bucket_name "test-bucket")
-      ~key:(object_key "missing")
+      ~key:(object_key "missing") ()
   with
   | Ok false -> ()
   | Ok true -> Alcotest.fail "expected false for missing object"
@@ -190,7 +190,7 @@ let test_exists_missing_bucket_returns_error () =
   match
     Simulator.Object.exists conn
       ~bucket:(bucket_name "missing-bucket")
-      ~key:(object_key "file")
+      ~key:(object_key "file") ()
   with
   | Error error when Error.is_no_such_bucket error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error

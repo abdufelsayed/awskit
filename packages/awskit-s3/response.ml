@@ -9,6 +9,18 @@ let parse_bool = function
   | "false" | "False" | "FALSE" -> Some false
   | _ -> None
 
+let response_bool_header response name =
+  match Awskit.Response.header response name with
+  | None -> Ok None
+  | Some value -> (
+      match parse_bool value with
+      | Some value -> Ok (Some value)
+      | None ->
+          Error
+            (decode_with_context
+               ~what:(Fmt.str "%s response header" name)
+               (Fmt.str "invalid boolean value %S" value)))
+
 let response_etag response =
   option_map_result Object.Etag.of_string
     (Awskit.Response.header response "etag")
@@ -47,33 +59,32 @@ let response_checksum response =
 
 let response_encryption response =
   match Awskit.Response.header response "x-amz-server-side-encryption" with
-  | None -> None
-  | Some "AES256" -> Some `AES256
+  | None -> Ok None
+  | Some "AES256" -> Ok (Some `AES256)
   | Some "aws:kms" ->
-      Some
-        (`Aws_kms
-           {
-             Object.Encryption.key_id =
-               Awskit.Response.header response
-                 "x-amz-server-side-encryption-aws-kms-key-id";
-             bucket_key_enabled =
-               Option.bind
-                 (Awskit.Response.header response
-                    "x-amz-server-side-encryption-bucket-key-enabled")
-                 parse_bool;
-           })
-  | Some value -> Some (`Unknown value)
+      let* bucket_key_enabled =
+        response_bool_header response
+          "x-amz-server-side-encryption-bucket-key-enabled"
+      in
+      Ok
+        (Some
+           (`Aws_kms
+              {
+                Object.Encryption.key_id =
+                  Awskit.Response.header response
+                    "x-amz-server-side-encryption-aws-kms-key-id";
+                bucket_key_enabled;
+              }))
+  | Some value -> Ok (Some (`Unknown value))
 
 let storage_class response =
   match Awskit.Response.header response "x-amz-storage-class" with
   | None -> Ok None
-  | Some value -> (
-      match Storage_class.of_string value with
-      | Some value -> Ok (Some value)
-      | None ->
-          Error
-            (Awskit.Error.Producer.decode
-               (Fmt.str "invalid storage class %s" value)))
+  | Some "" ->
+      Error
+        (decode_with_context ~what:"x-amz-storage-class response header"
+           "storage class must be non-empty")
+  | Some value -> Ok (Some (Storage_class.of_string value))
 
 let response_content_type response =
   match Awskit.Response.header response "content-type" with
@@ -97,6 +108,7 @@ let object_info response =
   let* version_id = response_version response in
   let* content_type = response_content_type response in
   let* content_range = response_content_range response in
+  let* server_side_encryption = response_encryption response in
   let* metadata =
     Metadata_headers.of_headers (Awskit.Response.headers response)
   in
@@ -114,7 +126,7 @@ let object_info response =
       storage_class;
       version_id;
       checksum = response_checksum response;
-      server_side_encryption = response_encryption response;
+      server_side_encryption;
       response;
     }
 
@@ -131,15 +143,8 @@ let put_result response =
 
 let delete_result response =
   let* version_id = response_version response in
-  Ok
-    {
-      Delete_object.delete_marker =
-        Option.bind
-          (Awskit.Response.header response "x-amz-delete-marker")
-          parse_bool;
-      version_id;
-      response;
-    }
+  let* delete_marker = response_bool_header response "x-amz-delete-marker" in
+  Ok { Delete_object.delete_marker; version_id; response }
 
 let embedded_service_error response body =
   Awskit.Error.Producer.service

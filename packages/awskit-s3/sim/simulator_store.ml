@@ -20,12 +20,12 @@ let require_object t bucket key =
 let versioning_enabled (bucket : bucket_state) =
   match bucket.versioning with
   | Some Bucket.Versioning.Status.Enabled -> true
-  | Some Suspended | None -> false
+  | Some Suspended | Some (Unknown _) | None -> false
 
 let versioning_suspended (bucket : bucket_state) =
   match bucket.versioning with
   | Some Bucket.Versioning.Status.Suspended -> true
-  | Some Enabled | None -> false
+  | Some Enabled | Some (Unknown _) | None -> false
 
 let versioning_keeps_history bucket =
   versioning_enabled bucket || versioning_suspended bucket

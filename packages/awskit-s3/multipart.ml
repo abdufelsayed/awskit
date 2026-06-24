@@ -150,11 +150,18 @@ module Create = struct
           value
     | _ -> Ok ()
 
+  let validate_storage_class = function
+    | Some (Storage_class.Unknown value) ->
+        invalid ~field:"storage_class" "unknown storage class %S cannot be sent"
+          value
+    | _ -> Ok ()
+
   let options ?content_type ?(metadata = Metadata.empty) ?storage_class
       ?(tags = Tag.Set.empty) ?checksum_algorithm ?checksum_type
       ?server_side_encryption ?expected_bucket_owner () =
     let* () = validate_metadata metadata in
     let* () = validate_tags tags in
+    let* () = validate_storage_class storage_class in
     let* () = validate_checksum_algorithm checksum_algorithm in
     let* () = validate_checksum_type checksum_type in
     Ok

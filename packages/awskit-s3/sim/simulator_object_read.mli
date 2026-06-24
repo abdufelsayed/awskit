@@ -34,6 +34,8 @@ val exists :
   Simulator_state.t ->
   bucket:string ->
   key:string ->
+  ?options:Object.Head.options ->
+  unit ->
   (bool, Awskit.Error.t) result
 
 val get_as_string :

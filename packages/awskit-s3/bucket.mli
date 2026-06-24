@@ -141,11 +141,12 @@ module Versioning : sig
 
   module Status : sig
     (** Bucket versioning state. Absence in a result means versioning was never
-        configured for the bucket. *)
-    type t = Enabled | Suspended
+        configured for the bucket. Unknown values are preserved on reads for
+        forward compatibility, but rejected by write operations. *)
+    type t = Enabled | Suspended | Unknown of string
 
     val to_string : t -> string
-    val of_string : string -> t option
+    val of_string : string -> t
   end
 
   type result = { status : Status.t option; response : Awskit.Response.t }
@@ -340,11 +341,16 @@ module Ownership_controls : sig
 
   (** S3 object ownership controls. *)
   module Object_ownership : sig
-    (** Object ownership mode. *)
-    type t = Bucket_owner_enforced | Bucket_owner_preferred | Object_writer
+    (** Object ownership mode. Unknown values are preserved on reads for forward
+        compatibility, but rejected by write operations. *)
+    type t =
+      | Bucket_owner_enforced
+      | Bucket_owner_preferred
+      | Object_writer
+      | Unknown of string
 
     val to_string : t -> string
-    val of_string : string -> t option
+    val of_string : string -> t
   end
 
   type config = { object_ownership : Object_ownership.t }

@@ -111,6 +111,19 @@ module Encryption = struct
   type response = [ `AES256 | `Aws_kms of kms | `Unknown of string ]
 end
 
+module Owner = struct
+  type t = { id : string option; display_name : string option }
+
+  let non_empty = function None | Some "" -> None | Some _ as value -> value
+
+  let create ?id ?display_name () =
+    let id = non_empty id in
+    let display_name = non_empty display_name in
+    match (id, display_name) with
+    | None, None -> None
+    | _ -> Some { id; display_name }
+end
+
 module Etag_condition = struct
   type t = Any | Etag of Etag.t
 
@@ -209,10 +222,24 @@ module Put = struct
       expected_bucket_owner = None;
     }
 
+  let validate_storage_class = function
+    | Some (Storage_class.Unknown value) ->
+        invalid ~field:"storage_class" "unknown storage class %S cannot be sent"
+          value
+    | _ -> Ok ()
+
+  let validate_checksum_value = function
+    | Some { Checksum.algorithm = Unknown value; _ } ->
+        invalid ~field:"checksum_algorithm"
+          "unknown checksum algorithm %S cannot be sent" value
+    | _ -> Ok ()
+
   let options ?content_type ?(metadata = Metadata.empty) ?storage_class
       ?(tags = Tag.Set.empty) ?cache_control ?content_encoding
       ?content_disposition ?(preconditions = Preconditions.Write.none) ?checksum
       ?server_side_encryption ?expected_bucket_owner () =
+    let* () = validate_storage_class storage_class in
+    let* () = validate_checksum_value checksum in
     Ok
       {
         content_type;
@@ -427,11 +454,25 @@ module Copy = struct
       source_expected_bucket_owner = None;
     }
 
+  let validate_storage_class = function
+    | Some (Storage_class.Unknown value) ->
+        invalid ~field:"storage_class" "unknown storage class %S cannot be sent"
+          value
+    | _ -> Ok ()
+
+  let validate_checksum_algorithm = function
+    | Some (Checksum.Algorithm.Unknown value) ->
+        invalid ~field:"checksum_algorithm"
+          "unknown checksum algorithm %S cannot be sent" value
+    | _ -> Ok ()
+
   let options ?source_version_id
       ?(source_preconditions = Preconditions.Copy_source.none)
       ?metadata_directive ?storage_class ?checksum_algorithm
       ?server_side_encryption ?expected_bucket_owner
       ?source_expected_bucket_owner () =
+    let* () = validate_storage_class storage_class in
+    let* () = validate_checksum_algorithm checksum_algorithm in
     Ok
       {
         source_version_id;
@@ -477,7 +518,7 @@ module Versions = struct
     etag : Etag.t option;
     size : int64 option;
     storage_class : Storage_class.t option;
-    owner : string option;
+    owner : Owner.t option;
     checksum : Checksum.summary;
   }
 
@@ -486,7 +527,7 @@ module Versions = struct
     version_id : Version_id.t option;
     is_latest : bool option;
     last_modified : Ptime.t option;
-    owner : string option;
+    owner : Owner.t option;
   }
 
   type page = {

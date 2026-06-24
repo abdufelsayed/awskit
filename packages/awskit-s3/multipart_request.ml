@@ -44,6 +44,24 @@ module Make (C : Request_context.S) = struct
   let upload_id upload = Multipart.Upload.upload_id upload
   let complete_min_part_size = 5_242_880L
 
+  let validate_create_options (options : Create_multipart_upload.options) =
+    match validate_metadata options.metadata with
+    | Error _ as error -> error
+    | Ok () -> (
+        match validate_tags options.tags with
+        | Error _ as error -> error
+        | Ok () -> (
+            match validate_opt validate_storage_class options.storage_class with
+            | Error _ as error -> error
+            | Ok () -> (
+                match
+                  ( validate_opt validate_checksum_algorithm
+                      options.checksum_algorithm,
+                    validate_opt validate_checksum_type options.checksum_type )
+                with
+                | Error error, _ | _, Error error -> Error error
+                | Ok (), Ok () -> Ok ())))
+
   let validate_complete_options (options : Complete_multipart_upload.options) =
     Complete_multipart_upload.options
       ?expected_bucket_owner:options.expected_bucket_owner
@@ -93,6 +111,24 @@ module Make (C : Request_context.S) = struct
     | [] -> invalid ~field:"parts" "complete requires at least one part"
     | parts -> loop None 0L true parts
 
+  let create_upload_result ~typed_bucket ~typed_key response body =
+    match Xml.decode_root body ~name:"InitiateMultipartUploadResult" with
+    | Error _ as error -> error
+    | Ok nodes -> (
+        match Xml.child_text "UploadId" nodes with
+        | None -> Error (decode "missing UploadId")
+        | Some upload_id -> (
+            match Multipart.Upload_id.of_string upload_id with
+            | Error _ as error -> error
+            | Ok upload_id ->
+                Ok
+                  {
+                    Create_multipart_upload.upload =
+                      Multipart.Upload.created ~bucket:typed_bucket
+                        ~key:typed_key ~upload_id;
+                    response;
+                  }))
+
   let create_upload conn ~bucket ~key ?options () =
     let typed_bucket = bucket in
     let typed_key = key in
@@ -108,77 +144,38 @@ module Make (C : Request_context.S) = struct
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        match validate_metadata options.metadata with
+        match validate_create_options options with
         | Error error -> return_error error
         | Ok () -> (
-            match validate_tags options.tags with
+            let headers =
+              Metadata_headers.to_headers options.metadata
+              @ checksum_algorithm_header options.checksum_algorithm
+              @ checksum_type_header options.checksum_type
+              @ encryption_request_headers options.server_side_encryption
+              |> add_opt_content_type_header "content-type" options.content_type
+              |> add_opt_header "x-amz-storage-class"
+                   (Option.map Storage_class.to_string options.storage_class)
+              |> add_opt_header "x-amz-tagging" (tags_header options.tags)
+              |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+                   options.expected_bucket_owner
+            in
+            match object_request conn ~bucket ~key with
             | Error error -> return_error error
-            | Ok () -> (
-                match
-                  ( validate_opt validate_checksum_algorithm
-                      options.checksum_algorithm,
-                    validate_opt validate_checksum_type options.checksum_type )
-                with
-                | Error error, _ | _, Error error -> return_error error
-                | Ok (), Ok () -> (
-                    let headers =
-                      Metadata_headers.to_headers options.metadata
-                      @ checksum_algorithm_header options.checksum_algorithm
-                      @ checksum_type_header options.checksum_type
-                      @ encryption_request_headers
-                          options.server_side_encryption
-                      |> add_opt_content_type_header "content-type"
-                           options.content_type
-                      |> add_opt_header "x-amz-storage-class"
-                           (Option.map Storage_class.to_string
-                              options.storage_class)
-                      |> add_opt_header "x-amz-tagging"
-                           (tags_header options.tags)
-                      |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                           options.expected_bucket_owner
-                    in
-                    match object_request conn ~bucket ~key with
-                    | Error error -> return_error error
-                    | Ok request ->
-                        with_operation_result return_error return_ok
-                          (with_empty_response conn ~method_:`POST ~request
-                             ~query:[ ("uploads", []) ]
-                             ~headers
-                             ~f:(fun response body ->
-                               let* body =
-                                 read_response_body body ~max_size:1_048_576L
-                               in
-                               match body with
-                               | Error error -> return_error error
-                               | Ok body -> (
-                                   match
-                                     Xml.decode_root body
-                                       ~name:"InitiateMultipartUploadResult"
-                                   with
-                                   | Error error -> return_error error
-                                   | Ok nodes -> (
-                                       match
-                                         Xml.child_text "UploadId" nodes
-                                       with
-                                       | None ->
-                                           return_error
-                                             (decode "missing UploadId")
-                                       | Some upload_id -> (
-                                           match
-                                             Multipart.Upload_id.of_string
-                                               upload_id
-                                           with
-                                           | Error error -> return_error error
-                                           | Ok upload_id ->
-                                               return_ok
-                                                 {
-                                                   Create_multipart_upload
-                                                   .upload =
-                                                     Multipart.Upload.created
-                                                       ~bucket:typed_bucket
-                                                       ~key:typed_key ~upload_id;
-                                                   response;
-                                                 })))))))))
+            | Ok request ->
+                with_operation_result return_error return_ok
+                  (with_empty_response conn ~method_:`POST ~request
+                     ~query:[ ("uploads", []) ]
+                     ~headers
+                     ~f:(fun response body ->
+                       let* body =
+                         read_response_body body ~max_size:1_048_576L
+                       in
+                       match body with
+                       | Error error -> return_error error
+                       | Ok body ->
+                           return_result return_error return_ok
+                             (create_upload_result ~typed_bucket ~typed_key
+                                response body)))))
 
   let upload_part conn ~upload ~part_number ~body ?options () =
     let bucket = upload_bucket upload in

@@ -446,7 +446,7 @@ module S3 = struct
            ?version_id:conn.Runtime.head_version_id
            (Some (Int64.of_int (String.length conn.Runtime.response_body))))
 
-    let exists _ ~bucket:_ ~key:_ = unsupported ()
+    let exists _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
     let delete _ ~bucket:_ ~key:_ ?options:_ () = unsupported ()
     let delete_objects _ ~bucket:_ ~objects:_ ?options:_ () = unsupported ()
 

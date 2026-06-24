@@ -15,19 +15,29 @@ module Public_access_block = struct
     |> xml_body
 
   let bool_child name nodes =
-    Option.value ~default:false
-      (Option.bind (Xml.child_text name nodes) Response.parse_bool)
+    match Xml.child_text name nodes with
+    | None -> Ok false
+    | Some value -> (
+        match Response.parse_bool value with
+        | Some value -> Ok value
+        | None ->
+            Xml.decode_field_error ~path:"PublicAccessBlockConfiguration"
+              "<%s> has invalid value %S" name value)
 
   let parse body response =
     let* nodes = Xml.decode_root body ~name:"PublicAccessBlockConfiguration" in
+    let* block_public_acls = bool_child "BlockPublicAcls" nodes in
+    let* ignore_public_acls = bool_child "IgnorePublicAcls" nodes in
+    let* block_public_policy = bool_child "BlockPublicPolicy" nodes in
+    let* restrict_public_buckets = bool_child "RestrictPublicBuckets" nodes in
     Ok
       {
         Bucket.Public_access_block.config =
           {
-            block_public_acls = bool_child "BlockPublicAcls" nodes;
-            ignore_public_acls = bool_child "IgnorePublicAcls" nodes;
-            block_public_policy = bool_child "BlockPublicPolicy" nodes;
-            restrict_public_buckets = bool_child "RestrictPublicBuckets" nodes;
+            block_public_acls;
+            ignore_public_acls;
+            block_public_policy;
+            restrict_public_buckets;
           };
         response;
       }
@@ -53,15 +63,14 @@ module Ownership_controls = struct
     | Some rule -> (
         match Xml.child_text "ObjectOwnership" rule with
         | None -> Error (decode "missing ObjectOwnership")
-        | Some value -> (
-            match
+        | Some "" -> Error (decode "invalid object ownership %S" "")
+        | Some value ->
+            let object_ownership =
               Bucket.Ownership_controls.Object_ownership.of_string value
-            with
-            | None -> Error (decode "invalid object ownership %S" value)
-            | Some object_ownership ->
-                Ok
-                  {
-                    Bucket.Ownership_controls.config = { object_ownership };
-                    response;
-                  }))
+            in
+            Ok
+              {
+                Bucket.Ownership_controls.config = { object_ownership };
+                response;
+              })
 end

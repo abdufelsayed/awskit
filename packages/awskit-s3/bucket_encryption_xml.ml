@@ -111,7 +111,15 @@ let parse body response =
         (sse_algorithm, kms_master_key_id)
   in
   let parse_bucket_key nodes =
-    Option.bind (Xml.child_text "BucketKeyEnabled" nodes) Response.parse_bool
+    match Xml.child_text "BucketKeyEnabled" nodes with
+    | None -> Ok None
+    | Some value -> (
+        match Response.parse_bool value with
+        | Some value -> Ok (Some value)
+        | None ->
+            Xml.decode_field_error
+              ~path:"ServerSideEncryptionConfiguration.Rule"
+              "<BucketKeyEnabled> has invalid value %S" value)
   in
   let parse_blocked nodes =
     Xml.child "BlockedEncryptionTypes" nodes
@@ -123,11 +131,12 @@ let parse body response =
     | [] -> Ok { Bucket.Encryption.config = { rules = List.rev acc }; response }
     | nodes :: rest ->
         let sse_algorithm, kms_master_key_id = parse_apply nodes in
+        let* bucket_key_enabled = parse_bucket_key nodes in
         let rule =
           {
             Bucket.Encryption.Rule.sse_algorithm;
             kms_master_key_id;
-            bucket_key_enabled = parse_bucket_key nodes;
+            bucket_key_enabled;
             blocked_encryption_types = parse_blocked nodes;
           }
         in

@@ -196,14 +196,14 @@ module Make (Client : SUBJECT) = struct
         "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=" head.checksum;
     Alcotest.(check bool)
       "object exists" true
-      (Client.Object.exists conn ~bucket ~key:(object_key "hello.txt")
+      (Client.Object.exists conn ~bucket ~key:(object_key "hello.txt") ()
       |> run_result "exists");
     ignore
       (Client.Object.delete conn ~bucket ~key:(object_key "hello.txt") ()
       |> run_result "delete");
     Alcotest.(check bool)
       "object deleted" false
-      (Client.Object.exists conn ~bucket ~key:(object_key "hello.txt")
+      (Client.Object.exists conn ~bucket ~key:(object_key "hello.txt") ()
       |> run_result "exists deleted")
 
   let test_streaming_get conn =
@@ -545,7 +545,7 @@ module Make (Client : SUBJECT) = struct
       "delete marker" (Some true) deleted.delete_marker;
     Alcotest.(check bool)
       "delete marker hides current" false
-      (Client.Object.exists conn ~bucket ~key:(object_key "versioned.txt")
+      (Client.Object.exists conn ~bucket ~key:(object_key "versioned.txt") ()
       |> run_result "exists after delete marker");
     let marker_get_options =
       { Object.Get.default_options with version_id = Some marker }
@@ -608,7 +608,9 @@ module Make (Client : SUBJECT) = struct
           |> run_result "delete missing version id");
         Alcotest.(check bool)
           "missing version delete keeps marker" false
-          (Client.Object.exists conn ~bucket ~key:(object_key "versioned.txt")
+          (Client.Object.exists conn ~bucket
+             ~key:(object_key "versioned.txt")
+             ()
           |> run_result "exists after missing version delete")
     | `Invalid_argument ->
         run_expect_status "delete missing version id" 400
@@ -687,7 +689,7 @@ module Make (Client : SUBJECT) = struct
       (List.length deleted_many.deleted);
     Alcotest.(check bool)
       "all versions removed" false
-      (Client.Object.exists conn ~bucket ~key:(object_key "versioned.txt")
+      (Client.Object.exists conn ~bucket ~key:(object_key "versioned.txt") ()
       |> run_result "exists after delete objects version");
     if Client.capabilities.suspended_versioning_null then (
       let enabled_put =
@@ -764,7 +766,7 @@ module Make (Client : SUBJECT) = struct
         (version_string suspended_delete.version_id);
       Alcotest.(check bool)
         "suspended marker hides current" false
-        (Client.Object.exists conn ~bucket ~key:(object_key "suspended.txt")
+        (Client.Object.exists conn ~bucket ~key:(object_key "suspended.txt") ()
         |> run_result "exists after suspended delete");
       let null_version = Object.Version_id.of_string_exn "null" in
       let null_marker_options =

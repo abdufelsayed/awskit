@@ -10,9 +10,15 @@ let xml status =
 
 let parse body response =
   let* nodes = Xml.decode_root body ~name:"VersioningConfiguration" in
-  let status =
-    Option.bind
-      (Xml.child_text "Status" nodes)
-      Bucket.Versioning.Status.of_string
-  in
-  Ok { Bucket.Versioning.status; response }
+  match Xml.child_text "Status" nodes with
+  | None -> Ok { Bucket.Versioning.status = None; response }
+  | Some "" ->
+      Xml.decode_field_error ~path:"VersioningConfiguration"
+        "<Status> has invalid value %S" ""
+  | Some value ->
+      Ok
+        {
+          Bucket.Versioning.status =
+            Some (Bucket.Versioning.Status.of_string value);
+          response;
+        }
