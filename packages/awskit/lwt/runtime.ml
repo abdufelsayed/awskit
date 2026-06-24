@@ -52,16 +52,20 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     stream : string Lwt_stream.t;
     sleep : Ptime.Span.t -> unit Lwt.t;
     timeout_policy : Awskit.Timeout.policy;
+    mutable active : bool;
     mutable chunk : string;
     mutable offset : int;
   }
 
   let validate_create_args ?endpoint ~max_response_drain_bytes () =
     if max_response_drain_bytes <= 0 then
-      invalid_arg
-        "Awskit_lwt.Make.create: max_response_drain_bytes must be positive";
-    Option.iter endpoint ~f:(fun endpoint ->
-        ignore (Awskit.Endpoint.to_url_prefix endpoint))
+      Error
+        (Awskit.Error.Producer.validation ~field:"max_response_drain_bytes"
+           "max_response_drain_bytes must be positive")
+    else (
+      Option.iter endpoint ~f:(fun endpoint ->
+          ignore (Awskit.Endpoint.to_url_prefix endpoint));
+      Ok ())
 
   let parse_endpoint = function
     | None -> Ok None
@@ -118,34 +122,37 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     match (Awskit.Region.of_string region, parse_endpoint endpoint) with
     | Error error, _ | _, Error error -> Error error
     | Ok region, Ok endpoint -> (
-        validate_create_args ?endpoint ~max_response_drain_bytes ();
-        match
-          validate_retry_capabilities ~retry_policy ~sleep ~random_float
-        with
+        match validate_create_args ?endpoint ~max_response_drain_bytes () with
         | Error _ as error -> error
         | Ok () -> (
-            match validate_timeout_capability ~timeout_policy ~sleep with
+            match
+              validate_retry_capabilities ~retry_policy ~sleep ~random_float
+            with
             | Error _ as error -> error
-            | Ok () ->
-                let sleep =
-                  Option.value sleep ~default:(fun _ -> Lwt.return_unit)
-                in
-                let random_float =
-                  Option.value random_float ~default:(fun ~upper_bound:_ -> 0.0)
-                in
-                Ok
-                  {
-                    ctx;
-                    endpoint;
-                    region;
-                    credentials_provider;
-                    clock;
-                    retry_policy;
-                    sleep;
-                    random_float;
-                    timeout_policy;
-                    max_response_drain_bytes;
-                  }))
+            | Ok () -> (
+                match validate_timeout_capability ~timeout_policy ~sleep with
+                | Error _ as error -> error
+                | Ok () ->
+                    let sleep =
+                      Option.value sleep ~default:(fun _ -> Lwt.return_unit)
+                    in
+                    let random_float =
+                      Option.value random_float ~default:(fun ~upper_bound:_ ->
+                          0.0)
+                    in
+                    Ok
+                      {
+                        ctx;
+                        endpoint;
+                        region;
+                        credentials_provider;
+                        clock;
+                        retry_policy;
+                        sleep;
+                        random_float;
+                        timeout_policy;
+                        max_response_drain_bytes;
+                      })))
 
   let create ?ctx ?endpoint ~region ~credentials ~clock ?retry_policy ?sleep
       ?random_float ?timeout_policy ?max_response_drain_bytes () =
@@ -423,6 +430,13 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       | Lwt.Fail exn -> Some (Error (body_error (Exn.to_string exn)))
       | Lwt.Sleep -> None
     in
+    let cancel_unfinished_request_body () =
+      match Lwt.state bridge.finished with
+      | Lwt.Sleep ->
+          bridge.cancel ();
+          Lwt.return_unit
+      | Lwt.Return _ | Lwt.Fail _ -> Lwt.return_unit
+    in
     let call_f response response_body =
       Log.debug (fun m -> m "HTTP %d" (Awskit.Response.status response));
       Lwt.catch
@@ -472,15 +486,18 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
               Lwt.return_error
                 (Awskit.Error.Producer.transport ~retryable:true message))
     in
-    response
-    |> with_transport_timeout `Attempt
-    |> with_transport_timeout `Operation
-    |> fun response ->
-    Lwt.bind response (function
-      | Error error when Awskit.Error.is_timeout error ->
-          bridge.cancel ();
-          Lwt.return_error error
-      | result -> Lwt.return result)
+    Lwt.finalize
+      (fun () ->
+        response
+        |> with_transport_timeout `Attempt
+        |> with_transport_timeout `Operation
+        |> fun response ->
+        Lwt.bind response (function
+          | Error error when Awskit.Error.is_timeout error ->
+              bridge.cancel ();
+              Lwt.return_error error
+          | result -> Lwt.return result))
+      cancel_unfinished_request_body
 
   (* Module satisfying Awskit.Runtime.S *)
 
@@ -543,8 +560,14 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let invalid_read_bounds bytes ~off ~len =
       off < 0 || len < 0 || len > Bytes.length bytes - off
 
+    let inactive_reader_error =
+      Awskit.Error.Producer.body "response body reader used outside its scope"
+
+    let close_response_body_reader reader = reader.active <- false
+
     let read_response_body reader bytes ~off ~len =
-      if invalid_read_bounds bytes ~off ~len then
+      if not reader.active then Lwt.return_error inactive_reader_error
+      else if invalid_read_bounds bytes ~off ~len then
         Lwt.return_error (Awskit.Error.Producer.body "invalid read bounds")
       else
         with_timeout_result ~sleep:reader.sleep reader.timeout_policy
@@ -602,7 +625,9 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                 Lwt.return_unit))
           (fun _ -> Lwt.return_unit)
       in
-      Lwt.bind (Lwt.protected drain) (fun () -> Lwt.fail exn)
+      Lwt.bind (Lwt.protected drain) (fun () ->
+          close_response_body_reader reader;
+          Lwt.fail exn)
 
     let with_response_body body ~consume =
       let reader =
@@ -610,6 +635,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           stream = Cohttp_lwt.Body.to_stream body.body;
           sleep = body.sleep;
           timeout_policy = body.timeout_policy;
+          active = true;
           chunk = "";
           offset = 0;
         }
@@ -620,10 +646,15 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
               match result with
               | Ok _ ->
                   Lwt.bind (drain_response_body_reader reader body) (function
-                    | Ok () -> Lwt.return result
-                    | Error error -> Lwt.return_error error)
+                    | Ok () ->
+                        close_response_body_reader reader;
+                        Lwt.return result
+                    | Error error ->
+                        close_response_body_reader reader;
+                        Lwt.return_error error)
               | Error _ ->
                   Lwt.bind (drain_response_body_reader reader body) (fun _ ->
+                      close_response_body_reader reader;
                       Lwt.return result)))
         (drain_response_body_after_exception reader body)
 
@@ -633,6 +664,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           stream = Cohttp_lwt.Body.to_stream body.body;
           sleep = body.sleep;
           timeout_policy = body.timeout_policy;
+          active = true;
           chunk = "";
           offset = 0;
         }

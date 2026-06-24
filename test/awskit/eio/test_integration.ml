@@ -144,6 +144,15 @@ let test_create_rejects_invalid_endpoint_string env =
     ~endpoint:"http://localhost:9000/path" ~credentials ()
   |> expect_validation "invalid endpoint"
 
+let test_create_rejects_invalid_response_drain_limit env =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  Eio.Switch.run @@ fun sw ->
+  Awskit_eio.create ~env ~sw ~https:Awskit_eio.http_only ~region:"us-east-1"
+    ~credentials ~max_response_drain_bytes:0 ()
+  |> expect_validation "invalid response drain limit"
+
 let rec read_all body buffer =
   let chunk = Bytes.create 2 in
   match
@@ -623,6 +632,31 @@ let test_with_response_body_drains_after_consumer_exception env =
           Alcotest.failf "unexpected exception: %s" (Exn.to_string exn)
       | `Returned -> Alcotest.fail "expected consumer exception")
 
+let test_response_body_reader_cannot_escape_scope env =
+  let escaped = ref None in
+  (match
+     with_eio_response_body env ~max_response_drain_bytes:64 "abcdef"
+       ~f:(fun body ->
+         Awskit_eio.Runtime.Response_body.with_reader body
+           ~consume:(fun reader ->
+             escaped := Some reader;
+             Ok ()))
+   with
+  | Ok () -> ()
+  | Error error ->
+      Alcotest.failf "unexpected with_reader error: %a" Awskit.Error.pp error);
+  let reader =
+    match !escaped with
+    | Some reader -> reader
+    | None -> Alcotest.fail "expected escaped reader"
+  in
+  let bytes = Bytes.create 1 in
+  match Awskit_eio.Runtime.Response_body.read reader bytes ~off:0 ~len:1 with
+  | Error error when is_body_error error -> ()
+  | Error error ->
+      Alcotest.failf "unexpected read error: %a" Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "escaped reader read succeeded"
+
 let suite env =
   [
     ( "integration:connection",
@@ -635,6 +669,8 @@ let suite env =
             test_create_rejects_invalid_region_string env);
         Alcotest.test_case "rejects invalid endpoint string" `Quick (fun () ->
             test_create_rejects_invalid_endpoint_string env);
+        Alcotest.test_case "rejects invalid response drain limit" `Quick
+          (fun () -> test_create_rejects_invalid_response_drain_limit env);
         Alcotest.test_case "uses env clock by default" `Quick (fun () ->
             test_connection_uses_env_clock_by_default env);
         Alcotest.test_case "runtime bodies" `Quick (fun () ->
@@ -673,5 +709,7 @@ let suite env =
         Alcotest.test_case "consumer exception still drains body" `Quick
           (fun () ->
             test_with_response_body_drains_after_consumer_exception env);
+        Alcotest.test_case "response body reader cannot escape scope" `Quick
+          (fun () -> test_response_body_reader_cannot_escape_scope env);
       ] );
   ]

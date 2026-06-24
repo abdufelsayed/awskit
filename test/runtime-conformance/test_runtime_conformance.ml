@@ -64,6 +64,28 @@ let test_discard_reports_drain_error () =
       Alcotest.(check bool) "discard error" true (is_body_error error)
   | Ok () -> Alcotest.fail "expected discard error"
 
+let test_response_reader_cannot_escape_scope () =
+  let escaped = ref None in
+  match
+    R.Response_body.with_reader (response_body "abcdef") ~consume:(fun reader ->
+        escaped := Some reader;
+        Ok ())
+  with
+  | Error error ->
+      Alcotest.failf "unexpected with_reader error: %a" Awskit.Error.pp error
+  | Ok () -> (
+      let reader =
+        match !escaped with
+        | Some reader -> reader
+        | None -> Alcotest.fail "expected escaped reader"
+      in
+      let bytes = Bytes.create 1 in
+      match R.Response_body.read reader bytes ~off:0 ~len:1 with
+      | Error error ->
+          Alcotest.(check bool)
+            "use-after-scope is body error" true (is_body_error error)
+      | Ok _ -> Alcotest.fail "escaped reader read succeeded")
+
 let test_retry_timeout_random_and_sleep_capabilities () =
   let retry_policy =
     Awskit.Retry.create_exn ~max_attempts:2 ~jitter:1.0
@@ -103,6 +125,8 @@ let suite =
           test_response_success_reports_drain_error;
         Alcotest.test_case "discard reports drain error" `Quick
           test_discard_reports_drain_error;
+        Alcotest.test_case "response reader cannot escape scope" `Quick
+          test_response_reader_cannot_escape_scope;
         Alcotest.test_case "retry timeout random and sleep" `Quick
           test_retry_timeout_random_and_sleep_capabilities;
       ] );

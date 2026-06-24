@@ -2,7 +2,10 @@
 
 type phase =
   [ `Connect | `Attempt | `Operation | `Request_body | `Response_body | `Drain ]
-(** Named timeout phases a runtime may enforce. *)
+(** Named timeout phases a runtime may enforce. [`Operation] is scoped to one
+    runtime transport operation. For service calls that retry, the operation
+    timer is applied independently to each attempt and does not include retry
+    sleeps. *)
 
 type policy
 (** Timeout policy for runtime adapters. [None] means no timeout for that phase.

@@ -50,6 +50,12 @@ let test_create_rejects_invalid_region_string () =
        ~clock:(fun () -> Ptime.epoch)
        ())
 
+let test_create_rejects_invalid_response_drain_limit () =
+  expect_validation "invalid response drain limit"
+    (Awskit_s3_lwt_unix.create ~region ~credentials
+       ~clock:(fun () -> Ptime.epoch)
+       ~max_response_drain_bytes:0 ())
+
 let suite () =
   [
     ( "connection",
@@ -57,5 +63,7 @@ let suite () =
         Alcotest.test_case "create" `Quick test_connection;
         Alcotest.test_case "rejects invalid region string" `Quick
           test_create_rejects_invalid_region_string;
+        Alcotest.test_case "rejects invalid response drain limit" `Quick
+          test_create_rejects_invalid_response_drain_limit;
       ] );
   ]

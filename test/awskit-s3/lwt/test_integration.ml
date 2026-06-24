@@ -52,6 +52,12 @@ let test_create_rejects_invalid_region_string () =
   S3.create ~region:"" ~credentials ~clock:(fun () -> Ptime.epoch) ()
   |> expect_validation "invalid region"
 
+let test_create_rejects_invalid_response_drain_limit () =
+  S3.create ~region ~credentials
+    ~clock:(fun () -> Ptime.epoch)
+    ~max_response_drain_bytes:0 ()
+  |> expect_validation "invalid response drain limit"
+
 let suite =
   [
     ( "connection",
@@ -59,5 +65,7 @@ let suite =
         Alcotest.test_case "roundtrip" `Quick test_connection_roundtrip;
         Alcotest.test_case "rejects invalid region string" `Quick
           test_create_rejects_invalid_region_string;
+        Alcotest.test_case "rejects invalid response drain limit" `Quick
+          test_create_rejects_invalid_response_drain_limit;
       ] );
   ]

@@ -98,6 +98,7 @@ module Recording_runtime = struct
   type response_body_reader = {
     body : string;
     read_error_after : int option;
+    mutable active : bool;
     mutable offset : int;
   }
 
@@ -157,7 +158,11 @@ module Recording_runtime = struct
     Ok ()
 
   let read_response_body reader bytes ~off ~len =
-    if len = 0 then Ok 0
+    if not reader.active then
+      Error
+        (Awskit.Error.Producer.body
+           "response body reader used outside its scope")
+    else if len = 0 then Ok 0
     else if
       match reader.read_error_after with
       | Some limit -> reader.offset >= limit
@@ -183,16 +188,36 @@ module Recording_runtime = struct
 
   let with_response_body (body : response_body) ~consume =
     let reader =
-      { body = body.body; read_error_after = body.read_error_after; offset = 0 }
+      {
+        body = body.body;
+        read_error_after = body.read_error_after;
+        active = true;
+        offset = 0;
+      }
     in
     match consume reader with
     | Ok _ as result -> (
-        match drain reader with Ok () -> result | Error _ as error -> error)
-    | Error _ as error -> ( match drain reader with Ok () | Error _ -> error)
+        match drain reader with
+        | Ok () ->
+            reader.active <- false;
+            result
+        | Error _ as error ->
+            reader.active <- false;
+            error)
+    | Error _ as error -> (
+        match drain reader with
+        | Ok () | Error _ ->
+            reader.active <- false;
+            error)
 
   let discard_response_body (body : response_body) =
     let reader =
-      { body = body.body; read_error_after = body.read_error_after; offset = 0 }
+      {
+        body = body.body;
+        read_error_after = body.read_error_after;
+        active = true;
+        offset = 0;
+      }
     in
     let result = drain reader in
     result

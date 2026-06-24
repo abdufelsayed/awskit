@@ -22,6 +22,7 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     ?sleep:(Ptime.Span.t -> unit Lwt.t) ->
     ?random_float:(upper_bound:float -> float) ->
     ?timeout_policy:Awskit.Timeout.policy ->
+    ?max_response_drain_bytes:int ->
     unit ->
     (t, Awskit.Error.t) result
   (** Create a generic Lwt S3 client.
@@ -32,7 +33,8 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
       capabilities or use [Awskit.Retry.disabled]. Explicit timeout policies
       with configured spans also require [sleep]. Use [endpoint_config] for AWS
       endpoint variants, local S3-compatible tests, or custom S3-compatible
-      endpoints. *)
+      endpoints. [max_response_drain_bytes] controls how much response body the
+      runtime drains after successful consumers. *)
 
   module Body : sig
     include

@@ -10,7 +10,7 @@ let is_validation_field field error =
   && Awskit.Error.validation_field error = Some field
 
 let reader body : Recording_s3.Reader.t =
-  { Recording_runtime.body; read_error_after = None; offset = 0 }
+  { Recording_runtime.body; read_error_after = None; active = true; offset = 0 }
 
 let expect_error label predicate = function
   | Error error when predicate error -> ()

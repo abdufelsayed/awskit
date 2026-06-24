@@ -57,10 +57,13 @@ val create :
     Defaults to AWS HTTPS endpoints. Pass an explicit [endpoint] for local test
     services or custom service endpoints. [region] and [endpoint] are parsed and
     validated when the connection is created; validation failures are returned
-    as structured [Awskit.Error.t] values. [retry_policy] defaults to
-    [Awskit.Retry.default]. [random_float] defaults to a connection-local random
-    state for retry jitter. [timeout_policy] defaults to
+    as structured [Awskit.Error.t] values. Invalid [max_response_drain_bytes]
+    values are also returned as structured validation errors. [retry_policy]
+    defaults to [Awskit.Retry.default]. [random_float] defaults to a
+    connection-local random state for retry jitter. [timeout_policy] defaults to
     [Awskit.Timeout.default]. [max_response_drain_bytes] defaults to 64 MiB. If
     a response consumer succeeds but the remaining body exceeds this drain
     limit, the operation fails with a body-limit error. If the consumer fails,
-    the consumer error is returned. *)
+    the consumer error is returned. [operation] timeouts in [timeout_policy]
+    apply to one runtime transport operation; service-level retries get a fresh
+    operation timer for each attempt. *)

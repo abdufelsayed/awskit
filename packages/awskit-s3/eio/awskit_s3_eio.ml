@@ -83,10 +83,11 @@ module Body = Body_reader.Body
 module Reader = Body_reader.Reader
 
 let create ~sw ~env ~https ~region ~credentials ?retry_policy ?random_float
-    ?timeout_policy ?(endpoint_config = Awskit_s3.default_endpoint_config) () =
+    ?timeout_policy ?(endpoint_config = Awskit_s3.default_endpoint_config)
+    ?max_response_drain_bytes () =
   match
     Awskit_eio.create ~sw ~env ~https ~region ~credentials ?retry_policy
-      ?random_float ?timeout_policy ()
+      ?random_float ?timeout_policy ?max_response_drain_bytes ()
   with
   | Error _ as error -> error
   | Ok aws -> Ok { aws; endpoint_config }

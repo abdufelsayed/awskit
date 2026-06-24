@@ -20,6 +20,7 @@ val create :
   ?random_float:(upper_bound:float -> float) ->
   ?timeout_policy:Awskit.Timeout.policy ->
   ?endpoint_config:Awskit_s3.Endpoint_config.t ->
+  ?max_response_drain_bytes:int ->
   unit ->
   (t, Awskit_s3.Error.t) result
 (** Create an Eio S3 client.
@@ -29,7 +30,9 @@ val create :
     should pass a connector compatible with [Cohttp_eio.Client.make ~https].
     [region] and [credentials] are explicit. Use [endpoint_config] for AWS
     endpoint variants, local S3-compatible tests, or custom S3-compatible
-    endpoints. [retry_policy] defaults to [Awskit.Retry.default]. *)
+    endpoints. [retry_policy] defaults to [Awskit.Retry.default].
+    [max_response_drain_bytes] controls how much response body the runtime
+    drains after successful consumers. *)
 
 module Body : sig
   include Awskit_s3.BODY with type 'a io := 'a and type t = Runtime.request_body

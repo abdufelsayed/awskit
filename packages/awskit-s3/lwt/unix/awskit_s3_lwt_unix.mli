@@ -20,6 +20,7 @@ val create :
   ?retry_policy:Awskit.Retry.t ->
   ?random_float:(upper_bound:float -> float) ->
   ?timeout_policy:Awskit.Timeout.policy ->
+  ?max_response_drain_bytes:int ->
   ?imdsv1_fallback:Awskit_lwt_unix.Credentials.imdsv1_fallback ->
   unit ->
   (t, Awskit_s3.Error.t) result
@@ -28,7 +29,8 @@ val create :
     If [region] or [credentials] are omitted, the underlying [Awskit_lwt_unix]
     runtime resolves them from standard AWS environment and profile sources. Use
     [endpoint_config] for AWS endpoint variants, local S3-compatible tests, or
-    custom S3-compatible endpoints. *)
+    custom S3-compatible endpoints. [max_response_drain_bytes] controls how much
+    response body the runtime drains after successful consumers. *)
 
 module Body : sig
   include

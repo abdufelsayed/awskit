@@ -71,17 +71,21 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
   (** [endpoint] overrides the default AWS HTTPS endpoint for local test
       services or custom service endpoints. [region] and [endpoint] are parsed
       and validated when the connection is created; validation failures are
-      returned as structured [Awskit.Error.t] values. [retry_policy] defaults to
-      [Awskit.Retry.default]. When retries are enabled, custom Lwt backends must
-      provide both [sleep] and [random_float]; use [Awskit.Retry.disabled] for
-      deterministic runtimes without real delay/random capabilities.
-      [timeout_policy] defaults to [Awskit.Timeout.default] when [sleep] is
-      supplied and to [Awskit.Timeout.disabled] otherwise. Passing an explicit
-      timeout policy with configured spans requires [sleep], which this generic
-      runtime uses as its timeout clock. [max_response_drain_bytes] defaults to
-      64 MiB. If a response consumer succeeds but the remaining body exceeds
-      this drain limit, the operation fails with a body-limit error. If the
-      consumer fails, the consumer error is returned. *)
+      returned as structured [Awskit.Error.t] values. Invalid
+      [max_response_drain_bytes] values are also returned as structured
+      validation errors. [retry_policy] defaults to [Awskit.Retry.default]. When
+      retries are enabled, custom Lwt backends must provide both [sleep] and
+      [random_float]; use [Awskit.Retry.disabled] for deterministic runtimes
+      without real delay/random capabilities. [timeout_policy] defaults to
+      [Awskit.Timeout.default] when [sleep] is supplied and to
+      [Awskit.Timeout.disabled] otherwise. Passing an explicit timeout policy
+      with configured spans requires [sleep], which this generic runtime uses as
+      its timeout clock. [max_response_drain_bytes] defaults to 64 MiB. If a
+      response consumer succeeds but the remaining body exceeds this drain
+      limit, the operation fails with a body-limit error. If the consumer fails,
+      the consumer error is returned. [operation] timeouts in [timeout_policy]
+      apply to one runtime transport operation; service-level retries get a
+      fresh operation timer for each attempt. *)
 
   val create_with_credentials_provider :
     ?ctx:Client.ctx ->

@@ -100,11 +100,11 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
   module Reader = S3.Reader
 
   let create ?ctx ?(endpoint_config = Awskit_s3.default_endpoint_config) ~region
-      ~credentials ~clock ?retry_policy ?sleep ?random_float ?timeout_policy ()
-      =
+      ~credentials ~clock ?retry_policy ?sleep ?random_float ?timeout_policy
+      ?max_response_drain_bytes () =
     match
       Aws.create ?ctx ~region ~credentials ~clock ?retry_policy ?sleep
-        ?random_float ?timeout_policy ()
+        ?random_float ?timeout_policy ?max_response_drain_bytes ()
     with
     | Error _ as error -> error
     | Ok aws -> Ok { aws; endpoint_config }

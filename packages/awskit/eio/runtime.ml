@@ -84,6 +84,7 @@ type response_body_reader = {
   body : Cohttp_eio.Body.t;
   time_clock : time_clock;
   timeout_policy : Awskit.Timeout.policy;
+  mutable active : bool;
   mutable chunk : string;
   mutable offset : int;
 }
@@ -111,11 +112,20 @@ let create ~env ~sw ~https ~region ~credentials ?clock
     ?(retry_policy = Awskit.Retry.default) ?random_float
     ?(timeout_policy = Awskit.Timeout.default) ?endpoint
     ?(max_response_drain_bytes = default_max_response_drain_bytes) () =
-  if max_response_drain_bytes <= 0 then
-    invalid_arg "Awskit_eio.create: max_response_drain_bytes must be positive";
-  match (Awskit.Region.of_string region, parse_endpoint endpoint) with
-  | Error error, _ | _, Error error -> Error error
-  | Ok region, Ok endpoint ->
+  let validate_max_response_drain_bytes () =
+    if max_response_drain_bytes <= 0 then
+      Error
+        (Awskit.Error.Producer.validation ~field:"max_response_drain_bytes"
+           "max_response_drain_bytes must be positive")
+    else Ok ()
+  in
+  match
+    ( validate_max_response_drain_bytes (),
+      Awskit.Region.of_string region,
+      parse_endpoint endpoint )
+  with
+  | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error
+  | Ok (), Ok region, Ok endpoint ->
       let net = Net (env :> < net : _ Eio.Net.t ; .. >)#net in
       let time_clock =
         Time_clock (env :> < clock : _ Eio.Time.clock ; .. >)#clock
@@ -434,6 +444,11 @@ type 'a t = 'a
 let invalid_read_bounds bytes ~off ~len =
   off < 0 || len < 0 || len > Bytes.length bytes - off
 
+let inactive_reader_error =
+  Awskit.Error.Producer.body "response body reader used outside its scope"
+
+let close_response_body_reader reader = reader.active <- false
+
 let rec read_from_current reader bytes ~off ~len =
   if len = 0 then Ok 0
   else if reader.offset < String.length reader.chunk then begin
@@ -451,7 +466,8 @@ let rec read_from_current reader bytes ~off ~len =
     read_from_current reader bytes ~off ~len
 
 let read_response_body reader bytes ~off ~len =
-  if invalid_read_bounds bytes ~off ~len then
+  if not reader.active then Error inactive_reader_error
+  else if invalid_read_bounds bytes ~off ~len then
     Error (Awskit.Error.Producer.body "invalid read bounds")
   else
     with_timeout_result reader.time_clock reader.timeout_policy `Response_body
@@ -494,6 +510,7 @@ let discard_response_body_after_exception reader body exn =
       match discard_response_body_reader reader body with
       | Ok () | Error _ -> ()
       | exception _ -> ());
+  close_response_body_reader reader;
   raise exn
 
 let with_response_body (body : response_body) ~consume =
@@ -502,6 +519,7 @@ let with_response_body (body : response_body) ~consume =
       body = body.body;
       time_clock = body.time_clock;
       timeout_policy = body.timeout_policy;
+      active = true;
       chunk = "";
       offset = 0;
     }
@@ -510,12 +528,17 @@ let with_response_body (body : response_body) ~consume =
   | exception exn -> discard_response_body_after_exception reader body exn
   | Ok _ as result -> (
       match discard_response_body_reader reader body with
-      | Ok () -> result
-      | Error _ as error -> error)
+      | Ok () ->
+          close_response_body_reader reader;
+          result
+      | Error _ as error ->
+          close_response_body_reader reader;
+          error)
   | Error _ as error -> (
       match discard_response_body_reader reader body with
-      | Ok () -> error
-      | Error _ -> error)
+      | Ok () | Error _ ->
+          close_response_body_reader reader;
+          error)
 
 let discard_response_body (body : response_body) =
   discard_response_body_reader
@@ -523,6 +546,7 @@ let discard_response_body (body : response_body) =
       body = body.body;
       time_clock = body.time_clock;
       timeout_policy = body.timeout_policy;
+      active = true;
       chunk = "";
       offset = 0;
     }

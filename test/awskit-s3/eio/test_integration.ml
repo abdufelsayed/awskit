@@ -50,6 +50,12 @@ let test_create_rejects_invalid_region_string env () =
     ~credentials ()
   |> expect_validation "invalid region"
 
+let test_create_rejects_invalid_response_drain_limit env () =
+  Eio.Switch.run @@ fun sw ->
+  Awskit_s3_eio.create ~sw ~env ~https:Awskit_eio.http_only ~region ~credentials
+    ~max_response_drain_bytes:0 ()
+  |> expect_validation "invalid response drain limit"
+
 let suite env =
   [
     ( "connection",
@@ -57,5 +63,7 @@ let suite env =
         Alcotest.test_case "create" `Quick (test_connection env);
         Alcotest.test_case "rejects invalid region string" `Quick
           (test_create_rejects_invalid_region_string env);
+        Alcotest.test_case "rejects invalid response drain limit" `Quick
+          (test_create_rejects_invalid_response_drain_limit env);
       ] );
   ]

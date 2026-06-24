@@ -77,6 +77,12 @@ let ptime_of_rfc3339 value =
   | Ok (time, _, _) -> time
   | Error _ -> Alcotest.failf "invalid test timestamp %S" value
 
+let rec is_body_error error =
+  match Awskit.Error.kind error with
+  | Body _ -> true
+  | Multiple errors -> List.exists errors ~f:is_body_error
+  | _ -> false
+
 let test_connection_roundtrip () =
   let c =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
@@ -684,6 +690,137 @@ let test_container_metadata_malformed_expiration_is_invalid () =
   expect_invalid_resolution "container malformed expiration"
     (resolve_provider provider)
 
+let close_socket fd =
+  Lwt.catch
+    (fun () -> Lwt_unix.close fd)
+    (function
+      | Unix.Unix_error (Unix.EBADF, _, _) | Lwt.Canceled -> Lwt.return_unit
+      | exn -> Lwt.fail exn)
+
+let write_all fd value =
+  let bytes = Stdlib.Bytes.of_string value in
+  let length = Stdlib.Bytes.length bytes in
+  let rec loop offset =
+    if offset = length then Lwt.return_unit
+    else
+      Lwt.bind
+        (Lwt_unix.write fd bytes offset (length - offset))
+        (fun written ->
+          if written = 0 then Lwt.fail End_of_file else loop (offset + written))
+  in
+  loop 0
+
+let write_raw_response ?content_length fd body =
+  let content_length =
+    Option.value content_length ~default:(String.length body)
+  in
+  let response =
+    Printf.sprintf
+      "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+      content_length body
+  in
+  Lwt.catch
+    (fun () -> write_all fd response)
+    (function
+      | Unix.Unix_error (Unix.EPIPE, _, _)
+      | Unix.Unix_error (Unix.ECONNRESET, _, _) ->
+          Lwt.return_unit
+      | exn -> Lwt.fail exn)
+
+let with_raw_http_server handle f =
+  let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
+  Lwt.bind
+    (Lwt_unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)))
+    (fun () ->
+      Lwt_unix.listen socket 1;
+      let uri =
+        match Lwt_unix.getsockname socket with
+        | Unix.ADDR_INET (_, port) ->
+            Printf.sprintf "http://127.0.0.1:%d/credentials" port
+        | Unix.ADDR_UNIX _ -> Alcotest.fail "unexpected Unix socket"
+      in
+      let server =
+        Lwt.catch
+          (fun () ->
+            Lwt.bind (Lwt_unix.accept socket) (fun (client, _) ->
+                Lwt.finalize
+                  (fun () -> handle client)
+                  (fun () -> close_socket client)))
+          (function
+            | Unix.Unix_error (Unix.EBADF, _, _) | Lwt.Canceled ->
+                Lwt.return_unit
+            | exn -> Lwt.fail exn)
+      in
+      Lwt.finalize
+        (fun () -> f uri)
+        (fun () ->
+          Lwt.cancel server;
+          Lwt.bind (close_socket socket) (fun () ->
+              Lwt.catch
+                (fun () -> server)
+                (function
+                  | Lwt.Canceled -> Lwt.return_unit | exn -> Lwt.fail exn))))
+
+let container_getenv_for_uri uri name =
+  if String.equal name "AWS_CONTAINER_CREDENTIALS_FULL_URI" then Some uri
+  else None
+
+let test_default_metadata_http_rejects_large_body () =
+  let content_length = 1_048_576 + 1 in
+  let resolution =
+    Lwt_main.run
+      (with_raw_http_server
+         (fun client -> write_raw_response ~content_length client "")
+         (fun uri ->
+           let getenv = container_getenv_for_uri uri in
+           let provider =
+             Awskit_lwt_unix.Credentials.container_provider ~getenv ()
+           in
+           Awskit_lwt_unix.Credentials.Provider.resolve provider))
+  in
+  match resolution with
+  | Failed error when is_body_error error -> ()
+  | Failed error ->
+      Alcotest.failf "expected body error, got: %a" Awskit.Error.pp error
+  | Invalid error ->
+      Alcotest.failf "expected failed body error, got invalid: %a"
+        Awskit.Error.pp error
+  | Resolved credentials ->
+      Alcotest.failf "unexpected credentials from oversized metadata: %s"
+        (Awskit.Credentials.access_key_id credentials)
+  | Unavailable unavailable ->
+      Alcotest.failf "unexpected unavailable credentials from %s: %s"
+        (provider_source_to_string unavailable.source)
+        unavailable.reason
+
+let test_default_metadata_http_timeout_is_timeout () =
+  let resolution =
+    Lwt_main.run
+      (with_raw_http_server
+         (fun _client -> Lwt_unix.sleep 60.0)
+         (fun uri ->
+           let getenv = container_getenv_for_uri uri in
+           let provider =
+             Awskit_lwt_unix.Credentials.container_provider ~getenv ()
+           in
+           Awskit_lwt_unix.Credentials.Provider.resolve provider))
+  in
+  match resolution with
+  | Failed error when Awskit.Error.is_timeout error -> ()
+  | Failed error ->
+      Alcotest.failf "expected timeout error, got: %a" Awskit.Error.pp error
+  | Invalid error ->
+      Alcotest.failf "expected failed timeout error, got invalid: %a"
+        Awskit.Error.pp error
+  | Resolved credentials ->
+      Alcotest.failf "unexpected credentials from timed out metadata: %s"
+        (Awskit.Credentials.access_key_id credentials)
+  | Unavailable unavailable ->
+      Alcotest.failf "unexpected unavailable credentials from %s: %s"
+        (provider_source_to_string unavailable.source)
+        unavailable.reason
+
 let test_instance_metadata_provider_uses_imdsv2 () =
   let calls = ref [] in
   let http_call ~meth ~headers uri =
@@ -1121,6 +1258,10 @@ let suite () =
           `Quick test_container_metadata_missing_expiration_is_invalid;
         Alcotest.test_case "container metadata malformed expiration is invalid"
           `Quick test_container_metadata_malformed_expiration_is_invalid;
+        Alcotest.test_case "default metadata HTTP rejects large body" `Quick
+          test_default_metadata_http_rejects_large_body;
+        Alcotest.test_case "default metadata HTTP timeout is timeout" `Quick
+          test_default_metadata_http_timeout_is_timeout;
         Alcotest.test_case "instance metadata provider uses imdsv2" `Quick
           test_instance_metadata_provider_uses_imdsv2;
         Alcotest.test_case "instance metadata missing expiration is invalid"

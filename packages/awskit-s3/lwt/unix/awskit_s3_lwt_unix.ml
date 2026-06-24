@@ -89,10 +89,11 @@ module Reader = Body_reader.Reader
 
 let create ?ctx ?(endpoint_config = Awskit_s3.default_endpoint_config) ?region
     ?credentials ?clock ?retry_policy ?random_float ?timeout_policy
-    ?imdsv1_fallback () =
+    ?max_response_drain_bytes ?imdsv1_fallback () =
   match
     Awskit_lwt_unix.create ?ctx ?region ?credentials ?clock ?retry_policy
-      ?random_float ?timeout_policy ?imdsv1_fallback ()
+      ?random_float ?timeout_policy ?max_response_drain_bytes ?imdsv1_fallback
+      ()
   with
   | Error _ as error -> error
   | Ok aws -> Ok { aws; endpoint_config }

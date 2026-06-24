@@ -203,8 +203,10 @@ retry-enabled construction instead of silently spinning.
 {1 Timeout Policy}
 
 Use {!module:Awskit.Timeout} to describe timeout spans by phase. A policy can
-carry connect, attempt, whole-operation, request-body, response-body, and drain
-limits:
+carry connect, per-attempt, runtime-operation, request-body, response-body, and
+drain limits. The runtime-operation limit is applied to one transport operation
+attempt; service calls that retry apply it independently to each attempt and do
+not include retry sleeps in that span:
 
 {[
 let timeout_policy =

@@ -108,6 +108,45 @@ end
 
 module RequestAws = Awskit_lwt.Make (Request_body_client)
 
+module Failing_transport_client = struct
+  type ctx = unit
+
+  module IO = Cohttp_lwt_unix.Client.IO
+
+  type 'a io = 'a Lwt.t
+  type 'a with_context = ?ctx:ctx -> 'a
+  type body = Cohttp_lwt.Body.t
+
+  let map_context f g ?ctx = g (f ?ctx)
+
+  let call ?ctx:_ ?headers:_ ?body:_ ?chunked:_ _meth _uri =
+    Lwt.fail (Failure "transport exploded")
+
+  let head ?ctx:_ ?headers:_ _uri = Lwt.fail (Failure "transport exploded")
+  let get ?ctx ?headers uri = call ?ctx ?headers `GET uri
+
+  let delete ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `DELETE uri
+
+  let post ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `POST uri
+
+  let put ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `PUT uri
+
+  let patch ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `PATCH uri
+
+  let set_cache _ = ()
+
+  let post_form ?ctx:_ ?headers:_ ~params:_ _uri =
+    Lwt.fail (Failure "transport exploded")
+
+  let callv ?ctx:_ _uri _requests = Lwt.fail (Failure "transport exploded")
+end
+
+module FailingTransportAws = Awskit_lwt.Make (Failing_transport_client)
+
 module Early_response_client = struct
   type ctx = unit
 
@@ -442,6 +481,12 @@ let stream_descriptor length =
     replayable = false;
   }
 
+let rec wait_until ?(attempts = 1_000) condition =
+  if condition () || attempts <= 0 then Lwt.return_unit
+  else
+    Lwt.bind (Lwt.pause ()) (fun () ->
+        wait_until ~attempts:(attempts - 1) condition)
+
 let is_body_error error =
   let open Awskit.Error in
   match kind error with Body _ -> true | _ -> false
@@ -563,12 +608,6 @@ let test_transport_timeout_cancels_stream_request_body () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
   in
-  let rec wait_until ?(attempts = 1_000) condition =
-    if condition () || attempts <= 0 then Lwt.return_unit
-    else
-      Lwt.bind (Lwt.pause ()) (fun () ->
-          wait_until ~attempts:(attempts - 1) condition)
-  in
   let producer_started, wake_producer_started = Lwt.wait () in
   let conn =
     RequestAws.create ~region:"us-east-1" ~credentials
@@ -609,6 +648,44 @@ let test_transport_timeout_cancels_stream_request_body () =
   | Error error ->
       Alcotest.failf "expected timeout error, got: %a" Awskit.Error.pp error
   | Ok () -> Alcotest.fail "expected transport timeout");
+  Alcotest.(check bool) "producer finalized" true producer_finalized
+
+let test_transport_exception_cancels_stream_request_body () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let conn =
+    FailingTransportAws.create ~region:"us-east-1" ~credentials
+      ~clock:(fun () -> Ptime.epoch)
+      ~retry_policy:Awskit.Retry.disabled ()
+    |> conn_or_fail
+  in
+  let producer_finalized = ref false in
+  let body =
+    FailingTransportAws.Runtime.Request_body.of_stream (stream_descriptor 1024L)
+      ~write:(fun _writer ->
+        Lwt.finalize
+          (fun () -> Lwt_unix.sleep 60.0 |> Lwt.map (fun () -> Ok ()))
+          (fun () ->
+            producer_finalized := true;
+            Lwt.return_unit))
+  in
+  let result, producer_finalized =
+    Lwt_main.run
+      (Lwt.bind
+         (FailingTransportAws.Runtime.Transport.with_response conn
+            request_body_request ~body ~consume:(fun _ body ->
+              FailingTransportAws.Runtime.Response_body.discard body))
+         (fun result ->
+           Lwt.bind
+             (wait_until (fun () -> !producer_finalized))
+             (fun () -> Lwt.return (result, !producer_finalized))))
+  in
+  (match result with
+  | Error error when Awskit.Error.is_transport error -> ()
+  | Error error ->
+      Alcotest.failf "expected transport error, got: %a" Awskit.Error.pp error
+  | Ok () -> Alcotest.fail "expected transport error");
   Alcotest.(check bool) "producer finalized" true producer_finalized
 
 let test_callback_exception_is_not_transport_error () =
@@ -830,6 +907,15 @@ let test_create_with_credentials_provider_rejects_invalid_endpoint_string () =
     ()
   |> expect_validation "invalid provider endpoint"
 
+let test_create_rejects_invalid_response_drain_limit () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  Aws.create ~region:"us-east-1" ~credentials
+    ~clock:(fun () -> Ptime.epoch)
+    ~max_response_drain_bytes:0 ()
+  |> expect_validation "invalid response drain limit"
+
 let limited_request =
   let target =
     Awskit.Request.Target.create_exn ~scheme:`Http ~host:"localhost" ~path:"/"
@@ -899,6 +985,34 @@ let test_with_response_body_drains_after_consumer_exception () =
   | `Raised exn -> Alcotest.failf "unexpected exception: %s" (Exn.to_string exn)
   | `Returned -> Alcotest.fail "expected consumer exception"
 
+let test_response_body_reader_cannot_escape_scope () =
+  let escaped = ref None in
+  let result =
+    with_limited_response ~max_response_drain_bytes:64 "abcdef" ~f:(fun body ->
+        LimitedAws.Runtime.Response_body.with_reader body
+          ~consume:(fun reader ->
+            escaped := Some reader;
+            Lwt.return_ok ()))
+  in
+  (match result with
+  | Ok () -> ()
+  | Error error ->
+      Alcotest.failf "unexpected with_reader error: %a" Awskit.Error.pp error);
+  let reader =
+    match !escaped with
+    | Some reader -> reader
+    | None -> Alcotest.fail "expected escaped reader"
+  in
+  let bytes = Bytes.create 1 in
+  match
+    Lwt_main.run
+      (LimitedAws.Runtime.Response_body.read reader bytes ~off:0 ~len:1)
+  with
+  | Error error when is_body_error error -> ()
+  | Error error ->
+      Alcotest.failf "unexpected read error: %a" Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "escaped reader read succeeded"
+
 let suite =
   [
     ( "integration:connection",
@@ -916,6 +1030,8 @@ let suite =
         Alcotest.test_case
           "credentials provider rejects invalid endpoint string" `Quick
           test_create_with_credentials_provider_rejects_invalid_endpoint_string;
+        Alcotest.test_case "rejects invalid response drain limit" `Quick
+          test_create_rejects_invalid_response_drain_limit;
         Alcotest.test_case "runtime bodies" `Quick test_runtime_bodies;
         Alcotest.test_case "provider chain continues on unavailable" `Quick
           test_provider_chain_continues_only_on_unavailable;
@@ -935,6 +1051,8 @@ let suite =
           test_stream_request_body_timeout_returns_timeout_error;
         Alcotest.test_case "transport timeout cancels stream request body"
           `Quick test_transport_timeout_cancels_stream_request_body;
+        Alcotest.test_case "transport exception cancels stream request body"
+          `Quick test_transport_exception_cancels_stream_request_body;
         Alcotest.test_case "callback exception is not transport error" `Quick
           test_callback_exception_is_not_transport_error;
         Alcotest.test_case "stream request body early response preserves body"
@@ -953,5 +1071,7 @@ let suite =
           test_with_response_body_preserves_consumer_error;
         Alcotest.test_case "consumer exception still drains body" `Quick
           test_with_response_body_drains_after_consumer_exception;
+        Alcotest.test_case "response body reader cannot escape scope" `Quick
+          test_response_body_reader_cannot_escape_scope;
       ] );
   ]

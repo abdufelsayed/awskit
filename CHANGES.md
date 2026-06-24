@@ -75,6 +75,8 @@ release packaging.
 
 - Added `Awskit.Timeout` policies and explicit retry budgets with runtime
   supplied jitter randomness. (6cce011)
+- Exposed response-drain tuning through S3 Lwt, S3 Lwt Unix, and S3 Eio
+  constructors.
 - Added native streaming S3 upload and download APIs with adapter-level `Body`
   and `Reader` modules, first-class bounded string/bytes object helpers, plus
   unified multipart body handling. (#5, 53a7642; 5815ba4; 73ef68f)
@@ -114,6 +116,12 @@ release packaging.
   Transfer Acceleration endpoint resolution rejects path-style and dotted-bucket
   combinations, and bracketed IPv6 loopback endpoints render valid URL
   authorities.
+- Runtime constructors now return structured validation errors for invalid
+  response drain limits, and Lwt/Eio response readers now reject reads after
+  their `with_reader` scope exits.
+- Lwt request body producers are now canceled on transport exits, and Unix
+  metadata credential HTTP now preserves cancellation, reports metadata
+  timeouts as timeout errors, and bounds metadata response reads.
 - Preserved Lwt timeout errors over request-body cleanup cancellation races.
   (d804565)
 

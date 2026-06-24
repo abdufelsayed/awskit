@@ -23,6 +23,7 @@ module Credentials = struct
   end
 
   let metadata_timeout_s = 1.0
+  let metadata_max_response_bytes = 1 * 1024 * 1024
   let container_host = "169.254.170.2"
   let eks_pod_identity_host = "169.254.170.23"
   let imds_host = "169.254.169.254"
@@ -33,6 +34,40 @@ module Credentials = struct
 
   let trim value = String.trim value
 
+  let metadata_response_too_large () =
+    Awskit.Error.Producer.body
+      ~limit:(Int64.of_int metadata_max_response_bytes)
+      (Printf.sprintf "credential metadata response exceeded %d bytes"
+         metadata_max_response_bytes)
+
+  let read_metadata_body body =
+    let stream = Cohttp_lwt.Body.to_stream body in
+    let buffer = Buffer.create 256 in
+    let rec loop remaining =
+      Lwt.bind (Lwt_stream.get stream) (function
+        | None -> Lwt.return_ok (Buffer.contents buffer)
+        | Some chunk ->
+            let length = String.length chunk in
+            if length > remaining then
+              Lwt.return_error (metadata_response_too_large ())
+            else (
+              Buffer.add_string buffer chunk;
+              loop (remaining - length)))
+    in
+    loop metadata_max_response_bytes
+
+  let metadata_content_length_error response =
+    match
+      Cohttp.Header.get (Cohttp.Response.headers response) "content-length"
+    with
+    | None -> None
+    | Some value -> (
+        match int_of_string_opt value with
+        | Some content_length when content_length > metadata_max_response_bytes
+          ->
+            Some (metadata_response_too_large ())
+        | Some _ | None -> None)
+
   let http_call ~meth ~headers uri =
     let headers = Cohttp.Header.of_list headers in
     Lwt.catch
@@ -40,21 +75,27 @@ module Credentials = struct
         Lwt_unix.with_timeout metadata_timeout_s (fun () ->
             Lwt.bind (Cohttp_lwt_unix.Client.call ~headers meth uri)
               (fun (response, body) ->
-                Lwt.bind (Cohttp_lwt.Body.to_string body) (fun body ->
-                    Lwt.return_ok
-                      {
-                        status =
-                          Cohttp.Response.status response
-                          |> Cohttp.Code.code_of_status;
-                        headers =
-                          Cohttp.Response.headers response
-                          |> Cohttp.Header.to_list;
-                        body;
-                      }))))
+                match metadata_content_length_error response with
+                | Some error -> Lwt.return_error error
+                | None ->
+                    Lwt.bind (read_metadata_body body) (function
+                      | Error _ as error -> Lwt.return error
+                      | Ok body ->
+                          Lwt.return_ok
+                            {
+                              status =
+                                Cohttp.Response.status response
+                                |> Cohttp.Code.code_of_status;
+                              headers =
+                                Cohttp.Response.headers response
+                                |> Cohttp.Header.to_list;
+                              body;
+                            }))))
       (function
+        | Lwt.Canceled -> Lwt.fail Lwt.Canceled
         | Lwt_unix.Timeout ->
             Lwt.return_error
-              (Awskit.Error.Producer.transport ~retryable:true
+              (Awskit.Error.Producer.timeout ~operation:"credential metadata"
                  "credential metadata request timed out")
         | exn ->
             Lwt.return_error
