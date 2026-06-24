@@ -160,11 +160,12 @@ module Https = struct
     Some
       (fun uri raw ->
         let host =
-          Uri.host uri
-          |> Option.map (fun host ->
-                 Domain_name.(host_exn (of_string_exn host)))
+          match Uri.host uri with
+          | Some host -> Domain_name.host_exn (Domain_name.of_string_exn host)
+          | None -> invalid_arg "HTTPS URI is missing a host"
         in
-        Tls_eio.client_of_flow ?host tls_config raw)
+        (Tls_eio.client_of_flow tls_config ~host raw
+          :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Flow.two_way))
 end
 
 let unwrap label = function
@@ -411,6 +412,7 @@ Optional MinIO contract tests:
 ```sh
 docker compose up -d
 opam exec -- dune build --force @minio-contract
+docker compose down -v
 ```
 
 The MinIO contract runner defaults to `http://127.0.0.1:9000` with the

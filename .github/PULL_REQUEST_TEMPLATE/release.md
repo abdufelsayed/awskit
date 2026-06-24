@@ -24,10 +24,14 @@ references.
 
 ## Release Files
 
+List the release-facing files changed in this PR. Common release files include:
+
 - `CHANGES.md`
-- `dune-project`
-- `*.opam`
-- `.github/workflows/main.yml`
+- `dune-project` and generated `*.opam`
+- `README.md`, `SUPPORT.md`, `SECURITY.md`, and `docs/*.md`
+- package documentation under `packages/*/doc`
+- examples under `examples/`
+- release and CI automation such as `.github/workflows/main.yml` and `scripts/`
 
 ## Validation
 
