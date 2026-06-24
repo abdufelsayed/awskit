@@ -50,6 +50,9 @@ module type BODY = sig
 
     val write_string : t -> string -> (unit, Awskit.Error.t) result io
     val write_bytes : t -> bytes -> (unit, Awskit.Error.t) result io
+
+    val write_subbytes :
+      t -> bytes -> off:int -> len:int -> (unit, Awskit.Error.t) result io
   end
 end
 

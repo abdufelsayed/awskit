@@ -38,6 +38,10 @@ module Minimal_runtime : Awskit_s3.RUNTIME = struct
     let write_bytes writer value =
       Buffer.add_bytes writer value;
       Ok ()
+
+    let write_subbytes writer value ~off ~len =
+      Buffer.add_subbytes writer value off len;
+      Ok ()
   end
 
   module Response_body = struct

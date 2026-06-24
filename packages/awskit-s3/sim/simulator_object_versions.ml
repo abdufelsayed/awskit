@@ -119,16 +119,14 @@ let sorted_version_entries bucket (options : Object.Versions.options) =
           }
   in
   let versioned =
-    Hashtbl.to_seq bucket.versions
-    |> Seq.flat_map (fun (key, versions) ->
-        versions |> List.to_seq |> Seq.map (fun version -> (key, version)))
-    |> List.of_seq
+    Simulator_state.versions bucket
+    |> List.concat_map (fun (key, versions) ->
+        List.map (fun version -> (key, version)) versions)
   in
   let unversioned =
-    Hashtbl.to_seq bucket.objects
-    |> Seq.filter_map (fun (key, version) ->
+    Simulator_state.objects bucket
+    |> List.filter_map (fun (key, version) ->
         if Hashtbl.mem bucket.versions key then None else Some (key, version))
-    |> List.of_seq
   in
   versioned @ unversioned
   |> List.filter (fun (key, _) ->

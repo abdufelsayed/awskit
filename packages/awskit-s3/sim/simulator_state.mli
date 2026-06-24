@@ -104,7 +104,11 @@ val find_bucket : store -> string -> bucket_state option
 val bucket_exists : store -> string -> bool
 val add_bucket : store -> string -> bucket_state -> unit
 val remove_bucket : store -> string -> unit
+val buckets : store -> (string * bucket_state) list
 val buckets_seq : store -> (string * bucket_state) Seq.t
+val objects : bucket_state -> (string * stored_version) list
+val versions : bucket_state -> (string * stored_version list) list
+val parts : multipart_upload -> stored_part list
 val history : store -> operation_record list
 val clear_history : store -> unit
 

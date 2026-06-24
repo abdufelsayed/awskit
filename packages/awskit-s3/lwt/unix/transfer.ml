@@ -223,8 +223,8 @@ struct
         Lwt.bind (Lwt_io.read_into channel bytes 0 buffer_size) (function
           | 0 -> Lwt.return_ok ()
           | n ->
-              let chunk = Bytes.sub_string bytes 0 n in
-              Lwt.bind (Writer.write_string writer chunk) (function
+              Lwt.bind (Writer.write_subbytes writer bytes ~off:0 ~len:n)
+                (function
                 | Error _ as error -> Lwt.return error
                 | Ok () ->
                     let transferred = Int64.add transferred (Int64.of_int n) in
@@ -443,10 +443,9 @@ struct
                                            spec.part_number)
                                         path))
                             | n ->
-                                let chunk = Bytes.sub_string bytes 0 n in
                                 Lwt.bind
-                                  (Runtime.Request_body.write_string writer
-                                     chunk) (function
+                                  (Runtime.Request_body.write_subbytes writer
+                                     bytes ~off:0 ~len:n) (function
                                   | Error _ as error -> Lwt.return error
                                   | Ok () -> loop (remaining - n)))
                       in
@@ -456,11 +455,13 @@ struct
     in
     Runtime.Request_body.of_stream descriptor ~write
 
-  let split_batch ~concurrency specs =
-    let rec loop remaining acc = function
-      | rest when remaining = 0 -> (List.rev acc, rest)
-      | [] -> (List.rev acc, [])
-      | spec :: rest -> loop (remaining - 1) (spec :: acc) rest
+  let take_batch ~concurrency specs =
+    let rec loop remaining acc specs =
+      if remaining = 0 then (List.rev acc, specs)
+      else
+        match specs () with
+        | Seq.Nil -> (List.rev acc, Seq.empty)
+        | Seq.Cons (spec, rest) -> loop (remaining - 1) (spec :: acc) rest
     in
     loop concurrency [] specs
 
@@ -577,13 +578,12 @@ struct
                 Lwt.return_ok part)
         in
         let rec loop acc specs =
-          match specs with
+          let batch, rest =
+            take_batch ~concurrency:options.Awskit_s3.Transfer.concurrency specs
+          in
+          match batch with
           | [] -> Lwt.return_ok (List.rev acc)
           | _ ->
-              let batch, rest =
-                split_batch ~concurrency:options.Awskit_s3.Transfer.concurrency
-                  specs
-              in
               Lwt.bind (joined_batch upload_one batch) (fun outcomes ->
                   Lwt.bind (first_batch_error_or_parts outcomes) (function
                     | Error _ as error -> Lwt.return error
@@ -638,7 +638,7 @@ struct
     let* content_length = regular_file_length path in
     let* specs =
       Lwt.return
-        (Plan.upload_parts ~content_length ~part_size:options.part_size)
+        (Plan.upload_part_seq ~content_length ~part_size:options.part_size)
     in
     let* () = verify_resume_upload conn ~upload ~options in
     let* uploaded_now =
@@ -660,7 +660,7 @@ struct
     let* content_length = regular_file_length path in
     let* specs =
       Lwt.return
-        (Plan.upload_parts ~content_length ~part_size:options.part_size)
+        (Plan.upload_part_seq ~content_length ~part_size:options.part_size)
     in
     let* created =
       S3.Multipart.create_upload conn ~bucket ~key
@@ -846,19 +846,17 @@ struct
       download_range_to_fd conn ~bucket ~key ~get_options ~path ~fd ~write_mutex
         ~completed ~content_length ?on_progress spec
     in
-    let rec loop ranges =
-      match ranges with
-      | [] -> Lwt.return_ok ()
+    let rec loop parts ranges =
+      let batch, rest = take_batch ~concurrency:options.concurrency ranges in
+      match batch with
+      | [] -> Lwt.return_ok parts
       | _ ->
-          let batch, rest =
-            split_batch ~concurrency:options.concurrency ranges
-          in
           Lwt.bind (joined_batch download_one batch) (fun outcomes ->
               Lwt.bind (first_batch_error_or_unit outcomes) (function
                 | Error _ as error -> Lwt.return error
-                | Ok () -> loop rest))
+                | Ok () -> loop (parts + List.length batch) rest))
     in
-    loop ranges
+    loop 0 ranges
 
   let download_file conn ~bucket ~key ?options ?on_progress ~path () =
     let options =
@@ -894,19 +892,16 @@ struct
     | Some content_length ->
         let* ranges =
           Lwt.return
-            (Plan.download_ranges ~content_length ~part_size:options.part_size)
+            (Plan.download_range_seq ~content_length
+               ~part_size:options.part_size)
         in
         let get_options = ranged_get_options_of_head info options.get_options in
         with_temp_download path (fun temp_path fd ->
-            let* () =
+            let* parts =
               ranged_download_to_fd conn ~bucket ~key ~options ~get_options
                 ?on_progress ~path:temp_path ~fd ~content_length ranges
             in
             Lwt.return_ok
               (Awskit_s3.Transfer.Ranged
-                 {
-                   info;
-                   parts = List.length ranges;
-                   bytes_transferred = content_length;
-                 }))
+                 { info; parts; bytes_transferred = content_length }))
 end

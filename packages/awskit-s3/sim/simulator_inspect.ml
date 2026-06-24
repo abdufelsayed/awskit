@@ -29,13 +29,10 @@ let keys store ~bucket =
   match bucket_state store bucket with
   | None -> []
   | Some bucket ->
-      Hashtbl.to_seq_keys bucket.objects
-      |> Seq.filter (fun key ->
-          match Hashtbl.find_opt bucket.objects key with
-          | Some (Stored_object _) -> true
-          | None | Some (Stored_delete_marker _) -> false)
-      |> List.of_seq
-      |> List.sort String.compare
+      objects bucket
+      |> List.filter_map (function
+        | key, Stored_object _ -> Some key
+        | _, Stored_delete_marker _ -> None)
 
 let history = Simulator_state.history
 let clear_history = Simulator_state.clear_history
@@ -49,11 +46,10 @@ let objects_as_strings store ~bucket =
   match bucket_state store bucket with
   | None -> []
   | Some (bucket : bucket_state) ->
-      Hashtbl.to_seq bucket.objects
-      |> Seq.filter_map (function
+      objects bucket
+      |> List.filter_map (function
         | key, Stored_object obj -> Some (key, obj.body)
         | _, Stored_delete_marker _ -> None)
-      |> List.of_seq
       |> List.sort compare_object_body_pair
 
 let inject_fault t fault = append_faults t [ fault ]

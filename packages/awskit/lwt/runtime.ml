@@ -273,16 +273,19 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       write_error = None;
     }
 
-  let check_write_length writer string =
+  let check_write_length writer length =
     match !(writer.remaining) with
     | None -> Ok ()
     | Some remaining ->
-        let length = Int64.of_int (String.length string) in
-        if Stdlib.Int64.compare length remaining > 0 then
+        let length64 = Int64.of_int length in
+        if Stdlib.Int64.compare length64 remaining > 0 then
           Error (body_error "request body exceeded declared content_length")
         else (
-          writer.remaining := Some (Stdlib.Int64.sub remaining length);
+          writer.remaining := Some (Stdlib.Int64.sub remaining length64);
           Ok ())
+
+  let invalid_write_bounds bytes ~off ~len =
+    off < 0 || len < 0 || len > Bytes.length bytes - off
 
   let check_finished_length writer =
     match writer.write_error with
@@ -298,7 +301,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     match writer.write_error with
     | Some error -> Lwt.return_error error
     | None -> (
-        match check_write_length writer string with
+        match check_write_length writer (String.length string) with
         | Error error ->
             writer.write_error <- Some error;
             Lwt.return_error error
@@ -323,6 +326,39 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                     let error = body_error (Exn.to_string exn) in
                     writer.write_error <- Some error;
                     Lwt.return_error error))
+
+  let write_request_body_subbytes writer bytes ~off ~len =
+    if invalid_write_bounds bytes ~off ~len then
+      Lwt.return_error (body_error "invalid write bounds")
+    else
+      match writer.write_error with
+      | Some error -> Lwt.return_error error
+      | None -> (
+          match check_write_length writer len with
+          | Error error ->
+              writer.write_error <- Some error;
+              Lwt.return_error error
+          | Ok () ->
+              Lwt.catch
+                (fun () ->
+                  Lwt.bind
+                    (Lwt.pick
+                       [
+                         writer.push (Stdlib.Bytes.sub_string bytes off len);
+                         Lwt.bind writer.cancelled (fun () ->
+                             Lwt.fail Lwt.Canceled);
+                       ])
+                    (fun () -> Lwt.return_ok ()))
+                (function
+                  | Lwt.Canceled -> Lwt.fail Lwt.Canceled
+                  | Lwt_stream.Closed ->
+                      let error = body_error "request body stream closed" in
+                      writer.write_error <- Some error;
+                      Lwt.return_error error
+                  | exn ->
+                      let error = body_error (Exn.to_string exn) in
+                      writer.write_error <- Some error;
+                      Lwt.return_error error))
 
   let body_to_cohttp (conn : conn) = function
     | Body (_, body) ->
@@ -557,6 +593,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let stream_request_body = stream_request_body
     let request_body_descriptor = request_body_descriptor
     let write_request_body_string = write_request_body_string
+    let write_request_body_subbytes = write_request_body_subbytes
 
     module Request_body = struct
       type 'a io = 'a Lwt.t
@@ -570,9 +607,11 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       let descriptor = request_body_descriptor
       let content_length body = (request_body_descriptor body).content_length
       let write_string = write_request_body_string
+      let write_subbytes = write_request_body_subbytes
 
       let write_bytes writer bytes =
-        write_request_body_string writer (Bytes.to_string bytes)
+        write_request_body_subbytes writer bytes ~off:0
+          ~len:(Bytes.length bytes)
     end
 
     let rec read_from_current reader bytes ~off ~len =

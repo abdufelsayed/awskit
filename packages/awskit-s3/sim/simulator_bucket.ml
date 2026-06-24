@@ -67,17 +67,12 @@ module Bucket = struct
 
   let list conn =
     let buckets =
-      buckets_seq (store conn)
-      |> Seq.map (fun (name, state) ->
+      buckets (store conn)
+      |> List.map (fun (name, state) ->
           {
             Bucket_model.name = Bucket_name.of_string_exn name;
             creation_date = Some state.created_at;
           })
-      |> List.of_seq
-      |> List.sort (fun (a : Bucket_model.info) b ->
-          String.compare
-            (Bucket_name.to_string a.name)
-            (Bucket_name.to_string b.name))
     in
     Ok { Bucket_model.List_buckets.buckets; response = response 200 }
 
