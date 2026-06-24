@@ -58,7 +58,7 @@ release packaging.
   instead of `Presigned.Get_object.options`. Presigned artifacts now expose
   `request_headers` for the non-host headers callers should pass explicitly,
   while `signed_headers` returns the full canonical signed-header set,
-  including `host`.
+  including `host`. (bd6f919)
 - Request builders, XML parsers, runtime internals, and adapter transfer helper
   modules are now private implementation modules. Use the public `Awskit`,
   `Awskit_s3`, and adapter APIs. (fc67929)
@@ -76,7 +76,7 @@ release packaging.
 - Added `Awskit.Timeout` policies and explicit retry budgets with runtime
   supplied jitter randomness. (6cce011)
 - Exposed response-drain tuning through S3 Lwt, S3 Lwt Unix, and S3 Eio
-  constructors.
+  constructors. (15d40de)
 - Added native streaming S3 upload and download APIs with adapter-level `Body`
   and `Reader` modules, first-class bounded string/bytes object helpers, plus
   unified multipart body handling. (#5, 53a7642; 5815ba4; 73ef68f)
@@ -115,13 +115,13 @@ release packaging.
 - Presigned requests now reject duplicate canonical signed-header names, S3
   Transfer Acceleration endpoint resolution rejects path-style and dotted-bucket
   combinations, and bracketed IPv6 loopback endpoints render valid URL
-  authorities.
+  authorities. (bd6f919)
 - Runtime constructors now return structured validation errors for invalid
   response drain limits, and Lwt/Eio response readers now reject reads after
-  their `with_reader` scope exits.
+  their `with_reader` scope exits. (15d40de)
 - Lwt request body producers are now canceled on transport exits, and Unix
   metadata credential HTTP now preserves cancellation, reports metadata
-  timeouts as timeout errors, and bounds metadata response reads.
+  timeouts as timeout errors, and bounds metadata response reads. (15d40de)
 - Preserved Lwt timeout errors over request-body cleanup cancellation races.
   (d804565)
 
