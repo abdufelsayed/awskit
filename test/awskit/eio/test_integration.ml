@@ -422,6 +422,86 @@ let test_no_read_past_response_eof env =
       | Error error ->
           Alcotest.failf "unexpected body read error: %a" Awskit.Error.pp error)
 
+(* A server that answers like a real S3/Ceph HeadObject: a 200 advertising a
+   Content-Length but sending NO message body, then holding the keep-alive
+   connection open. A client that tries to read/drain that advertised body
+   blocks until the connection closes. *)
+let with_eio_head_no_body_server env ~content_length test =
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let listening_socket =
+    try
+      Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:1
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+    with exn when listener_bind_denied_by_sandbox exn -> Alcotest.skip ()
+  in
+  let port =
+    match Eio.Net.listening_addr listening_socket with
+    | `Tcp (_, port) -> port
+    | _ -> Alcotest.fail "expected TCP listening socket"
+  in
+  let hold_open, resolve_hold_open = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+      Eio.Net.accept_fork listening_socket ~sw
+        ~on_error:(fun _ -> ())
+        (fun flow _addr ->
+          let input = Eio.Buf_read.of_flow ~max_size:Int.max_value flow in
+          let rec read_headers () =
+            match Eio.Buf_read.line input with "" -> () | _ -> read_headers ()
+          in
+          read_headers ();
+          Eio.Buf_write.with_flow flow (fun output ->
+              Eio.Buf_write.string output
+                (Fmt.str
+                   "HTTP/1.1 200 test\r\n\
+                    Content-Length: %d\r\n\
+                    Connection: keep-alive\r\n\
+                    \r\n"
+                   content_length);
+              Eio.Buf_write.flush output;
+              Eio.Promise.await hold_open)));
+  let endpoint = Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port () in
+  let release_server () =
+    ignore (Eio.Promise.try_resolve resolve_hold_open () : bool)
+  in
+  match test endpoint with
+  | result ->
+      release_server ();
+      result
+  | exception exn ->
+      release_server ();
+      raise exn
+
+let head_request_for_endpoint endpoint =
+  let target =
+    Awskit.Request.Target.create_exn
+      ~scheme:(Awskit.Endpoint.scheme endpoint)
+      ~host:(Awskit.Endpoint.host endpoint)
+      ?port:(Awskit.Endpoint.port endpoint)
+      ~path:"/" ()
+  in
+  Awskit.Request.create_exn ~method_:`HEAD ~target ()
+
+(* Regression: a HEAD response has no message body even when Content-Length is
+   present (RFC 7230 §3.3.3), so the runtime must treat it as empty and never
+   read the body flow. A tiny drain timeout makes a regression (reading the
+   advertised body) fail fast instead of hanging. *)
+let test_head_response_is_bodiless env =
+  let timeout_policy = Awskit.Timeout.create_exn ~drain:tiny_span () in
+  with_eio_head_no_body_server env ~content_length:5 (fun endpoint ->
+      Eio.Switch.run @@ fun sw ->
+      let conn = request_conn ~timeout_policy env sw in
+      let request = head_request_for_endpoint endpoint in
+      match
+        Awskit_eio.Runtime.Transport.with_response conn request
+          ~body:Awskit_eio.Runtime.Request_body.empty
+          ~consume:(fun _ response_body ->
+            read_response_body_to_string response_body)
+      with
+      | Ok payload -> Alcotest.(check string) "head body is empty" "" payload
+      | Error error ->
+          Alcotest.failf "unexpected HEAD body error: %a" Awskit.Error.pp error)
+
 let test_stream_request_body_emits_multiple_chunks env =
   let request_body = ref None in
   with_eio_early_response_server env ~status:200 ~response_body:"ok"
@@ -951,6 +1031,8 @@ let suite env =
             test_response_read_cancellation_skips_drain_cleanup env);
         Alcotest.test_case "does not read response body past EOF" `Quick
           (fun () -> test_no_read_past_response_eof env);
+        Alcotest.test_case "head response is treated as bodiless" `Quick
+          (fun () -> test_head_response_is_bodiless env);
         Alcotest.test_case "discard body limit" `Quick (fun () ->
             test_discard_response_body_enforces_limit env);
         Alcotest.test_case "scoped drain body limit" `Quick (fun () ->
