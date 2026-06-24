@@ -14,6 +14,13 @@ module Expect = struct
     | Error error -> Alcotest.failf "%s: %a" label pp error
 end
 
+module Qcheck = struct
+  let to_alcotest ~seed test =
+    QCheck_alcotest.to_alcotest ~speed_level:`Quick
+      ~rand:(Random.State.make [| seed |])
+      test
+end
+
 module Header = struct
   let find name headers = List.assoc_opt name headers
 end

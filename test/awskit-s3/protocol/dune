@@ -34,6 +34,7 @@
  (modules test_protocol_pbt)
  (libraries
   awskit
+  awskit_test
   awskit-s3
   awskit_s3_test
   awskit_s3_protocol_test_support
@@ -47,7 +48,7 @@
  (alias protocol-pbt)
  (deps test_protocol_pbt.exe)
  (action
-  (run ./test_protocol_pbt.exe)))
+  (run ./test_protocol_pbt.exe test "pbt:protocol")))
 
 (test
  (name test_fuzz_replay)

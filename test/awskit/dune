@@ -1,4 +1,14 @@
 (test
  (name test_awskit)
  (package awskit)
- (libraries awskit ptime alcotest qcheck-core qcheck-alcotest))
+ (libraries awskit awskit_test ptime alcotest qcheck-core qcheck-alcotest))
+
+(rule
+ (alias protocol-pbt)
+ (deps test_awskit.exe)
+ (action
+  (progn
+   (run ./test_awskit.exe test "pbt:signing:uri-encode")
+   (run ./test_awskit.exe test "pbt:signing:canonical-query")
+   (run ./test_awskit.exe test "pbt:signing:sign-request")
+   (run ./test_awskit.exe test "pbt:signing:ptime"))))

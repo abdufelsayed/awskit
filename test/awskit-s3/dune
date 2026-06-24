@@ -3,6 +3,7 @@
  (package awskit-s3)
  (libraries
   awskit
+  awskit_test
   awskit-s3
   awskit_s3_test
   alcotest
@@ -14,4 +15,9 @@
  (alias protocol-pbt)
  (deps test_awskit_s3.exe)
  (action
-  (run ./test_awskit_s3.exe test "pbt:paginator")))
+  (progn
+   (run ./test_awskit_s3.exe test "pbt:domain:bucket")
+   (run ./test_awskit_s3.exe test "pbt:domain:key")
+   (run ./test_awskit_s3.exe test "pbt:domain:account-metadata-tags")
+   (run ./test_awskit_s3.exe test "pbt:paginator")
+   (run ./test_awskit_s3.exe test "pbt:transfer-plan"))))

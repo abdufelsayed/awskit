@@ -1,4 +1,4 @@
 (library
  (name awskit_test)
  (wrapped false)
- (libraries awskit alcotest ptime))
+ (libraries awskit alcotest ptime qcheck-core qcheck-alcotest))

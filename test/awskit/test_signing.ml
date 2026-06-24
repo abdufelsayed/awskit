@@ -14,11 +14,7 @@ let fixed_time =
   |> Option.value ~default:Ptime.epoch
 
 let qcheck_seed = 0xA5110
-
-let to_alcotest test =
-  QCheck_alcotest.to_alcotest ~speed_level:`Quick
-    ~rand:(Random.State.make [| qcheck_seed |])
-    test
+let to_alcotest = Awskit_test.Qcheck.to_alcotest ~seed:qcheck_seed
 
 (* ── uri_encode ──────────────────────────────────────────────────── *)
 

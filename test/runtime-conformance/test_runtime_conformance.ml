@@ -6,6 +6,12 @@ let error_text error = Awskit.Error.to_string_hum error
 let is_body_error error =
   match Awskit.Error.kind error with Body _ -> true | _ -> false
 
+let expect_body_error label = function
+  | Error error when is_body_error error -> ()
+  | Error error ->
+      Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
+  | Ok _ -> Alcotest.failf "%s: expected body error" label
+
 let contains ~substring text =
   let text_length = String.length text in
   let substring_length = String.length substring in
@@ -32,8 +38,102 @@ let test_request_body_descriptor_is_authoritative () =
     "content_length helper" (Some 5L)
     (R.Request_body.content_length body)
 
+let request =
+  let target =
+    Awskit.Request.Target.create_exn ~scheme:`Https
+      ~host:"s3.us-east-1.amazonaws.com" ~path:"/" ()
+  in
+  Awskit.Request.create_exn ~method_:`PUT ~target ()
+
+let test_request_body_of_bytes_owns_input () =
+  let bytes = Bytes.of_string "hello" in
+  let body = R.Request_body.of_bytes bytes in
+  Bytes.fill bytes 0 (Bytes.length bytes) 'x';
+  let conn = R.connect [ response 200 "" ] in
+  match
+    R.Transport.with_response conn request ~body
+      ~consume:(fun _ response_body -> R.Response_body.discard response_body)
+  with
+  | Error error ->
+      Alcotest.failf "unexpected transport error: %a" Awskit.Error.pp error
+  | Ok () ->
+      Alcotest.(check string) "request body" "hello" (R.last_call conn).body
+
+let test_stream_request_body_preserves_descriptor () =
+  let descriptor =
+    {
+      Awskit.Body.Request.content_length = Some 4L;
+      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
+      replayable = false;
+    }
+  in
+  let body =
+    R.Request_body.of_stream descriptor ~write:(fun writer ->
+        R.Request_body.write_string writer "body")
+  in
+  let actual = R.Request_body.descriptor body in
+  Alcotest.(check (option int64))
+    "content length" descriptor.content_length actual.content_length;
+  Alcotest.(check string)
+    "payload hash"
+    (Awskit.Body.Payload_hash.to_header_value descriptor.payload_hash)
+    (Awskit.Body.Payload_hash.to_header_value actual.payload_hash);
+  Alcotest.(check bool) "replayable" false actual.replayable;
+  Alcotest.(check (option int64))
+    "content_length helper" descriptor.content_length
+    (R.Request_body.content_length body)
+
+let test_stream_request_body_length_mismatch_prevents_transport () =
+  let descriptor =
+    {
+      Awskit.Body.Request.content_length = Some 4L;
+      payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
+      replayable = false;
+    }
+  in
+  let body =
+    R.Request_body.of_stream descriptor ~write:(fun writer ->
+        R.Request_body.write_string writer "abcde")
+  in
+  let conn = R.connect [ response 200 "" ] in
+  R.Transport.with_response conn request ~body ~consume:(fun _ response_body ->
+      R.Response_body.discard response_body)
+  |> expect_body_error "length mismatch";
+  Alcotest.(check int) "no transport call" 0 (List.length conn.calls)
+
 let response_body ?read_error_after body : R.response_body =
   { body; read_error_after }
+
+let bytes_to_string bytes = Bytes.sub_string bytes 0 (Bytes.length bytes)
+
+let test_response_next_reads_bounded_chunks () =
+  match
+    R.Response_body.with_reader (response_body "abcde") ~consume:(fun reader ->
+        match R.Response_body.next ~chunk_size:2 reader with
+        | Error _ as error -> error
+        | Ok None -> Error (Awskit.Error.Producer.body "missing first chunk")
+        | Ok (Some first) -> (
+            match R.Response_body.next ~chunk_size:3 reader with
+            | Error _ as error -> error
+            | Ok None ->
+                Error (Awskit.Error.Producer.body "missing second chunk")
+            | Ok (Some second) -> (
+                match R.Response_body.next ~chunk_size:3 reader with
+                | Error _ as error -> error
+                | Ok None -> Ok (bytes_to_string first, bytes_to_string second)
+                | Ok (Some _) ->
+                    Error (Awskit.Error.Producer.body "unexpected chunk"))))
+  with
+  | Error error ->
+      Alcotest.failf "unexpected response body error: %a" Awskit.Error.pp error
+  | Ok (first, second) ->
+      Alcotest.(check string) "first chunk" "ab" first;
+      Alcotest.(check string) "second chunk" "cde" second
+
+let test_response_next_rejects_nonpositive_chunk_size () =
+  R.Response_body.with_reader (response_body "abcdef") ~consume:(fun reader ->
+      R.Response_body.next ~chunk_size:0 reader)
+  |> expect_body_error "chunk size"
 
 let test_response_consumer_error_wins_over_drain_error () =
   let consumer_error = Awskit.Error.Producer.body "consumer failed" in
@@ -86,6 +186,19 @@ let test_response_reader_cannot_escape_scope () =
             "use-after-scope is body error" true (is_body_error error)
       | Ok _ -> Alcotest.fail "escaped reader read succeeded")
 
+let test_transport_callback_exception_is_not_wrapped () =
+  let callback_exn = Failure "callback exploded" in
+  let conn = R.connect [ response 200 "" ] in
+  try
+    ignore
+      (R.Transport.with_response conn request ~body:R.Request_body.empty
+         ~consume:(fun _ _ -> raise callback_exn)
+        : (unit, Awskit.Error.t) result);
+    Alcotest.fail "expected callback exception"
+  with
+  | exn when Stdlib.( == ) exn callback_exn -> ()
+  | exn -> Alcotest.failf "unexpected exception: %s" (Printexc.to_string exn)
+
 let test_retry_timeout_random_and_sleep_capabilities () =
   let retry_policy =
     Awskit.Retry.create_exn ~max_attempts:2 ~jitter:1.0
@@ -119,6 +232,17 @@ let suite =
         Alcotest.test_case "io bind law" `Quick test_io_bind_law;
         Alcotest.test_case "request body descriptor" `Quick
           test_request_body_descriptor_is_authoritative;
+        Alcotest.test_case "request body of_bytes owns input" `Quick
+          test_request_body_of_bytes_owns_input;
+        Alcotest.test_case "stream request body preserves descriptor" `Quick
+          test_stream_request_body_preserves_descriptor;
+        Alcotest.test_case
+          "stream request body length mismatch prevents transport" `Quick
+          test_stream_request_body_length_mismatch_prevents_transport;
+        Alcotest.test_case "response next reads bounded chunks" `Quick
+          test_response_next_reads_bounded_chunks;
+        Alcotest.test_case "response next rejects nonpositive chunk size" `Quick
+          test_response_next_rejects_nonpositive_chunk_size;
         Alcotest.test_case "consumer error wins over drain error" `Quick
           test_response_consumer_error_wins_over_drain_error;
         Alcotest.test_case "success reports drain error" `Quick
@@ -127,6 +251,8 @@ let suite =
           test_discard_reports_drain_error;
         Alcotest.test_case "response reader cannot escape scope" `Quick
           test_response_reader_cannot_escape_scope;
+        Alcotest.test_case "transport callback exception is not wrapped" `Quick
+          test_transport_callback_exception_is_not_wrapped;
         Alcotest.test_case "retry timeout random and sleep" `Quick
           test_retry_timeout_random_and_sleep_capabilities;
       ] );

@@ -43,6 +43,82 @@ let test_presigned_get_fixture () =
     [ "presign"; "get-object-safe-uri.txt" ]
     ~actual:safe_uri
 
+let redact_authorization authorization =
+  match String.index_opt authorization ' ' with
+  | Some index ->
+      let algorithm = String.sub authorization 0 index in
+      let fields =
+        String.sub authorization (index + 1)
+          (String.length authorization - index - 1)
+      in
+      let redacted_field field =
+        match String.split_on_char '=' field with
+        | [ "Credential"; _ ] -> "Credential=REDACTED"
+        | [ "Signature"; _ ] -> "Signature=REDACTED"
+        | _ -> field
+      in
+      algorithm
+      ^ " "
+      ^ (fields
+        |> String.split_on_char ','
+        |> List.map String.trim
+        |> List.map redacted_field
+        |> String.concat ", ")
+  | None -> authorization
+
+let test_signing_artifact_fixture () =
+  let headers =
+    [
+      ("host", "bucket.s3.us-east-1.amazonaws.com");
+      ("x-amz-meta-trace", "  replay\t fixture  ");
+      ("x-amz-meta-trace", "second");
+    ]
+  in
+  let payload_hash = Awskit.Body.Payload_hash.sha256_of_string "body" in
+  let signed =
+    Awskit.Signing.sign_request_params ~credentials:creds
+      ~region:(Region.of_string_exn "us-east-1")
+      ~service:"s3" ~method_:`PUT ~path:"/photos/cat space.jpg"
+      ~query_params:
+        [
+          ("partNumber", [ "10" ]);
+          ("uploadId", [ "upload 1" ]);
+          ("X-Amz-Meta", [ "a/b"; "a b" ]);
+        ]
+      ~headers ~payload_hash ~now:test_time
+    |> ok_or_fail "signing artifact fixture"
+  in
+  let canonical_headers =
+    Awskit.Signing.canonical_headers
+      (List.filter
+         (fun (name, _) -> not (String.equal name "authorization"))
+         signed.headers)
+  in
+  let authorization = header_or_empty "authorization" signed.headers in
+  let actual =
+    Fmt.str
+      "method=PUT\n\
+       canonical-path=%s\n\
+       canonical-query=%s\n\
+       canonical-headers=%ssigned-headers=%s\n\
+       payload-hash=%s\n\
+       authorization=%s"
+      (Awskit.Signing.uri_encode ~encode_slash:false "/photos/cat space.jpg")
+      (Awskit.Signing.canonical_query_params
+         [
+           ("partNumber", [ "10" ]);
+           ("uploadId", [ "upload 1" ]);
+           ("X-Amz-Meta", [ "a/b"; "a b" ]);
+         ])
+      (Awskit.Signing.canonical_headers_block canonical_headers)
+      signed.signed_headers_str
+      (Awskit.Body.Payload_hash.to_header_value payload_hash)
+      (redact_authorization authorization)
+  in
+  check_fixture "signing canonical artifact"
+    [ "signing"; "put-object-canonical.expected" ]
+    ~actual
+
 let test_endpoint_resolution_fixture () =
   let region = Region.of_string_exn "us-east-1" in
   let resolved =
@@ -160,6 +236,71 @@ let test_range_get_fixture () =
          (List.assoc_opt "origin" (Metadata.to_list result.metadata)))
   in
   check_fixture "range GET response" [ "object"; "range-get.expected" ] ~actual
+
+let describe_request (call : Recording_runtime.call) =
+  let request = call.request in
+  let target = request.Awskit.Request.target in
+  Fmt.str
+    "method=%s\n\
+     path=%s\n\
+     query=%s\n\
+     content-md5=%s\n\
+     content-type=%s\n\
+     expected-owner=%s\n\
+     body=%s"
+    (Awskit.Request.Method.to_string request.method_)
+    target.path
+    (query_to_string target.query)
+    (header_or_empty "content-md5" request.headers)
+    (header_or_empty "content-type" request.headers)
+    (header_or_empty "x-amz-expected-bucket-owner" request.headers)
+    call.body
+
+let test_bucket_versioning_xml_fixture () =
+  let options =
+    Bucket.Versioning.options_exn
+      ~expected_bucket_owner:(account_id "123456789012")
+      ()
+  in
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  ignore
+    (Recording_s3.Bucket.Versioning.put conn ~bucket:(bucket_name "my-bucket")
+       ~options ~status:Bucket.Versioning.Status.Enabled ()
+    |> ok_or_fail "bucket versioning XML fixture");
+  check_fixture "bucket versioning XML"
+    [ "bucket"; "versioning-put.expected" ]
+    ~actual:(describe_request (Recording_runtime.last_call conn))
+
+let test_bucket_encryption_xml_fixture () =
+  let config =
+    {
+      Bucket.Encryption.rules =
+        [
+          {
+            Bucket.Encryption.Rule.sse_algorithm =
+              Some Bucket.Encryption.Algorithm.Aws_kms_dsse;
+            kms_master_key_id =
+              Some "arn:aws:kms:us-east-1:123456789012:key/test";
+            bucket_key_enabled = Some true;
+            blocked_encryption_types =
+              [ Bucket.Encryption.Blocked_encryption_type.Sse_c ];
+          };
+        ];
+    }
+  in
+  let options =
+    Bucket.Encryption.options_exn
+      ~expected_bucket_owner:(account_id "123456789012")
+      ()
+  in
+  let conn = Recording_runtime.connect [ response 200 "" ] in
+  ignore
+    (Recording_s3.Bucket.Encryption.put conn ~bucket:(bucket_name "my-bucket")
+       ~options ~config ()
+    |> ok_or_fail "bucket encryption XML fixture");
+  check_fixture "bucket encryption XML"
+    [ "bucket"; "encryption-put.expected" ]
+    ~actual:(describe_request (Recording_runtime.last_call conn))
 
 let describe_list_page (page : Object.List.page) =
   let render_prefix = Object_key.Prefix.to_string in
@@ -301,6 +442,12 @@ let suite =
         Alcotest.test_case "PUT metadata/tags" `Quick
           test_put_object_metadata_tags_fixture;
         Alcotest.test_case "range GET response" `Quick test_range_get_fixture;
+        Alcotest.test_case "signing canonical artifact" `Quick
+          test_signing_artifact_fixture;
+        Alcotest.test_case "bucket versioning XML" `Quick
+          test_bucket_versioning_xml_fixture;
+        Alcotest.test_case "bucket encryption XML" `Quick
+          test_bucket_encryption_xml_fixture;
         Alcotest.test_case "ListObjectsV2 XML" `Quick
           test_list_objects_v2_fixture;
         Alcotest.test_case "service error XML" `Quick test_service_error_fixture;
