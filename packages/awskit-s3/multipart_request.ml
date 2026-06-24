@@ -301,7 +301,8 @@ module Make (C : Request_context.S) = struct
                 | Error error -> return_error error
                 | Ok request ->
                     with_operation_result return_error return_ok
-                      (with_response conn ~method_:`POST ~request
+                      (with_retryable_embedded_response conn ~method_:`POST
+                         ~request
                          ~query:
                            [
                              ( "uploadId",

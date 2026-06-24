@@ -33,6 +33,11 @@ let body_error_or_raise_callback action path = function
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (body_error action path exn)
 
+let body_error_or_escape_callback action path = function
+  | Callback_raised exn -> Awskit.Body.Request.raise_escaped_exn exn
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (body_error action path exn)
+
 let body_error_or_preserve_callback action path = function
   | Callback_raised _ as exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -42,6 +47,17 @@ let target_error_or_raise_callback action target = function
   | Callback_raised exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (target_error action target exn)
+
+let target_error_or_escape_callback action target = function
+  | Callback_raised exn -> Awskit.Body.Request.raise_escaped_exn exn
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (target_error action target exn)
+
+let raise_escaped_callback_or_raise = function
+  | exn -> (
+      match Awskit.Body.Request.escaped_exn exn with
+      | Some escaped -> raise escaped
+      | None -> raise exn)
 
 let regular_file_length path =
   try
@@ -118,6 +134,17 @@ let cleanup_temp_download path error =
         |> Awskit.Error.Producer.with_context
              "download failed and temporary file cleanup also failed")
 
+let cleanup_temp_download_with_failures path errors =
+  let errors =
+    match remove_temp_download path with
+    | Ok () -> errors
+    | Error cleanup_error -> errors @ [ cleanup_error ]
+  in
+  Error
+    (Awskit.Error.Producer.multiple errors
+    |> Awskit.Error.Producer.with_context
+         "download failed and temporary file cleanup also failed")
+
 let cleanup_temp_download_before_raise path exn =
   Eio.Cancel.protect (fun () -> ignore (remove_temp_download path));
   raise exn
@@ -156,7 +183,8 @@ let with_temp_download path f =
         match close_temp_download temp_path file with
         | exception (Eio.Cancel.Cancelled _ as exn) ->
             cleanup_open_temp_download_before_raise temp_path file exn
-        | Error close_error -> cleanup_temp_download temp_path close_error
+        | Error close_error ->
+            cleanup_temp_download_with_failures temp_path [ error; close_error ]
         | Ok () -> cleanup_temp_download temp_path error
       in
       let close_and_publish value =
@@ -221,7 +249,7 @@ struct
       let write writer =
         try copy_flow_to_writer ?on_progress flow writer
         with exn ->
-          target_error_or_raise_callback "read upload flow" "<flow>" exn
+          target_error_or_escape_callback "read upload flow" "<flow>" exn
       in
       of_stream ~content_length ~replayable:false ~write
 
@@ -231,7 +259,7 @@ struct
         try
           Eio.Path.with_open_in path (fun file ->
               copy_flow_to_writer ?on_progress file writer)
-        with exn -> body_error_or_raise_callback "read upload" path exn
+        with exn -> body_error_or_escape_callback "read upload" path exn
       in
       of_stream ~content_length ~replayable:true ~write
   end
@@ -366,6 +394,15 @@ struct
                 let len = min buffer_size remaining in
                 let read_buffer = Cstruct.sub cstruct 0 len in
                 match Eio.Flow.single_read file read_buffer with
+                | 0 ->
+                    Error
+                      (Awskit.Error.Producer.body
+                         (Fmt.str
+                            "multipart upload file read made no progress while \
+                             reading part %d from %a"
+                            (Awskit_s3.Multipart.Part_number.to_int
+                               spec.part_number)
+                            Eio.Path.pp path))
                 | n -> (
                     let chunk =
                       Cstruct.to_string (Cstruct.sub read_buffer 0 n)
@@ -460,7 +497,7 @@ struct
   let sort_parts parts =
     List.sort
       (fun (left : Awskit_s3.Multipart.Part.t) right ->
-        compare
+        Int.compare
           (Awskit_s3.Multipart.Part.part_number left
           |> Awskit_s3.Multipart.Part_number.to_int)
           (Awskit_s3.Multipart.Part.part_number right
@@ -473,7 +510,7 @@ struct
         ~options:options.Awskit_s3.Transfer.list_parts_options ~max_pages:1 ()
     with
     | Error _ as error -> error
-    | Ok _ -> Ok ()
+    | Ok _parts -> Ok ()
 
   let complete_multipart conn ~upload ~options ~bytes_transferred parts =
     let parts = sort_parts parts in
@@ -584,7 +621,11 @@ struct
       in
       let* body = Body.of_path ?on_progress:upload_progress path in
       let* result =
-        S3.Object.put conn ~bucket ~key ~options:options.put_options ~body ()
+        match
+          S3.Object.put conn ~bucket ~key ~options:options.put_options ~body ()
+        with
+        | exception exn -> raise_escaped_callback_or_raise exn
+        | result -> result
       in
       Ok
         (Awskit_s3.Transfer.Put
@@ -640,11 +681,10 @@ struct
             in
             { get_options with preconditions })
 
-  let download_range_to_file conn ~bucket ~key ~options ~path ~file ~completed
+  let download_range_to_file conn ~bucket ~key
+      ~(get_options : Awskit_s3.Object.Get.options) ~path ~file ~completed
       ~content_length ?on_progress (spec : Plan.download_range) =
-    let get_options =
-      { options.Awskit_s3.Transfer.get_options with range = Some spec.range }
-    in
+    let get_options = { get_options with range = Some spec.range } in
     let consume reader =
       try
         let bytes = Bytes.create buffer_size in
@@ -677,12 +717,14 @@ struct
     | Error _ as error -> error
     | Ok { value = (); _ } -> Ok ()
 
-  let ranged_download_to_file conn ~bucket ~key ~options ?on_progress ~path
-      ~file ~content_length ranges =
+  let ranged_download_to_file conn ~bucket ~key
+      ~(options : Awskit_s3.Transfer.download_options)
+      ~(get_options : Awskit_s3.Object.Get.options) ?on_progress ~path ~file
+      ~content_length ranges =
     let completed = ref 0L in
     let download_one spec =
-      download_range_to_file conn ~bucket ~key ~options ~path ~file ~completed
-        ~content_length ?on_progress spec
+      download_range_to_file conn ~bucket ~key ~get_options ~path ~file
+        ~completed ~content_length ?on_progress spec
     in
     let rec loop ranges =
       match ranges with
@@ -738,11 +780,10 @@ struct
           Plan.download_ranges ~content_length ~part_size:options.part_size
         in
         let get_options = ranged_get_options_of_head info options.get_options in
-        let options = { options with get_options } in
         with_temp_download path (fun temp_path file ->
             let* () =
-              ranged_download_to_file conn ~bucket ~key ~options ?on_progress
-                ~path:temp_path ~file ~content_length ranges
+              ranged_download_to_file conn ~bucket ~key ~options ~get_options
+                ?on_progress ~path:temp_path ~file ~content_length ranges
             in
             Ok
               (Awskit_s3.Transfer.Ranged

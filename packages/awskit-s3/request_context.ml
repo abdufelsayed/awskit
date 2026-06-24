@@ -70,5 +70,16 @@ module type S = sig
     f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
     ('a, Error.t) result io
 
+  val with_retryable_embedded_response :
+    connection ->
+    method_:Awskit.Request.Method.t ->
+    request:Endpoint_resolver.Request.t ->
+    query:(string * string list) list ->
+    headers:(string * string) list ->
+    payload_hash:Awskit.Body.Payload_hash.t ->
+    request_body ->
+    f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
+    ('a, Error.t) result io
+
   val content_md5 : string -> string
 end

@@ -34,6 +34,8 @@ module Payload_hash = struct
 end
 
 module Request = struct
+  exception Escaped_exn of exn
+
   type descriptor = {
     content_length : int64 option;
     payload_hash : Payload_hash.t;
@@ -47,6 +49,9 @@ module Request = struct
           (Aws_error.Producer.validation ~field:"content_length"
              "request content length must be non-negative")
     | _ -> Ok ()
+
+  let raise_escaped_exn exn = raise (Escaped_exn exn)
+  let escaped_exn = function Escaped_exn exn -> Some exn | _ -> None
 end
 
 module Response = struct

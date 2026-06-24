@@ -99,7 +99,7 @@ let test_object_checksum_headers_and_response () =
     (header "x-amz-expected-bucket-owner" call.request.headers)
 
 let test_object_precondition_headers () =
-  let time = Ptime.to_rfc3339 test_time in
+  let time = "Wed, 08 Apr 2026 12:00:00 GMT" in
   let conn =
     Recording_runtime.connect
       [
@@ -459,6 +459,34 @@ let test_object_head_parses_int64_content_length () =
   in
   Alcotest.(check (option int64))
     "content length" (Some large_content_length) result.content_length
+
+let test_object_head_accepts_http_date_last_modified () =
+  let last_modified_header = "Wed, 24 Jun 2026 02:04:39 GMT" in
+  let expected =
+    Ptime.of_date_time ((2026, 6, 24), ((2, 4, 39), 0)) |> Option.get
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:
+            [
+              ("etag", "\"etag\"");
+              ("content-length", "0");
+              ("last-modified", last_modified_header);
+            ]
+          "";
+      ]
+  in
+  let result =
+    Recording_s3.Object.head conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file") ()
+    |> ok_or_fail "head HTTP-date last-modified"
+  in
+  Alcotest.(check (option string))
+    "last modified"
+    (Some (Ptime.to_rfc3339 expected))
+    (Option.map Ptime.to_rfc3339 result.last_modified)
 
 let test_object_head_rejects_malformed_known_headers () =
   let cases =
@@ -1085,6 +1113,37 @@ let test_find_preserves_consumer_not_found_error () =
   | Ok None -> Alcotest.fail "expected consumer error, got None"
   | Ok (Some _) -> Alcotest.fail "expected consumer error"
 
+let test_get_consumer_retryable_service_error_is_final () =
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          ~headers:[ ("etag", "\"etag\""); ("content-length", "4") ]
+          "body";
+        response 200
+          ~headers:[ ("etag", "\"etag\""); ("content-length", "5") ]
+          "again";
+      ]
+  in
+  let consumer_calls = ref 0 in
+  let consumer_error =
+    service_error ~code:"SlowDown" ~message:"consumer-owned throttling" 503
+  in
+  (match
+     Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file")
+       ~consume:(fun _reader ->
+         incr consumer_calls;
+         Error consumer_error)
+       ()
+   with
+  | Error error when Error.service_code error = Some "SlowDown" -> ()
+  | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
+  | Ok _ -> Alcotest.fail "expected consumer service error");
+  Alcotest.(check int) "attempts" 1 (List.length conn.calls);
+  Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps);
+  Alcotest.(check int) "consumer calls" 1 !consumer_calls
+
 let test_malformed_xml_responses () =
   let conn =
     Recording_runtime.connect
@@ -1466,20 +1525,50 @@ let test_head_rejects_duplicate_metadata_headers_as_decode_error () =
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected duplicate metadata decode error"
 
-let test_copy_object_embedded_error () =
-  let body =
+let test_copy_object_retryable_embedded_error_retries_then_succeeds () =
+  let slow_down =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
   in
-  let conn = Recording_runtime.connect [ response 200 body ] in
-  match
-    Recording_s3.Object.copy conn ~source_bucket:(bucket_name "my-bucket")
-      ~source_key:(object_key "file")
-      ~destination_bucket:(bucket_name "my-bucket")
-      ~destination_key:(object_key "copy") ()
-  with
-  | Error error when Error.service_code error = Some "SlowDown" -> ()
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 slow_down;
+        response 200
+          {|<CopyObjectResult><ETag>"copy"</ETag></CopyObjectResult>|};
+      ]
+  in
+  ignore
+    (Recording_s3.Object.copy conn ~source_bucket:(bucket_name "my-bucket")
+       ~source_key:(object_key "file")
+       ~destination_bucket:(bucket_name "my-bucket")
+       ~destination_key:(object_key "copy") ()
+    |> ok_or_fail "copy after embedded SlowDown");
+  Alcotest.(check int) "attempts" 2 (List.length conn.calls);
+  Alcotest.(check int) "sleeps" 1 (List.length conn.sleeps)
+
+let test_copy_object_non_retryable_embedded_error_is_final () =
+  let invalid_request =
+    {|<Error><Code>InvalidRequest</Code><Message>invalid copy</Message></Error>|}
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 invalid_request;
+        response 200
+          {|<CopyObjectResult><ETag>"copy"</ETag></CopyObjectResult>|};
+      ]
+  in
+  (match
+     Recording_s3.Object.copy conn ~source_bucket:(bucket_name "my-bucket")
+       ~source_key:(object_key "file")
+       ~destination_bucket:(bucket_name "my-bucket")
+       ~destination_key:(object_key "copy") ()
+   with
+  | Error error when Error.service_code error = Some "InvalidRequest" -> ()
   | Error error -> Alcotest.failf "unexpected copy error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected embedded copy error"
+  | Ok _ -> Alcotest.fail "expected embedded copy error");
+  Alcotest.(check int) "attempts" 1 (List.length conn.calls);
+  Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
 
 let test_copy_object_rejects_malformed_result_fields () =
   let cases =
@@ -1648,6 +1737,8 @@ let suite =
           test_object_get_rejects_malformed_content_range;
         Alcotest.test_case "object head parses int64 content length" `Quick
           test_object_head_parses_int64_content_length;
+        Alcotest.test_case "object head accepts HTTP-date Last-Modified" `Quick
+          test_object_head_accepts_http_date_last_modified;
         Alcotest.test_case "object head rejects malformed known headers" `Quick
           test_object_head_rejects_malformed_known_headers;
         Alcotest.test_case "delete objects request body" `Quick
@@ -1692,6 +1783,8 @@ let suite =
           test_find_missing_bucket_returns_error;
         Alcotest.test_case "find preserves consumer not found error" `Quick
           test_find_preserves_consumer_not_found_error;
+        Alcotest.test_case "get consumer retryable service error is final"
+          `Quick test_get_consumer_retryable_service_error_is_final;
         Alcotest.test_case "malformed xml responses" `Quick
           test_malformed_xml_responses;
         Alcotest.test_case "object list rejects malformed known fields" `Quick
@@ -1719,8 +1812,10 @@ let suite =
         Alcotest.test_case
           "head rejects duplicate metadata headers as decode error" `Quick
           test_head_rejects_duplicate_metadata_headers_as_decode_error;
-        Alcotest.test_case "copy object embedded error" `Quick
-          test_copy_object_embedded_error;
+        Alcotest.test_case "copy object retryable embedded error" `Quick
+          test_copy_object_retryable_embedded_error_retries_then_succeeds;
+        Alcotest.test_case "copy object non-retryable embedded error" `Quick
+          test_copy_object_non_retryable_embedded_error_is_final;
         Alcotest.test_case "copy object rejects malformed result fields" `Quick
           test_copy_object_rejects_malformed_result_fields;
         Alcotest.test_case "object checksum mode and expected owner headers"

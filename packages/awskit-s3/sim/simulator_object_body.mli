@@ -12,3 +12,8 @@ val consume_string :
   max_bytes:int64 ->
   Simulator_runtime.Runtime.response_body_reader ->
   (string, Awskit.Error.t) result
+
+val consume_bytes :
+  max_bytes:int64 ->
+  Simulator_runtime.Runtime.response_body_reader ->
+  (bytes, Awskit.Error.t) result

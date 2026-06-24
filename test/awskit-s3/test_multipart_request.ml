@@ -211,11 +211,18 @@ let test_multipart_checksum_and_expected_owner_headers () =
            complete.body)
   | _ -> Alcotest.fail "expected three multipart calls"
 
-let test_complete_multipart_embedded_error () =
-  let body =
+let test_complete_multipart_retryable_embedded_error_retries_then_succeeds () =
+  let slow_down =
     {|<Error><Code>SlowDown</Code><Message>reduce request rate</Message></Error>|}
   in
-  let conn = Recording_runtime.connect [ response 200 body ] in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 slow_down;
+        response 200
+          {|<CompleteMultipartUploadResult><ETag>"final"</ETag></CompleteMultipartUploadResult>|};
+      ]
+  in
   let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
   let upload =
     Multipart.Upload.resume ~bucket:(bucket_name "my-bucket")
@@ -227,12 +234,39 @@ let test_complete_multipart_embedded_error () =
       ~etag:(Object.Etag.of_string_exn "\"part-1\"")
       ()
   in
-  match
-    Recording_s3.Multipart.complete_upload conn ~upload ~parts:[ part ] ()
-  with
-  | Error error when Error.service_code error = Some "SlowDown" -> ()
+  ignore
+    (Recording_s3.Multipart.complete_upload conn ~upload ~parts:[ part ] ()
+    |> ok_or_fail "complete after embedded SlowDown");
+  Alcotest.(check int) "attempts" 2 (List.length conn.calls);
+  Alcotest.(check int) "sleeps" 1 (List.length conn.sleeps)
+
+let test_complete_multipart_non_retryable_embedded_error_is_final () =
+  let invalid_request =
+    {|<Error><Code>InvalidRequest</Code><Message>invalid completion</Message></Error>|}
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 invalid_request;
+        response 200
+          {|<CompleteMultipartUploadResult><ETag>"final"</ETag></CompleteMultipartUploadResult>|};
+      ]
+  in
+  let upload = upload_handle () in
+  let part =
+    Multipart.Part.create_exn
+      ~part_number:(Multipart.Part_number.of_int_exn 1)
+      ~etag:(Object.Etag.of_string_exn "\"part-1\"")
+      ()
+  in
+  (match
+     Recording_s3.Multipart.complete_upload conn ~upload ~parts:[ part ] ()
+   with
+  | Error error when Error.service_code error = Some "InvalidRequest" -> ()
   | Error error -> Alcotest.failf "unexpected complete error: %a" Error.pp error
-  | Ok _ -> Alcotest.fail "expected embedded complete error"
+  | Ok _ -> Alcotest.fail "expected embedded complete error");
+  Alcotest.(check int) "attempts" 1 (List.length conn.calls);
+  Alcotest.(check int) "sleeps" 0 (List.length conn.sleeps)
 
 let test_abort_multipart_result_and_absent_error () =
   let absent_body =
@@ -337,8 +371,10 @@ let suite =
           test_multipart_unknown_storage_class_rejected;
         Alcotest.test_case "multipart checksum and expected owner headers"
           `Quick test_multipart_checksum_and_expected_owner_headers;
-        Alcotest.test_case "complete multipart embedded error" `Quick
-          test_complete_multipart_embedded_error;
+        Alcotest.test_case "complete multipart retryable embedded error" `Quick
+          test_complete_multipart_retryable_embedded_error_retries_then_succeeds;
+        Alcotest.test_case "complete multipart non-retryable embedded error"
+          `Quick test_complete_multipart_non_retryable_embedded_error_is_final;
         Alcotest.test_case "abort multipart result and absent upload error"
           `Quick test_abort_multipart_result_and_absent_error;
         Alcotest.test_case "complete revalidates public option record" `Quick

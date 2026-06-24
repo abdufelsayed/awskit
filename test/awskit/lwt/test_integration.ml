@@ -147,6 +147,161 @@ end
 
 module FailingTransportAws = Awskit_lwt.Make (Failing_transport_client)
 
+module Failing_after_request_body_client = struct
+  type ctx = unit
+
+  module IO = Cohttp_lwt_unix.Client.IO
+
+  type 'a io = 'a Lwt.t
+  type 'a with_context = ?ctx:ctx -> 'a
+  type body = Cohttp_lwt.Body.t
+
+  let map_context f g ?ctx = g (f ?ctx)
+
+  let drain_request_body = function
+    | None -> Lwt.return_unit
+    | Some body ->
+        Lwt.catch
+          (fun () -> Lwt.map ignore (Cohttp_lwt.Body.to_string body))
+          (fun _exn -> Lwt.return_unit)
+
+  let call ?ctx:_ ?headers:_ ?body ?chunked:_ _meth _uri =
+    Lwt.bind (drain_request_body body) (fun () ->
+        Lwt.bind (Lwt.pause ()) (fun () ->
+            Lwt.fail (Failure "transport exploded after request body")))
+
+  let head ?ctx:_ ?headers:_ _uri =
+    Lwt.fail (Failure "transport exploded after request body")
+
+  let get ?ctx ?headers uri = call ?ctx ?headers `GET uri
+
+  let delete ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `DELETE uri
+
+  let post ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `POST uri
+
+  let put ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `PUT uri
+
+  let patch ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `PATCH uri
+
+  let set_cache _ = ()
+
+  let post_form ?ctx:_ ?headers:_ ~params:_ _uri =
+    Lwt.fail (Failure "transport exploded after request body")
+
+  let callv ?ctx:_ _uri _requests =
+    Lwt.fail (Failure "transport exploded after request body")
+end
+
+module FailingAfterRequestBodyAws =
+  Awskit_lwt.Make (Failing_after_request_body_client)
+
+module Blocking_transport_client = struct
+  type ctx = unit
+
+  module IO = Cohttp_lwt_unix.Client.IO
+
+  type 'a io = 'a Lwt.t
+  type 'a with_context = ?ctx:ctx -> 'a
+  type body = Cohttp_lwt.Body.t
+
+  let call_started = ref false
+  let call_finalized = ref false
+  let map_context f g ?ctx = g (f ?ctx)
+  let response () = Cohttp.Response.make ~status:`OK ()
+
+  let call ?ctx:_ ?headers:_ ?body:_ ?chunked:_ _meth _uri =
+    call_started := true;
+    let blocked, _wake = Lwt.task () in
+    Lwt.finalize
+      (fun () -> blocked)
+      (fun () ->
+        call_finalized := true;
+        Lwt.return_unit)
+
+  let head ?ctx:_ ?headers:_ _uri = Lwt.return (response ())
+  let get ?ctx ?headers uri = call ?ctx ?headers `GET uri
+
+  let delete ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `DELETE uri
+
+  let post ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `POST uri
+
+  let put ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `PUT uri
+
+  let patch ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `PATCH uri
+
+  let set_cache _ = ()
+
+  let post_form ?ctx:_ ?headers:_ ~params:_ _uri =
+    Lwt.return (response (), Cohttp_lwt.Body.empty)
+
+  let callv ?ctx:_ _uri _requests = Lwt.return (Lwt_stream.of_list [])
+end
+
+module BlockingTransportAws = Awskit_lwt.Make (Blocking_transport_client)
+
+module Blocking_response_client = struct
+  type ctx = unit
+
+  module IO = Cohttp_lwt_unix.Client.IO
+
+  type 'a io = 'a Lwt.t
+  type 'a with_context = ?ctx:ctx -> 'a
+  type body = Cohttp_lwt.Body.t
+
+  let read_started_count = ref 0
+  let read_finalized_count = ref 0
+  let response () = Cohttp.Response.make ~status:`OK ()
+  let map_context f g ?ctx = g (f ?ctx)
+
+  let body () =
+    let stream =
+      Lwt_stream.from (fun () ->
+          Int.incr read_started_count;
+          let blocked, _wake = Lwt.task () in
+          Lwt.finalize
+            (fun () -> blocked)
+            (fun () ->
+              Int.incr read_finalized_count;
+              Lwt.return_unit))
+    in
+    Cohttp_lwt.Body.of_stream stream
+
+  let call ?ctx:_ ?headers:_ ?body:_ ?chunked:_ _meth _uri =
+    Lwt.return (response (), body ())
+
+  let head ?ctx:_ ?headers:_ _uri = Lwt.return (response ())
+  let get ?ctx ?headers uri = call ?ctx ?headers `GET uri
+
+  let delete ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `DELETE uri
+
+  let post ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `POST uri
+
+  let put ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `PUT uri
+
+  let patch ?ctx ?body ?chunked ?headers uri =
+    call ?ctx ?body ?chunked ?headers `PATCH uri
+
+  let set_cache _ = ()
+
+  let post_form ?ctx:_ ?headers:_ ~params:_ _uri =
+    Lwt.return (response (), body ())
+
+  let callv ?ctx:_ _uri _requests = Lwt.return (Lwt_stream.of_list [])
+end
+
+module BlockingResponseAws = Awskit_lwt.Make (Blocking_response_client)
+
 module Early_response_client = struct
   type ctx = unit
 
@@ -602,6 +757,46 @@ let test_stream_request_body_timeout_returns_timeout_error () =
       Alcotest.failf "expected timeout error, got: %a" Awskit.Error.pp error
   | Ok () -> Alcotest.fail "expected request body timeout"
 
+let test_transport_timeout_cancels_blocked_call () =
+  Blocking_transport_client.call_started := false;
+  Blocking_transport_client.call_finalized := false;
+  let timeout_policy = Awskit.Timeout.create_exn ~connect:tiny_span () in
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let conn =
+    BlockingTransportAws.create ~region:"us-east-1" ~credentials
+      ~clock:(fun () -> Ptime.epoch)
+      ~retry_policy:Awskit.Retry.disabled ~timeout_policy
+      ~sleep:(fun _ -> Lwt.return_unit)
+      ()
+    |> conn_or_fail
+  in
+  let result, call_started, call_finalized =
+    Lwt_main.run
+      (Lwt.bind
+         (BlockingTransportAws.Runtime.Transport.with_response conn
+            request_body_request
+            ~body:BlockingTransportAws.Runtime.Request_body.empty
+            ~consume:(fun _ body ->
+              BlockingTransportAws.Runtime.Response_body.discard body))
+         (fun result ->
+           Lwt.bind
+             (wait_until (fun () -> !Blocking_transport_client.call_finalized))
+             (fun () ->
+               Lwt.return
+                 ( result,
+                   !Blocking_transport_client.call_started,
+                   !Blocking_transport_client.call_finalized ))))
+  in
+  (match result with
+  | Error error when is_timeout_error error -> ()
+  | Error error ->
+      Alcotest.failf "expected timeout error, got: %a" Awskit.Error.pp error
+  | Ok () -> Alcotest.fail "expected transport timeout");
+  Alcotest.(check bool) "call started" true call_started;
+  Alcotest.(check bool) "blocked call finalized" true call_finalized
+
 let test_transport_timeout_cancels_stream_request_body () =
   Request_body_client.request_body := None;
   let timeout_policy = Awskit.Timeout.create_exn ~attempt:tiny_span () in
@@ -709,6 +904,41 @@ let test_callback_exception_is_not_transport_error () =
       Alcotest.failf "callback exception became SDK error: %a" Awskit.Error.pp
         error
   | `Returned (Ok _) -> Alcotest.fail "expected callback exception"
+
+let test_request_body_exception_wins_over_transport_exception () =
+  let request_body_exn = Failure "request body callback exploded" in
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let conn =
+    FailingAfterRequestBodyAws.create ~region:"us-east-1" ~credentials
+      ~clock:(fun () -> Ptime.epoch)
+      ~retry_policy:Awskit.Retry.disabled ()
+    |> conn_or_fail
+  in
+  let body =
+    FailingAfterRequestBodyAws.Runtime.Request_body.of_stream
+      (stream_descriptor 4L) ~write:(fun _writer ->
+        Awskit.Body.Request.raise_escaped_exn request_body_exn)
+  in
+  match
+    Lwt_main.run
+      (Lwt.catch
+         (fun () ->
+           Lwt.map
+             (fun result -> `Returned result)
+             (FailingAfterRequestBodyAws.Runtime.Transport.with_response conn
+                request_body_request ~body ~consume:(fun _response body ->
+                  FailingAfterRequestBodyAws.Runtime.Response_body.discard body)))
+         (fun exn -> Lwt.return (`Raised exn)))
+  with
+  | `Raised exn when Stdlib.( == ) exn request_body_exn -> ()
+  | `Raised exn ->
+      Alcotest.failf "unexpected raised exception: %s" (Exn.to_string exn)
+  | `Returned (Error error) ->
+      Alcotest.failf "request body exception became SDK error: %a"
+        Awskit.Error.pp error
+  | `Returned (Ok _) -> Alcotest.fail "expected request body exception"
 
 let expect_request_body_error label result =
   match result with
@@ -944,6 +1174,126 @@ let expect_body_limit label expected = function
       Alcotest.failf "%s: unexpected error: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected body limit error" label
 
+let test_response_read_timeout_interrupts_drain_cleanup () =
+  Blocking_response_client.read_started_count := 0;
+  Blocking_response_client.read_finalized_count := 0;
+  let timeout_policy = Awskit.Timeout.create_exn ~response_body:tiny_span () in
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let conn =
+    BlockingResponseAws.create ~region:"us-east-1" ~credentials
+      ~clock:(fun () -> Ptime.epoch)
+      ~retry_policy:Awskit.Retry.disabled ~timeout_policy
+      ~sleep:(fun _ -> Lwt.return_unit)
+      ()
+    |> conn_or_fail
+  in
+  let result, started_count =
+    Lwt_main.run
+      (Lwt.map
+         (fun result -> (result, !Blocking_response_client.read_started_count))
+         (BlockingResponseAws.Runtime.Transport.with_response conn
+            request_body_request
+            ~body:BlockingResponseAws.Runtime.Request_body.empty
+            ~consume:(fun _ body ->
+              BlockingResponseAws.Runtime.Response_body.with_reader body
+                ~consume:(fun reader ->
+                  let bytes = Bytes.create 1 in
+                  BlockingResponseAws.Runtime.Response_body.read reader bytes
+                    ~off:0 ~len:1))))
+  in
+  (match result with
+  | Error error when is_timeout_error error -> ()
+  | Error error ->
+      Alcotest.failf "expected timeout error, got: %a" Awskit.Error.pp error
+  | Ok _ -> Alcotest.fail "expected response body timeout");
+  Alcotest.(check int) "single blocked read started" 1 started_count
+
+let test_response_read_cancellation_skips_drain_cleanup () =
+  Blocking_response_client.read_started_count := 0;
+  Blocking_response_client.read_finalized_count := 0;
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let conn =
+    BlockingResponseAws.create ~region:"us-east-1" ~credentials
+      ~clock:(fun () -> Ptime.epoch)
+      ~retry_policy:Awskit.Retry.disabled ()
+    |> conn_or_fail
+  in
+  let escaped_reader = ref None in
+  let observed =
+    Lwt_main.run
+      (Lwt.catch
+         (fun () ->
+           Lwt_unix.with_timeout 0.5 (fun () ->
+               let consume body =
+                 BlockingResponseAws.Runtime.Response_body.with_reader body
+                   ~consume:(fun reader ->
+                     escaped_reader := Some reader;
+                     let bytes = Bytes.create 1 in
+                     let read =
+                       BlockingResponseAws.Runtime.Response_body.read reader
+                         bytes ~off:0 ~len:1
+                     in
+                     Lwt.bind
+                       (wait_until (fun () ->
+                            !Blocking_response_client.read_started_count = 1))
+                       (fun started ->
+                         if not started then
+                           Alcotest.fail
+                             "blocked response body read did not start";
+                         Lwt.cancel read;
+                         read))
+               in
+               BlockingResponseAws.Runtime.Transport.with_response conn
+                 request_body_request
+                 ~body:BlockingResponseAws.Runtime.Request_body.empty
+                 ~consume:(fun _ body -> consume body)
+               |> Lwt.map (fun result -> `Returned result)))
+         (function
+           | Lwt_unix.Timeout -> Lwt.return `Timed_out
+           | exn -> Lwt.return (`Raised exn)))
+  in
+  (match observed with
+  | `Raised Lwt.Canceled -> ()
+  | `Raised exn ->
+      Alcotest.failf "unexpected raised exception: %s" (Exn.to_string exn)
+  | `Timed_out ->
+      Alcotest.fail "response body cancellation waited for drain cleanup"
+  | `Returned (Error error) ->
+      Alcotest.failf "response body cancellation became SDK error: %a"
+        Awskit.Error.pp error
+  | `Returned (Ok _) -> Alcotest.fail "expected response body cancellation");
+  Alcotest.(check int)
+    "single blocked read started" 1
+    !Blocking_response_client.read_started_count;
+  if !Blocking_response_client.read_finalized_count = 0 then
+    let reader =
+      match !escaped_reader with
+      | Some reader -> reader
+      | None -> Alcotest.fail "expected escaped response body reader"
+    in
+    let bytes = Bytes.create 1 in
+    match
+      Lwt_main.run
+        (BlockingResponseAws.Runtime.Response_body.read reader bytes ~off:0
+           ~len:1)
+    with
+    | Error error when is_body_error error ->
+        Alcotest.(check int)
+          "closed reader did not start drain read" 1
+          !Blocking_response_client.read_started_count
+    | Error error ->
+        Alcotest.failf "unexpected closed reader error: %a" Awskit.Error.pp
+          error
+    | Ok _ -> Alcotest.fail "canceled response body reader stayed active"
+  else
+    Alcotest.(check int)
+      "blocked read finalized" 1
+      !Blocking_response_client.read_finalized_count
+
 let test_discard_response_body_enforces_limit () =
   with_limited_response ~max_response_drain_bytes:3 "abcdef"
     ~f:LimitedAws.Runtime.Response_body.discard
@@ -1049,12 +1399,17 @@ let suite =
           test_stream_request_body_cancellation_propagates;
         Alcotest.test_case "stream request body timeout" `Quick
           test_stream_request_body_timeout_returns_timeout_error;
+        Alcotest.test_case "transport timeout cancels blocked call" `Quick
+          test_transport_timeout_cancels_blocked_call;
         Alcotest.test_case "transport timeout cancels stream request body"
           `Quick test_transport_timeout_cancels_stream_request_body;
         Alcotest.test_case "transport exception cancels stream request body"
           `Quick test_transport_exception_cancels_stream_request_body;
         Alcotest.test_case "callback exception is not transport error" `Quick
           test_callback_exception_is_not_transport_error;
+        Alcotest.test_case
+          "request body exception is not masked by transport error" `Quick
+          test_request_body_exception_wins_over_transport_exception;
         Alcotest.test_case "stream request body early response preserves body"
           `Quick test_stream_request_body_early_response_preserves_body;
         Alcotest.test_case "stream request body backpressure limits read ahead"
@@ -1063,6 +1418,10 @@ let suite =
           test_stream_request_body_rejects_short_body;
         Alcotest.test_case "stream request body rejects long body" `Quick
           test_stream_request_body_rejects_long_body;
+        Alcotest.test_case "response read timeout interrupts drain cleanup"
+          `Quick test_response_read_timeout_interrupts_drain_cleanup;
+        Alcotest.test_case "response read cancellation skips drain cleanup"
+          `Quick test_response_read_cancellation_skips_drain_cleanup;
         Alcotest.test_case "discard body limit" `Quick
           test_discard_response_body_enforces_limit;
         Alcotest.test_case "scoped drain body limit" `Quick

@@ -1110,8 +1110,20 @@ module Make (R : RUNTIME) = struct
       | Done of ('a, Awskit.Error.t) result
       | Retry of Awskit.Error.t
 
-    let with_response conn ~method_ ~request ~query ~headers ~payload_hash body
-        ~f =
+    let retryable_service_error error =
+      let open Awskit.Error in
+      match kind error with
+      | Service _ -> (
+          match retry_class error with
+          | Retryable | Throttled -> true
+          | Auth | Conflict | Not_found | Fatal | Unknown -> false)
+      | Validation _ | Credentials _ | Signing _ | Endpoint _ | Transport _
+      | Timeout _ | Cancelled _ | Body _ | Decode _ | Retry_exhausted _
+      | Not_supported _ | Multiple _ ->
+          false
+
+    let with_response_action conn ~method_ ~request ~query ~headers
+        ~payload_hash body ~success_action =
       let replayable = (R.Request_body.descriptor body).replayable in
       let policy = R.Retry.policy conn in
       let initial_budget_state = Awskit.Retry.initial_budget_state policy in
@@ -1126,8 +1138,7 @@ module Make (R : RUNTIME) = struct
               R.Transport.with_response conn request ~body
                 ~consume:(fun response response_body ->
                   if Awskit.Response.is_success response then
-                    let* result = f response response_body in
-                    return_ok (Done result)
+                    success_action response response_body
                   else
                     let* body =
                       read_response_body response_body ~max_size:1_048_576L
@@ -1148,6 +1159,23 @@ module Make (R : RUNTIME) = struct
                   ~replayable error attempt)
       in
       attempt initial_budget_state 1
+
+    let with_response conn ~method_ ~request ~query ~headers ~payload_hash body
+        ~f =
+      with_response_action conn ~method_ ~request ~query ~headers ~payload_hash
+        body ~success_action:(fun response response_body ->
+          let* result = f response response_body in
+          return_ok (Done result))
+
+    let with_retryable_embedded_response conn ~method_ ~request ~query ~headers
+        ~payload_hash body ~f =
+      with_response_action conn ~method_ ~request ~query ~headers ~payload_hash
+        body ~success_action:(fun response response_body ->
+          let* result = f response response_body in
+          match result with
+          | Error error when retryable_service_error error ->
+              return_ok (Retry error)
+          | Ok _ | Error _ -> return_ok (Done result))
 
     let with_empty_response conn ~method_ ~request ~query ~headers ~f =
       with_response conn ~method_ ~request ~query ~headers

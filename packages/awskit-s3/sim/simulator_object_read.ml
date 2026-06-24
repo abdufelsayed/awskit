@@ -158,20 +158,4 @@ let get_as_string conn ~bucket ~key ~max_bytes ?options () =
   get conn ~bucket ~key ?options ~consume:(consume_string ~max_bytes) ()
 
 let get_as_bytes conn ~bucket ~key ~max_bytes ?options () =
-  Result.map
-    (fun result ->
-      {
-        Object.Get.value = Bytes.of_string result.Object.Get.value;
-        etag = result.etag;
-        content_type = result.content_type;
-        content_length = result.content_length;
-        content_range = result.content_range;
-        last_modified = result.last_modified;
-        metadata = result.metadata;
-        storage_class = result.storage_class;
-        version_id = result.version_id;
-        checksum = result.checksum;
-        server_side_encryption = result.server_side_encryption;
-        response = result.response;
-      })
-    (get_as_string conn ~bucket ~key ~max_bytes ?options ())
+  get conn ~bucket ~key ?options ~consume:(consume_bytes ~max_bytes) ()

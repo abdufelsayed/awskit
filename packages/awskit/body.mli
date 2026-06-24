@@ -44,6 +44,17 @@ module Request : sig
 
   val validate_descriptor : descriptor -> (unit, Error.t) result
   (** Validate descriptor invariants such as non-negative lengths. *)
+
+  val raise_escaped_exn : exn -> 'a
+  (** Raise [exn] through the runtime request-body writer boundary.
+
+      Runtime adapters unwrap this marker and propagate the original exception.
+      Request-body writers must still return [Error error] for ordinary body
+      failures that should surface as {!Awskit.Error.Body}. *)
+
+  val escaped_exn : exn -> exn option
+  (** Return the original exception when an exception was raised with
+      {!raise_escaped_exn}. *)
 end
 
 module Response : sig

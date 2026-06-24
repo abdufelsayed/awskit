@@ -75,3 +75,36 @@ let consume_string ~max_bytes reader =
         end
   in
   loop 0L
+
+let consume_bytes ~max_bytes reader =
+  let chunk_size = 8192 in
+  let allocation_limit = Int64.of_int Sys.max_string_length in
+  let rec loop total chunks =
+    let chunk = Bytes.create chunk_size in
+    match Runtime.Response_body.read reader chunk ~off:0 ~len:chunk_size with
+    | Error error -> Error error
+    | Ok 0 ->
+        let bytes = Bytes.create (Int64.to_int total) in
+        let rec copy offset = function
+          | [] -> bytes
+          | chunk :: chunks ->
+              let len = Bytes.length chunk in
+              Bytes.blit chunk 0 bytes offset len;
+              copy (offset + len) chunks
+        in
+        Ok (copy 0 (List.rev chunks))
+    | Ok n ->
+        let total = Int64.add total (Int64.of_int n) in
+        if Int64.compare total max_bytes > 0 then
+          Error
+            (Awskit.Error.Producer.body ~limit:max_bytes
+               "response body exceeded max_bytes")
+        else if Int64.compare total allocation_limit > 0 then
+          Error
+            (Awskit.Error.Producer.body ~limit:allocation_limit
+               "response body exceeded maximum in-memory bytes allocation")
+        else
+          let chunk = if n = chunk_size then chunk else Bytes.sub chunk 0 n in
+          loop total (chunk :: chunks)
+  in
+  loop 0L []

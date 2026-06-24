@@ -233,20 +233,38 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       (Fmt.str "%s timed out after %.3fs" phase_name
          (Ptime.Span.to_float_s span))
 
-  let with_timeout_result ~sleep timeout_policy phase promise =
+  let with_timeout_value ?cancel ?(on_timeout = fun () -> ()) ~sleep
+      timeout_policy phase promise =
+    let cancel_promise = Option.value cancel ~default:promise in
     match Awskit.Timeout.span timeout_policy phase with
-    | None -> promise
+    | None -> Lwt.map (fun value -> Ok value) promise
     | Some span ->
         let timeout =
           Lwt.bind (sleep span) (fun () ->
               Lwt.return (`Timeout (timeout_error phase span)))
         in
-        let result = Lwt.map (fun result -> `Result result) promise in
+        let result = Lwt.map (fun value -> `Result value) promise in
         Lwt.bind
           (Lwt.pick [ result; timeout ])
           (function
-            | `Result result -> Lwt.return result
-            | `Timeout error -> Lwt.return_error error)
+            | `Result value ->
+                Lwt.cancel timeout;
+                Lwt.return_ok value
+            | `Timeout error ->
+                on_timeout ();
+                Lwt.cancel cancel_promise;
+                Lwt.return_error error)
+
+  let with_timeout_result ?cancel ?on_timeout ~sleep timeout_policy phase
+      promise =
+    match Awskit.Timeout.span timeout_policy phase with
+    | None -> promise
+    | Some _ ->
+        Lwt.bind
+          (with_timeout_value ?cancel ?on_timeout ~sleep timeout_policy phase
+             promise) (function
+          | Ok result -> Lwt.return result
+          | Error error -> Lwt.return_error error)
 
   let writer_for descriptor ~push ~close ~cancelled =
     {
@@ -382,13 +400,18 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
               | Lwt.Canceled ->
                   wake_finished_exn_once Lwt.Canceled;
                   Lwt.return_unit
-              | exn ->
-                  let error = body_error (Exn.to_string exn) in
-                  Log.warn (fun m ->
-                      m "request body stream raised: %s"
-                        (Awskit.Error.to_string_hum error));
-                  wake_finished_result_once (Error error);
-                  Lwt.return_unit)
+              | exn -> (
+                  match Awskit.Body.Request.escaped_exn exn with
+                  | Some _ ->
+                      wake_finished_exn_once exn;
+                      Lwt.return_unit
+                  | None ->
+                      let error = body_error (Exn.to_string exn) in
+                      Log.warn (fun m ->
+                          m "request body stream raised: %s"
+                            (Awskit.Error.to_string_hum error));
+                      wake_finished_result_once (Error error);
+                      Lwt.return_unit))
         in
         Lwt.async (fun () -> producer);
         {
@@ -427,8 +450,17 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       match Lwt.state bridge.finished with
       | Lwt.Return result -> Some result
       | Lwt.Fail Lwt.Canceled -> raise Lwt.Canceled
-      | Lwt.Fail exn -> Some (Error (body_error (Exn.to_string exn)))
+      | Lwt.Fail exn -> (
+          match Awskit.Body.Request.escaped_exn exn with
+          | Some _ -> raise exn
+          | None -> Some (Error (body_error (Exn.to_string exn))))
       | Lwt.Sleep -> None
+    in
+    let ready_request_body_exception () =
+      match ready_request_body_result () with
+      | Some _ | None -> None
+      | exception Lwt.Canceled -> Some Lwt.Canceled
+      | exception exn -> Awskit.Body.Request.escaped_exn exn
     in
     let cancel_unfinished_request_body () =
       match Lwt.state bridge.finished with
@@ -449,11 +481,9 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       Lwt.catch
         (fun () ->
           Lwt.bind
-            (with_transport_timeout `Connect
-               (Lwt.map
-                  (fun response -> Ok response)
-                  (Client.call ?ctx:conn.ctx ~headers ~body:bridge.body
-                     ~chunked:false meth uri)))
+            (with_timeout_value ~sleep:conn.sleep conn.timeout_policy `Connect
+               (Client.call ?ctx:conn.ctx ~headers ~body:bridge.body
+                  ~chunked:false meth uri))
             (function
               | Error error -> Lwt.return_error error
               | Ok (response, response_body) -> (
@@ -480,11 +510,18 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         (function
           | Lwt.Canceled -> Lwt.fail Lwt.Canceled
           | Callback_raised exn -> Lwt.fail exn
-          | exn ->
-              let message = Exn.to_string exn in
-              Log.warn (fun m -> m "HTTP call failed: %s" message);
-              Lwt.return_error
-                (Awskit.Error.Producer.transport ~retryable:true message))
+          | exn -> (
+              match Awskit.Body.Request.escaped_exn exn with
+              | Some escaped -> Lwt.fail escaped
+              | None -> (
+                  match ready_request_body_exception () with
+                  | Some escaped -> Lwt.fail escaped
+                  | None ->
+                      let message = Exn.to_string exn in
+                      Log.warn (fun m -> m "HTTP call failed: %s" message);
+                      Lwt.return_error
+                        (Awskit.Error.Producer.transport ~retryable:true message)
+                  )))
     in
     Lwt.finalize
       (fun () ->
@@ -570,15 +607,25 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       else if invalid_read_bounds bytes ~off ~len then
         Lwt.return_error (Awskit.Error.Producer.body "invalid read bounds")
       else
-        with_timeout_result ~sleep:reader.sleep reader.timeout_policy
-          `Response_body
-          (Lwt.catch
-             (fun () -> read_from_current reader bytes ~off ~len)
-             (function
-               | Lwt.Canceled -> Lwt.fail Lwt.Canceled
-               | exn ->
-                   Lwt.return_error
-                     (Awskit.Error.Producer.body (Exn.to_string exn))))
+        let read = read_from_current reader bytes ~off ~len in
+        let result =
+          with_timeout_result ~sleep:reader.sleep reader.timeout_policy
+            `Response_body ~cancel:read
+            ~on_timeout:(fun () -> close_response_body_reader reader)
+            (Lwt.catch
+               (fun () -> read)
+               (function
+                 | Lwt.Canceled ->
+                     close_response_body_reader reader;
+                     Lwt.fail Lwt.Canceled
+                 | exn ->
+                     Lwt.return_error
+                       (Awskit.Error.Producer.body (Exn.to_string exn))))
+        in
+        Lwt.on_cancel result (fun () ->
+            close_response_body_reader reader;
+            Lwt.cancel read);
+        result
 
     let next_response_body ?(chunk_size = 8192) reader =
       if chunk_size <= 0 then
@@ -618,16 +665,21 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
            ~max_response_drain_bytes:body.max_response_drain_bytes)
 
     let drain_response_body_after_exception reader body exn =
-      let drain =
-        Lwt.catch
-          (fun () ->
-            Lwt.bind (drain_response_body_reader reader body) (fun _ ->
-                Lwt.return_unit))
-          (fun _ -> Lwt.return_unit)
-      in
-      Lwt.bind (Lwt.protected drain) (fun () ->
+      match exn with
+      | Lwt.Canceled ->
           close_response_body_reader reader;
-          Lwt.fail exn)
+          Lwt.fail Lwt.Canceled
+      | exn ->
+          let drain =
+            Lwt.catch
+              (fun () ->
+                Lwt.bind (drain_response_body_reader reader body) (fun _ ->
+                    Lwt.return_unit))
+              (fun _ -> Lwt.return_unit)
+          in
+          Lwt.bind (Lwt.protected drain) (fun () ->
+              close_response_body_reader reader;
+              Lwt.fail exn)
 
     let with_response_body body ~consume =
       let reader =

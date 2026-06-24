@@ -24,6 +24,16 @@ let body_error_or_raise_callback action path = function
   | Callback_raised exn -> Lwt.fail exn
   | exn -> body_error_or_fail action path exn
 
+let body_error_or_escape_callback action path = function
+  | Callback_raised exn -> Awskit.Body.Request.raise_escaped_exn exn
+  | exn -> body_error_or_fail action path exn
+
+let raise_escaped_callback_or_fail = function
+  | exn -> (
+      match Awskit.Body.Request.escaped_exn exn with
+      | Some escaped -> Lwt.fail escaped
+      | None -> Lwt.fail exn)
+
 let raise_callback_or_fail = function
   | Callback_raised exn -> Lwt.fail exn
   | exn -> Lwt.fail exn
@@ -94,6 +104,18 @@ let cleanup_temp_download path error =
           |> Awskit.Error.Producer.with_context
                "download failed and temporary file cleanup also failed"))
 
+let cleanup_temp_download_with_failures path errors =
+  Lwt.bind (remove_temp_download path) (fun cleanup_result ->
+      let errors =
+        match cleanup_result with
+        | Ok () -> errors
+        | Error cleanup_error -> errors @ [ cleanup_error ]
+      in
+      Lwt.return_error
+        (Awskit.Error.Producer.multiple errors
+        |> Awskit.Error.Producer.with_context
+             "download failed and temporary file cleanup also failed"))
+
 let write_all fd bytes offset length =
   let rec loop offset remaining =
     if remaining = 0 then Lwt.return_ok ()
@@ -135,7 +157,9 @@ let with_temp_download path f =
     | Ok (temp_path, fd) ->
         let close_and_cleanup error =
           Lwt.bind (close_temp_download temp_path fd) (function
-            | Error close_error -> cleanup_temp_download temp_path close_error
+            | Error close_error ->
+                cleanup_temp_download_with_failures temp_path
+                  [ error; close_error ]
             | Ok () -> cleanup_temp_download temp_path error)
         in
         let close_and_publish value =
@@ -230,7 +254,7 @@ struct
       let write writer =
         Lwt.catch
           (fun () -> copy_channel_to_writer ?on_progress channel writer)
-          (body_error_or_raise_callback "read upload channel" "<channel>")
+          (body_error_or_escape_callback "read upload channel" "<channel>")
       in
       of_stream ~content_length ~replayable:false ~write
 
@@ -243,7 +267,7 @@ struct
                 (fun () ->
                   Lwt_io.with_file ~mode:Lwt_io.Input path (fun channel ->
                       copy_channel_to_writer ?on_progress channel writer))
-                (body_error_or_raise_callback "read upload" path)
+                (body_error_or_escape_callback "read upload" path)
             in
             Lwt.return (of_stream ~content_length ~replayable:true ~write))
   end
@@ -441,21 +465,92 @@ struct
     in
     loop concurrency [] specs
 
-  let first_error_or_parts results =
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
-      | Error error :: _ -> Error error
-      | Ok part :: rest -> loop (part :: acc) rest
-    in
-    loop [] results
+  type 'a batch_outcome =
+    | Batch_result of ('a, Awskit_s3.Error.t) result
+    | Batch_raised of exn
 
-  let first_error_or_unit results =
-    let rec loop = function
-      | [] -> Ok ()
-      | Error error :: _ -> Error error
-      | Ok () :: rest -> loop rest
+  let joined_batch f batch =
+    let jobs =
+      batch
+      |> List.map (fun item ->
+          let promise = try f item with exn -> Lwt.fail exn in
+          let outcome =
+            Lwt.catch
+              (fun () -> Lwt.map (fun result -> Batch_result result) promise)
+              (function
+                | Lwt.Canceled -> Lwt.fail Lwt.Canceled
+                | exn -> Lwt.return (Batch_raised exn))
+          in
+          (promise, outcome))
     in
-    loop results
+    let outcomes = List.map snd jobs in
+    let cancel_jobs () =
+      List.iter
+        (fun (promise, outcome) ->
+          Lwt.cancel promise;
+          Lwt.cancel outcome)
+        jobs
+    in
+    let cancellation =
+      let never_resolved () =
+        let promise, _wakener = Lwt.task () in
+        promise
+      in
+      outcomes
+      |> List.map (fun outcome ->
+          Lwt.catch
+            (fun () -> Lwt.bind outcome (fun _ -> never_resolved ()))
+            (function Lwt.Canceled -> Lwt.return_unit | exn -> Lwt.fail exn))
+      |> Lwt.pick
+    in
+    Lwt.finalize
+      (fun () ->
+        Lwt.bind
+          (Lwt.pick
+             [
+               Lwt.map (fun outcomes -> `Outcomes outcomes) (Lwt.all outcomes);
+               Lwt.map (fun () -> `Canceled) cancellation;
+             ])
+          (function
+            | `Outcomes outcomes -> Lwt.return outcomes
+            | `Canceled ->
+                cancel_jobs ();
+                Lwt.fail Lwt.Canceled))
+      (fun () ->
+        Lwt.cancel cancellation;
+        Lwt.return_unit)
+
+  let first_batch_error_or_parts outcomes =
+    match
+      List.find_map
+        (function Batch_raised exn -> Some exn | Batch_result _ -> None)
+        outcomes
+    with
+    | Some exn -> Lwt.fail exn
+    | None ->
+        let rec loop acc = function
+          | [] -> Lwt.return_ok (List.rev acc)
+          | Batch_result (Error error) :: _ -> Lwt.return_error error
+          | Batch_result (Ok part) :: rest -> loop (part :: acc) rest
+          | Batch_raised _ :: _ -> assert false
+        in
+        loop [] outcomes
+
+  let first_batch_error_or_unit outcomes =
+    match
+      List.find_map
+        (function Batch_raised exn -> Some exn | Batch_result _ -> None)
+        outcomes
+    with
+    | Some exn -> Lwt.fail exn
+    | None ->
+        let rec loop = function
+          | [] -> Lwt.return_ok ()
+          | Batch_result (Error error) :: _ -> Lwt.return_error error
+          | Batch_result (Ok ()) :: rest -> loop rest
+          | Batch_raised _ :: _ -> assert false
+        in
+        loop outcomes
 
   let upload_part_from_path conn ~upload ~options ~path
       (spec : Plan.upload_part) =
@@ -490,10 +585,10 @@ struct
                 split_batch ~concurrency:options.Awskit_s3.Transfer.concurrency
                   specs
               in
-              Lwt.bind (Lwt_list.map_p upload_one batch) (fun results ->
-                  match first_error_or_parts results with
-                  | Error _ as error -> Lwt.return error
-                  | Ok parts -> loop (List.rev_append parts acc) rest)
+              Lwt.bind (joined_batch upload_one batch) (fun outcomes ->
+                  Lwt.bind (first_batch_error_or_parts outcomes) (function
+                    | Error _ as error -> Lwt.return error
+                    | Ok parts -> loop (List.rev_append parts acc) rest))
         in
         loop [] specs)
       raise_callback_or_fail
@@ -501,7 +596,7 @@ struct
   let sort_parts parts =
     List.sort
       (fun (left : Awskit_s3.Multipart.Part.t) right ->
-        compare
+        Int.compare
           (Awskit_s3.Multipart.Part.part_number left
           |> Awskit_s3.Multipart.Part_number.to_int)
           (Awskit_s3.Multipart.Part.part_number right
@@ -514,7 +609,7 @@ struct
          ~options:options.Awskit_s3.Transfer.list_parts_options ~max_pages:1 ())
       (function
       | Error _ as error -> Lwt.return error
-      | Ok _ -> Lwt.return_ok ())
+      | Ok _parts -> Lwt.return_ok ())
 
   let complete_multipart conn ~upload ~options ~bytes_transferred parts =
     let parts = sort_parts parts in
@@ -630,8 +725,11 @@ struct
                 in
                 let* body = Body.of_path ?on_progress:upload_progress path in
                 let* result =
-                  S3.Object.put conn ~bucket ~key ~options:options.put_options
-                    ~body ()
+                  Lwt.catch
+                    (fun () ->
+                      S3.Object.put conn ~bucket ~key
+                        ~options:options.put_options ~body ())
+                    raise_escaped_callback_or_fail
                 in
                 Lwt.return_ok
                   (Awskit_s3.Transfer.Put
@@ -691,11 +789,10 @@ struct
             in
             { get_options with preconditions })
 
-  let download_range_to_fd conn ~bucket ~key ~options ~path ~fd ~write_mutex
+  let download_range_to_fd conn ~bucket ~key
+      ~(get_options : Awskit_s3.Object.Get.options) ~path ~fd ~write_mutex
       ~completed ~content_length ?on_progress (spec : Plan.download_range) =
-    let get_options =
-      { options.Awskit_s3.Transfer.get_options with range = Some spec.range }
-    in
+    let get_options = { get_options with range = Some spec.range } in
     let consume reader =
       Lwt.catch
         (fun () ->
@@ -740,12 +837,14 @@ struct
       | Error _ as error -> Lwt.return error
       | Ok { value = (); _ } -> Lwt.return_ok ())
 
-  let ranged_download_to_fd conn ~bucket ~key ~options ?on_progress ~path ~fd
+  let ranged_download_to_fd conn ~bucket ~key
+      ~(options : Awskit_s3.Transfer.download_options)
+      ~(get_options : Awskit_s3.Object.Get.options) ?on_progress ~path ~fd
       ~content_length ranges =
     let completed = ref 0L in
     let write_mutex = Lwt_mutex.create () in
     let download_one spec =
-      download_range_to_fd conn ~bucket ~key ~options ~path ~fd ~write_mutex
+      download_range_to_fd conn ~bucket ~key ~get_options ~path ~fd ~write_mutex
         ~completed ~content_length ?on_progress spec
     in
     let rec loop ranges =
@@ -755,10 +854,10 @@ struct
           let batch, rest =
             split_batch ~concurrency:options.concurrency ranges
           in
-          Lwt.bind (Lwt_list.map_p download_one batch) (fun results ->
-              match first_error_or_unit results with
-              | Error _ as error -> Lwt.return error
-              | Ok () -> loop rest)
+          Lwt.bind (joined_batch download_one batch) (fun outcomes ->
+              Lwt.bind (first_batch_error_or_unit outcomes) (function
+                | Error _ as error -> Lwt.return error
+                | Ok () -> loop rest))
     in
     loop ranges
 
@@ -799,11 +898,10 @@ struct
             (Plan.download_ranges ~content_length ~part_size:options.part_size)
         in
         let get_options = ranged_get_options_of_head info options.get_options in
-        let options = { options with get_options } in
         with_temp_download path (fun temp_path fd ->
             let* () =
-              ranged_download_to_fd conn ~bucket ~key ~options ?on_progress
-                ~path:temp_path ~fd ~content_length ranges
+              ranged_download_to_fd conn ~bucket ~key ~options ~get_options
+                ?on_progress ~path:temp_path ~fd ~content_length ranges
             in
             Lwt.return_ok
               (Awskit_s3.Transfer.Ranged

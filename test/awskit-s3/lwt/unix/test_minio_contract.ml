@@ -625,9 +625,7 @@ let test_multipart_path_transfer_resumes () =
           (fun index -> Char.chr ((index mod 10) + Char.code '0'))
       in
       write_file path body;
-      let options =
-        { Transfer.default_upload_options with part_size; concurrency = 2 }
-      in
+      let options = Transfer.upload_options_exn ~part_size ~concurrency:2 () in
       let progress = ref [] in
       Fun.protect
         ~finally:(fun () -> remove_file path)

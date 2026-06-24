@@ -374,6 +374,31 @@ let test_stream_request_body_error_propagates env =
             error
       | Ok () -> Alcotest.fail "expected stream request body error")
 
+let test_stream_request_body_escaped_exception_propagates env =
+  let callback_exn = Failure "request body callback exploded" in
+  with_eio_early_response_server env ~status:200 ~response_body:"ok"
+    ~read_request_body:false ~ignore_connection_errors:true (fun endpoint ->
+      Eio.Switch.run @@ fun sw ->
+      let conn = request_conn env sw in
+      let request = request_body_request_for_endpoint endpoint in
+      let body =
+        Awskit_eio.Runtime.Request_body.of_stream (stream_descriptor 4L)
+          ~write:(fun writer ->
+            match Awskit_eio.Runtime.Request_body.write_string writer "ab" with
+            | Error _ as error -> error
+            | Ok () -> Awskit.Body.Request.raise_escaped_exn callback_exn)
+      in
+      try
+        ignore
+          (Awskit_eio.Runtime.Transport.with_response conn request ~body
+             ~consume:(fun _ response_body ->
+               Awskit_eio.Runtime.Response_body.discard response_body)
+            : (unit, Awskit.Error.t) Result.t);
+        Alcotest.fail "expected escaped request body exception"
+      with
+      | exn when phys_equal exn callback_exn -> ()
+      | exn -> Alcotest.failf "unexpected exception: %s" (Exn.to_string exn))
+
 let test_stream_request_body_timeout_returns_timeout_error env =
   let timeout_policy = Awskit.Timeout.create_exn ~request_body:tiny_span () in
   with_eio_early_response_server env ~status:200 ~response_body:"ok"
@@ -683,6 +708,9 @@ let suite env =
           (fun () -> test_stream_request_body_emits_multiple_chunks env);
         Alcotest.test_case "stream request body error propagates" `Quick
           (fun () -> test_stream_request_body_error_propagates env);
+        Alcotest.test_case "stream request body escaped exception propagates"
+          `Quick (fun () ->
+            test_stream_request_body_escaped_exception_propagates env);
         Alcotest.test_case "stream request body timeout" `Quick (fun () ->
             test_stream_request_body_timeout_returns_timeout_error env);
         Alcotest.test_case "stream request body rejects short body" `Quick

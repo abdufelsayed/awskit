@@ -43,7 +43,7 @@ type progress = {
 (** Structured progress event. [transferred] is cumulative for the current
     helper invocation. *)
 
-type upload_options = {
+type upload_options = private {
   multipart_threshold : int64;
       (** Object size at or above which high-level upload helpers use multipart
           upload. *)
@@ -75,7 +75,7 @@ type upload_options = {
     target. [Error_if_exists] rejects an existing target before transport. *)
 type overwrite = Replace | Error_if_exists
 
-type download_options = {
+type download_options = private {
   multipart_threshold : int64;
       (** Object size at or above which high-level download helpers use ranged
           requests. *)

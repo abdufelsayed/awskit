@@ -86,6 +86,14 @@ module Make (R : Request_context.RUNTIME) = struct
              "response body exceeded max_bytes")
       else Ok ()
 
+    let check_bytes_allocation total =
+      let limit = Int64.of_int Sys.max_string_length in
+      if Int64.compare total limit > 0 then
+        Error
+          (Awskit.Error.Producer.body ~limit
+             "response body exceeded maximum in-memory bytes allocation")
+      else Ok ()
+
     let drain_to_buffer ?chunk_size ~max_bytes reader =
       if Int64.compare max_bytes 0L < 0 then
         R.IO.return (Error (invalid_max_bytes max_bytes))
@@ -104,11 +112,36 @@ module Make (R : Request_context.RUNTIME) = struct
         | Error _ as error -> R.IO.return error
         | Ok _ -> R.IO.return (Ok buffer)
 
+    let drain_to_chunks ?chunk_size ~max_bytes reader =
+      if Int64.compare max_bytes 0L < 0 then
+        R.IO.return (Error (invalid_max_bytes max_bytes))
+      else
+        fold ?chunk_size reader ~init:(0L, []) ~f:(fun total_chunks chunk ->
+            let total, chunks = total_chunks in
+            let total = Int64.add total (Int64.of_int (Bytes.length chunk)) in
+            match check_limit ~max_bytes total with
+            | Error _ as error -> R.IO.return error
+            | Ok () -> (
+                match check_bytes_allocation total with
+                | Error _ as error -> R.IO.return error
+                | Ok () -> R.IO.return (Ok (total, chunk :: chunks))))
+
+    let chunks_to_bytes total chunks =
+      let bytes = Bytes.create (Int64.to_int total) in
+      let rec copy offset = function
+        | [] -> bytes
+        | chunk :: chunks ->
+            let len = Bytes.length chunk in
+            Bytes.blit chunk 0 bytes offset len;
+            copy (offset + len) chunks
+      in
+      copy 0 (List.rev chunks)
+
     let to_bytes ?chunk_size ~max_bytes reader =
-      let* result = drain_to_buffer ?chunk_size ~max_bytes reader in
+      let* result = drain_to_chunks ?chunk_size ~max_bytes reader in
       match result with
       | Error _ as error -> R.IO.return error
-      | Ok buffer -> R.IO.return (Ok (Buffer.to_bytes buffer))
+      | Ok (total, chunks) -> R.IO.return (Ok (chunks_to_bytes total chunks))
 
     let to_string ?chunk_size ~max_bytes reader =
       let* result = drain_to_buffer ?chunk_size ~max_bytes reader in

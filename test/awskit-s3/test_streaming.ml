@@ -29,6 +29,17 @@ let test_reader_to_string_rejects_over_limit () =
   Recording_s3.Reader.to_string ~chunk_size:2 ~max_bytes:2L (reader "abc")
   |> expect_error "oversized body" is_body_error
 
+let test_reader_to_bytes_accepts_exact_limit () =
+  match
+    Recording_s3.Reader.to_bytes ~chunk_size:2 ~max_bytes:3L (reader "abc")
+  with
+  | Error error -> Alcotest.failf "read failed: %a" Error.pp error
+  | Ok body -> Alcotest.(check string) "body" "abc" (Bytes.to_string body)
+
+let test_reader_to_bytes_rejects_over_limit () =
+  Recording_s3.Reader.to_bytes ~chunk_size:2 ~max_bytes:2L (reader "abc")
+  |> expect_error "oversized body" is_body_error
+
 let test_reader_to_string_stops_after_limit_exceeded () =
   let reader = reader "abcdef" in
   Recording_s3.Reader.to_string ~chunk_size:2 ~max_bytes:3L reader
@@ -142,6 +153,10 @@ let suite =
           test_reader_to_string_accepts_exact_limit;
         Alcotest.test_case "reader rejects oversized body" `Quick
           test_reader_to_string_rejects_over_limit;
+        Alcotest.test_case "reader bytes accepts exact byte limit" `Quick
+          test_reader_to_bytes_accepts_exact_limit;
+        Alcotest.test_case "reader bytes rejects oversized body" `Quick
+          test_reader_to_bytes_rejects_over_limit;
         Alcotest.test_case "reader stops after limit exceeded" `Quick
           test_reader_to_string_stops_after_limit_exceeded;
         Alcotest.test_case "reader preserves binary bytes" `Quick

@@ -208,11 +208,54 @@ module Make (C : Request_context.S) = struct
 
   let read_string ~max_bytes reader = read_body reader ~max_size:max_bytes
 
+  let read_bytes_limit_error ~max_bytes =
+    Awskit.Error.Producer.body ~limit:max_bytes
+      "response body exceeded max_bytes"
+    |> Awskit.Error.Producer.with_context "reading bounded response body"
+
+  let read_bytes_allocation_error () =
+    let limit = Int64.of_int Sys.max_string_length in
+    Awskit.Error.Producer.body ~limit
+      "response body exceeded maximum in-memory bytes allocation"
+    |> Awskit.Error.Producer.with_context "reading bounded response body"
+
+  let read_bytes_chunks ~max_bytes reader =
+    let chunk_size = 8192 in
+    let allocation_limit = Int64.of_int Sys.max_string_length in
+    let rec loop total chunks =
+      let chunk = Bytes.create chunk_size in
+      let* read = R.Response_body.read reader chunk ~off:0 ~len:chunk_size in
+      match read with
+      | Error _ as error -> return error
+      | Ok 0 -> return_ok (total, chunks)
+      | Ok n ->
+          let total = Int64.add total (Int64.of_int n) in
+          if Int64.compare total max_bytes > 0 then
+            return_error (read_bytes_limit_error ~max_bytes)
+          else if Int64.compare total allocation_limit > 0 then
+            return_error (read_bytes_allocation_error ())
+          else
+            let chunk = if n = chunk_size then chunk else Bytes.sub chunk 0 n in
+            loop total (chunk :: chunks)
+    in
+    loop 0L []
+
+  let chunks_to_bytes total chunks =
+    let bytes = Bytes.create (Int64.to_int total) in
+    let rec copy offset = function
+      | [] -> bytes
+      | chunk :: chunks ->
+          let len = Bytes.length chunk in
+          Bytes.blit chunk 0 bytes offset len;
+          copy (offset + len) chunks
+    in
+    copy 0 (List.rev chunks)
+
   let read_bytes ~max_bytes reader =
-    let* result = read_body reader ~max_size:max_bytes in
+    let* result = read_bytes_chunks ~max_bytes reader in
     match result with
     | Error _ as error -> return error
-    | Ok body -> return_ok (Bytes.of_string body)
+    | Ok (total, chunks) -> return_ok (chunks_to_bytes total chunks)
 
   let get_string conn ~bucket ~key ?options ~max_bytes () =
     let return_error =
@@ -506,8 +549,11 @@ module Make (C : Request_context.S) = struct
                 | Error error -> return_error error
                 | Ok request ->
                     let* result =
-                      with_empty_response conn ~method_:`PUT ~request ~query:[]
-                        ~headers ~f:(fun response body ->
+                      with_retryable_embedded_response conn ~method_:`PUT
+                        ~request ~query:[] ~headers
+                        ~payload_hash:
+                          (Awskit.Body.Payload_hash.sha256_of_string "")
+                        R.Request_body.empty ~f:(fun response body ->
                           let* body =
                             read_response_body body ~max_size:1_048_576L
                           in

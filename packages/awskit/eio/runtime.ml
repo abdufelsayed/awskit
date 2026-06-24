@@ -296,7 +296,8 @@ module Request_body = struct
     write_request_body_string writer (Bytes.to_string bytes)
 end
 
-let body_to_cohttp ?(on_error = fun _ -> ()) ~(conn : conn) ~sw = function
+let body_to_cohttp ?(on_error = fun _ -> ()) ?(on_escaped_exn = fun _ -> ())
+    ~(conn : conn) ~sw = function
   | Source (_, body) ->
       { body = Some body; finished = Eio.Promise.create_resolved (Ok ()) }
   | Stream (descriptor, write) ->
@@ -326,14 +327,22 @@ let body_to_cohttp ?(on_error = fun _ -> ()) ~(conn : conn) ~sw = function
               finish (Error error);
               Eio.Stream.add stream (Failed (Awskit.Error.to_string_hum error))
           | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-          | exception exn ->
-              let error = body_error (Exn.to_string exn) in
-              Log.warn (fun m ->
-                  m "request body stream raised: %s"
-                    (Awskit.Error.to_string_hum error));
-              on_error error;
-              finish (Error error);
-              Eio.Stream.add stream (Failed (Awskit.Error.to_string_hum error)));
+          | exception exn -> (
+              match Awskit.Body.Request.escaped_exn exn with
+              | Some escaped ->
+                  on_escaped_exn escaped;
+                  finish
+                    (Error (body_error "request body writer escaped exception"));
+                  Eio.Stream.add stream End
+              | None ->
+                  let error = body_error (Exn.to_string exn) in
+                  Log.warn (fun m ->
+                      m "request body stream raised: %s"
+                        (Awskit.Error.to_string_hum error));
+                  on_error error;
+                  finish (Error error);
+                  Eio.Stream.add stream
+                    (Failed (Awskit.Error.to_string_hum error))));
       { body = Some (stream_source stream); finished = request_body_finished }
 
 let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
@@ -357,6 +366,7 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
       let successful_status status = status >= 200 && status < 300 in
       let early_result = ref None in
       let request_body_stream_error = ref None in
+      let request_body_escaped_exn = ref None in
       let exception Early_response in
       let exception Callback_raised of exn in
       let call_f response body =
@@ -368,6 +378,7 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
         let bridge =
           body_to_cohttp ~conn ~sw:call_sw
             ~on_error:(fun error -> request_body_stream_error := Some error)
+            ~on_escaped_exn:(fun exn -> request_body_escaped_exn := Some exn)
             request_body
         in
         try
@@ -400,23 +411,31 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
                                  (make_response_body body));
                           raise Early_response
                   in
-                  match request_body_result with
-                  | Error _ as error -> error
-                  | Ok () ->
-                      Log.debug (fun m -> m "HTTP %d" status);
-                      call_f (to_aws_response response)
-                        (make_response_body body)))
+                  match !request_body_escaped_exn with
+                  | Some escaped -> raise escaped
+                  | None -> (
+                      match request_body_result with
+                      | Error _ as error -> error
+                      | Ok () ->
+                          Log.debug (fun m -> m "HTTP %d" status);
+                          call_f (to_aws_response response)
+                            (make_response_body body))))
         with
         | Early_response as exn -> raise exn
         | Callback_raised exn -> raise exn
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> (
-            match Eio.Promise.peek bridge.finished with
-            | Some (Error error) -> Error error
-            | _ ->
-                let message = Exn.to_string exn in
-                Log.warn (fun m -> m "HTTP call failed: %s" message);
-                Error (Awskit.Error.Producer.transport ~retryable:true message))
+            match !request_body_escaped_exn with
+            | Some escaped -> raise escaped
+            | None -> (
+                match Eio.Promise.peek bridge.finished with
+                | Some (Error error) -> Error error
+                | _ ->
+                    let message = Exn.to_string exn in
+                    Log.warn (fun m -> m "HTTP call failed: %s" message);
+                    Error
+                      (Awskit.Error.Producer.transport ~retryable:true message))
+            )
       in
       with_timeout_result conn.time_clock conn.timeout_policy `Operation
         (fun () ->
@@ -434,9 +453,12 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
               | Callback_raised exn -> raise exn
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> (
-                  match !request_body_stream_error with
-                  | Some error -> Error error
-                  | None -> raise exn)))
+                  match !request_body_escaped_exn with
+                  | Some escaped -> raise escaped
+                  | None -> (
+                      match !request_body_stream_error with
+                      | Some error -> Error error
+                      | None -> raise exn))))
 
 type connection = conn
 type 'a t = 'a
