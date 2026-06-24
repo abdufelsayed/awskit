@@ -86,9 +86,20 @@ module Checksum : sig
     val to_string : t -> string
   end
 
-  type value = { algorithm : Algorithm.t; value : string }
+  type value = private { algorithm : Algorithm.t; value : string }
   (** Explicit checksum value supplied by the caller or returned for a part. The
-      value is the base64/string payload expected by the selected algorithm. *)
+      value is the base64/string payload expected by the selected algorithm.
+      Values remain inspectable, but use {!val:value} to construct outbound
+      request checksums so unknown response-only algorithms cannot be sent. *)
+
+  val value :
+    algorithm:Algorithm.t -> value:string -> (value, Awskit.Error.t) result
+  (** Validate and wrap an explicit outbound checksum value. Unknown algorithms
+      are rejected because they cannot be rendered safely in request headers. *)
+
+  val value_exn : algorithm:Algorithm.t -> value:string -> value
+  (** Like {!val:value}, but raises [Awskit.Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
 
   type response = { values : value list; checksum_type : Type.t option }
   (** Modeled checksum headers returned by object and multipart operations. *)

@@ -7,9 +7,14 @@ module Clock : sig
   val advance_ms : t -> int -> unit
 end
 
-type config = { max_list_keys : int }
+type config = private { max_list_keys : int }
 
 val default_config : config
+
+val create_config :
+  ?max_list_keys:int -> unit -> (config, Awskit.Error.t) result
+
+val create_config_exn : ?max_list_keys:int -> unit -> config
 
 type stored_object = {
   mutable body : string;

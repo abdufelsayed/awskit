@@ -436,14 +436,8 @@ let test_multipart_domain_values () =
   expect_error_field "size"
     (Multipart.Part.create ~part_number:first ~etag ~size:(-1L) ());
   expect_error_field "checksum_algorithm"
-    (Multipart.Part.create ~part_number:first ~etag
-       ~checksum:
-         {
-           Object.Checksum.algorithm =
-             Object.Checksum.Algorithm.Unknown "FUTURE";
-           value = "checksum";
-         }
-       ())
+    (Object.Checksum.value
+       ~algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE") ~value:"checksum")
 
 let suite =
   [

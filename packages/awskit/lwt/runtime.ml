@@ -195,12 +195,10 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       ()
 
   let descriptor_for_string body =
-    {
-      Awskit.Body.Request.content_length =
-        Some (String.length body |> Int64.of_int);
-      payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
-      replayable = true;
-    }
+    Awskit.Body.Request.descriptor_exn
+      ~content_length:(String.length body |> Int64.of_int)
+      ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string body)
+      ~replayable:true ()
 
   let empty_request_body = Body (descriptor_for_string "", Cohttp_lwt.Body.empty)
 

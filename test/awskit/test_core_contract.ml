@@ -147,11 +147,9 @@ let test_payload_hash_result_and_exn () =
 
 let test_runtime_request_response_body_names () =
   let request_descriptor =
-    {
-      Awskit.Body.Request.content_length = Some 5L;
-      payload_hash = Awskit.Body.Payload_hash.sha256_of_string "hello";
-      replayable = true;
-    }
+    Awskit.Body.Request.descriptor_exn ~content_length:5L
+      ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string "hello")
+      ~replayable:true ()
   in
   Alcotest.(check bool)
     "request descriptor replayable" true request_descriptor.replayable;

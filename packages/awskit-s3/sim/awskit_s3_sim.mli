@@ -23,9 +23,17 @@ module Clock : sig
   (** Advance simulated time by milliseconds. *)
 end
 
-type config = { max_list_keys : int }
+type config = private { max_list_keys : int }
 (** Simulator configuration. [max_list_keys] caps list-page sizes when the
     request does not provide a smaller [max_keys]. *)
+
+val config : ?max_list_keys:int -> unit -> (config, Awskit.Error.t) result
+(** Validate and create simulator configuration. [max_list_keys] must be between
+    [1] and [1000]. *)
+
+val config_exn : ?max_list_keys:int -> unit -> config
+(** Like {!val:config}, but raises [Awskit.Error.Awskit_error] carrying the
+    structured validation error on validation failure. *)
 
 val default_config : config
 (** Default simulator configuration. *)

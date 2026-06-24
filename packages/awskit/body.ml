@@ -50,6 +50,16 @@ module Request = struct
              "request content length must be non-negative")
     | _ -> Ok ()
 
+  let descriptor ?content_length ~payload_hash ~replayable () =
+    let descriptor = { content_length; payload_hash; replayable } in
+    match validate_descriptor descriptor with
+    | Ok () -> Ok descriptor
+    | Error _ as error -> error
+
+  let descriptor_exn ?content_length ~payload_hash ~replayable () =
+    Aws_error.Producer.get_ok_exn
+      (descriptor ?content_length ~payload_hash ~replayable ())
+
   let raise_escaped_exn exn = raise (Escaped_exn exn)
   let escaped_exn = function Escaped_exn exn -> Some exn | _ -> None
 end

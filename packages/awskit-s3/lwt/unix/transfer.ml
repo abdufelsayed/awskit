@@ -214,11 +214,8 @@ struct
     include S3.Body
 
     let descriptor ~content_length ~replayable =
-      {
-        Awskit.Body.Request.content_length = Some content_length;
-        payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-        replayable;
-      }
+      Awskit.Body.Request.descriptor_exn ~content_length
+        ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable ()
 
     let copy_channel_to_writer ?on_progress channel writer =
       let bytes = Bytes.create buffer_size in
@@ -416,11 +413,10 @@ struct
 
   let range_body_of_path path (spec : Plan.upload_part) =
     let descriptor =
-      {
-        Awskit.Body.Request.content_length = Some (Int64.of_int spec.length);
-        payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-        replayable = true;
-      }
+      Awskit.Body.Request.descriptor_exn
+        ~content_length:(Int64.of_int spec.length)
+        ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:true
+        ()
     in
     let write writer =
       Lwt.catch

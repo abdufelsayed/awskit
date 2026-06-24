@@ -22,16 +22,12 @@ module Make (R : Request_context.RUNTIME) = struct
     end
 
     let of_stream ~content_length ~replayable ~write =
-      let descriptor =
-        {
-          Awskit.Body.Request.content_length = Some content_length;
-          payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-          replayable;
-        }
-      in
-      match Awskit.Body.Request.validate_descriptor descriptor with
+      match
+        Awskit.Body.Request.descriptor ~content_length
+          ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable ()
+      with
       | Error _ as error -> error
-      | Ok () -> Ok (R.Request_body.of_stream descriptor ~write)
+      | Ok descriptor -> Ok (R.Request_body.of_stream descriptor ~write)
   end
 
   module Reader = struct

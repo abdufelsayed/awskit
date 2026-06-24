@@ -24,12 +24,10 @@ module Minimal_runtime : Awskit_s3.RUNTIME = struct
     let of_stream _descriptor ~write:_ = ""
 
     let descriptor value =
-      {
-        Awskit.Body.Request.content_length =
-          Some (Int64.of_int (String.length value));
-        payload_hash = Awskit.Body.Payload_hash.sha256_of_string value;
-        replayable = true;
-      }
+      Awskit.Body.Request.descriptor_exn
+        ~content_length:(Int64.of_int (String.length value))
+        ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string value)
+        ~replayable:true ()
 
     let content_length value = Some (Int64.of_int (String.length value))
 

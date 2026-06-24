@@ -321,10 +321,9 @@ module Make (Client : SUBJECT) = struct
         tags = tag_set [ tag "env" "test" ];
         checksum =
           Some
-            {
-              Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
-              value = "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=";
-            };
+            (Object.Checksum.value_exn
+               ~algorithm:Object.Checksum.Algorithm.Sha256
+               ~value:"LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=");
       }
     in
     let put =
@@ -1324,10 +1323,9 @@ module Make (Client : SUBJECT) = struct
              Multipart.Upload_part.default_options with
              checksum =
                Some
-                 {
-                   Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
-                   value = "provided-sha256";
-                 };
+                 (Object.Checksum.value_exn
+                    ~algorithm:Object.Checksum.Algorithm.Sha256
+                    ~value:"provided-sha256");
            }
          in
          Client.Multipart.upload_part conn ~upload:upload.upload ~part_number

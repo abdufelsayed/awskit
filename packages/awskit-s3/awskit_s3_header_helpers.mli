@@ -115,7 +115,7 @@ module type DOMAIN = sig
         val to_string : t -> string
       end
 
-      type value = { algorithm : Algorithm.t; value : string }
+      type value = private { algorithm : Algorithm.t; value : string }
     end
 
     module Encryption : sig

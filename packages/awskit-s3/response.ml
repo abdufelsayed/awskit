@@ -54,7 +54,7 @@ let response_checksum response =
   let find algorithm header =
     match Awskit.Response.header response header with
     | None -> None
-    | Some value -> Some { Object.Checksum.algorithm; value }
+    | Some value -> Some (Object.Checksum.value_exn ~algorithm ~value)
   in
   let values =
     [

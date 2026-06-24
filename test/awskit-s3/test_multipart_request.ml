@@ -44,10 +44,8 @@ let test_multipart_upload_part_checksum_headers () =
       ~key:(object_key "large.bin") ~upload_id
   in
   let checksum : Object.Checksum.value =
-    {
-      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
-      value = "provided-sha256";
-    }
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:"provided-sha256"
   in
   let options =
     { Multipart.Upload_part.default_options with checksum = Some checksum }
@@ -120,10 +118,8 @@ let test_multipart_checksum_and_expected_owner_headers () =
     |> ok_or_fail "create multipart checksum"
   in
   let part_checksum : Object.Checksum.value =
-    {
-      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
-      value = "provided-sha256";
-    }
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:"provided-sha256"
   in
   let upload_options =
     {
@@ -147,10 +143,8 @@ let test_multipart_checksum_and_expected_owner_headers () =
         "part carries response checksum value" "provided-sha256" checksum.value
   | None -> Alcotest.fail "expected part checksum");
   let complete_checksum : Object.Checksum.value =
-    {
-      Object.Checksum.algorithm = Object.Checksum.Algorithm.Sha256;
-      value = "top-sha256";
-    }
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:"top-sha256"
   in
   let complete_options =
     {

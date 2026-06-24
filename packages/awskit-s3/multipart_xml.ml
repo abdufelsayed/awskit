@@ -20,7 +20,7 @@ let checksum_xml_name = function
 let checksum_values_from_xml nodes =
   let find algorithm name =
     Option.map
-      (fun value -> { Object.Checksum.algorithm; value })
+      (fun value -> Object.Checksum.value_exn ~algorithm ~value)
       (Xml.child_text name nodes)
   in
   [

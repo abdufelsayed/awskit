@@ -122,12 +122,10 @@ module Recording_runtime = struct
     | [] -> Alcotest.fail "expected recorded request"
 
   let descriptor ?(replayable = true) body =
-    {
-      Awskit.Body.Request.content_length =
-        Some (Int64.of_int (String.length body));
-      payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
-      replayable;
-    }
+    Awskit.Body.Request.descriptor_exn
+      ~content_length:(Int64.of_int (String.length body))
+      ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string body)
+      ~replayable ()
 
   let request_body ?replayable body =
     { body = Ok body; descriptor = descriptor ?replayable body }

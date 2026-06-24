@@ -240,11 +240,11 @@ data in memory.
 Request bodies carry a descriptor:
 
 {[
-{
-  Awskit.Body.Request.content_length = Some 5L;
-  payload_hash = Awskit.Body.Payload_hash.sha256_of_string "hello";
-  replayable = true;
-}
+Awskit.Body.Request.descriptor_exn
+  ~content_length:5L
+  ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string "hello")
+  ~replayable:true
+  ()
 ]}
 
 The descriptor records the declared request body length, the payload hash used

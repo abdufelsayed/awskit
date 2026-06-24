@@ -22,7 +22,17 @@ end
 
 type config = { max_list_keys : int }
 
-let default_config = { max_list_keys = 1000 }
+let default_max_list_keys = 1000
+
+let create_config ?(max_list_keys = default_max_list_keys) () =
+  if max_list_keys < 1 || max_list_keys > 1000 then
+    invalid ~field:"max_list_keys" "max_list_keys must be between 1 and 1000"
+  else Ok { max_list_keys }
+
+let create_config_exn ?max_list_keys () =
+  Awskit.Error.Producer.get_ok_exn (create_config ?max_list_keys ())
+
+let default_config = create_config_exn ()
 
 type stored_object = {
   mutable body : string;
