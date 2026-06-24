@@ -222,6 +222,9 @@ module Runtime = struct
 
     let write_bytes writer bytes =
       write_request_body_string writer (Bytes.to_string bytes)
+
+    let write_subbytes writer bytes ~off ~len =
+      write_request_body_string writer (Bytes.sub_string bytes off len)
   end
 
   module Response_body = struct
@@ -356,6 +359,17 @@ let connection ?(response_body = "") ?head_etag ?head_version_id () =
     abort_active_upload_part_count = None;
   }
 
+let recorded_uploaded_part_numbers conn =
+  List.rev conn.Runtime.uploaded_part_numbers
+
+let recorded_get_ranges conn = List.rev conn.Runtime.get_ranges
+
+let recorded_ranged_get_version_ids conn =
+  List.rev conn.Runtime.ranged_get_version_ids
+
+let recorded_ranged_get_if_matches conn =
+  List.rev conn.Runtime.ranged_get_if_matches
+
 let response status = Awskit.Response.create_exn ~status ()
 
 let empty_checksum : Awskit_s3.Object.Checksum.response =
@@ -453,23 +467,19 @@ module S3 = struct
         | None -> conn.Runtime.response_body
         | Some range ->
             let header = Awskit_s3.Range.to_header range in
-            conn.Runtime.get_ranges <- conn.Runtime.get_ranges @ [ header ];
+            conn.Runtime.get_ranges <- header :: conn.Runtime.get_ranges;
             conn.Runtime.ranged_get_version_ids <-
-              conn.Runtime.ranged_get_version_ids
-              @ [
-                  Option.bind options
-                    (fun (options : Awskit_s3.Object.Get.options) ->
-                      Option.map Awskit_s3.Object.Version_id.to_string
-                        options.version_id);
-                ];
+              Option.bind options
+                (fun (options : Awskit_s3.Object.Get.options) ->
+                  Option.map Awskit_s3.Object.Version_id.to_string
+                    options.version_id)
+              :: conn.Runtime.ranged_get_version_ids;
             conn.Runtime.ranged_get_if_matches <-
-              conn.Runtime.ranged_get_if_matches
-              @ [
-                  Option.bind options
-                    (fun (options : Awskit_s3.Object.Get.options) ->
-                      Option.map etag_condition_to_string
-                        options.preconditions.if_match);
-                ];
+              Option.bind options
+                (fun (options : Awskit_s3.Object.Get.options) ->
+                  Option.map etag_condition_to_string
+                    options.preconditions.if_match)
+              :: conn.Runtime.ranged_get_if_matches;
             parse_range_header header conn.Runtime.response_body
       in
       if
@@ -575,7 +585,7 @@ module S3 = struct
         Awskit_s3.Multipart.Part_number.to_int part_number
       in
       conn.Runtime.uploaded_part_numbers <-
-        conn.Runtime.uploaded_part_numbers @ [ part_number_int ];
+        part_number_int :: conn.Runtime.uploaded_part_numbers;
       let maybe_block () =
         match conn.Runtime.block_upload_part_number with
         | Some blocked when blocked = part_number_int ->
@@ -1401,7 +1411,8 @@ let test_resume_multipart_upload_file_uses_list_parts_options () =
           Alcotest.(check int)
             "upload part count" 2 conn.Runtime.upload_part_count;
           Alcotest.(check (list int))
-            "uploaded part numbers" [ 1; 2 ] conn.Runtime.uploaded_part_numbers;
+            "uploaded part numbers" [ 1; 2 ]
+            (recorded_uploaded_part_numbers conn);
           Alcotest.(check int) "complete count" 1 conn.Runtime.complete_count;
           Alcotest.(check (list string))
             "completed part etags" [ "etag-1"; "etag-2" ]
@@ -1429,7 +1440,8 @@ let test_resume_multipart_upload_ignores_mismatched_listed_part () =
           Alcotest.failf "resume failed: %a" Awskit_s3.Error.pp error
       | Ok _ ->
           Alcotest.(check (list int))
-            "uploaded part numbers" [ 1; 2 ] conn.Runtime.uploaded_part_numbers;
+            "uploaded part numbers" [ 1; 2 ]
+            (recorded_uploaded_part_numbers conn);
           Alcotest.(check int)
             "upload part count" 2 conn.Runtime.upload_part_count;
           Alcotest.(check int) "complete count" 1 conn.Runtime.complete_count;
@@ -1456,7 +1468,7 @@ let test_multipart_upload_finishes_error_batch_before_stopping () =
       | Error error when is_body_error error ->
           Alcotest.(check (list int))
             "attempted current batch only" [ 1; 2 ]
-            conn.Runtime.uploaded_part_numbers;
+            (recorded_uploaded_part_numbers conn);
           Alcotest.(check int) "complete count" 0 conn.Runtime.complete_count;
           Alcotest.(check int) "abort count" 1 conn.Runtime.abort_count
       | Error error ->
@@ -1772,7 +1784,7 @@ let test_download_file_uses_get_below_threshold () =
           Alcotest.(check int) "get count" 1 conn.Runtime.get_count;
           Alcotest.(check int)
             "range count" 0
-            (List.length conn.Runtime.get_ranges);
+            (List.length (recorded_get_ranges conn));
           Alcotest.(check bool)
             "progress" true
             (Option.is_some
@@ -1838,7 +1850,7 @@ let test_download_file_ranged_progress_exception_propagates () =
       in
       Alcotest.(check bool)
         "ranged get attempted" true
-        (List.length conn.Runtime.get_ranges > 0);
+        (List.length (recorded_get_ranges conn) > 0);
       match observed with
       | Raised exn ->
           Alcotest.(check bool)
@@ -1892,7 +1904,7 @@ let test_download_file_uses_ranges_at_threshold () =
               Fmt.str "bytes=0-%d" (part_size - 1);
               Fmt.str "bytes=%d-%d" part_size (String.length body - 1);
             ]
-            conn.Runtime.get_ranges;
+            (recorded_get_ranges conn);
           Alcotest.(check (option int64))
             "final progress"
             (Some (Int64.of_int (String.length body)))
@@ -1931,7 +1943,7 @@ let test_download_file_finishes_error_batch_before_stopping () =
       | Error error when is_body_error error ->
           Alcotest.(check int)
             "attempted current batch only" 2
-            (List.length conn.Runtime.get_ranges)
+            (List.length (recorded_get_ranges conn))
       | Error error ->
           Alcotest.failf "unexpected error: %a" Awskit_s3.Error.pp error
       | Ok _ -> Alcotest.fail "download succeeded despite ranged failure")
@@ -1965,7 +1977,7 @@ let test_download_file_ranges_use_head_version_id () =
           Alcotest.(check (list (option string)))
             "ranged version ids"
             [ Some "version-1"; Some "version-1" ]
-            conn.Runtime.ranged_get_version_ids)
+            (recorded_ranged_get_version_ids conn))
 
 let test_download_file_ranges_use_head_etag () =
   let path = Filename.temp_file "awskit-download-ranged-etag" ".bin" in
@@ -1994,7 +2006,7 @@ let test_download_file_ranges_use_head_etag () =
           Alcotest.(check (list (option string)))
             "ranged if-matches"
             [ Some "\"head-etag\""; Some "\"head-etag\"" ]
-            conn.Runtime.ranged_get_if_matches)
+            (recorded_ranged_get_if_matches conn))
 
 let test_download_file_allows_small_range_parts () =
   let path = Filename.temp_file "awskit-download-small-ranges" ".bin" in
@@ -2024,7 +2036,7 @@ let test_download_file_allows_small_range_parts () =
           Alcotest.(check (list string))
             "ranges"
             [ "bytes=0-3"; "bytes=4-7"; "bytes=8-8" ]
-            conn.Runtime.get_ranges)
+            (recorded_get_ranges conn))
 
 let test_download_file_rejects_range_option () =
   let path = Filename.temp_file "awskit-download-range-option" ".bin" in

@@ -44,6 +44,10 @@ module type Request_body = sig
 
   val write_bytes : writer -> bytes -> (unit, Error.t) result io
   (** Write a bytes chunk to a streaming request body. *)
+
+  val write_subbytes :
+    writer -> bytes -> off:int -> len:int -> (unit, Error.t) result io
+  (** Write a bounded bytes slice to a streaming request body. *)
 end
 
 module type Response_body = sig

@@ -1,5 +1,7 @@
+let ( let* ) = S3_result.( let* )
+
 type entry = { key : string; value : Header_value.t }
-type t = entry list
+type t = { entries_rev : entry list; lower_keys : string list }
 
 let prefix = "x-amz-meta-"
 
@@ -31,11 +33,11 @@ let validate_key seen key =
       invalid ~field:"metadata" "metadata key %S is duplicated" key
     else Ok lower
 
-let empty = []
+let empty = { entries_rev = []; lower_keys = [] }
 
 let of_list entries =
   let rec loop seen acc = function
-    | [] -> Ok (List.rev acc)
+    | [] -> Ok { entries_rev = acc; lower_keys = seen }
     | (key, value) :: rest -> (
         match validate_key seen key with
         | Error _ as error -> error
@@ -49,13 +51,20 @@ let of_list entries =
 let of_list_exn entries = Awskit.Error.Producer.get_ok_exn (of_list entries)
 
 let to_list metadata =
-  List.map (fun { key; value } -> (key, Header_value.to_string value)) metadata
+  List.rev_map
+    (fun { key; value } -> (key, Header_value.to_string value))
+    metadata.entries_rev
 
-let entries metadata = metadata
+let entries metadata = List.rev metadata.entries_rev
 
 let add ~key ~value metadata =
-  let raw = to_list metadata @ [ (key, value) ] in
-  of_list raw
+  let* lower = validate_key metadata.lower_keys key in
+  let* value = Header_value.of_string ~field:("metadata " ^ key) value in
+  Ok
+    {
+      entries_rev = { key; value } :: metadata.entries_rev;
+      lower_keys = lower :: metadata.lower_keys;
+    }
 
 let pp fmt metadata =
   Fmt.Dump.list
@@ -65,4 +74,4 @@ let pp fmt metadata =
 let equal_entry left right =
   String.equal left.key right.key && Header_value.equal left.value right.value
 
-let equal left right = List.equal equal_entry left right
+let equal left right = List.equal equal_entry (entries left) (entries right)

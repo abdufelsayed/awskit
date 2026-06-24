@@ -17,6 +17,16 @@ let upload_parts ~content_length ~part_size =
 let download_ranges ~content_length ~part_size =
   Transfer.Plan.download_ranges ~content_length ~part_size |> Result.get_ok
 
+let upload_part_seq ~content_length ~part_size =
+  Transfer.Plan.upload_part_seq ~content_length ~part_size
+  |> Result.get_ok
+  |> List.of_seq
+
+let download_range_seq ~content_length ~part_size =
+  Transfer.Plan.download_range_seq ~content_length ~part_size
+  |> Result.get_ok
+  |> List.of_seq
+
 let part_numbers parts =
   List.map
     (fun (part : Transfer.Plan.upload_part) ->
@@ -84,6 +94,41 @@ let test_download_planning_rejects_too_many_ranges () =
     (Transfer.Plan.download_ranges
        ~content_length:(Int64.of_int (Transfer.max_parts + 1))
        ~part_size:1)
+
+let test_lazy_plans_match_list_plans () =
+  let upload_length =
+    Int64.add (Int64.mul 2L (Int64.of_int Transfer.min_part_size)) 23L
+  in
+  let upload_list =
+    upload_parts ~content_length:upload_length ~part_size:Transfer.min_part_size
+  in
+  let upload_seq =
+    upload_part_seq ~content_length:upload_length
+      ~part_size:Transfer.min_part_size
+  in
+  Alcotest.(check (list int))
+    "lazy upload part numbers" (part_numbers upload_list)
+    (part_numbers upload_seq);
+  Alcotest.(check (list int))
+    "lazy upload lengths"
+    (upload_lengths upload_list)
+    (upload_lengths upload_seq);
+  let download_list = download_ranges ~content_length:11L ~part_size:4 in
+  let download_seq = download_range_seq ~content_length:11L ~part_size:4 in
+  Alcotest.(check (list int))
+    "lazy download lengths"
+    (download_lengths download_list)
+    (download_lengths download_seq);
+  Alcotest.(check (list string))
+    "lazy download ranges"
+    (List.map
+       (fun (range : Transfer.Plan.download_range) ->
+         Range.to_header range.range)
+       download_list)
+    (List.map
+       (fun (range : Transfer.Plan.download_range) ->
+         Range.to_header range.range)
+       download_seq)
 
 let sum_lengths lengths =
   List.fold_left (fun total length -> total + length) 0 lengths
@@ -198,6 +243,8 @@ let suite =
           test_download_planning_edges;
         Alcotest.test_case "download planning rejects too many ranges" `Quick
           test_download_planning_rejects_too_many_ranges;
+        Alcotest.test_case "lazy plans match list plans" `Quick
+          test_lazy_plans_match_list_plans;
       ] );
     ( "pbt:transfer-plan",
       [

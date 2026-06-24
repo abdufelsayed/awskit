@@ -194,23 +194,24 @@ module Plan = struct
       invalid ~field:"part_count" "file transfer would exceed 10000 parts"
     else Ok ()
 
-  let build_parts ~content_length ~part_size ~make =
+  let build_part_seq ~content_length ~part_size ~make =
     let part_size64 = Int64.of_int part_size in
     let count = planned_part_count ~content_length ~part_size |> Int64.to_int in
-    let rec loop index offset acc =
-      if index > count then Ok (List.rev acc)
+    let rec next index offset () =
+      if index > count then Seq.Nil
       else
         let remaining = Int64.sub content_length offset in
         let length =
           if Int64.compare remaining part_size64 > 0 then part_size
           else Int64.to_int remaining
         in
-        let* part = make ~index ~offset ~length in
-        loop (index + 1) (Int64.add offset (Int64.of_int length)) (part :: acc)
+        let part = make ~index ~offset ~length in
+        Seq.Cons
+          (part, next (index + 1) (Int64.add offset (Int64.of_int length)))
     in
-    loop 1 0L []
+    next 1 0L
 
-  let upload_parts ~content_length ~part_size =
+  let upload_part_seq ~content_length ~part_size =
     let* () = validate_non_negative_content_length content_length in
     if Int64.equal content_length 0L then
       invalid ~field:"content_length"
@@ -218,19 +219,30 @@ module Plan = struct
     else
       let* () = validate_upload_part_size part_size in
       let* () = validate_part_count ~content_length ~part_size in
-      build_parts ~content_length ~part_size
-        ~make:(fun ~index ~offset ~length ->
-          let* part_number = Multipart.Part_number.of_int index in
-          Ok { part_number; offset; length })
+      Ok
+        (build_part_seq ~content_length ~part_size
+           ~make:(fun ~index ~offset ~length ->
+             let part_number = Multipart.Part_number.of_int_exn index in
+             { part_number; offset; length }))
 
-  let download_ranges ~content_length ~part_size =
+  let upload_parts ~content_length ~part_size =
+    let* parts = upload_part_seq ~content_length ~part_size in
+    Ok (List.of_seq parts)
+
+  let download_range_seq ~content_length ~part_size =
     let* () = validate_non_negative_content_length content_length in
     let* () = validate_download_part_size part_size in
     let* () = validate_part_count ~content_length ~part_size in
-    build_parts ~content_length ~part_size ~make:(fun ~index ~offset ~length ->
-        let finish = Int64.add offset (Int64.of_int (length - 1)) in
-        let* range = Range.bytes ~start:offset ~finish in
-        Ok { index; offset; length; range })
+    Ok
+      (build_part_seq ~content_length ~part_size
+         ~make:(fun ~index ~offset ~length ->
+           let finish = Int64.add offset (Int64.of_int (length - 1)) in
+           let range = Range.bytes_exn ~start:offset ~finish in
+           { index; offset; length; range }))
+
+  let download_ranges ~content_length ~part_size =
+    let* ranges = download_range_seq ~content_length ~part_size in
+    Ok (List.of_seq ranges)
 end
 
 let validate_download_options (options : download_options) =

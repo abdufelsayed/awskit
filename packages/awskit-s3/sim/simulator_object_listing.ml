@@ -87,8 +87,8 @@ let find_sub ~sub value =
 let visible_objects (bucket_state : Simulator_state.bucket_state)
     (options : Object.List.options) =
   let prefix = Option.map Object_key.Prefix.to_string options.prefix in
-  Hashtbl.to_seq bucket_state.objects
-  |> Seq.filter_map (function
+  Simulator_state.objects bucket_state
+  |> List.filter_map (function
     | key, Simulator_state.Stored_object obj -> (
         match prefix with
         | None -> Some (key, obj)
@@ -96,8 +96,6 @@ let visible_objects (bucket_state : Simulator_state.bucket_state)
             if Simulator_support.is_prefix ~prefix key then Some (key, obj)
             else None)
     | _, Simulator_state.Stored_delete_marker _ -> None)
-  |> List.of_seq
-  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
 
 let common_prefix_for_key (options : Object.List.options) key =
   match options.delimiter with

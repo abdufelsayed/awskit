@@ -21,6 +21,9 @@ module type Request_body = sig
   val content_length : t -> int64 option
   val write_string : writer -> string -> (unit, Error.t) result io
   val write_bytes : writer -> bytes -> (unit, Error.t) result io
+
+  val write_subbytes :
+    writer -> bytes -> off:int -> len:int -> (unit, Error.t) result io
 end
 
 module type Response_body = sig

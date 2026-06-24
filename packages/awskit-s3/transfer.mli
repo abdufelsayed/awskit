@@ -272,10 +272,25 @@ module Plan : sig
   (** Compute deterministic multipart upload parts. Rejects non-positive content
       lengths because an empty object should use [PutObject]. *)
 
+  val upload_part_seq :
+    content_length:int64 ->
+    part_size:int ->
+    (upload_part Seq.t, Awskit.Error.t) result
+  (** Lazily enumerate deterministic multipart upload parts without building the
+      whole plan list. Rejects non-positive content lengths because an empty
+      object should use [PutObject]. *)
+
   val download_ranges :
     content_length:int64 ->
     part_size:int ->
     (download_range list, Awskit.Error.t) result
   (** Compute deterministic ranged-download byte ranges. Empty objects produce
       no ranges. *)
+
+  val download_range_seq :
+    content_length:int64 ->
+    part_size:int ->
+    (download_range Seq.t, Awskit.Error.t) result
+  (** Lazily enumerate deterministic ranged-download byte ranges without
+      building the whole plan list. Empty objects produce no ranges. *)
 end

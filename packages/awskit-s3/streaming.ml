@@ -16,9 +16,8 @@ module Make (R : Request_context.RUNTIME) = struct
       type t = writer
 
       let write_string = R.Request_body.write_string
-
-      let write_bytes writer bytes =
-        R.Request_body.write_string writer (Bytes.to_string bytes)
+      let write_bytes = R.Request_body.write_bytes
+      let write_subbytes = R.Request_body.write_subbytes
     end
 
     let of_stream ~content_length ~replayable ~write =

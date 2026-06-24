@@ -373,10 +373,7 @@ module Multipart = struct
                         options.max_parts
                     in
                     let all =
-                      Hashtbl.to_seq_values upload.parts
-                      |> List.of_seq
-                      |> List.sort (fun a b ->
-                          Int.compare a.part_number b.part_number)
+                      Simulator_state.parts upload
                       |> List.filter (fun part ->
                           match options.part_number_marker with
                           | None -> true

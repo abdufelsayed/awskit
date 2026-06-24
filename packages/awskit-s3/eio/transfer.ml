@@ -234,8 +234,9 @@ struct
         match Eio.Flow.single_read flow cstruct with
         | 0 -> Ok ()
         | n -> (
-            let chunk = Cstruct.to_string (Cstruct.sub cstruct 0 n) in
-            match Writer.write_string writer chunk with
+            match
+              Writer.write_string writer (Cstruct.to_string ~len:n cstruct)
+            with
             | Error _ as error -> error
             | Ok () ->
                 let transferred = Int64.add transferred (Int64.of_int n) in
@@ -404,10 +405,10 @@ struct
                                spec.part_number)
                             Eio.Path.pp path))
                 | n -> (
-                    let chunk =
-                      Cstruct.to_string (Cstruct.sub read_buffer 0 n)
-                    in
-                    match Runtime.Request_body.write_string writer chunk with
+                    match
+                      Runtime.Request_body.write_string writer
+                        (Cstruct.to_string ~len:n read_buffer)
+                    with
                     | Error _ as error -> error
                     | Ok () -> loop (remaining - n))
                 | exception End_of_file ->
@@ -427,11 +428,13 @@ struct
     in
     Runtime.Request_body.of_stream descriptor ~write
 
-  let split_batch ~concurrency specs =
-    let rec loop remaining acc = function
-      | rest when remaining = 0 -> (List.rev acc, rest)
-      | [] -> (List.rev acc, [])
-      | spec :: rest -> loop (remaining - 1) (spec :: acc) rest
+  let take_batch ~concurrency specs =
+    let rec loop remaining acc specs =
+      if remaining = 0 then (List.rev acc, specs)
+      else
+        match specs () with
+        | Seq.Nil -> (List.rev acc, Seq.empty)
+        | Seq.Cons (spec, rest) -> loop (remaining - 1) (spec :: acc) rest
     in
     loop concurrency [] specs
 
@@ -475,13 +478,12 @@ struct
           Ok part
     in
     let rec loop acc specs =
-      match specs with
+      let batch, rest =
+        take_batch ~concurrency:options.Awskit_s3.Transfer.concurrency specs
+      in
+      match batch with
       | [] -> Ok (List.rev acc)
       | _ ->
-          let batch, rest =
-            split_batch ~concurrency:options.Awskit_s3.Transfer.concurrency
-              specs
-          in
           let results =
             Eio.Switch.run @@ fun sw ->
             batch
@@ -537,7 +539,7 @@ struct
     let* () = Awskit_s3.Transfer.validate_upload_multipart_selection options in
     let* content_length = regular_file_length path in
     let* specs =
-      Plan.upload_parts ~content_length ~part_size:options.part_size
+      Plan.upload_part_seq ~content_length ~part_size:options.part_size
     in
     let* () = verify_resume_upload conn ~upload ~options in
     let* uploaded_now =
@@ -555,7 +557,7 @@ struct
     let* () = Awskit_s3.Transfer.validate_upload_multipart_selection options in
     let* content_length = regular_file_length path in
     let* specs =
-      Plan.upload_parts ~content_length ~part_size:options.part_size
+      Plan.upload_part_seq ~content_length ~part_size:options.part_size
     in
     let* created =
       S3.Multipart.create_upload conn ~bucket ~key
@@ -726,14 +728,13 @@ struct
       download_range_to_file conn ~bucket ~key ~get_options ~path ~file
         ~completed ~content_length ?on_progress spec
     in
-    let rec loop ranges =
-      match ranges with
-      | [] -> Ok ()
+    let rec loop parts ranges =
+      let batch, rest =
+        take_batch ~concurrency:options.Awskit_s3.Transfer.concurrency ranges
+      in
+      match batch with
+      | [] -> Ok parts
       | _ ->
-          let batch, rest =
-            split_batch ~concurrency:options.Awskit_s3.Transfer.concurrency
-              ranges
-          in
           let results =
             Eio.Switch.run @@ fun sw ->
             batch
@@ -742,9 +743,9 @@ struct
             |> List.map Eio.Promise.await_exn
           in
           let* () = first_error_or_unit results in
-          loop rest
+          loop (parts + List.length batch) rest
     in
-    loop ranges
+    loop 0 ranges
 
   let download_file conn ~bucket ~key ?options ?on_progress ~path () =
     let options =
@@ -777,19 +778,15 @@ struct
         download_with_get ~total:content_length ()
     | Some content_length ->
         let* ranges =
-          Plan.download_ranges ~content_length ~part_size:options.part_size
+          Plan.download_range_seq ~content_length ~part_size:options.part_size
         in
         let get_options = ranged_get_options_of_head info options.get_options in
         with_temp_download path (fun temp_path file ->
-            let* () =
+            let* parts =
               ranged_download_to_file conn ~bucket ~key ~options ~get_options
                 ?on_progress ~path:temp_path ~file ~content_length ranges
             in
             Ok
               (Awskit_s3.Transfer.Ranged
-                 {
-                   info;
-                   parts = List.length ranges;
-                   bytes_transferred = content_length;
-                 }))
+                 { info; parts; bytes_transferred = content_length }))
 end

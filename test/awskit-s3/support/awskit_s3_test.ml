@@ -237,6 +237,9 @@ module Recording_runtime = struct
 
     let write_bytes writer bytes =
       write_request_body_string writer (Bytes.to_string bytes)
+
+    let write_subbytes writer bytes ~off ~len =
+      write_request_body_string writer (Bytes.sub_string bytes off len)
   end
 
   module Response_body = struct
