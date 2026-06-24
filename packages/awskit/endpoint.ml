@@ -22,37 +22,9 @@ let pp fmt t =
     (Scheme.to_string t.scheme)
     (authority_host_port ~host:t.host ~port:t.port)
 
-let has_ctl_or_del s =
-  String.exists s ~f:(fun c ->
-      let code = Char.to_int c in
-      code < 0x20 || code = 0x7F)
-
-let invalid ?field message =
-  Error (Aws_error.Producer.validation ?field message)
-
-let validate_host host =
-  if String.is_empty host then invalid ~field:"host" "host must be non-empty"
-  else if not (String.equal host (String.strip host)) then
-    invalid ~field:"host" "host must not have leading/trailing whitespace"
-  else if has_ctl_or_del host then
-    invalid ~field:"host" "host contains control characters"
-  else if String.is_substring host ~substring:"://" then
-    invalid ~field:"host" "host must not include a URL scheme"
-  else if
-    String.exists host ~f:(function
-      | '/' | '?' | '#' | '@' -> true
-      | _ -> false)
-  then invalid ~field:"host" "host must be a bare hostname or IP"
-  else if String.exists host ~f:(function '[' | ']' -> true | _ -> false) then
-    invalid ~field:"host"
-      "host must not include IPv6 brackets; brackets are URL syntax"
-  else Ok ()
-
-let validate_port = function
-  | None -> Ok ()
-  | Some port when port > 0 && port <= 65_535 -> Ok ()
-  | Some port ->
-      invalid ~field:"port" (Fmt.str "invalid port %d (expected 1-65535)" port)
+let invalid = Aws_validation.invalid
+let validate_host = Aws_validation.Host.validate ~allow_ipv6_brackets:false
+let validate_port = Aws_validation.validate_port
 
 let create ~scheme ~host ?port () =
   match validate_host host with
@@ -114,7 +86,7 @@ let split_host_port authority =
 let of_string input =
   if String.is_empty input then
     invalid ~field:"endpoint" "endpoint must be non-empty"
-  else if not (String.equal input (String.strip input)) then
+  else if Aws_validation.has_leading_or_trailing_whitespace input then
     invalid ~field:"endpoint"
       "endpoint must not have leading/trailing whitespace"
   else

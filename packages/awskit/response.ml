@@ -8,47 +8,14 @@ type t = {
   host_id : string option;
 }
 
-let has_ctl_or_del s =
-  String.exists s ~f:(fun c ->
-      let code = Char.to_int c in
-      code < 0x20 || code = 0x7F)
-
-let invalid ?field message =
-  Error (Aws_error.Producer.validation ?field message)
-
+let invalid = Aws_validation.invalid
 let decode message = Error (Aws_error.Producer.decode message)
 
 let validate_status status =
   if status >= 100 && status <= 599 then Ok ()
   else invalid ~field:"status" (Fmt.str "invalid HTTP status: %d" status)
 
-let validate_header_name name =
-  if String.is_empty name then
-    invalid ~field:"header" "header name must be non-empty"
-  else if has_ctl_or_del name then
-    invalid ~field:"header"
-      (Fmt.str "header %s contains control characters" name)
-  else if String.exists name ~f:(function ':' -> true | _ -> false) then
-    invalid ~field:"header" (Fmt.str "header %s must not contain ':'" name)
-  else Ok ()
-
-let validate_header_value name value =
-  if String.exists value ~f:(function '\r' | '\n' -> true | _ -> false) then
-    invalid ~field:"header" (Fmt.str "header %s contains a newline" name)
-  else Ok ()
-
-let validate_headers headers =
-  let rec loop = function
-    | [] -> Ok ()
-    | (name, value) :: rest -> (
-        match validate_header_name name with
-        | Error _ as error -> error
-        | Ok () -> (
-            match validate_header_value name value with
-            | Error _ as error -> error
-            | Ok () -> loop rest))
-  in
-  loop headers
+let validate_headers = Aws_validation.Header.validate_list
 
 let header_in headers name =
   List.find_map headers ~f:(fun (key, value) ->

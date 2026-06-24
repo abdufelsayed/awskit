@@ -4,21 +4,16 @@ module Format = Stdlib.Format
 
 type t = string
 
-let has_ctl_or_del s =
-  String.exists s ~f:(fun c ->
-      let code = Char.to_int c in
-      code < 0x20 || code = 0x7F)
-
 let of_string region =
   if String.is_empty region then
     Error
       (Aws_error.Producer.validation ~field:"region"
          "AWS region must be non-empty")
-  else if not (String.equal region (String.strip region)) then
+  else if Aws_validation.has_leading_or_trailing_whitespace region then
     Error
       (Aws_error.Producer.validation ~field:"region"
          "AWS region must not have leading/trailing whitespace")
-  else if has_ctl_or_del region then
+  else if Aws_validation.has_control_or_delete region then
     Error
       (Aws_error.Producer.validation ~field:"region"
          "AWS region contains control characters")

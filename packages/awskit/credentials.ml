@@ -74,19 +74,13 @@ module Provider = struct
   let source_label = source_label_of_source
 end
 
-let has_ctl_or_del s =
-  String.exists s ~f:(fun c ->
-      let code = Char.to_int c in
-      code < 0x20 || code = 0x7F)
-
-let invalid ~field message =
-  Error (Aws_error.Producer.validation ~field message)
+let invalid ~field message = Aws_validation.invalid ~field message
 
 let validate_required ~field value =
   if String.is_empty value then invalid ~field (Fmt.str "%s is empty" field)
-  else if has_ctl_or_del value then
+  else if Aws_validation.has_control_or_delete value then
     invalid ~field (Fmt.str "%s contains control characters" field)
-  else if not (String.equal value (String.strip value)) then
+  else if Aws_validation.has_leading_or_trailing_whitespace value then
     invalid ~field
       (Fmt.str "%s must not have leading/trailing whitespace" field)
   else Ok ()

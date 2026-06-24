@@ -218,6 +218,35 @@ let test_request_response_contracts () =
        ~headers:[ ("content-type", "text/plain\nbad") ]
        ())
 
+let test_core_validation_rejects_invalid_low_level_strings () =
+  check_validation_error "region control"
+    (Awskit.Region.of_string "us\001-east-1");
+  check_validation_error "region whitespace"
+    (Awskit.Region.of_string " us-east-1");
+  check_validation_error "credential control"
+    (Awskit.Credentials.create ~access_key_id:"AK\001" ~secret_access_key:"SK"
+       ());
+  check_validation_error "endpoint bracketed host"
+    (Awskit.Endpoint.https ~host:"[::1]" ());
+  check_validation_error "request target path control"
+    (Awskit.Request.Target.create ~scheme:`Https ~host:"s3.amazonaws.com"
+       ~path:"/bad\001" ());
+  check_validation_error "request target query control"
+    (Awskit.Request.Target.create ~scheme:`Https ~host:"s3.amazonaws.com"
+       ~path:"/"
+       ~query:[ ("versionId", [ "bad\001" ]) ]
+       ());
+  check_validation_error "request header control name"
+    (Awskit.Request.validate_headers [ ("x-test\001", "ok") ]);
+  check_validation_error "request header newline"
+    (Awskit.Request.validate_headers [ ("x-test", "bad\nvalue") ]);
+  check_validation_error "response header control name"
+    (Awskit.Response.create ~status:200 ~headers:[ ("x-test\001", "ok") ] ());
+  check_validation_error "response header newline"
+    (Awskit.Response.create ~status:200
+       ~headers:[ ("x-test", "bad\nvalue") ]
+       ())
+
 let test_response_header_parse_failures_are_decode_errors () =
   let missing = Awskit.Response.create_exn ~status:200 () in
   (match Awskit.Response.required_header missing "etag" with
@@ -663,6 +692,8 @@ let suite =
           test_runtime_request_response_body_names;
         Alcotest.test_case "request/response metadata" `Quick
           test_request_response_contracts;
+        Alcotest.test_case "low-level validation strings" `Quick
+          test_core_validation_rejects_invalid_low_level_strings;
         Alcotest.test_case "response header parse failures are decode errors"
           `Quick test_response_header_parse_failures_are_decode_errors;
         Alcotest.test_case "error context and sexp" `Quick

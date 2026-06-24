@@ -1,15 +1,7 @@
 module Aws_error = Error
 open Base
 
-let has_ctl_or_del s =
-  String.exists s ~f:(fun c ->
-      let code = Char.to_int c in
-      code < 0x20 || code = 0x7F)
-
-let has_leading_or_trailing_ws s = not (String.equal s (String.strip s))
-
-let invalid ?field message =
-  Error (Aws_error.Producer.validation ?field message)
+let invalid = Aws_validation.invalid
 
 module Method = struct
   type t = [ `GET | `PUT | `POST | `DELETE | `HEAD | `PATCH ]
@@ -35,38 +27,20 @@ module Method = struct
   let of_string_exn value = Aws_error.Producer.get_ok_exn (of_string value)
 end
 
-let validate_host host =
-  if String.is_empty host then invalid ~field:"host" "host must be non-empty"
-  else if has_leading_or_trailing_ws host then
-    invalid ~field:"host" "host must not have leading/trailing whitespace"
-  else if has_ctl_or_del host then
-    invalid ~field:"host" "host contains control characters"
-  else if String.is_substring host ~substring:"://" then
-    invalid ~field:"host" "host must not include a URL scheme"
-  else if
-    String.exists host ~f:(function
-      | '/' | '?' | '#' | '@' -> true
-      | _ -> false)
-  then invalid ~field:"host" "host must be a bare hostname or IP"
-  else Ok ()
-
-let validate_port = function
-  | None -> Ok ()
-  | Some port when port > 0 && port <= 65_535 -> Ok ()
-  | Some port ->
-      invalid ~field:"port" (Fmt.str "invalid port %d (expected 1-65535)" port)
+let validate_host = Aws_validation.Host.validate
+let validate_port = Aws_validation.validate_port
 
 let validate_path path =
   if String.is_empty path then invalid ~field:"path" "path must be non-empty"
   else if not (String.is_prefix path ~prefix:"/") then
     invalid ~field:"path" "path must start with /"
-  else if has_ctl_or_del path then
+  else if Aws_validation.has_control_or_delete path then
     invalid ~field:"path" "path contains control characters"
   else Ok ()
 
 let validate_query query =
   let validate_piece ~field value =
-    if has_ctl_or_del value then
+    if Aws_validation.has_control_or_delete value then
       invalid ~field (Fmt.str "%s contains control characters" field)
     else Ok ()
   in
@@ -76,7 +50,7 @@ let validate_query query =
         match validate_piece ~field:"query key" key with
         | Error _ as error -> error
         | Ok () -> (
-            match List.find values ~f:(fun value -> has_ctl_or_del value) with
+            match List.find values ~f:Aws_validation.has_control_or_delete with
             | Some _ ->
                 invalid ~field:"query value"
                   "query value contains control characters"
@@ -84,33 +58,9 @@ let validate_query query =
   in
   loop query
 
-let validate_header_name name =
-  if String.is_empty name then
-    invalid ~field:"header" "header name must be non-empty"
-  else if has_ctl_or_del name then
-    invalid ~field:"header"
-      (Fmt.str "header %s contains control characters" name)
-  else if String.exists name ~f:(function ':' -> true | _ -> false) then
-    invalid ~field:"header" (Fmt.str "header %s must not contain ':'" name)
-  else Ok ()
-
-let validate_header_value name value =
-  if String.exists value ~f:(function '\r' | '\n' -> true | _ -> false) then
-    invalid ~field:"header" (Fmt.str "header %s contains a newline" name)
-  else Ok ()
-
-let validate_headers headers =
-  let rec loop = function
-    | [] -> Ok ()
-    | (name, value) :: rest -> (
-        match validate_header_name name with
-        | Error _ as error -> error
-        | Ok () -> (
-            match validate_header_value name value with
-            | Error _ as error -> error
-            | Ok () -> loop rest))
-  in
-  loop headers
+let validate_header_name = Aws_validation.Header.validate_name
+let validate_header_value = Aws_validation.Header.validate_value
+let validate_headers = Aws_validation.Header.validate_list
 
 module Target = struct
   type t = {
