@@ -998,30 +998,26 @@ module Make (R : RUNTIME) = struct
               style = `Path;
             }
 
+    let bounded_body_chunk_size = 8192
+
+    let bounded_body_context error =
+      Awskit.Error.Producer.with_context "reading bounded response body" error
+
+    let with_bounded_body_context result =
+      let* result = result in
+      match result with
+      | Ok _ as ok -> return ok
+      | Error error -> return_error (bounded_body_context error)
+
     let read_body reader ~max_size =
-      let buffer = Buffer.create 4096 in
-      let chunk = Bytes.create 8192 in
-      let rec loop total =
-        let* read =
-          R.Response_body.read reader chunk ~off:0 ~len:(Bytes.length chunk)
-        in
-        match read with
-        | Error error -> return (Error error)
-        | Ok 0 -> return_ok (Buffer.contents buffer)
-        | Ok n ->
-            let total = Int64.add total (Int64.of_int n) in
-            if Int64.compare total max_size > 0 then
-              return_error
-                (Awskit.Error.Producer.body ~limit:max_size
-                   "response body exceeded max_bytes"
-                |> Awskit.Error.Producer.with_context
-                     "reading bounded response body")
-            else begin
-              Buffer.add_subbytes buffer chunk 0 n;
-              loop total
-            end
-      in
-      loop 0L
+      with_bounded_body_context
+        (Reader.to_string ~chunk_size:bounded_body_chunk_size
+           ~max_bytes:max_size reader)
+
+    let read_body_bytes reader ~max_size =
+      with_bounded_body_context
+        (Reader.to_bytes ~chunk_size:bounded_body_chunk_size ~max_bytes:max_size
+           reader)
 
     let read_response_body body ~max_size =
       R.Response_body.with_reader body ~consume:(read_body ~max_size)

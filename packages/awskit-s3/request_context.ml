@@ -45,6 +45,9 @@ module type S = sig
   val read_body :
     response_body_reader -> max_size:int64 -> (string, Error.t) result io
 
+  val read_body_bytes :
+    response_body_reader -> max_size:int64 -> (bytes, Error.t) result io
+
   val read_response_body :
     R.response_body -> max_size:int64 -> (string, Error.t) result io
 
