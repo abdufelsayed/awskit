@@ -19,6 +19,13 @@ val precondition_failed : unit -> Awskit.Error.t
 val not_modified : unit -> Awskit.Error.t
 val response : ?headers:(string * string) list -> int -> Awskit.Response.t
 
+val with_operation :
+  Simulator_state.operation ->
+  bucket:string ->
+  ?key:string ->
+  Awskit.Error.t ->
+  Awskit.Error.t
+
 val record :
   ?faulted:bool ->
   Simulator_state.t ->

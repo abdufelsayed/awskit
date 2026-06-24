@@ -144,6 +144,61 @@ let test_s3_operation_context_for_validation_error () =
         "mentions resource" true
         (string_contains text ~substring:"s3://test-bucket/k")
 
+let expect_operation_context label ~operation ~resource = function
+  | Error error ->
+      let text = Awskit.Error.to_string_hum error in
+      Alcotest.(check bool)
+        (label ^ " operation") true
+        (string_contains text ~substring:operation);
+      Alcotest.(check bool)
+        (label ^ " resource") true
+        (string_contains text ~substring:resource)
+  | Ok _ -> Alcotest.failf "%s: expected operation-scoped error" label
+
+let test_s3_operation_context_for_missing_get_key () =
+  let conn = Simulator_subject.fresh () in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:(bucket_name "test-bucket") ()
+    |> ok_or_fail "create bucket");
+  Simulator.Object.get conn
+    ~bucket:(bucket_name "test-bucket")
+    ~key:(object_key "missing")
+    ~consume:(fun _reader -> Ok "unused")
+    ()
+  |> expect_operation_context "missing get key" ~operation:"GetObject"
+       ~resource:"s3://test-bucket/missing"
+
+let test_s3_operation_context_for_missing_copy_source () =
+  let conn = Simulator_subject.fresh () in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:(bucket_name "test-bucket") ()
+    |> ok_or_fail "create bucket");
+  Simulator.Object.copy conn
+    ~source_bucket:(bucket_name "test-bucket")
+    ~source_key:(object_key "missing-source")
+    ~destination_bucket:(bucket_name "test-bucket")
+    ~destination_key:(object_key "copy.txt") ()
+  |> expect_operation_context "missing copy source" ~operation:"CopyObject"
+       ~resource:"s3://test-bucket/missing-source"
+
+let test_s3_operation_context_for_missing_upload_id () =
+  let conn = Simulator_subject.fresh () in
+  ignore
+    (Simulator.Bucket.create conn ~bucket:(bucket_name "test-bucket") ()
+    |> ok_or_fail "create bucket");
+  let upload =
+    Multipart.Upload.resume
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "large.bin")
+      ~upload_id:(Multipart.Upload_id.of_string_exn "missing-upload")
+  in
+  Simulator.Multipart.upload_part conn ~upload
+    ~part_number:(Multipart.Part_number.of_int_exn 1)
+    ~body:(Simulator.Body.of_string "part")
+    ()
+  |> expect_operation_context "missing upload id" ~operation:"UploadPart"
+       ~resource:"s3://test-bucket/large.bin"
+
 let test_find_metadata_missing_object_returns_none () =
   let conn = Simulator_subject.fresh () in
   ignore
@@ -221,12 +276,15 @@ let test_find_missing_bucket_returns_error () =
       ~consume:(fun _reader -> Ok "unused")
       ()
   with
-  | Error error when Error.is_no_such_bucket error -> ()
+  | Error error when Error.is_no_such_bucket error ->
+      Error error
+      |> expect_operation_context "find missing bucket" ~operation:"GetObject"
+           ~resource:"s3://missing-bucket/file"
   | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
   | Ok None -> Alcotest.fail "expected missing bucket error, got None"
   | Ok (Some _) -> Alcotest.fail "expected missing bucket error"
 
-let test_find_preserves_consumer_not_found_error () =
+let test_find_scopes_consumer_not_found_error () =
   let conn = Simulator_subject.fresh () in
   ignore
     (Simulator.Bucket.create conn ~bucket:(bucket_name "test-bucket") ()
@@ -249,7 +307,10 @@ let test_find_preserves_consumer_not_found_error () =
       ~consume:(fun _reader -> Error consumer_error)
       ()
   with
-  | Error error when error == consumer_error -> ()
+  | Error error when Error.is_no_such_key error ->
+      Error error
+      |> expect_operation_context "find consumer error" ~operation:"GetObject"
+           ~resource:"s3://test-bucket/present"
   | Error error -> Alcotest.failf "unexpected error: %a" Awskit.Error.pp error
   | Ok None -> Alcotest.fail "expected consumer error, got None"
   | Ok (Some _) -> Alcotest.fail "expected consumer error"
@@ -266,6 +327,12 @@ let suite =
             test_simulator_response_lost_fault;
           Alcotest.test_case "operation context for validation" `Quick
             test_s3_operation_context_for_validation_error;
+          Alcotest.test_case "operation context for missing get key" `Quick
+            test_s3_operation_context_for_missing_get_key;
+          Alcotest.test_case "operation context for missing copy source" `Quick
+            test_s3_operation_context_for_missing_copy_source;
+          Alcotest.test_case "operation context for missing upload id" `Quick
+            test_s3_operation_context_for_missing_upload_id;
           Alcotest.test_case "find metadata missing object returns none" `Quick
             test_find_metadata_missing_object_returns_none;
           Alcotest.test_case "find metadata missing bucket returns error" `Quick
@@ -278,7 +345,7 @@ let suite =
             test_find_missing_object_returns_none;
           Alcotest.test_case "find missing bucket returns error" `Quick
             test_find_missing_bucket_returns_error;
-          Alcotest.test_case "find preserves consumer not found error" `Quick
-            test_find_preserves_consumer_not_found_error;
+          Alcotest.test_case "find scopes consumer not found error" `Quick
+            test_find_scopes_consumer_not_found_error;
         ] );
     ]

@@ -7,7 +7,7 @@ module Runtime = struct
 
   type request_body = {
     descriptor : Awskit.Body.Request.descriptor;
-    body : (string, Awskit.Error.t) result;
+    materialize : unit -> (string, Awskit.Error.t) result;
   }
 
   type response_body = { body : string; read_fault : Awskit.Error.t option }
@@ -32,10 +32,13 @@ module Runtime = struct
       ~replayable:true ()
 
   let empty_request_body =
-    { descriptor = descriptor_for_string ""; body = Ok "" }
+    { descriptor = descriptor_for_string ""; materialize = (fun () -> Ok "") }
 
   let string_request_body value =
-    { descriptor = descriptor_for_string value; body = Ok value }
+    {
+      descriptor = descriptor_for_string value;
+      materialize = (fun () -> Ok value);
+    }
 
   let bytes_request_body value = string_request_body (Bytes.to_string value)
   let body_error message = Awskit.Error.Producer.body message
@@ -69,16 +72,16 @@ module Runtime = struct
               (body_error "request body ended before declared content_length"))
 
   let stream_request_body descriptor ~write =
-    let writer = writer_for descriptor in
-    let body =
+    let materialize () =
+      let writer = writer_for descriptor in
       match write writer with
       | Ok () -> check_finished_length writer
       | Error _ as error -> error
     in
-    { descriptor; body }
+    { descriptor; materialize }
 
   let request_body_descriptor (body : request_body) = body.descriptor
-  let request_body_result (body : request_body) = body.body
+  let request_body_result (body : request_body) = body.materialize ()
 
   let write_request_body_string writer value =
     match writer.write_error with

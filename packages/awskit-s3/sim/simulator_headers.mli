@@ -46,6 +46,9 @@ val validate_checksum_type :
 val validate_checksum_value :
   Awskit_s3.Object.Checksum.value -> (unit, Awskit.Error.t) result
 
+val validate_storage_class :
+  Awskit_s3.Storage_class.t -> (unit, Awskit.Error.t) result
+
 val checksum_value_headers :
   Awskit_s3.Object.Checksum.value option -> (string * string) list
 

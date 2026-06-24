@@ -9,11 +9,9 @@ open Simulator_object_body
 module Object = Awskit_s3.Object
 
 let validate_opt f = function None -> Ok () | Some value -> f value
-let s3_uri ~bucket ~key = Fmt.str "s3://%s/%s" bucket key
 
 let with_put_context ~bucket ~key error =
-  Awskit.Error.Producer.with_operation ~service:"S3" ~name:"PutObject"
-    ~resource:(s3_uri ~bucket ~key) () error
+  with_operation `Put_object ~bucket ~key error
 
 let put conn ~bucket ~key ?options ~body () =
   let options = Option.value ~default:Object.Put.default_options options in
@@ -31,6 +29,9 @@ let put conn ~bucket ~key ?options ~body () =
               | Error error -> return_error error
               | Ok () -> (
                   match
+                    let* () =
+                      validate_opt validate_storage_class options.storage_class
+                    in
                     validate_opt validate_checksum_value options.checksum
                   with
                   | Error error -> return_error error

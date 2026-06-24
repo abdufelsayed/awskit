@@ -120,6 +120,34 @@ let test_simulator_stream_request_body_error_propagates () =
   | Error error -> Alcotest.failf "unexpected head error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream error object to be absent"
 
+let test_simulator_stream_request_body_runs_at_operation_time () =
+  let conn = make_simulator () in
+  let writes = ref 0 in
+  let descriptor : Awskit.Body.Request.descriptor =
+    Awskit.Body.Request.descriptor_exn ~content_length:4L
+      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false
+      ()
+  in
+  let body =
+    Simulator.Runtime.Request_body.of_stream descriptor ~write:(fun writer ->
+        incr writes;
+        Simulator.Runtime.Request_body.write_string writer "body")
+  in
+  Alcotest.(check int) "writer not run during construction" 0 !writes;
+  ignore
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "lazy-body") ~body ()
+    |> ok_or_fail "put lazy body");
+  Alcotest.(check int) "writer run during operation" 1 !writes;
+  let read =
+    Simulator.Object.get_string conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "lazy-body") ~max_bytes:16L ()
+    |> ok_or_fail "get lazy body"
+  in
+  Alcotest.(check string) "lazy body" "body" read.value
+
 let test_simulator_stream_request_body_rejects_length_mismatch () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
@@ -306,7 +334,12 @@ let test_simulator_multipart_upload_part_stream_error_does_not_store_part () =
        ~part_number:(Multipart.Part_number.of_int_exn 1)
        ~body ()
    with
-  | Error error when Error.equal error stream_error -> ()
+  | Error error
+    when is_body_error error
+         && string_contains
+              (Awskit.Error.to_string_hum error)
+              ~substring:"simulator multipart request body failed" ->
+      ()
   | Error error ->
       Alcotest.failf "unexpected upload part error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected stream request body error");
@@ -617,6 +650,46 @@ let expect_validation_field label field = function
       Alcotest.failf "%s: unexpected error: %a" label Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected validation field %s" label field
 
+let test_simulator_rejects_unknown_storage_class_writes () =
+  let conn = make_simulator () in
+  let unknown_storage = Storage_class.Unknown "FUTURE_CLASS" in
+  let put_options =
+    { Object.Put.default_options with storage_class = Some unknown_storage }
+  in
+  expect_validation_field "simulator put storage" "storage_class"
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "unknown-storage")
+       ~options:put_options
+       ~body:(Simulator.Body.of_string "body")
+       ());
+  ignore
+    (Simulator.Object.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "source.txt")
+       ~body:(Simulator.Body.of_string "body")
+       ()
+    |> ok_or_fail "put source");
+  let copy_options =
+    { Object.Copy.default_options with storage_class = Some unknown_storage }
+  in
+  expect_validation_field "simulator copy storage" "storage_class"
+    (Simulator.Object.copy conn
+       ~source_bucket:(bucket_name "test-bucket")
+       ~source_key:(object_key "source.txt")
+       ~destination_bucket:(bucket_name "test-bucket")
+       ~destination_key:(object_key "copy.txt") ~options:copy_options ());
+  let create_options =
+    {
+      Multipart.Create.default_options with
+      storage_class = Some unknown_storage;
+    }
+  in
+  expect_validation_field "simulator multipart storage" "storage_class"
+    (Simulator.Multipart.create_upload conn
+       ~bucket:(bucket_name "test-bucket")
+       ~key:(object_key "large.bin") ~options:create_options ())
+
 let test_simulator_multipart_complete_validates_sizes () =
   let conn = make_simulator () in
   let upload =
@@ -926,6 +999,9 @@ let suite =
         Alcotest.test_case "simulator stream request body error propagates"
           `Quick test_simulator_stream_request_body_error_propagates;
         Alcotest.test_case
+          "simulator stream request body runs at operation time" `Quick
+          test_simulator_stream_request_body_runs_at_operation_time;
+        Alcotest.test_case
           "simulator stream request body rejects length mismatch" `Quick
           test_simulator_stream_request_body_rejects_length_mismatch;
         Alcotest.test_case
@@ -954,6 +1030,8 @@ let suite =
           test_simulator_conveniences_validate_max_bytes_before_lookup;
         Alcotest.test_case "simulator rejects unknown checksum writes" `Quick
           test_simulator_rejects_unknown_checksum_writes;
+        Alcotest.test_case "simulator rejects unknown storage class writes"
+          `Quick test_simulator_rejects_unknown_storage_class_writes;
         Alcotest.test_case "simulator validates multipart complete sizes" `Quick
           test_simulator_multipart_complete_validates_sizes;
         Alcotest.test_case "simulator validates multipart complete checksums"

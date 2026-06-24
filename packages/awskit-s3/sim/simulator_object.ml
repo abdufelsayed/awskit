@@ -46,19 +46,22 @@ module Object = struct
     let options =
       Option.value ~default:Object_model.Versions.default_options options
     in
+    let return_error error =
+      Error (with_operation `List_object_versions ~bucket error)
+    in
     match validate_bucket bucket with
-    | Error error -> Error error
+    | Error error -> return_error error
     | Ok () -> (
         match validate_list_max_keys options.max_keys with
-        | Error error -> Error error
+        | Error error -> return_error error
         | Ok () -> (
             match require_bucket conn bucket with
-            | Error error -> Error error
+            | Error error -> return_error error
             | Ok bucket_state -> (
                 match
                   operation_fault conn `List_object_versions bucket None
                 with
-                | Some error -> Error error
+                | Some error -> return_error error
                 | None ->
                     let all = listing_entries bucket_state options in
                     let max_keys =
@@ -118,17 +121,20 @@ module Object = struct
     let options =
       Option.value ~default:Object_model.List.default_options options
     in
+    let return_error error =
+      Error (with_operation `List_objects_v2 ~bucket error)
+    in
     match validate_bucket bucket with
-    | Error error -> Error error
+    | Error error -> return_error error
     | Ok () -> (
         match validate_list_max_keys options.max_keys with
-        | Error error -> Error error
+        | Error error -> return_error error
         | Ok () -> (
             match require_bucket conn bucket with
-            | Error error -> Error error
+            | Error error -> return_error error
             | Ok bucket_state -> (
                 match operation_fault conn `List_objects_v2 bucket None with
-                | Some error -> Error error
+                | Some error -> return_error error
                 | None ->
                     Ok
                       (Simulator_object_listing.page

@@ -54,43 +54,55 @@ let read_object ?read_fault obj options ~consume =
 
 let get conn ~bucket ~key ?options ~consume () =
   let options = Option.value ~default:Object.Get.default_options options in
+  let return_error error =
+    Error (with_operation `Get_object ~bucket ~key error)
+  in
   match validate_bucket_key bucket key with
-  | Error error -> Error error
+  | Error error -> return_error error
   | Ok () -> (
       match require_bucket conn bucket with
-      | Error error -> Error error
+      | Error error -> return_error error
       | Ok bucket_state -> (
           match current_or_version bucket_state key options.version_id with
-          | None -> Error (no_such_key ())
+          | None -> return_error (no_such_key ())
           | Some (Stored_delete_marker marker) ->
-              Error
+              return_error
                 (delete_marker_error
                    ~current:(Option.is_none options.version_id)
                    marker)
           | Some (Stored_object obj) -> (
               match take_fault conn with
-              | Some Response_lost ->
+              | Some Response_lost -> (
                   record ~faulted:true conn `Get_object bucket (Some key);
-                  read_object obj options
-                    ~read_fault:(fault_error Response_lost)
-                    ~consume
+                  match
+                    read_object obj options
+                      ~read_fault:(fault_error Response_lost)
+                      ~consume
+                  with
+                  | Error error -> return_error error
+                  | Ok _ as ok -> ok)
               | Some fault ->
                   record ~faulted:true conn `Get_object bucket (Some key);
-                  Error (fault_error fault)
-              | None ->
+                  return_error (fault_error fault)
+              | None -> (
                   record conn `Get_object bucket (Some key);
-                  read_object obj options ~consume)))
+                  match read_object obj options ~consume with
+                  | Error error -> return_error error
+                  | Ok _ as ok -> ok))))
 
 let find conn ~bucket ~key ?options ~consume () =
   let options = Option.value ~default:Object.Get.default_options options in
+  let return_error error =
+    Error (with_operation `Get_object ~bucket ~key error)
+  in
   let lookup_error error =
-    if Error.is_no_such_key error then Ok None else Error error
+    if Error.is_no_such_key error then Ok None else return_error error
   in
   match validate_bucket_key bucket key with
-  | Error error -> Error error
+  | Error error -> return_error error
   | Ok () -> (
       match require_bucket conn bucket with
-      | Error error -> lookup_error error
+      | Error error -> return_error error
       | Ok bucket_state -> (
           match current_or_version bucket_state key options.version_id with
           | None -> Ok None
@@ -101,40 +113,48 @@ let find conn ~bucket ~key ?options ~consume () =
                    marker)
           | Some (Stored_object obj) -> (
               match take_fault conn with
-              | Some Response_lost ->
+              | Some Response_lost -> (
                   record ~faulted:true conn `Get_object bucket (Some key);
-                  Result.map Option.some
-                    (read_object obj options
-                       ~read_fault:(fault_error Response_lost)
-                       ~consume)
+                  match
+                    read_object obj options
+                      ~read_fault:(fault_error Response_lost)
+                      ~consume
+                  with
+                  | Error error -> return_error error
+                  | Ok result -> Ok (Some result))
               | Some fault ->
                   record ~faulted:true conn `Get_object bucket (Some key);
-                  Error (fault_error fault)
-              | None ->
+                  return_error (fault_error fault)
+              | None -> (
                   record conn `Get_object bucket (Some key);
-                  Result.map Option.some (read_object obj options ~consume))))
+                  match read_object obj options ~consume with
+                  | Error error -> return_error error
+                  | Ok result -> Ok (Some result)))))
 
 let head conn ~bucket ~key ?options () =
   let options = Option.value ~default:Object.Head.default_options options in
+  let return_error error =
+    Error (with_operation `Head_object ~bucket ~key error)
+  in
   match validate_bucket_key bucket key with
-  | Error error -> Error error
+  | Error error -> return_error error
   | Ok () -> (
       match require_bucket conn bucket with
-      | Error error -> Error error
+      | Error error -> return_error error
       | Ok bucket_state -> (
           match current_or_version bucket_state key options.version_id with
-          | None -> Error (no_such_key ())
+          | None -> return_error (no_such_key ())
           | Some (Stored_delete_marker marker) ->
-              Error
+              return_error
                 (delete_marker_error
                    ~current:(Option.is_none options.version_id)
                    marker)
           | Some (Stored_object obj) -> (
               match operation_fault conn `Head_object bucket (Some key) with
-              | Some error -> Error error
+              | Some error -> return_error error
               | None -> (
                   match ensure_read_preconditions obj options.preconditions with
-                  | Error error -> Error error
+                  | Error error -> return_error error
                   | Ok () ->
                       let response =
                         response 200

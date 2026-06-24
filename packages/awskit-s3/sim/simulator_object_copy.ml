@@ -11,38 +11,50 @@ let validate_opt f = function None -> Ok () | Some value -> f value
 let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
     ?options () =
   let options = Option.value ~default:Object.Copy.default_options options in
+  let source_error error =
+    Error
+      (with_operation `Copy_object ~bucket:source_bucket ~key:source_key error)
+  in
+  let return_error error =
+    Error
+      (with_operation `Copy_object ~bucket:destination_bucket
+         ~key:destination_key error)
+  in
   match validate_bucket_key source_bucket source_key with
-  | Error error -> Error error
+  | Error error -> source_error error
   | Ok () -> (
       match validate_bucket_key destination_bucket destination_key with
-      | Error error -> Error error
+      | Error error -> return_error error
       | Ok () -> (
           match
             require_object_version conn source_bucket source_key
               options.source_version_id
           with
-          | Error error -> Error error
+          | Error error -> source_error error
           | Ok src -> (
               match
+                let* () =
+                  validate_opt validate_storage_class options.storage_class
+                in
                 validate_opt validate_checksum_algorithm
                   options.checksum_algorithm
               with
-              | Error error -> Error error
+              | Error error -> return_error error
               | Ok () -> (
                   match require_bucket conn destination_bucket with
-                  | Error error -> Error error
+                  | Error error -> return_error error
                   | Ok destination_bucket_state -> (
                       match
                         operation_fault conn `Copy_object destination_bucket
                           (Some destination_key)
                       with
-                      | Some error -> Error error
+                      | Some error -> return_error error
                       | None -> (
                           match
                             ensure_copy_source_preconditions src
                               options.source_preconditions
                           with
-                          | Error error -> Error error
+                          | Error error -> source_error error
                           | Ok () ->
                               let metadata =
                                 match options.metadata_directive with

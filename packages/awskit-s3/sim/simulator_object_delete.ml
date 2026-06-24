@@ -30,14 +30,17 @@ let delete_objects_conditions_match object_ = function
 
 let delete conn ~bucket ~key ?options () =
   let options = Option.value ~default:Object.Delete.default_options options in
+  let return_error error =
+    Error (with_operation `Delete_object ~bucket ~key error)
+  in
   match validate_bucket_key bucket key with
-  | Error error -> Error error
+  | Error error -> return_error error
   | Ok () -> (
       match require_bucket conn bucket with
-      | Error error -> Error error
+      | Error error -> return_error error
       | Ok bucket_state -> (
           match operation_fault conn `Delete_object bucket (Some key) with
-          | Some error -> Error error
+          | Some error -> return_error error
           | None -> (
               match options.version_id with
               | Some version_id -> (
@@ -45,16 +48,16 @@ let delete conn ~bucket ~key ?options () =
                   | None
                     when delete_preconditions_are_empty options.preconditions ->
                       Ok (delete_result ~version_id ())
-                  | None -> Error (precondition_failed ())
+                  | None -> return_error (precondition_failed ())
                   | Some (Stored_delete_marker _) ->
                       if delete_preconditions_are_empty options.preconditions
                       then Ok (delete_result ~delete_marker:true ~version_id ())
-                      else Error (precondition_failed ())
+                      else return_error (precondition_failed ())
                   | Some (Stored_object obj) -> (
                       match
                         ensure_delete_preconditions obj options.preconditions
                       with
-                      | Error error -> Error error
+                      | Error error -> return_error error
                       | Ok () -> Ok (delete_result ~version_id ())))
               | None when versioning_keeps_history bucket_state -> (
                   match current_object bucket_state key with
@@ -64,12 +67,12 @@ let delete conn ~bucket ~key ?options () =
                       Ok
                         (delete_result ~delete_marker:true
                            ~version_id:marker.version_id ())
-                  | None -> Error (precondition_failed ())
+                  | None -> return_error (precondition_failed ())
                   | Some obj -> (
                       match
                         ensure_delete_preconditions obj options.preconditions
                       with
-                      | Error error -> Error error
+                      | Error error -> return_error error
                       | Ok () ->
                           let marker =
                             store_delete_marker conn bucket_state key
@@ -83,26 +86,29 @@ let delete conn ~bucket ~key ?options () =
                     when delete_preconditions_are_empty options.preconditions ->
                       Hashtbl.remove bucket_state.objects key;
                       Ok (delete_result ())
-                  | None -> Error (precondition_failed ())
+                  | None -> return_error (precondition_failed ())
                   | Some obj -> (
                       match
                         ensure_delete_preconditions obj options.preconditions
                       with
-                      | Error error -> Error error
+                      | Error error -> return_error error
                       | Ok () ->
                           Hashtbl.remove bucket_state.objects key;
                           Ok (delete_result ()))))))
 
 let delete_objects conn ~bucket ~objects ?options:_ () =
   let key_string key = Object_key.to_string key in
+  let return_error error =
+    Error (with_operation `Delete_objects ~bucket error)
+  in
   match validate_bucket bucket with
-  | Error error -> Error error
+  | Error error -> return_error error
   | Ok () -> (
       match require_bucket conn bucket with
-      | Error error -> Error error
+      | Error error -> return_error error
       | Ok bucket_state -> (
           match operation_fault conn `Delete_objects bucket None with
-          | Some error -> Error error
+          | Some error -> return_error error
           | None ->
               let deleted, errors =
                 List.fold_right

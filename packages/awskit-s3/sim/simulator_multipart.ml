@@ -20,6 +20,7 @@ module Multipart = struct
   let validate_create_options (options : Multipart_model.Create.options) =
     let* () = validate_metadata options.metadata in
     let* () = validate_tags options.tags in
+    let* () = validate_opt validate_storage_class options.storage_class in
     let* () =
       validate_opt validate_checksum_algorithm options.checksum_algorithm
     in
@@ -47,24 +48,27 @@ module Multipart = struct
     let options =
       Option.value ~default:Multipart_model.Create.default_options options
     in
+    let return_error error =
+      Error (with_operation `Create_multipart_upload ~bucket ~key error)
+    in
     match validate_bucket_key bucket key with
-    | Error error -> Error error
+    | Error error -> return_error error
     | Ok () -> (
         match require_bucket conn bucket with
-        | Error error -> Error error
+        | Error error -> return_error error
         | Ok bucket_state -> (
             match validate_create_options options with
-            | Error error -> Error error
+            | Error error -> return_error error
             | Ok () -> (
                 match
                   operation_fault conn `Create_multipart_upload bucket
                     (Some key)
                 with
-                | Some error -> Error error
+                | Some error -> return_error error
                 | None -> (
                     let upload_id = next_upload_id conn in
                     match created_upload_of_strings ~bucket ~key ~upload_id with
-                    | Error error -> Error error
+                    | Error error -> return_error error
                     | Ok upload ->
                         Hashtbl.replace bucket_state.multipart_uploads
                           (upload_key upload_id)
@@ -105,20 +109,23 @@ module Multipart = struct
     let key = upload_handle_key upload in
     let upload_id = upload_handle_id upload in
     let part_number_int = Multipart_model.Part_number.to_int part_number in
+    let return_error error =
+      Error (with_operation `Upload_part ~bucket ~key error)
+    in
     match validate_bucket_key bucket key with
-    | Error error -> Error error
+    | Error error -> return_error error
     | Ok () -> (
         match validate_opt validate_checksum_value options.checksum with
-        | Error error -> Error error
+        | Error error -> return_error error
         | Ok () -> (
             match require_multipart_upload conn ~bucket ~key ~upload_id with
-            | Error error -> Error error
+            | Error error -> return_error error
             | Ok (_bucket_state, stored_upload) -> (
                 match operation_fault conn `Upload_part bucket (Some key) with
-                | Some error -> Error error
+                | Some error -> return_error error
                 | None -> (
                     match request_body_result body with
-                    | Error error -> Error error
+                    | Error error -> return_error error
                     | Ok body ->
                         let etag = etag body in
                         let checksum = checksum_for_value options.checksum in
@@ -243,23 +250,26 @@ module Multipart = struct
     let bucket = upload_handle_bucket upload in
     let key = upload_handle_key upload in
     let upload_id = upload_handle_id upload in
+    let return_error error =
+      Error (with_operation `Complete_multipart_upload ~bucket ~key error)
+    in
     match validate_bucket_key bucket key with
-    | Error error -> Error error
+    | Error error -> return_error error
     | Ok () -> (
         match validate_complete_options options with
-        | Error error -> Error error
+        | Error error -> return_error error
         | Ok () -> (
             match require_multipart_upload conn ~bucket ~key ~upload_id with
-            | Error error -> Error error
+            | Error error -> return_error error
             | Ok (bucket_state, upload) -> (
                 match validate_complete_parts upload options parts with
-                | Error error -> Error error
+                | Error error -> return_error error
                 | Ok () -> (
                     match
                       operation_fault conn `Complete_multipart_upload bucket
                         (Some key)
                     with
-                    | Some error -> Error error
+                    | Some error -> return_error error
                     | None ->
                         let body =
                           parts
@@ -325,16 +335,19 @@ module Multipart = struct
     let bucket = upload_handle_bucket upload in
     let key = upload_handle_key upload in
     let upload_id = upload_handle_id upload in
+    let return_error error =
+      Error (with_operation `Abort_multipart_upload ~bucket ~key error)
+    in
     match validate_bucket_key bucket key with
-    | Error error -> Error error
+    | Error error -> return_error error
     | Ok () -> (
         match require_multipart_upload conn ~bucket ~key ~upload_id with
-        | Error error -> Error error
+        | Error error -> return_error error
         | Ok (bucket_state, _upload) -> (
             match
               operation_fault conn `Abort_multipart_upload bucket (Some key)
             with
-            | Some error -> Error error
+            | Some error -> return_error error
             | None ->
                 Hashtbl.remove bucket_state.multipart_uploads
                   (upload_key upload_id);
@@ -356,17 +369,20 @@ module Multipart = struct
     let bucket = upload_handle_bucket upload in
     let key = upload_handle_key upload in
     let upload_id = upload_handle_id upload in
+    let return_error error =
+      Error (with_operation `List_parts ~bucket ~key error)
+    in
     match validate_bucket_key bucket key with
-    | Error error -> Error error
+    | Error error -> return_error error
     | Ok () -> (
         match validate_list_parts_options options with
-        | Error error -> Error error
+        | Error error -> return_error error
         | Ok () -> (
             match require_multipart_upload conn ~bucket ~key ~upload_id with
-            | Error error -> Error error
+            | Error error -> return_error error
             | Ok (_bucket_state, upload) -> (
                 match operation_fault conn `List_parts bucket (Some key) with
-                | Some error -> Error error
+                | Some error -> return_error error
                 | None ->
                     let max_parts =
                       Option.value ~default:(config (store conn)).max_list_keys

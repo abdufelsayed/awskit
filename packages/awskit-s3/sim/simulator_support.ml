@@ -48,21 +48,8 @@ end
 let validate_metadata metadata =
   Metadata.of_list (Metadata.to_list metadata) |> Result.map ignore
 
-let validate_tag tag =
-  let* () = validate_header_value ~field:"tag key" (Tag.key tag) in
-  if has_ctl_or_del (Tag.value tag) then
-    invalid ~field:"tag value" "tag value contains control characters"
-  else Ok ()
-
 let validate_tags tags =
-  let tags = Tag.Set.to_list tags in
-  let rec loop = function
-    | [] -> Tag.Set.of_list tags
-    | tag :: rest ->
-        let* () = validate_tag tag in
-        loop rest
-  in
-  loop tags |> Result.map ignore
+  Tag.Set.of_list (Tag.Set.to_list tags) |> Result.map ignore
 
 let validate_bucket bucket = Bucket_name.of_string bucket |> Result.map ignore
 let validate_key key = Object_key.of_string key |> Result.map ignore

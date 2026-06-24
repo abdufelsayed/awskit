@@ -2,6 +2,8 @@
 
 (copy_files ../awskit_s3_header_helpers.mli)
 
+(copy_files ../s3_error_context.ml)
+
 (library
  (name awskit_s3_sim)
  (public_name awskit-s3-sim)
@@ -26,5 +28,6 @@
   simulator_runtime
   simulator_state
   simulator_store
-  simulator_support)
+  simulator_support
+  s3_error_context)
  (libraries awskit awskit-s3 digestif ptime fmt base64 uri))
