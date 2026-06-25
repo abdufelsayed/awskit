@@ -1,4 +1,11 @@
 (library
  (name awskit_test)
+ (modules awskit_test)
  (wrapped false)
  (libraries awskit alcotest ptime qcheck-core qcheck-alcotest))
+
+(library
+ (name awskit_runtime_http_contract)
+ (modules runtime_http_contract)
+ (wrapped false)
+ (libraries awskit))

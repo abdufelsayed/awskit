@@ -1,11 +1,29 @@
 (test
  (name test_awskit_eio)
  (package awskit-eio)
- (libraries awskit awskit-eio cohttp-eio eio eio_main ptime alcotest unix))
+ (libraries
+  awskit
+  awskit-eio
+  awskit_runtime_http_contract
+  cohttp-eio
+  eio
+  eio_main
+  ptime
+  alcotest
+  unix))
+
+(rule
+ (alias runtime-http-contract)
+ (package awskit-eio)
+ (deps test_awskit_eio.exe)
+ (action
+  (run ./test_awskit_eio.exe test "runtime-http-contract")))
 
 (rule
  (alias runtime-conformance)
  (package awskit-eio)
- (deps test_awskit_eio.exe)
+ (deps
+  (alias runtime-http-contract)
+  test_awskit_eio.exe)
  (action
   (run ./test_awskit_eio.exe test "integration:connection")))
