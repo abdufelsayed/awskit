@@ -16,6 +16,10 @@ Runtime HTTP adapter work runs through package-owned aliases:
 The suite IDs are `workload:awskit-eio:runtime-http` and
 `workload:awskit-lwt:runtime-http`.
 
+S3 workload support lives in `test/awskit-s3/support`. The private
+`awskit_s3_workload` library provides reusable command generation, pure model
+state, replay text helpers, and a target functor for package-owned runners.
+
 During the migration, the previous test tree may exist locally as `test.o/`.
 That directory is historical reference material only. Do not stage it, do not
 add ignore rules for it, and do not use it as replacement evidence for tracked
