@@ -28,6 +28,15 @@ workload without network access:
 
 The suite ID is `workload:awskit-s3-sim:s3-state`.
 
+The MinIO runner lives in `test/awskit-s3/lwt/unix` and runs a bounded profile
+of the same shared S3 state workload against Docker-backed MinIO:
+
+- `@test/awskit-s3/lwt/unix/s3-minio-workload`
+- `@s3-minio-workload`
+
+The suite ID is `workload:minio:s3-state`. The compatibility alias
+`@minio-contract` points at the same workload.
+
 During the migration, the previous test tree may exist locally as `test.o/`.
 That directory is historical reference material only. Do not stage it, do not
 add ignore rules for it, and do not use it as replacement evidence for tracked

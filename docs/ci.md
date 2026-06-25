@@ -51,9 +51,7 @@ as release branch pushes, scheduled runs, and manual dispatches.
 
 - Runs on Ubuntu.
 - Starts MinIO with Docker Compose as a local S3-compatible test double.
-- Runs `opam exec -- dune build --force @minio-contract`.
-- Runs the focused Eio smoke with
-  `opam exec -- dune build --force @test/awskit-s3/eio/minio-smoke-eio`.
+- Runs `opam exec -- dune build --force @check-docker`.
 - Provides local adapter integration evidence, separate from no-network
   protocol evidence.
 - Dumps MinIO logs on failure.
@@ -90,8 +88,7 @@ Reproduce locally with the closest command. For MinIO failures:
 
 ```sh
 docker compose up -d
-opam exec -- dune build --force @minio-contract
-opam exec -- dune build --force @test/awskit-s3/eio/minio-smoke-eio
+opam exec -- dune build --force @check-docker
 docker compose down -v
 ```
 

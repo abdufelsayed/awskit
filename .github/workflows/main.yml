@@ -186,11 +186,8 @@ jobs:
       - name: Start MinIO
         run: docker compose up -d
 
-      - name: Run S3 Lwt Unix contract
-        run: opam exec -- dune build --force @minio-contract
-
-      - name: Run S3 Eio smoke
-        run: opam exec -- dune build --force @test/awskit-s3/eio/minio-smoke-eio
+      - name: Run Docker-backed S3 checks
+        run: opam exec -- dune build --force @check-docker
 
       - name: Dump MinIO logs on failure
         if: failure()

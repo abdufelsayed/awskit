@@ -15,7 +15,9 @@
 
 (alias
  (name check-docker)
- (deps dune-project))
+ (deps
+  dune-project
+  (alias s3-minio-workload)))
 
 (alias
  (name check-discovery)
@@ -39,6 +41,16 @@
  (name s3-sim-workload)
  (deps
   (alias test/awskit-s3/sim/s3-sim-workload)))
+
+(alias
+ (name s3-minio-workload)
+ (deps
+  (alias test/awskit-s3/lwt/unix/s3-minio-workload)))
+
+(alias
+ (name minio-contract)
+ (deps
+  (alias s3-minio-workload)))
 
 (alias
  (name check-protocol)

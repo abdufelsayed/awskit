@@ -1,0 +1,28 @@
+(executable
+ (name test_s3_minio_workload)
+ (libraries
+  awskit
+  awskit-lwt-unix
+  awskit-s3
+  awskit-s3-lwt-unix
+  awskit_s3_workload
+  lwt
+  lwt.unix
+  ptime.clock.os
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  unix))
+
+(rule
+ (alias s3-minio-workload)
+ (package awskit-s3-lwt-unix)
+ (deps test_s3_minio_workload.exe)
+ (action
+  (run ./test_s3_minio_workload.exe test "workload:minio:s3-state")))
+
+(alias
+ (name minio-contract)
+ (package awskit-s3-lwt-unix)
+ (deps
+  (alias s3-minio-workload)))

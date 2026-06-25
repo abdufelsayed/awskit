@@ -246,7 +246,9 @@
   (fmt
    (>= 0.11.0))
   ptime
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-s3-eio)
