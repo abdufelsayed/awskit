@@ -19,7 +19,7 @@ layers. A strong test names four axes and combines them deliberately:
   S3 state model, wire-format law, fixture bytes, local S3-compatible behavior,
   or reduced regression.
 - Cost: the gate where the evidence belongs, such as fast local, no-network
-  correctness, Docker integration, long discovery, or optional live-service
+  correctness, Docker integration, opt-in discovery, or optional live-service
   validation.
 
 Use the narrowest check that proves the behavior, then broaden when a change
@@ -54,6 +54,7 @@ mentioning a field name.
 | `@check-protocol` | Compatibility no-network protocol gate used by CI and release checks while the test tree is rebuilt. Package-scoped gates delegate to tracked package-owned workloads where wired, including the S3 protocol wire aliases. | No |
 | `@check-local` | Local composed gate for repository changes; currently includes runtime HTTP workloads, the simulator S3 workloads, S3 transfer fault workloads, and S3 protocol wire workloads. | No |
 | `@check-docker` | Docker-backed local integration gates, currently the MinIO S3 workload. | Local Docker |
+| `@check-discovery` | Opt-in no-network discovery gate that recursively runs directory-owned `discovery` aliases for generated workloads and replay evidence. | No |
 | `@s3-sim-workload` | No-network simulator run of the shared S3 state workload. | No |
 | `@s3-protocol-wire` | No-network S3 protocol wire property workload. | No |
 | `@s3-protocol-fixtures` | Golden S3 protocol fixture comparisons. | No |
@@ -87,6 +88,46 @@ therefore participate in `@check-local` and the package-scoped `@check-protocol`
 for `awskit-s3`. The S3 transfer fault workload is also no-network evidence and
 participates in `@check-local` through `@s3-transfer-faults`. Docker-backed
 MinIO transfer cases stay under `@s3-minio-workload` and `@check-docker`.
+
+## Discovery And Backtesting
+
+`@check-discovery` is an opt-in Dune alias for no-network discovery. It
+depends on recursive `discovery` aliases in focused test directories, currently
+covering runtime HTTP workloads, the S3 simulator workload, S3 transfer fault
+workloads, S3 protocol wire properties, and S3 protocol replay. It does not run
+Docker-backed MinIO; use `@s3-minio-workload` or `@check-docker` for that
+evidence.
+
+Generated workloads honor `AWSKIT_QCHECK_COUNT=<positive-int>` as an override
+for their default QCheck counts. Unset, empty, invalid, or non-positive values
+fall back to the workload default. Set a larger value when discovery should
+explore more generated cases; smaller positive values are useful for quick
+validation. Deterministic Alcotest examples, replay corpora, and fixture
+comparisons should not be inflated by this setting.
+
+Property tests should keep fresh seeds by default. Let `QCheck_alcotest` choose
+and print a `qcheck random seed`; use `QCHECK_SEED=<seed>` with the focused
+alias that found the failure when reproducing a case.
+
+Backtesting is opt-in discovery work used to prove a workload catches the bug
+class it claims to cover. Temporarily mutate production or target test code, run
+the focused alias, confirm the workload fails, then restore the mutation. The
+committed artifact is the workload improvement or a reduced replay case, not the
+temporary mutation.
+
+Useful backtesting examples:
+
+- Remove bodiless response handling and run
+  `opam exec -- dune build @runtime-http-workload`.
+- Permit malformed XML and run `opam exec -- dune build @s3-protocol-wire`.
+- Drop simulator object-tag mutation and run
+  `opam exec -- dune build @s3-sim-workload`.
+- Skip multipart cleanup and run
+  `opam exec -- dune build @s3-transfer-faults`.
+
+When backtesting or high-count discovery finds a real product bug, reduce the
+failing input and commit it as a replay artifact under the target fixture
+directory before the production fix.
 
 `@docs-mdx` does not exist yet. Do not add a placeholder alias. Add it only
 when README or package-guide snippets are normalized into real MDX or extracted

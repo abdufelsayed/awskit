@@ -25,7 +25,8 @@
 
 (alias
  (name check-discovery)
- (deps dune-project))
+ (deps
+  (alias_rec discovery)))
 
 ; Compatibility aliases stay usable while the test tree is rebuilt. Focused
 ; workload passes replace these no-op deps with the aliases they introduce.

@@ -1,5 +1,19 @@
 open Awskit_s3
 
+let count_from_env ~var ~default =
+  match Sys.getenv_opt var with
+  | None | Some "" -> default
+  | Some value -> (
+      match int_of_string_opt value with
+      | Some count when count > 0 -> count
+      | _ -> default)
+
+let broad_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:500
+let boundary_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:300
+let default_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:200
+let tagging_field_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:250
+let oversized_tag_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:100
+
 let split_ampersand value =
   if String.equal value "" then [] else String.split_on_char '&' value
 
@@ -15,7 +29,8 @@ let print_query params =
   |> String.concat ";"
 
 let prop_canonical_query_params_sorted =
-  QCheck.Test.make ~count:500 ~name:"canonical query params sort encoded pairs"
+  QCheck.Test.make ~count:broad_count
+    ~name:"canonical query params sort encoded pairs"
     (QCheck.make ~print:print_query Protocol_generators.query_params)
     (fun params ->
       let canonical = Awskit.Signing.canonical_query_params params in
@@ -24,7 +39,7 @@ let prop_canonical_query_params_sorted =
       && String.equal canonical (Protocol_wire_model.canonical_query params))
 
 let prop_canonical_query_duplicate_keys =
-  QCheck.Test.make ~count:300
+  QCheck.Test.make ~count:boundary_count
     ~name:"canonical query params preserve duplicate keys"
     (QCheck.make ~print:print_query Protocol_generators.duplicate_query_params)
     (fun params ->
@@ -40,7 +55,8 @@ let content_range_equal (left : Range.Content_range.t)
   && Option.equal Int64.equal left.complete_length right.complete_length
 
 let prop_content_range_valid_round_trips =
-  QCheck.Test.make ~count:500 ~name:"Content-Range valid values round-trip"
+  QCheck.Test.make ~count:broad_count
+    ~name:"Content-Range valid values round-trip"
     (QCheck.make ~print:Protocol_wire_model.content_range_header
        Protocol_generators.valid_content_range) (fun generated ->
       let header = Protocol_wire_model.content_range_header generated in
@@ -56,7 +72,7 @@ let prop_content_range_valid_round_trips =
               && content_range_equal value reparsed))
 
 let prop_content_range_invalid_headers_decode_error =
-  QCheck.Test.make ~count:300
+  QCheck.Test.make ~count:boundary_count
     ~name:"Content-Range invalid boundary families are decode errors"
     (QCheck.make ~print:Fun.id Protocol_generators.invalid_content_range)
     (fun header ->
@@ -65,14 +81,15 @@ let prop_content_range_invalid_headers_decode_error =
       | Ok _ -> false)
 
 let prop_endpoint_rejects_url_parts =
-  QCheck.Test.make ~count:200
+  QCheck.Test.make ~count:default_count
     ~name:"endpoint parser rejects URL parts and malformed authorities"
     (QCheck.make ~print:String.escaped
        Protocol_generators.malformed_endpoint_authority) (fun value ->
       Result.is_error (Awskit.Endpoint.of_string value))
 
 let prop_header_values_reject_newline =
-  QCheck.Test.make ~count:200 ~name:"request header values reject newline"
+  QCheck.Test.make ~count:default_count
+    ~name:"request header values reject newline"
     (QCheck.make
        ~print:(fun value -> String.escaped value)
        Protocol_generators.newline_header_value)
@@ -88,7 +105,7 @@ let prop_metadata_rejects_case_insensitive_duplicate_keys =
     Protocol_generators.gen_string ~min:0 ~max:12
       ~chars:"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
   in
-  QCheck.Test.make ~count:200
+  QCheck.Test.make ~count:default_count
     ~name:"metadata rejects case-insensitive duplicate keys"
     (QCheck.make
        ~print:(fun (key, first, second) -> Fmt.str "%s=%s/%s" key first second)
@@ -117,7 +134,7 @@ let invalid_tag_field_to_string = function
   | `Value value -> Fmt.str "value=%S" value
 
 let prop_tagging_xml_rejects_invalid_tag_fields =
-  QCheck.Test.make ~count:250
+  QCheck.Test.make ~count:tagging_field_count
     ~name:"tagging XML rejects invalid tag fields as decode errors"
     (QCheck.make ~print:invalid_tag_field_to_string
        Protocol_generators.invalid_tag_field) (fun invalid ->
@@ -131,7 +148,7 @@ let prop_tagging_xml_rejects_invalid_tag_fields =
       | Ok _ -> false)
 
 let prop_tagging_xml_rejects_duplicate_tag_keys =
-  QCheck.Test.make ~count:200
+  QCheck.Test.make ~count:default_count
     ~name:"tagging XML rejects duplicate tag keys as decode errors"
     (QCheck.make
        ~print:(fun (key, first, second) -> Fmt.str "%s=%S/%S" key first second)
@@ -148,7 +165,7 @@ let prop_tagging_xml_rejects_duplicate_tag_keys =
       | Ok _ -> false)
 
 let prop_tagging_xml_rejects_oversized_tag_sets =
-  QCheck.Test.make ~count:100
+  QCheck.Test.make ~count:oversized_tag_count
     ~name:"tagging XML rejects tag sets above the S3 limit as decode errors"
     (QCheck.make ~print:tag_pairs_to_string
        Protocol_generators.oversized_tag_set) (fun tags ->
@@ -160,7 +177,7 @@ let planned_part_count ~content_length ~part_size =
   if content_length = 0 then 0 else ((content_length - 1) / part_size) + 1
 
 let prop_download_ranges_cover_content_length =
-  QCheck.Test.make ~count:300
+  QCheck.Test.make ~count:boundary_count
     ~name:"download ranges exactly cover content length with exact bounds"
     (QCheck.make
        ~print:(fun (content_length, part_size) ->
@@ -209,7 +226,7 @@ let prop_download_ranges_cover_content_length =
           && valid_ranges 1 0 ranges)
 
 let prop_upload_parts_cover_content_length =
-  QCheck.Test.make ~count:200
+  QCheck.Test.make ~count:default_count
     ~name:
       "upload parts exactly cover non-empty content length with exact bounds"
     (QCheck.make

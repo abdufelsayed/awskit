@@ -70,6 +70,23 @@ Docker-backed MinIO:
 The suite IDs are `workload:minio:s3-state` and `integration:minio:transfer`.
 The compatibility alias `@minio-contract` points at the same workload.
 
+## Discovery And Backtesting
+
+`@check-discovery` is the opt-in no-network discovery gate. It recurses through
+focused `discovery` aliases for runtime HTTP, S3 simulator, S3 transfer faults,
+S3 protocol wire properties, and S3 protocol replay. Docker-backed MinIO stays
+under `@s3-minio-workload` and `@check-docker`.
+
+Use `AWSKIT_QCHECK_COUNT=<positive-int>` to override generated workload counts,
+optionally raising them for deeper discovery. Unset or invalid values keep the
+workload defaults, and deterministic examples, fixtures, and replay cases remain
+ordinary fixed evidence. QCheck chooses fresh seeds by default; replay failures
+with `QCHECK_SEED=<seed>` on the focused alias that reported the seed.
+
+Backtesting uses temporary mutations to verify a workload catches a bug class.
+Restore the mutation before committing. Commit workload improvements or reduced
+replay cases, not the mutation itself.
+
 During the migration, the previous test tree may exist locally as `test.o/`.
 That directory is historical reference material only. Do not stage it, do not
 add ignore rules for it, and do not use it as replacement evidence for tracked

@@ -5,6 +5,14 @@ module type TARGET = sig
   val run_upload_case : Model.upload_case -> bool
 end
 
+let count_from_env ~var ~default =
+  match Sys.getenv_opt var with
+  | None | Some "" -> default
+  | Some value -> (
+      match int_of_string_opt value with
+      | Some count when count > 0 -> count
+      | _ -> default)
+
 let max_extra_part_bytes = 4096
 
 let body_char length index =
@@ -220,7 +228,8 @@ let arbitrary =
 
 module Make (Target : TARGET) = struct
   let property =
-    QCheck.Test.make ~count:50
+    let count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:50 in
+    QCheck.Test.make ~count
       ~name:(Target.name ^ " transfer faults preserve model")
       arbitrary Target.run_upload_case
     |> QCheck_alcotest.to_alcotest ~speed_level:`Quick

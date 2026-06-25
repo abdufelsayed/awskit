@@ -15,6 +15,7 @@
  (alias s3-sim-workload)
  (package awskit-s3-sim)
  (deps test_awskit_s3_sim.exe)
+ (locks awskit-s3-sim-alcotest)
  (action
   (run ./test_awskit_s3_sim.exe test "workload:awskit-s3-sim:s3-state")))
 
@@ -22,6 +23,7 @@
  (alias s3-transfer-faults)
  (package awskit-s3-sim)
  (deps test_awskit_s3_sim.exe)
+ (locks awskit-s3-sim-alcotest)
  (action
   (run
    ./test_awskit_s3_sim.exe
@@ -33,3 +35,11 @@
  (package awskit-s3-sim)
  (deps
   (alias s3-sim-workload)))
+
+(rule
+ (alias discovery)
+ (package awskit-s3-sim)
+ (deps test_awskit_s3_sim.exe)
+ (locks awskit-s3-sim-alcotest)
+ (action
+  (run ./test_awskit_s3_sim.exe test "workload:awskit-s3-sim:")))

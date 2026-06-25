@@ -3,6 +3,14 @@ module Model = S3_model
 
 type profile = Strict | Minio
 
+let count_from_env ~var ~default =
+  match Sys.getenv_opt var with
+  | None | Some "" -> default
+  | Some value -> (
+      match int_of_string_opt value with
+      | Some count when count > 0 -> count
+      | _ -> default)
+
 module type TARGET = sig
   val name : string
   val bucket : Awskit_s3.Bucket_name.t
@@ -161,8 +169,10 @@ struct
         in
         true)
 
+  let count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:Config.count
+
   let property =
-    QCheck.Test.make ~count:Config.count
+    QCheck.Test.make ~count
       ~name:(Printf.sprintf "%s S3 workload follows model" Target.name)
       (arbitrary_for_profile Config.profile)
       run

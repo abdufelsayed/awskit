@@ -32,6 +32,14 @@ let seed_scenarios =
       ();
   ]
 
+let count_from_env ~var ~default =
+  match Stdlib.Sys.getenv_opt var with
+  | None | Some "" -> default
+  | Some value -> (
+      match Stdlib.int_of_string_opt value with
+      | Some count when count > 0 -> count
+      | _ -> default)
+
 let char_gen = QCheck.Gen.oneof_list [ 'a'; 'b'; 'c'; ' '; '-'; '_' ]
 
 let small_body_gen =
@@ -121,7 +129,8 @@ module Make (Target : TARGET) = struct
                 : bool)))
 
   let generated_case =
-    QCheck.Test.make ~count:250 ~name:"generated scenarios"
+    let count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:250 in
+    QCheck.Test.make ~count ~name:"generated scenarios"
       (QCheck.make ~print:Model.to_string scenario_gen)
       (check_scenario ~target_name:Target.name Target.run_scenario)
     |> QCheck_alcotest.to_alcotest ~speed_level:`Quick

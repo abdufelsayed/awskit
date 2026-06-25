@@ -103,3 +103,10 @@
  (package awskit-s3)
  (deps
   (alias s3-protocol-replay)))
+
+(alias
+ (name discovery)
+ (package awskit-s3)
+ (deps
+  (alias s3-protocol-wire)
+  (alias s3-protocol-replay)))
