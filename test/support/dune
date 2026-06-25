@@ -1,8 +1,20 @@
 (library
+ (name awskit_test_coverage)
+ (modules workload_coverage)
+ (wrapped false)
+ (libraries alcotest))
+
+(library
  (name awskit_runtime_http_workload)
  (modules runtime_http_model runtime_http_workload)
  (wrapped false)
- (libraries awskit base alcotest qcheck-core qcheck-alcotest))
+ (libraries
+  awskit
+  awskit_test_coverage
+  base
+  alcotest
+  qcheck-core
+  qcheck-alcotest))
 
 (library
  (name awskit_runtime_test_support)

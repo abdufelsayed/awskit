@@ -527,33 +527,78 @@ let prop_complete_upload_rejects_small_nonfinal_parts =
           && conn.Protocol_recording_runtime.Runtime.calls = []
       | Ok _ -> false)
 
+let protocol_family_properties =
+  [
+    (Protocol_generators.Query, prop_canonical_query_params_sorted);
+    (Protocol_generators.Duplicate_query, prop_canonical_query_duplicate_keys);
+    ( Protocol_generators.Invalid_content_range,
+      prop_content_range_invalid_headers_decode_error );
+    (Protocol_generators.Endpoint_malformed, prop_endpoint_rejects_url_parts);
+    (Protocol_generators.Header_newline, prop_header_values_reject_newline);
+    ( Protocol_generators.Invalid_tag_field,
+      prop_tagging_xml_rejects_invalid_tag_fields );
+    ( Protocol_generators.Oversized_tag_set,
+      prop_tagging_xml_rejects_oversized_tag_sets );
+  ]
+
+let remaining_protocol_properties =
+  [
+    prop_content_range_valid_round_trips;
+    prop_endpoint_auto_virtual_hosted_object_paths;
+    prop_endpoint_auto_dotted_bucket_uses_path_style;
+    prop_endpoint_accelerate_rejects_dotted_buckets;
+    prop_metadata_rejects_case_insensitive_duplicate_keys;
+    prop_presigned_upload_part_safe_uri_keeps_operation_query;
+    prop_presigned_rejects_invalid_extra_signed_headers;
+    prop_presigned_rejects_invalid_expiration_bounds;
+    prop_tagging_xml_rejects_duplicate_tag_keys;
+    prop_download_ranges_cover_content_length;
+    prop_upload_parts_cover_content_length;
+    prop_get_request_emits_range_header;
+    prop_complete_upload_rejects_unsorted_parts_before_request;
+    prop_complete_upload_rejects_small_nonfinal_parts;
+  ]
+
+let required_protocol_family_bins =
+  [
+    "protocol.family.query";
+    "protocol.family.duplicate-query";
+    "protocol.family.endpoint-malformed";
+    "protocol.family.header-newline";
+    "protocol.family.invalid-content-range";
+    "protocol.family.invalid-tag-field";
+    "protocol.family.oversized-tag-set";
+  ]
+
+let test_protocol_family_coverage () =
+  let observed =
+    protocol_family_properties
+    |> List.map (fun (family, _) -> Protocol_generators.family_bin family)
+  in
+  let has_observed bin = List.exists (String.equal bin) observed in
+  match
+    List.filter
+      (fun bin -> not (has_observed bin))
+      required_protocol_family_bins
+  with
+  | [] -> ()
+  | missing ->
+      Alcotest.failf
+        "S3 protocol generator families missing semantic coverage bins:\n\
+         %s\n\n\
+         observed:\n\
+         %s"
+        (String.concat "\n" missing)
+        (String.concat "\n" observed)
+
 let suite =
   [
     ( "workload:awskit-s3:protocol-wire",
-      List.map Protocol_support.to_alcotest
-        [
-          prop_canonical_query_params_sorted;
-          prop_canonical_query_duplicate_keys;
-          prop_content_range_valid_round_trips;
-          prop_content_range_invalid_headers_decode_error;
-          prop_endpoint_rejects_url_parts;
-          prop_endpoint_auto_virtual_hosted_object_paths;
-          prop_endpoint_auto_dotted_bucket_uses_path_style;
-          prop_endpoint_accelerate_rejects_dotted_buckets;
-          prop_header_values_reject_newline;
-          prop_metadata_rejects_case_insensitive_duplicate_keys;
-          prop_presigned_upload_part_safe_uri_keeps_operation_query;
-          prop_presigned_rejects_invalid_extra_signed_headers;
-          prop_presigned_rejects_invalid_expiration_bounds;
-          prop_tagging_xml_rejects_invalid_tag_fields;
-          prop_tagging_xml_rejects_duplicate_tag_keys;
-          prop_tagging_xml_rejects_oversized_tag_sets;
-          prop_download_ranges_cover_content_length;
-          prop_upload_parts_cover_content_length;
-          prop_get_request_emits_range_header;
-          prop_complete_upload_rejects_unsorted_parts_before_request;
-          prop_complete_upload_rejects_small_nonfinal_parts;
-        ] );
+      Alcotest.test_case "generator family semantic coverage" `Quick
+        test_protocol_family_coverage
+      :: List.map Protocol_support.to_alcotest
+           (List.map snd protocol_family_properties
+           @ remaining_protocol_properties) );
   ]
 
 let () = Alcotest.run "awskit-s3-protocol-wire" suite

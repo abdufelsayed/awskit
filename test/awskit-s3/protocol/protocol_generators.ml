@@ -1,3 +1,21 @@
+type family =
+  | Query
+  | Duplicate_query
+  | Endpoint_malformed
+  | Header_newline
+  | Invalid_content_range
+  | Invalid_tag_field
+  | Oversized_tag_set
+
+let family_bin = function
+  | Query -> "protocol.family.query"
+  | Duplicate_query -> "protocol.family.duplicate-query"
+  | Endpoint_malformed -> "protocol.family.endpoint-malformed"
+  | Header_newline -> "protocol.family.header-newline"
+  | Invalid_content_range -> "protocol.family.invalid-content-range"
+  | Invalid_tag_field -> "protocol.family.invalid-tag-field"
+  | Oversized_tag_set -> "protocol.family.oversized-tag-set"
+
 let chars_of_string value = List.init (String.length value) (String.get value)
 let gen_from_chars chars = QCheck.Gen.oneof_list (chars_of_string chars)
 

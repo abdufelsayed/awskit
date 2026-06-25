@@ -96,6 +96,32 @@ let scenario_gen =
             status)
        ~method_ ~status ~framing ~connection ())
 
+let generated_samples count = QCheck.Gen.generate ~n:count scenario_gen
+
+let required_runtime_bins =
+  [
+    "http.method.get";
+    "http.method.head";
+    "http.status.bodiless";
+    "http.status.error";
+    "http.framing.content-length.exact";
+    "http.framing.content-length.underflow";
+    "http.framing.content-length.overflow";
+    "http.framing.chunked";
+    "http.framing.malformed-chunked";
+    "http.expected.no-body";
+    "http.expected.body";
+    "http.expected.body-error";
+  ]
+
+let test_generator_coverage () =
+  let coverage =
+    Workload_coverage.of_lists (generated_samples 1_000)
+      ~bins:Runtime_http_model.coverage_bins
+  in
+  Workload_coverage.require_all ~label:"runtime HTTP generator"
+    ~required:required_runtime_bins coverage
+
 let check_scenario ~target_name run_scenario scenario =
   match (scenario.Model.expected_body, run_scenario scenario) with
   | No_body, Ok "" -> true
@@ -138,6 +164,11 @@ module Make (Target : TARGET) = struct
   let suite =
     [
       ( Printf.sprintf "workload:%s:runtime-http" Target.name,
-        deterministic_cases @ [ generated_case ] );
+        deterministic_cases
+        @ [
+            Alcotest.test_case "generator semantic coverage" `Quick
+              test_generator_coverage;
+            generated_case;
+          ] );
     ]
 end

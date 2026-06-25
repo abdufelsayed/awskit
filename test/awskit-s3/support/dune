@@ -8,4 +8,10 @@
   transfer_fault_workload
   transfer_model)
  (wrapped false)
- (libraries awskit awskit-s3 alcotest qcheck-core qcheck-alcotest))
+ (libraries
+  awskit
+  awskit-s3
+  awskit_test_coverage
+  alcotest
+  qcheck-core
+  qcheck-alcotest))

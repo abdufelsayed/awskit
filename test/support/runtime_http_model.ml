@@ -68,6 +68,38 @@ let expected_body_for ~bodiless framing =
     | Chunked chunks -> Body (String.concat chunks)
     | Malformed_chunked _ -> Body_error
 
+let method_bin scenario =
+  "http.method." ^ String.lowercase (method_to_string scenario.method_)
+
+let status_bin scenario =
+  if is_bodiless_status scenario.status then "http.status.bodiless"
+  else if scenario.status >= 400 then "http.status.error"
+  else "http.status.body"
+
+let framing_bin = function
+  | Empty -> "http.framing.empty"
+  | Content_length { declared; actual } ->
+      if Int.equal declared (String.length actual) then
+        "http.framing.content-length.exact"
+      else if declared > String.length actual then
+        "http.framing.content-length.underflow"
+      else "http.framing.content-length.overflow"
+  | Chunked _ -> "http.framing.chunked"
+  | Malformed_chunked _ -> "http.framing.malformed-chunked"
+
+let expected_body_bin = function
+  | No_body -> "http.expected.no-body"
+  | Body _ -> "http.expected.body"
+  | Body_error -> "http.expected.body-error"
+
+let coverage_bins scenario =
+  [
+    method_bin scenario;
+    status_bin scenario;
+    framing_bin scenario.framing;
+    expected_body_bin scenario.expected_body;
+  ]
+
 let scenario ~name ~method_ ~status ?(headers = []) ~framing ~connection () =
   let partial =
     {

@@ -111,3 +111,12 @@ tests.
 
 Test-construction passes may expose product bugs. Record the focused failing
 alias and reduced input, but keep production fixes in separate fix passes.
+
+## Semantic Coverage
+
+Generated workloads include lightweight semantic coverage checks. These checks
+do not prove product correctness by themselves; they prove that a generator is
+reaching important behavior classes before the target oracle runs.
+
+If a semantic coverage check fails, fix the generator or split rare behavior
+into a directed generator. Do not pin a random seed to make the check pass.

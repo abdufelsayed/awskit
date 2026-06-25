@@ -53,6 +53,7 @@ let length_gen part_size =
       (1, return 0);
       (2, int_range 1 4096);
       (2, int_range 4097 (128 * 1024));
+      (2, return part_size);
       (3, int_range part_size ((2 * part_size) + 257));
       (1, int_range ((2 * part_size) + 1) ((3 * part_size) + 257));
     ]
@@ -102,6 +103,23 @@ let upload_case_gen =
   length_gen part_size >>= fun length ->
   fault_gen ~length ~part_size >>= fun fault ->
   return { Model.local_body = body_of_length length; part_size; fault }
+
+let size_bin case =
+  let length = String.length case.Model.local_body in
+  if length = 0 then "transfer.size.zero"
+  else if length < case.part_size then "transfer.size.single"
+  else if length = case.part_size then "transfer.size.exact-part"
+  else "transfer.size.multipart"
+
+let fault_bin = function
+  | None -> "transfer.fault.none"
+  | Some (Model.Read_fails_after _) -> "transfer.fault.read"
+  | Some (Model.Write_fails_after _) -> "transfer.fault.write"
+  | Some Model.Multipart_create_fails -> "transfer.fault.multipart-create"
+  | Some (Model.Multipart_part_fails _) -> "transfer.fault.multipart-part"
+  | Some Model.Multipart_complete_fails -> "transfer.fault.multipart-complete"
+
+let coverage_bins case = [ size_bin case; fault_bin case.Model.fault ]
 
 let normalize_fault ~part_size ~length = function
   | None -> None
@@ -274,6 +292,26 @@ let arbitrary =
   QCheck.make ~print:Model.upload_case_to_string ~shrink:shrink_case
     upload_case_gen
 
+let required_transfer_bins =
+  [
+    "transfer.size.zero";
+    "transfer.size.single";
+    "transfer.size.exact-part";
+    "transfer.size.multipart";
+    "transfer.fault.none";
+    "transfer.fault.read";
+    "transfer.fault.write";
+    "transfer.fault.multipart-create";
+    "transfer.fault.multipart-part";
+    "transfer.fault.multipart-complete";
+  ]
+
+let test_generator_coverage () =
+  let cases = QCheck.Gen.generate ~n:1_000 upload_case_gen in
+  let coverage = Workload_coverage.of_lists cases ~bins:coverage_bins in
+  Workload_coverage.require_all ~label:"S3 transfer fault generator"
+    ~required:required_transfer_bins coverage
+
 module Make (Target : TARGET) = struct
   let property =
     let count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:50 in
@@ -287,6 +325,8 @@ module Make (Target : TARGET) = struct
       ( "workload:" ^ Target.name ^ ":transfer-faults",
         Alcotest.test_case "fault shrink excludes original" `Quick
           test_shrink_fault_excludes_original
+        :: Alcotest.test_case "generator semantic coverage" `Quick
+             test_generator_coverage
         :: List.map
              (fun (name, case) ->
                Alcotest.test_case name `Quick (fun () ->

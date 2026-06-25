@@ -150,6 +150,40 @@ let arbitrary_for_profile profile =
       QCheck.make ~print:Command.transcript ~shrink
         QCheck.Gen.(list_size (int_range 1 20) command)
 
+let required_strict_bins =
+  [
+    "s3.command.put";
+    "s3.command.put-metadata";
+    "s3.command.get";
+    "s3.command.find";
+    "s3.command.head";
+    "s3.command.exists";
+    "s3.command.delete";
+    "s3.command.list";
+    "s3.command.list-prefix";
+    "s3.command.copy";
+    "s3.command.copy-metadata";
+    "s3.command.put-object-tags";
+    "s3.command.get-object-tags";
+    "s3.command.delete-object-tags";
+    "s3.command.put-bucket-tags";
+    "s3.command.get-bucket-tags";
+    "s3.command.delete-bucket-tags";
+    "s3.command.versioning.enabled";
+    "s3.command.versioning.suspended";
+    "s3.command.get-versioning";
+    "s3.history.versioning-after-put";
+    "s3.history.delete-after-versioning";
+  ]
+
+let test_generator_coverage generator () =
+  let histories = QCheck.Gen.generate ~n:500 generator in
+  let coverage =
+    Workload_coverage.of_lists histories ~bins:S3_command.history_bins
+  in
+  Workload_coverage.require_all ~label:"S3 workload generator"
+    ~required:required_strict_bins coverage
+
 module Make_with_config
     (Config : sig
       val profile : profile
@@ -179,10 +213,20 @@ struct
       (arbitrary_for_profile Config.profile)
       run
 
+  let coverage_cases =
+    match Config.profile with
+    | Strict ->
+        [
+          Alcotest.test_case "generator semantic coverage" `Quick
+            (test_generator_coverage Command.history_generator);
+        ]
+    | Minio -> []
+
   let suite =
     [
       ( Printf.sprintf "workload:%s:s3-state" Target.name,
-        [ QCheck_alcotest.to_alcotest ~speed_level:`Quick property ] );
+        coverage_cases
+        @ [ QCheck_alcotest.to_alcotest ~speed_level:`Quick property ] );
     ]
 end
 

@@ -110,6 +110,55 @@ let to_string = function
         (versioning_status_to_string status)
   | Get_versioning -> "get-versioning"
 
+let command_bin = function
+  | Put_string _ -> "s3.command.put"
+  | Put_string_metadata _ -> "s3.command.put-metadata"
+  | Get_string _ -> "s3.command.get"
+  | Find_string _ -> "s3.command.find"
+  | Head_object _ -> "s3.command.head"
+  | Exists_object _ -> "s3.command.exists"
+  | Delete_object _ -> "s3.command.delete"
+  | List_keys -> "s3.command.list"
+  | List_prefix _ -> "s3.command.list-prefix"
+  | Copy_object _ -> "s3.command.copy"
+  | Copy_object_metadata _ -> "s3.command.copy-metadata"
+  | Put_object_tags _ -> "s3.command.put-object-tags"
+  | Get_object_tags _ -> "s3.command.get-object-tags"
+  | Delete_object_tags _ -> "s3.command.delete-object-tags"
+  | Put_bucket_tags _ -> "s3.command.put-bucket-tags"
+  | Get_bucket_tags -> "s3.command.get-bucket-tags"
+  | Delete_bucket_tags -> "s3.command.delete-bucket-tags"
+  | Put_versioning Enabled -> "s3.command.versioning.enabled"
+  | Put_versioning Suspended -> "s3.command.versioning.suspended"
+  | Put_versioning (Unknown _) -> "s3.command.versioning.unknown"
+  | Get_versioning -> "s3.command.get-versioning"
+
+let history_bins commands =
+  let command_bins = List.map command_bin commands in
+  let saw_put = ref false in
+  let saw_enabled_after_put = ref false in
+  let saw_delete_after_versioning = ref false in
+  let versioning = ref false in
+  List.iter
+    (function
+      | Put_string _ | Put_string_metadata _ -> saw_put := true
+      | Put_versioning Enabled when !saw_put ->
+          versioning := true;
+          saw_enabled_after_put := true
+      | Put_versioning Enabled | Put_versioning Suspended -> versioning := true
+      | Delete_object _ when !versioning -> saw_delete_after_versioning := true
+      | _ -> ())
+    commands;
+  let enabled_after_put_bins =
+    if !saw_enabled_after_put then [ "s3.history.versioning-after-put" ] else []
+  in
+  let delete_after_versioning_bins =
+    if !saw_delete_after_versioning then
+      [ "s3.history.delete-after-versioning" ]
+    else []
+  in
+  command_bins @ enabled_after_put_bins @ delete_after_versioning_bins
+
 let transcript commands =
   commands
   |> List.mapi (fun index command ->
@@ -299,7 +348,7 @@ let shrinker = function
   | Get_versioning -> QCheck.Iter.empty
 
 let shrink_list = QCheck.Shrink.list ~shrink:shrinker
+let history_generator = QCheck.Gen.(list_size (int_range 1 40) generator)
 
 let arbitrary =
-  QCheck.make ~print:transcript ~shrink:shrink_list
-    QCheck.Gen.(list_size (int_range 1 40) generator)
+  QCheck.make ~print:transcript ~shrink:shrink_list history_generator
