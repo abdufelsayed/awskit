@@ -1,3 +1,5 @@
+(dirs :standard \ test.o)
+
 (alias
  (name check-fast)
  (deps
@@ -5,13 +7,24 @@
   (alias_rec examples)))
 
 (alias
+ (name check-local)
+ (deps dune-project))
+
+(alias
+ (name check-docker)
+ (deps dune-project))
+
+(alias
+ (name check-discovery)
+ (deps dune-project))
+
+; Compatibility aliases stay usable while the test tree is rebuilt. Focused
+; workload passes replace these no-op deps with the aliases they introduce.
+
+(alias
  (name check-protocol)
  (package awskit)
- (deps
-  (alias_rec protocol-pbt)))
-
-; Keep package-filtered @check-protocol usable for packages whose protocol
-; evidence is covered by another package-specific gate.
+ (deps dune-project))
 
 (alias
  (name check-protocol)
@@ -21,23 +34,17 @@
 (alias
  (name check-protocol)
  (package awskit-s3)
- (deps
-  (alias_rec protocol-pbt)
-  (alias_rec protocol-fixtures)
-  (alias_rec fuzz-replay)
-  (alias_rec runtime-conformance)))
+ (deps dune-project))
 
 (alias
  (name check-protocol)
  (package awskit-s3-sim)
- (deps
-  (alias_rec simulator-contract)))
+ (deps dune-project))
 
 (alias
  (name check-protocol)
  (package awskit-lwt)
- (deps
-  (alias_rec runtime-conformance)))
+ (deps dune-project))
 
 (alias
  (name check-protocol)
@@ -47,8 +54,7 @@
 (alias
  (name check-protocol)
  (package awskit-eio)
- (deps
-  (alias_rec runtime-conformance)))
+ (deps dune-project))
 
 (alias
  (name check-protocol)

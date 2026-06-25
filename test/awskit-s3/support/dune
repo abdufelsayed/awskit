@@ -1,4 +1,0 @@
-(library
- (name awskit_s3_test)
- (wrapped false)
- (libraries awskit awskit_test awskit-s3 alcotest ptime fmt uri))

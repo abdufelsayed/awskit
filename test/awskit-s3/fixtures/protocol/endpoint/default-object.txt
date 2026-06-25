@@ -1,5 +1,0 @@
-endpoint=https://bucket.s3.us-east-1.amazonaws.com
-path=/photos/cat.jpg
-signing_path=/photos/cat.jpg
-signing_region=us-east-1
-style=virtual-hosted

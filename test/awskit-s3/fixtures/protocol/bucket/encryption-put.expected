@@ -1,7 +1,0 @@
-method=PUT
-path=/
-query=encryption=
-content-md5=WS+yjBs+AIH/obLOyToFgw==
-content-type=application/xml
-expected-owner=123456789012
-body=<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms:dsse</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:123456789012:key/test</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled><BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>

@@ -1,9 +1,0 @@
-bucket=my-bucket
-prefix=logs/
-delimiter=/
-key_count=2
-truncated=true
-continuation=token-1
-next=token-2
-objects=logs/a.txt:10,logs/b.txt:20
-common_prefixes=logs/archive/
