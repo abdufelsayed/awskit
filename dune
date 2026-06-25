@@ -10,7 +10,8 @@
  (name check-local)
  (deps
   dune-project
-  (alias runtime-http-workload)))
+  (alias runtime-http-workload)
+  (alias s3-sim-workload)))
 
 (alias
  (name check-docker)
@@ -35,6 +36,11 @@
   (alias runtime-http-workload)))
 
 (alias
+ (name s3-sim-workload)
+ (deps
+  (alias test/awskit-s3/sim/s3-sim-workload)))
+
+(alias
  (name check-protocol)
  (package awskit)
  (deps dune-project))
@@ -52,7 +58,9 @@
 (alias
  (name check-protocol)
  (package awskit-s3-sim)
- (deps dune-project))
+ (deps
+  dune-project
+  (alias test/awskit-s3/sim/s3-sim-workload)))
 
 (alias
  (name check-protocol)

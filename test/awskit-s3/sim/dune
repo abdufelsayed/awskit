@@ -1,0 +1,25 @@
+(test
+ (name test_awskit_s3_sim)
+ (package awskit-s3-sim)
+ (libraries
+  awskit
+  awskit-s3
+  awskit-s3-sim
+  awskit_s3_workload
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  ptime))
+
+(rule
+ (alias s3-sim-workload)
+ (package awskit-s3-sim)
+ (deps test_awskit_s3_sim.exe)
+ (action
+  (run ./test_awskit_s3_sim.exe test "workload:awskit-s3-sim:s3-state")))
+
+(alias
+ (name simulator-stateful-pbt)
+ (package awskit-s3-sim)
+ (deps
+  (alias s3-sim-workload)))

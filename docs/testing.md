@@ -15,7 +15,7 @@ docs, or releases.
 | Property tests | Parsers, formatters, validators, endpoint policy, canonical query/header normalization, pagination, retry jitter bounds, and transfer planning. Explore fresh generated cases by default and replay failures with `QCHECK_SEED`. | `opam exec -- dune build @protocol-pbt` |
 | Golden fixtures | Exact protocol artifacts that reviewers should inspect: presigned artifacts, endpoint resolution, XML decode/encode bodies, pagination, multipart XML, service errors, and normalized wire summaries. | `opam exec -- dune build @protocol-fixtures` |
 | Fuzz replay | Minimized failures found by manual or mutation fuzzing. Commit the reduced input and replay it as an ordinary deterministic test before treating the bug as fixed. | `opam exec -- dune build @fuzz-replay` |
-| Simulator contracts | No-network S3 behavior, stateful model-oracle PBT, fault injection, and docs/test backend behavior. The simulator is not an AWS wire authority. | `opam exec -- dune build @simulator-contract` |
+| Simulator contracts | No-network S3 behavior, stateful model-oracle workloads, fault injection, and docs/test backend behavior. The simulator is not an AWS wire authority. | `opam exec -- dune build @s3-sim-workload` |
 | Runtime HTTP workloads | Package-owned runtime HTTP adapter workloads against loopback servers, including bodiless responses, framing, body-reader, and error-path behavior. | `opam exec -- dune build @runtime-http-workload` |
 | MinIO contracts | Local adapter interoperability through a real S3-compatible test double. Requires Docker and cleanup, and remains outside no-network protocol gates. | `opam exec -- dune build --force @minio-contract` |
 | Examples/docs | Extracted examples, odoc pages, and future MDX/docs checks. Examples should compile, and simulator-backed examples should execute when practical. | `opam exec -- dune build @examples @doc` |
@@ -31,19 +31,19 @@ mentioning a field name.
 | Alias | Purpose | External service |
 | --- | --- | --- |
 | `@check-fast` | Local `runtest` and examples. | No |
-| `@check-protocol` | Protocol PBT, protocol fixtures, fuzz replay, simulator contract, and runtime conformance. | No |
-| `@check-local` | Local composed gate for repository changes; currently includes runtime HTTP workloads. | No |
+| `@check-protocol` | Protocol PBT, protocol fixtures, fuzz replay, simulator workload, and runtime HTTP workloads. | No |
+| `@check-local` | Local composed gate for repository changes; currently includes runtime HTTP workloads and the simulator S3 workload. | No |
 | `@protocol-pbt` | Fast deterministic protocol property tests. | No |
 | `@protocol-fixtures` | Fixture-backed protocol artifact tests with normalized comparisons. | No |
 | `@fuzz-replay` | Deterministic replay of committed minimized parser/validator failures. | No |
-| `@simulator-contract` | Simulator contract and simulator-specific fault/lifecycle tests. | No |
+| `@s3-sim-workload` | No-network simulator run of the shared S3 state workload. | No |
 | `@runtime-http-workload` | Eio and Lwt runtime HTTP workload gates. | No |
 | `@runtime-conformance` | Compatibility alias for runtime workload gates while the test tree is rebuilt. | No |
 | `@minio-contract` | MinIO-backed S3-compatible contract tests. | Local Docker |
 | `@examples` | Build example executables. | No |
 | `@test/awskit/eio/runtime-http-workload` | Focused Eio runtime HTTP workload. | No |
 | `@test/awskit/lwt/runtime-http-workload` | Focused Lwt runtime HTTP workload. | No |
-| `@test/awskit-s3/sim/simulator-stateful-pbt` | Focused simulator stateful model-oracle PBT under simulator contracts. | No |
+| `@test/awskit-s3/sim/s3-sim-workload` | Focused simulator run of the shared S3 state workload. | No |
 | `@test/awskit-s3/eio/minio-smoke-eio` | Focused Eio MinIO smoke for local adapter integration. | Local Docker |
 
 Long-running mutation fuzzing, live AWS account tests, and broader provider
@@ -58,9 +58,8 @@ when README or package-guide snippets are normalized into real MDX or extracted
 checks that compile meaningful code.
 
 Shared S3 contract suites should name backend capability differences explicitly
-instead of weakening assertions globally. For example, the simulator can run the
-strict profile while MinIO uses a documented S3-compatible profile for APIs it
-actually supports.
+instead of weakening assertions globally. The simulator workload is the
+no-network stateful model-oracle runner for the shared S3 workload core.
 
 During the testing foundation rebuild, the tracked `test/` tree is reset around
 focused package-owned workloads and support libraries. A local `test.o/`
@@ -78,7 +77,7 @@ Test identities have three layers:
 
 - Dune aliases are command-facing evidence IDs. Keep them kebab-case, such as
   `@protocol-pbt`, `@runtime-http-workload`, or
-  `@test/awskit/eio/runtime-http-workload`.
+  `@test/awskit-s3/sim/s3-sim-workload`.
 - Alcotest executable names identify the runnable package or evidence binary.
   Keep them close to the package or evidence name, such as `awskit-s3` or
   `awskit-s3-protocol-pbt`.

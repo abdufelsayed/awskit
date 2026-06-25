@@ -20,6 +20,14 @@ S3 workload support lives in `test/awskit-s3/support`. The private
 `awskit_s3_workload` library provides reusable command generation, pure model
 state, replay text helpers, and a target functor for package-owned runners.
 
+The simulator runner lives in `test/awskit-s3/sim` and runs the shared S3 state
+workload without network access:
+
+- `@test/awskit-s3/sim/s3-sim-workload`
+- `@s3-sim-workload`
+
+The suite ID is `workload:awskit-s3-sim:s3-state`.
+
 During the migration, the previous test tree may exist locally as `test.o/`.
 That directory is historical reference material only. Do not stage it, do not
 add ignore rules for it, and do not use it as replacement evidence for tracked
