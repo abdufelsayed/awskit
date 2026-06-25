@@ -1,4 +1,5 @@
 open Awskit_s3
+open Awskit_s3_test
 
 let to_alcotest = Awskit_test.Qcheck.to_alcotest
 let chars_of_string value = List.init (String.length value) (String.get value)
@@ -236,6 +237,108 @@ let prop_metadata_rejects_case_insensitive_duplicate_keys =
         (Metadata.of_list
            [ (key, first); (String.uppercase_ascii key, second) ]))
 
+let tag_chars =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 +-_=.:/@"
+
+let safe_tag_suffix_gen =
+  gen_string ~min:1 ~max:20 ~chars:"abcdefghijklmnopqrstuvwxyz0123456789"
+
+let valid_tag_key_gen = QCheck.Gen.map (( ^ ) "tag-") safe_tag_suffix_gen
+let valid_tag_value_gen = gen_string ~min:0 ~max:24 ~chars:tag_chars
+
+let xml_escape value =
+  let buffer = Buffer.create (String.length value) in
+  String.iter
+    (function
+      | '&' -> Buffer.add_string buffer "&amp;"
+      | '<' -> Buffer.add_string buffer "&lt;"
+      | '>' -> Buffer.add_string buffer "&gt;"
+      | '"' -> Buffer.add_string buffer "&quot;"
+      | '\'' -> Buffer.add_string buffer "&apos;"
+      | char -> Buffer.add_char buffer char)
+    value;
+  Buffer.contents buffer
+
+let tagging_xml tags =
+  tags
+  |> List.map (fun (key, value) ->
+      Fmt.str "<Tag><Key>%s</Key><Value>%s</Value></Tag>" (xml_escape key)
+        (xml_escape value))
+  |> String.concat ""
+  |> Fmt.str "<Tagging><TagSet>%s</TagSet></Tagging>"
+
+let tagging_result_from_xml body =
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  Recording_s3.Bucket.Tagging.get conn ~bucket:(bucket_name "bucket") ()
+
+let tag_pairs_to_string tags =
+  tags
+  |> List.map (fun (key, value) -> Fmt.str "%s=%S" key value)
+  |> String.concat ";"
+
+let invalid_tag_field_gen =
+  let open QCheck.Gen in
+  let suffix = gen_string ~min:0 ~max:12 ~chars:tag_chars in
+  oneof
+    [
+      map (fun suffix -> `Key ("aws:" ^ suffix)) suffix;
+      map (fun suffix -> `Key ("AWS:" ^ suffix)) suffix;
+      map (fun suffix -> `Key ("team," ^ suffix)) suffix;
+      map (fun suffix -> `Key ("team\n" ^ suffix)) suffix;
+      return (`Key (String.make 129 'a'));
+      map (fun suffix -> `Value ("bad&" ^ suffix)) suffix;
+      map (fun suffix -> `Value ("bad\n" ^ suffix)) suffix;
+      map (fun suffix -> `Value ("emoji-\240\159\152\128" ^ suffix)) suffix;
+      return (`Value (String.make 257 'a'));
+    ]
+
+let invalid_tag_field_to_string = function
+  | `Key key -> Fmt.str "key=%S" key
+  | `Value value -> Fmt.str "value=%S" value
+
+let prop_tagging_xml_rejects_invalid_tag_fields =
+  QCheck.Test.make ~count:250
+    ~name:"tagging XML rejects invalid tag fields as decode errors"
+    (QCheck.make ~print:invalid_tag_field_to_string invalid_tag_field_gen)
+    (fun invalid ->
+      let tags =
+        match invalid with
+        | `Key key -> [ (key, "value") ]
+        | `Value value -> [ ("key", value) ]
+      in
+      match tagging_result_from_xml (tagging_xml tags) with
+      | Error error -> is_decode_error error
+      | Ok _ -> false)
+
+let prop_tagging_xml_rejects_duplicate_tag_keys =
+  QCheck.Test.make ~count:200
+    ~name:"tagging XML rejects duplicate tag keys as decode errors"
+    (QCheck.make
+       ~print:(fun (key, first, second) -> Fmt.str "%s=%S/%S" key first second)
+       QCheck.Gen.(
+         triple valid_tag_key_gen valid_tag_value_gen valid_tag_value_gen))
+    (fun (key, first, second) ->
+      match
+        tagging_result_from_xml (tagging_xml [ (key, first); (key, second) ])
+      with
+      | Error error -> is_decode_error error
+      | Ok _ -> false)
+
+let oversized_tag_set_gen =
+  let open QCheck.Gen in
+  let* count = int_range 11 20 in
+  let* values = list_size (return count) valid_tag_value_gen in
+  return
+    (List.mapi (fun index value -> (Fmt.str "tag-%02d" index, value)) values)
+
+let prop_tagging_xml_rejects_oversized_tag_sets =
+  QCheck.Test.make ~count:100
+    ~name:"tagging XML rejects tag sets above the S3 limit as decode errors"
+    (QCheck.make ~print:tag_pairs_to_string oversized_tag_set_gen) (fun tags ->
+      match tagging_result_from_xml (tagging_xml tags) with
+      | Error error -> is_decode_error error
+      | Ok _ -> false)
+
 let prop_download_ranges_cover_content_length =
   let gen = QCheck.Gen.(pair (int_range 0 10000) (int_range 1 4096)) in
   QCheck.Test.make ~count:300
@@ -303,6 +406,9 @@ let suite =
           prop_endpoint_rejects_url_parts;
           prop_header_values_reject_newline;
           prop_metadata_rejects_case_insensitive_duplicate_keys;
+          prop_tagging_xml_rejects_invalid_tag_fields;
+          prop_tagging_xml_rejects_duplicate_tag_keys;
+          prop_tagging_xml_rejects_oversized_tag_sets;
           prop_download_ranges_cover_content_length;
           prop_retry_jitter_stays_within_policy_bounds;
         ] );
