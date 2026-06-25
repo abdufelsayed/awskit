@@ -379,14 +379,19 @@ let check_metadata command_index command label expected actual =
     (normalize_metadata expected)
     (metadata_to_set actual)
 
+let max_bytes_for_expected = function
+  | Some object_ -> Int64.of_int (String.length object_.body)
+  | None -> 64L
+
 let assert_get command_index command conn key expected =
+  let max_bytes = max_bytes_for_expected expected in
   match expected with
   | Some object_ ->
       let result =
         expect_ok command_index command "get_string"
           (await_result "get_string"
-             (S3.Object.get_string conn ~bucket ~key:(object_key key)
-                ~max_bytes:64L ()))
+             (S3.Object.get_string conn ~bucket ~key:(object_key key) ~max_bytes
+                ()))
       in
       check_equal command_index command Alcotest.string "get body" object_.body
         result.value;
@@ -397,14 +402,14 @@ let assert_get command_index command conn key expected =
   | None ->
       expect_no_such_key command_index command "get_string"
         (await_result "get_string"
-           (S3.Object.get_string conn ~bucket ~key:(object_key key)
-              ~max_bytes:64L ()))
+           (S3.Object.get_string conn ~bucket ~key:(object_key key) ~max_bytes
+              ()))
 
 let assert_find command_index command conn key expected =
+  let max_bytes = max_bytes_for_expected expected in
   match
     await_result "find_string"
-      (S3.Object.find_string conn ~bucket ~key:(object_key key) ~max_bytes:64L
-         ())
+      (S3.Object.find_string conn ~bucket ~key:(object_key key) ~max_bytes ())
   with
   | Ok (Some result) -> (
       match expected with
@@ -614,7 +619,8 @@ let check_store command_index command conn model =
         expect_ok command_index command "store get"
           (await_result "store get"
              (S3.Object.get_string conn ~bucket ~key:(object_key key)
-                ~max_bytes:64L ()))
+                ~max_bytes:(Int64.of_int (String.length object_.body))
+                ()))
       in
       check_equal command_index command Alcotest.string
         (Printf.sprintf "store body %s" key)

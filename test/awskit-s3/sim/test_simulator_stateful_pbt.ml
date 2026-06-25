@@ -87,13 +87,18 @@ let check_metadata command_index command label expected actual =
     Alcotest.(list (pair string string))
     label expected (Metadata.to_list actual)
 
+let max_bytes_for_expected = function
+  | Some object_ -> Int64.of_int (String.length object_.body)
+  | None -> 64L
+
 let assert_get command_index command conn key expected =
+  let max_bytes = max_bytes_for_expected expected in
   match expected with
   | Some object_ ->
       let result =
         expect_ok command_index command "get_string"
           (Simulator.Object.get_string conn ~bucket ~key:(key_to_object_key key)
-             ~max_bytes:64L ())
+             ~max_bytes ())
       in
       check_equal command_index command Alcotest.string "get body" object_.body
         result.value;
@@ -104,12 +109,13 @@ let assert_get command_index command conn key expected =
   | None ->
       expect_no_such_key command_index command "get_string"
         (Simulator.Object.get_string conn ~bucket ~key:(key_to_object_key key)
-           ~max_bytes:64L ())
+           ~max_bytes ())
 
 let assert_find command_index command conn key expected =
+  let max_bytes = max_bytes_for_expected expected in
   match
     Simulator.Object.find_string conn ~bucket ~key:(key_to_object_key key)
-      ~max_bytes:64L ()
+      ~max_bytes ()
   with
   | Ok (Some result) -> (
       match expected with

@@ -29,10 +29,11 @@ The suite IDs are `workload:awskit-eio:runtime-http` and
 `workload:awskit-lwt:runtime-http`.
 
 S3 workload support lives in `test/awskit-s3/support`. The private
-`awskit_s3_workload` library provides reusable command generation, pure model
-state, replay text helpers, and a target functor for package-owned runners.
-It also provides `transfer_model.ml` and `transfer_fault_workload.ml` for
-runtime-neutral transfer byte-movement, progress, and cleanup workloads.
+`awskit_s3_workload` library provides reusable command definitions,
+model-aware history synthesis, pure model state, replay text helpers, and a
+target functor for package-owned runners. It also provides `transfer_model.ml`
+and `transfer_fault_workload.ml` for runtime-neutral transfer byte-movement,
+progress, and cleanup workloads.
 
 The simulator runner lives in `test/awskit-s3/sim` and runs the shared S3 state
 workload, deterministic simulator contracts, and generated transfer fault

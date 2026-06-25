@@ -2,6 +2,7 @@
  (name awskit_s3_workload)
  (modules
   s3_command
+  s3_history
   s3_model
   s3_replay
   s3_workload

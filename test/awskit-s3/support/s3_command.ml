@@ -1,6 +1,7 @@
 type tag_model = (string * string) list
 type metadata_model = (string * string) list
 type copy_metadata = Copy_source_metadata | Replace_metadata of metadata_model
+type value_profile = Small | Broad
 
 type t =
   | Put_string of string * string * tag_model
@@ -23,9 +24,25 @@ type t =
   | Put_versioning of Awskit_s3.Bucket.Versioning.Status.t
   | Get_versioning
 
-let key_domain =
+let ascii_key_domain =
   [ "a.txt"; "b.txt"; "logs/a.txt"; "logs/b.txt"; "photos/2026.jpg" ]
 
+let broad_key_domain =
+  ascii_key_domain
+  @ [
+      "space key.txt";
+      "unicode-\206\180.txt";
+      "prefix//double-slash";
+      "prefix/trailing/";
+      "copy/source-object";
+      "copy/destination-object";
+    ]
+
+let keys_for_profile = function
+  | Small -> ascii_key_domain
+  | Broad -> broad_key_domain
+
+let key_domain = ascii_key_domain
 let prefix_domain = [ "logs/"; "photos/"; "missing/"; "a" ]
 
 let tag_sets_domain =
@@ -179,49 +196,68 @@ let gen_copy_metadata =
         map (fun metadata -> Replace_metadata metadata) gen_metadata;
       ])
 
-let gen_body =
-  QCheck.Gen.(
-    string_size
-      ~gen:
-        (oneof_weighted
-           [ (8, char_range 'a' 'z'); (1, return ' '); (1, numeral) ])
-      (int_range 0 12))
+let body_gen_for_profile = function
+  | Small ->
+      QCheck.Gen.(
+        string_size
+          ~gen:
+            (oneof_weighted
+               [ (8, char_range 'a' 'z'); (1, return ' '); (1, numeral) ])
+          (int_range 0 12))
+  | Broad ->
+      QCheck.Gen.(
+        oneof_weighted
+          [
+            (5, string_size ~gen:(char_range 'a' 'z') (int_range 0 128));
+            (2, return "");
+            (1, return "\000\255binary-ish");
+            (1, string_size ~gen:(char_range ' ' '~') (int_range 129 4096));
+          ])
 
-let generator =
-  let open QCheck.Gen in
-  oneof_weighted
-    [
-      ( 4,
-        map3
-          (fun key body tags -> Put_string (key, body, tags))
-          gen_key gen_body gen_tags );
-      ( 3,
-        map4
-          (fun key body tags metadata ->
-            Put_string_metadata (key, body, tags, metadata))
-          gen_key gen_body gen_tags gen_metadata );
-      (2, map (fun key -> Get_string key) gen_key);
-      (2, map (fun key -> Find_string key) gen_key);
-      (2, map (fun key -> Head_object key) gen_key);
-      (2, map (fun key -> Exists_object key) gen_key);
-      (2, map (fun key -> Delete_object key) gen_key);
-      (1, return List_keys);
-      (1, map (fun prefix -> List_prefix prefix) gen_prefix);
-      (2, map2 (fun source dest -> Copy_object (source, dest)) gen_key gen_key);
-      ( 2,
-        map3
-          (fun source dest metadata ->
-            Copy_object_metadata (source, dest, metadata))
-          gen_key gen_key gen_copy_metadata );
-      (2, map2 (fun key tags -> Put_object_tags (key, tags)) gen_key gen_tags);
-      (2, map (fun key -> Get_object_tags key) gen_key);
-      (2, map (fun key -> Delete_object_tags key) gen_key);
-      (1, map (fun tags -> Put_bucket_tags tags) gen_tags);
-      (1, return Get_bucket_tags);
-      (1, return Delete_bucket_tags);
-      (1, map (fun status -> Put_versioning status) gen_versioning_status);
-      (1, return Get_versioning);
-    ]
+let gen_body = body_gen_for_profile Small
+
+let generator_with ~gen_key ~gen_body =
+  QCheck.Gen.(
+    oneof_weighted
+      [
+        ( 4,
+          map3
+            (fun key body tags -> Put_string (key, body, tags))
+            gen_key gen_body gen_tags );
+        ( 3,
+          map4
+            (fun key body tags metadata ->
+              Put_string_metadata (key, body, tags, metadata))
+            gen_key gen_body gen_tags gen_metadata );
+        (2, map (fun key -> Get_string key) gen_key);
+        (2, map (fun key -> Find_string key) gen_key);
+        (2, map (fun key -> Head_object key) gen_key);
+        (2, map (fun key -> Exists_object key) gen_key);
+        (2, map (fun key -> Delete_object key) gen_key);
+        (1, return List_keys);
+        (1, map (fun prefix -> List_prefix prefix) gen_prefix);
+        (2, map2 (fun source dest -> Copy_object (source, dest)) gen_key gen_key);
+        ( 2,
+          map3
+            (fun source dest metadata ->
+              Copy_object_metadata (source, dest, metadata))
+            gen_key gen_key gen_copy_metadata );
+        (2, map2 (fun key tags -> Put_object_tags (key, tags)) gen_key gen_tags);
+        (2, map (fun key -> Get_object_tags key) gen_key);
+        (2, map (fun key -> Delete_object_tags key) gen_key);
+        (1, map (fun tags -> Put_bucket_tags tags) gen_tags);
+        (1, return Get_bucket_tags);
+        (1, return Delete_bucket_tags);
+        (1, map (fun status -> Put_versioning status) gen_versioning_status);
+        (1, return Get_versioning);
+      ])
+
+let generator_for_profile profile =
+  let gen_key = QCheck.Gen.oneof_list (keys_for_profile profile) in
+  let gen_body = body_gen_for_profile profile in
+  generator_with ~gen_key ~gen_body
+
+let generator = generator_for_profile Small
 
 let shrink_to_domain_first domain value =
   match domain with
@@ -348,7 +384,3 @@ let shrinker = function
   | Get_versioning -> QCheck.Iter.empty
 
 let shrink_list = QCheck.Shrink.list ~shrink:shrinker
-let history_generator = QCheck.Gen.(list_size (int_range 1 40) generator)
-
-let arbitrary =
-  QCheck.make ~print:transcript ~shrink:shrink_list history_generator

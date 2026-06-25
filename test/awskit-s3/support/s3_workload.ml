@@ -25,130 +25,10 @@ module type TARGET = sig
   val run_command : int -> connection -> Model.t -> Command.t -> Model.t
 end
 
-let supports_command profile command =
-  match (profile, command) with
-  | Strict, _ -> true
-  | Minio, Command.Put_string_metadata _ -> false
-  | Minio, Command.Copy_object_metadata _ -> false
-  | Minio, Command.Put_versioning status -> (
-      match status with
-      | Awskit_s3.Bucket.Versioning.Status.Suspended -> false
-      | Enabled | Unknown _ -> true)
-  | Minio, Command.Copy_object (source_key, destination_key) ->
-      not (String.equal source_key destination_key)
-  | Minio, _ -> true
-
-let command_supported profile command = supports_command profile command
-
-let commands_supported profile =
-  List.for_all (fun command -> command_supported profile command)
-
-let supported_generators profile =
-  let open QCheck.Gen in
-  let maybe command gen =
-    if command_supported profile command then Some gen else None
-  in
-  let copy_generator =
-    match profile with
-    | Strict ->
-        Some
-          (map2
-             (fun source destination ->
-               Command.Copy_object (source, destination))
-             Command.gen_key Command.gen_key)
-    | Minio ->
-        let pairs =
-          List.concat_map
-            (fun source ->
-              List.filter_map
-                (fun destination ->
-                  if String.equal source destination then None
-                  else Some (source, destination))
-                Command.key_domain)
-            Command.key_domain
-        in
-        if pairs = [] then None
-        else
-          Some
-            (map
-               (fun (source, destination) ->
-                 Command.Copy_object (source, destination))
-               (oneof_list pairs))
-  in
-  let versioning_generator =
-    let statuses =
-      List.filter
-        (fun status ->
-          command_supported profile (Command.Put_versioning status))
-        Command.versioning_status_domain
-    in
-    match statuses with
-    | [] -> None
-    | statuses ->
-        Some
-          (map
-             (fun status -> Command.Put_versioning status)
-             (oneof_list statuses))
-  in
-  let generators =
-    [
-      maybe
-        (Command.Put_string ("a.txt", "", []))
-        (map3
-           (fun key body tags -> Command.Put_string (key, body, tags))
-           Command.gen_key Command.gen_body Command.gen_tags);
-      maybe (Command.Get_string "a.txt")
-        (map (fun key -> Command.Get_string key) Command.gen_key);
-      maybe (Command.Find_string "a.txt")
-        (map (fun key -> Command.Find_string key) Command.gen_key);
-      maybe (Command.Head_object "a.txt")
-        (map (fun key -> Command.Head_object key) Command.gen_key);
-      maybe (Command.Exists_object "a.txt")
-        (map (fun key -> Command.Exists_object key) Command.gen_key);
-      maybe (Command.Delete_object "a.txt")
-        (map (fun key -> Command.Delete_object key) Command.gen_key);
-      maybe Command.List_keys (return Command.List_keys);
-      maybe (Command.List_prefix "a")
-        (map (fun prefix -> Command.List_prefix prefix) Command.gen_prefix);
-      copy_generator;
-      maybe
-        (Command.Put_object_tags ("a.txt", []))
-        (map2
-           (fun key tags -> Command.Put_object_tags (key, tags))
-           Command.gen_key Command.gen_tags);
-      maybe (Command.Get_object_tags "a.txt")
-        (map (fun key -> Command.Get_object_tags key) Command.gen_key);
-      maybe (Command.Delete_object_tags "a.txt")
-        (map (fun key -> Command.Delete_object_tags key) Command.gen_key);
-      maybe (Command.Put_bucket_tags [])
-        (map (fun tags -> Command.Put_bucket_tags tags) Command.gen_tags);
-      maybe Command.Get_bucket_tags (return Command.Get_bucket_tags);
-      maybe Command.Delete_bucket_tags (return Command.Delete_bucket_tags);
-      versioning_generator;
-      maybe Command.Get_versioning (return Command.Get_versioning);
-    ]
-  in
-  List.filter_map Fun.id generators
-
 let arbitrary_for_profile profile =
   match profile with
-  | Strict -> Command.arbitrary
-  | Minio ->
-      let command =
-        match supported_generators profile with
-        | [] ->
-            QCheck.Gen.map
-              (fun () ->
-                QCheck.Test.fail_reportf "S3 workload profile has no commands")
-              QCheck.Gen.unit
-        | generators -> QCheck.Gen.oneof generators
-      in
-      let shrink commands =
-        Command.shrink_list commands
-        |> QCheck.Iter.filter (commands_supported profile)
-      in
-      QCheck.make ~print:Command.transcript ~shrink
-        QCheck.Gen.(list_size (int_range 1 20) command)
+  | Strict -> S3_history.arbitrary S3_history.strict_default
+  | Minio -> S3_history.arbitrary S3_history.minio_default
 
 let required_strict_bins =
   [
@@ -218,7 +98,8 @@ struct
     | Strict ->
         [
           Alcotest.test_case "generator semantic coverage" `Quick
-            (test_generator_coverage Command.history_generator);
+            (test_generator_coverage
+               (S3_history.generator S3_history.strict_default));
         ]
     | Minio -> []
 
