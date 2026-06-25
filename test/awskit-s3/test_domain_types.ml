@@ -468,7 +468,7 @@ let test_multipart_domain_values () =
 
 let suite =
   [
-    ( "pbt:domain:bucket",
+    ( "pbt:awskit-s3:domain:bucket",
       List.map to_alcotest
         [
           prop_valid_bucket_names_round_trip;
@@ -477,14 +477,14 @@ let suite =
           prop_adjacent_dot_bucket_names_fail;
           prop_ipv4_bucket_names_fail;
         ] );
-    ( "pbt:domain:key",
+    ( "pbt:awskit-s3:domain:key",
       List.map to_alcotest
         [
           prop_object_keys_round_trip;
           prop_object_prefixes_round_trip;
           prop_delimiters_round_trip;
         ] );
-    ( "pbt:domain:account-metadata-tags",
+    ( "pbt:awskit-s3:domain:account-metadata-tags",
       List.map to_alcotest
         [
           prop_account_ids_round_trip;

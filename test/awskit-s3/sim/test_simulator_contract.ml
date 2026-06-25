@@ -316,11 +316,9 @@ let test_find_scopes_consumer_not_found_error () =
   | Ok (Some _) -> Alcotest.fail "expected consumer error"
 
 let suite =
-  List.map
-    (fun (name, cases) -> ("simulator " ^ name, cases))
-    Simulator_contract.suites
+  Simulator_contract.scoped_suites ~subject:"awskit-s3-sim"
   @ [
-      ( "simulator faults",
+      ( "contract:awskit-s3-sim:faults",
         [
           Alcotest.test_case "slow down" `Quick test_simulator_slow_down_fault;
           Alcotest.test_case "response lost" `Quick

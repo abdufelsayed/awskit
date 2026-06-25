@@ -50,7 +50,7 @@
  (package awskit-s3)
  (deps test_protocol_pbt.exe)
  (action
-  (run ./test_protocol_pbt.exe test "pbt:protocol")))
+  (run ./test_protocol_pbt.exe test "pbt:awskit-s3:protocol")))
 
 (test
  (name test_fuzz_replay)

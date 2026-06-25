@@ -40,7 +40,7 @@ Use the repo's existing QCheck style:
 
 - Fixed seed, such as `0xA5111`.
 - `Awskit_test.Qcheck.to_alcotest`.
-- Alcotest group `pbt:simulator-stateful`.
+- Alcotest suite ID `pbt:awskit-s3-sim:simulator-stateful`.
 - Compact printers for generated scenarios.
 - Explicit list and command-field shrinkers.
 - Small, deterministic generated domains.

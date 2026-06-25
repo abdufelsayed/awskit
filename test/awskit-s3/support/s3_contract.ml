@@ -1547,5 +1547,13 @@ module Make (Client : SUBJECT) = struct
       ("contract:multipart", multipart_cases);
     ]
 
+  let scoped_suites ~subject =
+    let scope_name name =
+      match String.split_on_char ':' name with
+      | [ "contract"; area ] -> "contract:" ^ subject ^ ":" ^ area
+      | _ -> "contract:" ^ subject ^ ":" ^ name
+    in
+    List.map (fun (name, cases) -> (scope_name name, cases)) suites
+
   let cases = List.concat_map (fun (_name, cases) -> cases) suites
 end

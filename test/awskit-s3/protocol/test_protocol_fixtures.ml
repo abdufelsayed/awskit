@@ -434,7 +434,7 @@ let test_multipart_complete_xml_fixture () =
 
 let suite =
   [
-    ( "protocol fixtures",
+    ( "fixture:awskit-s3:protocol",
       [
         Alcotest.test_case "presigned GET" `Quick test_presigned_get_fixture;
         Alcotest.test_case "endpoint resolution" `Quick

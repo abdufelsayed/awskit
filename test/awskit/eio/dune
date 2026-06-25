@@ -17,7 +17,7 @@
  (package awskit-eio)
  (deps test_awskit_eio.exe)
  (action
-  (run ./test_awskit_eio.exe test "runtime-http-contract")))
+  (run ./test_awskit_eio.exe test "contract:awskit-eio:runtime-http")))
 
 (rule
  (alias runtime-conformance)
@@ -26,4 +26,4 @@
   (alias runtime-http-contract)
   test_awskit_eio.exe)
  (action
-  (run ./test_awskit_eio.exe test "integration:connection")))
+  (run ./test_awskit_eio.exe test "integration:awskit-eio:connection")))

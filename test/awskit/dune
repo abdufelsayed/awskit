@@ -9,7 +9,7 @@
  (deps test_awskit.exe)
  (action
   (progn
-   (run ./test_awskit.exe test "pbt:signing:uri-encode")
-   (run ./test_awskit.exe test "pbt:signing:canonical-query")
-   (run ./test_awskit.exe test "pbt:signing:sign-request")
-   (run ./test_awskit.exe test "pbt:signing:ptime"))))
+   (run ./test_awskit.exe test "pbt:awskit:signing:uri-encode")
+   (run ./test_awskit.exe test "pbt:awskit:signing:canonical-query")
+   (run ./test_awskit.exe test "pbt:awskit:signing:sign-request")
+   (run ./test_awskit.exe test "pbt:awskit:signing:ptime"))))

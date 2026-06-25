@@ -105,7 +105,7 @@ Read-only production files for this pass:
    (package awskit-eio)
    (deps test_awskit_eio.exe)
    (action
-    (run ./test_awskit_eio.exe test "runtime-http-contract")))
+    (run ./test_awskit_eio.exe test "contract:awskit-eio:runtime-http")))
   ```
 
 - [ ] Make the existing `runtime-conformance` alias depend on or run the new
@@ -139,7 +139,7 @@ Read-only production files for this pass:
    (package awskit-lwt)
    (deps test_awskit_lwt.exe)
    (action
-    (run ./test_awskit_lwt.exe test "runtime-http-contract")))
+    (run ./test_awskit_lwt.exe test "contract:awskit-lwt:runtime-http")))
   ```
 
 - [ ] Make the existing `runtime-conformance` alias depend on or run the new

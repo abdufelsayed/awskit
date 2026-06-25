@@ -246,7 +246,7 @@ let suite =
         Alcotest.test_case "lazy plans match list plans" `Quick
           test_lazy_plans_match_list_plans;
       ] );
-    ( "pbt:transfer-plan",
+    ( "pbt:awskit-s3:transfer-plan",
       [
         to_alcotest prop_upload_parts_cover_content;
         to_alcotest prop_download_ranges_cover_content;

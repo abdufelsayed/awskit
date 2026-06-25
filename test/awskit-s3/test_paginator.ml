@@ -433,7 +433,7 @@ let test_multipart_list_parts_rejects_invalid_numeric_fields () =
 
 let suite =
   [
-    ( "pbt:paginator",
+    ( "pbt:awskit-s3:paginator",
       List.map to_alcotest
         [
           prop_list_paginator_collects_ordered_keys;

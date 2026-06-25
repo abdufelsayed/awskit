@@ -53,6 +53,51 @@ instead of weakening assertions globally. For example, the simulator can run the
 strict profile while MinIO uses a documented S3-compatible profile for APIs it
 actually supports.
 
+## Test Identity
+
+Keep test identifiers scoped and stable so maintainers and agents can select
+the same behavior without guessing local naming conventions.
+
+Test identities have three layers:
+
+- Dune aliases are command-facing evidence IDs. Keep them kebab-case, such as
+  `@protocol-pbt`, `@runtime-conformance`, or
+  `@test/awskit/eio/runtime-http-contract`.
+- Alcotest executable names identify the runnable package or evidence binary.
+  Keep them close to the package or evidence name, such as `awskit-s3` or
+  `awskit-s3-protocol-pbt`.
+- Alcotest suite IDs are selector-facing test IDs. New or modified suite IDs
+  must use colon scopes:
+
+  ```text
+  <evidence>:<subject>:<area>[:<detail>]
+  ```
+
+Use lowercase ASCII and kebab-case inside each segment. Supported evidence
+segments are `unit`, `integration`, `contract`, `pbt`, `fixture`, and `replay`.
+The subject should be the package, runtime adapter, or backend under test, such
+as `awskit`, `awskit-eio`, `awskit-s3`, `awskit-s3-sim`, or `minio`.
+
+Examples:
+
+- `pbt:awskit:signing:canonical-query`
+- `pbt:awskit-s3:domain:bucket`
+- `contract:awskit-eio:runtime-http`
+- `contract:awskit-s3-sim:bucket`
+- `contract:minio:multipart`
+- `fixture:awskit-s3:protocol`
+- `replay:awskit-s3:fuzz`
+
+QCheck property names can remain short human-readable sentences because they
+are reported inside a scoped PBT suite. Fixture corpus paths use filesystem
+scoping under `test/*/fixtures/**`; do not duplicate the full suite ID in every
+fixture filename.
+
+When touching an older unscoped suite ID, normalize it to the scoped form and
+update any Dune rule that selects it. Do not use a Dune alias name as an
+Alcotest suite ID unless it already follows the colon-scoped suite format. See
+`test/README.md` for the local registry and examples.
+
 ## Test Current Behavior
 
 Tests should protect the current supported contract. When removing old

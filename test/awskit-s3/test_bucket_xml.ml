@@ -483,7 +483,7 @@ let test_bucket_tagging_rejects_invalid_tag_xml_as_decode_error () =
 
 let suite =
   [
-    ( "pbt:bucket-xml",
+    ( "pbt:awskit-s3:bucket-xml",
       List.map to_alcotest
         [
           prop_bucket_tagging_decodes_generated_xml;

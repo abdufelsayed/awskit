@@ -17,9 +17,9 @@
  (deps test_awskit_s3.exe)
  (action
   (progn
-   (run ./test_awskit_s3.exe test "pbt:domain:bucket")
-   (run ./test_awskit_s3.exe test "pbt:domain:key")
-   (run ./test_awskit_s3.exe test "pbt:domain:account-metadata-tags")
-   (run ./test_awskit_s3.exe test "pbt:paginator")
-   (run ./test_awskit_s3.exe test "pbt:bucket-xml")
-   (run ./test_awskit_s3.exe test "pbt:transfer-plan"))))
+   (run ./test_awskit_s3.exe test "pbt:awskit-s3:domain:bucket")
+   (run ./test_awskit_s3.exe test "pbt:awskit-s3:domain:key")
+   (run ./test_awskit_s3.exe test "pbt:awskit-s3:domain:account-metadata-tags")
+   (run ./test_awskit_s3.exe test "pbt:awskit-s3:paginator")
+   (run ./test_awskit_s3.exe test "pbt:awskit-s3:bucket-xml")
+   (run ./test_awskit_s3.exe test "pbt:awskit-s3:transfer-plan"))))

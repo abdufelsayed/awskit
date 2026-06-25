@@ -440,7 +440,7 @@ let test_ptime_amzdate_format =
 
 let suite =
   [
-    ( "pbt:signing:uri-encode",
+    ( "pbt:awskit:signing:uri-encode",
       List.map to_alcotest
         [
           test_uri_encode_safe_chars_unchanged;
@@ -448,7 +448,7 @@ let suite =
           test_uri_encode_slash_flag;
           test_uri_encode_no_double_encode;
         ] );
-    ( "pbt:signing:canonical-query",
+    ( "pbt:awskit:signing:canonical-query",
       List.map to_alcotest
         [
           test_canonical_query_sorted;
@@ -456,7 +456,7 @@ let suite =
           test_canonical_query_preserves_pairs;
           test_canonical_query_generated_edge_cases;
         ] );
-    ( "pbt:signing:sign-request",
+    ( "pbt:awskit:signing:sign-request",
       List.map to_alcotest
         [
           test_sign_deterministic;
@@ -474,7 +474,7 @@ let suite =
         Alcotest.test_case "rejects expired credentials" `Quick
           test_sign_rejects_expired_credentials;
       ] );
-    ( "pbt:signing:ptime",
+    ( "pbt:awskit:signing:ptime",
       List.map to_alcotest
         [ test_ptime_datestamp_format; test_ptime_amzdate_format ] );
   ]

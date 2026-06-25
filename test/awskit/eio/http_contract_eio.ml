@@ -151,7 +151,7 @@ let test_discard_scenario env scenario =
 
 let suite env =
   [
-    ( "runtime-http-contract",
+    ( "contract:awskit-eio:runtime-http",
       List.concat
         [
           List.map Runtime_http_contract.scenarios ~f:(fun scenario ->

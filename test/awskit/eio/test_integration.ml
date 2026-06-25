@@ -975,7 +975,7 @@ let test_response_read_cancellation_skips_drain_cleanup env =
 
 let suite env =
   [
-    ( "integration:connection",
+    ( "integration:awskit-eio:connection",
       [
         Alcotest.test_case "roundtrip" `Quick (fun () ->
             test_connection_roundtrip env);

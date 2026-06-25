@@ -295,7 +295,7 @@ let prop_retry_jitter_stays_within_policy_bounds =
 
 let suite =
   [
-    ( "pbt:protocol",
+    ( "pbt:awskit-s3:protocol",
       List.map to_alcotest
         [
           prop_canonical_query_params_sorted;

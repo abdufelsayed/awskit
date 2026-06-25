@@ -782,11 +782,9 @@ let test_multipart_path_transfer_resumes () =
             (first_transferred !progress)))
 
 let suite () =
-  List.map
-    (fun (name, cases) -> ("minio " ^ name, cases))
-    Shared_contract.suites
+  Shared_contract.scoped_suites ~subject:"minio"
   @ [
-      ( "minio contract",
+      ( "contract:minio:local",
         [
           Alcotest.test_case "object range metadata copy" `Quick
             test_object_range_metadata_and_copy;

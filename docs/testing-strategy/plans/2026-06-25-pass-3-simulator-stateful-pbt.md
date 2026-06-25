@@ -178,8 +178,8 @@ Read-only production files for this pass:
 
 ## Task 6: Suite And Alias
 
-- [ ] Add the property to an Alcotest group named
-  `pbt:simulator-stateful`.
+- [ ] Add the property to an Alcotest suite ID named
+  `pbt:awskit-s3-sim:simulator-stateful`.
 
 - [ ] Register `Test_simulator_stateful_pbt.suite` in
   `test/awskit-s3/sim/test_awskit_s3_sim.ml`.
@@ -195,7 +195,7 @@ Read-only production files for this pass:
    (package awskit-s3-sim)
    (deps test_awskit_s3_sim.exe)
    (action
-    (run ./test_awskit_s3_sim.exe test "pbt:simulator-stateful")))
+    (run ./test_awskit_s3_sim.exe test "pbt:awskit-s3-sim:simulator-stateful")))
   ```
 
 - [ ] Ensure `@simulator-contract` runs the new property.

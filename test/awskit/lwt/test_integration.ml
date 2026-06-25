@@ -1362,7 +1362,7 @@ let test_response_body_reader_cannot_escape_scope () =
 
 let suite =
   [
-    ( "integration:connection",
+    ( "integration:awskit-lwt:connection",
       [
         Alcotest.test_case "roundtrip" `Quick test_connection_roundtrip;
         Alcotest.test_case "defaults" `Quick test_connection_defaults;

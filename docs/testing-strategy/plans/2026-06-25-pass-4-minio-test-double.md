@@ -130,7 +130,7 @@ Package docs under `packages/awskit-s3/doc/**` are editable.
    (package awskit-s3-eio)
    (deps test_awskit_s3_eio.exe)
    (action
-    (run ./test_awskit_s3_eio.exe test "minio-smoke")))
+    (run ./test_awskit_s3_eio.exe test "integration:awskit-s3-eio:minio-smoke")))
   ```
 
 - [ ] Keep the Eio smoke small. Do not duplicate the full Lwt Unix shared

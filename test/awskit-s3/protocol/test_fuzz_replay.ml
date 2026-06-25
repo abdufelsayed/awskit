@@ -95,7 +95,7 @@ let test_xml_replay_corpus () =
 
 let suite =
   [
-    ( "fuzz replay",
+    ( "replay:awskit-s3:fuzz",
       [
         Alcotest.test_case "endpoint corpus" `Quick test_endpoint_replay_corpus;
         Alcotest.test_case "header corpus" `Quick test_header_replay_corpus;

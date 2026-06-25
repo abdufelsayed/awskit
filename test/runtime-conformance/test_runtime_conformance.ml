@@ -223,7 +223,7 @@ let test_retry_timeout_random_and_sleep_capabilities () =
 
 let suite =
   [
-    ( "runtime-conformance",
+    ( "contract:runtime:conformance",
       [
         Alcotest.test_case "io bind law" `Quick test_io_bind_law;
         Alcotest.test_case "request body descriptor" `Quick

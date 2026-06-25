@@ -209,7 +209,7 @@ let test_discard_scenario scenario =
 
 let suite =
   [
-    ( "runtime-http-contract",
+    ( "contract:awskit-lwt:runtime-http",
       List.concat
         [
           List.map Runtime_http_contract.scenarios ~f:(fun scenario ->
