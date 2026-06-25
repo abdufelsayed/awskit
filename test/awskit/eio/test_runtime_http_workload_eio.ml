@@ -25,8 +25,7 @@ let rec read_headers input =
 let write_response output scenario =
   Eio.Buf_write.string output
     (Printf.sprintf "HTTP/1.1 %d test\r\n" scenario.Model.status);
-  List.iter (Model.response_headers scenario) ~f:(fun (name, value) ->
-      Eio.Buf_write.string output (Printf.sprintf "%s: %s\r\n" name value));
+  Eio.Buf_write.string output (Model.response_header_block scenario);
   Eio.Buf_write.string output "\r\n";
   Eio.Buf_write.string output (Model.body_for_framing scenario.framing);
   Eio.Buf_write.flush output
@@ -129,6 +128,23 @@ let read_body_to_string body =
   Awskit_eio.Runtime.Response_body.with_reader body ~consume:(fun reader ->
       read_all reader (Buffer.create 16))
 
+let read_body_once n body =
+  let n = Int.max 0 n in
+  Awskit_eio.Runtime.Response_body.with_reader body ~consume:(fun reader ->
+      let bytes = Bytes.create n in
+      match
+        Awskit_eio.Runtime.Response_body.read reader bytes ~off:0 ~len:n
+      with
+      | Error _ as error -> error
+      | Ok read -> Ok (Stdlib.Bytes.sub_string bytes 0 read))
+
+let consume_body scenario body =
+  match scenario.Model.consume with
+  | Model.Read_all -> read_body_to_string body
+  | Model.Read_once n -> read_body_once n body
+  | Model.Drop_without_read -> Ok ""
+  | Model.Raise_in_consume -> raise Stdlib.Exit
+
 let run_with_guard env scenario =
   let clock = Eio.Stdenv.clock env in
   with_loopback_server env scenario (fun endpoint ->
@@ -143,14 +159,21 @@ let run_with_guard env scenario =
                 Alcotest.(check int)
                   "response status" scenario.status
                   (Awskit.Response.status response);
-                read_body_to_string response_body))
+                consume_body scenario response_body))
       with Eio.Time.Timeout ->
         Error (timeout_error "runtime HTTP scenario timed out"))
+
+let observe_run env scenario =
+  try
+    match run_with_guard env scenario with
+    | Ok body -> Model.Observed_body body
+    | Error error -> Model.Observed_error (Awskit.Error.to_string_hum error)
+  with Stdlib.Exit -> Model.Observed_exception
 
 let suite env =
   let module Target = struct
     let name = "awskit-eio"
-    let run_scenario scenario = run_with_guard env scenario
+    let run_scenario scenario = observe_run env scenario
   end in
   let module Workload = Runtime_http_workload.Make (Target) in
   Workload.suite

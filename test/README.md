@@ -25,6 +25,11 @@ Runtime HTTP adapter work runs through package-owned aliases:
 - `@test/awskit/lwt/runtime-http-workload`
 - `@runtime-http-workload`
 
+The shared runtime HTTP workload covers generated response framing, bodiless
+responses, adversarial framing conflicts, early closes, malformed header/body
+wire cases, response-body reader consumption modes, and callback exception
+preservation.
+
 The suite IDs are `workload:awskit-eio:runtime-http` and
 `workload:awskit-lwt:runtime-http`.
 

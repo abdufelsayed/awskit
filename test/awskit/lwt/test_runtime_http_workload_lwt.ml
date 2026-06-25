@@ -64,12 +64,8 @@ let write_all fd value =
   loop 0
 
 let response_wire scenario =
-  let headers =
-    List.map (Model.response_headers scenario) ~f:(fun (name, value) ->
-        Printf.sprintf "%s: %s\r\n" name value)
-    |> String.concat ~sep:""
-  in
-  Printf.sprintf "HTTP/1.1 %d test\r\n%s\r\n%s" scenario.Model.status headers
+  Printf.sprintf "HTTP/1.1 %d test\r\n%s\r\n%s" scenario.Model.status
+    (Model.response_header_block scenario)
     (Model.body_for_framing scenario.framing)
 
 let with_loopback_server scenario f =
@@ -198,6 +194,22 @@ let read_body_to_string body =
   Aws.Runtime.Response_body.with_reader body ~consume:(fun reader ->
       read_all reader (Buffer.create 16))
 
+let read_body_once n body =
+  let n = Int.max 0 n in
+  Aws.Runtime.Response_body.with_reader body ~consume:(fun reader ->
+      let bytes = Bytes.create n in
+      Lwt.bind (Aws.Runtime.Response_body.read reader bytes ~off:0 ~len:n)
+        (function
+        | Error _ as error -> Lwt.return error
+        | Ok read -> Lwt.return_ok (Stdlib.Bytes.sub_string bytes 0 read)))
+
+let consume_body scenario body =
+  match scenario.Model.consume with
+  | Model.Read_all -> read_body_to_string body
+  | Model.Read_once n -> read_body_once n body
+  | Model.Drop_without_read -> Lwt.return_ok ""
+  | Model.Raise_in_consume -> raise Stdlib.Exit
+
 let run_with_guard scenario =
   Lwt_unix.with_timeout 0.75 (fun () ->
       with_loopback_server scenario (fun endpoint ->
@@ -208,12 +220,19 @@ let run_with_guard scenario =
               Alcotest.(check int)
                 "response status" scenario.status
                 (Awskit.Response.status response);
-              read_body_to_string body)))
+              consume_body scenario body)))
 
 let run_scenario scenario =
-  try Lwt_main.run (run_with_guard scenario)
-  with Lwt_unix.Timeout ->
-    Error (timeout_error "runtime HTTP scenario timed out")
+  try
+    match Lwt_main.run (run_with_guard scenario) with
+    | Ok body -> Model.Observed_body body
+    | Error error -> Model.Observed_error (Awskit.Error.to_string_hum error)
+  with
+  | Lwt_unix.Timeout ->
+      Model.Observed_error
+        (Awskit.Error.to_string_hum
+           (timeout_error "runtime HTTP scenario timed out"))
+  | Stdlib.Exit -> Model.Observed_exception
 
 module Target = struct
   let name = "awskit-lwt"
