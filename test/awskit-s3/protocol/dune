@@ -32,12 +32,27 @@
   ptime
   fmt))
 
+(test
+ (name test_domain_pbt)
+ (package awskit-s3)
+ (modules test_domain_pbt)
+ (libraries
+  awskit
+  awskit-s3
+  awskit_s3_protocol_test_support
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  fmt))
+
 (rule
  (alias s3-protocol-wire)
  (package awskit-s3)
- (deps test_protocol_pbt.exe)
+ (deps test_protocol_pbt.exe test_domain_pbt.exe)
  (action
-  (run ./test_protocol_pbt.exe test "workload:awskit-s3:protocol-wire")))
+  (progn
+   (run ./test_protocol_pbt.exe test "workload:awskit-s3:protocol-wire")
+   (run ./test_domain_pbt.exe))))
 
 (test
  (name test_protocol_fixtures)

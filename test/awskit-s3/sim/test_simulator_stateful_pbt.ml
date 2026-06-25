@@ -18,6 +18,8 @@ let tags_to_set tags =
   |> List.map (fun (key, value) -> Tag.create_exn ~key ~value)
   |> Tag.Set.of_list_exn
 
+let metadata_to_store metadata = Metadata.of_list_exn metadata
+
 let tags_of_set tags =
   Tag.Set.to_list tags |> List.map (fun tag -> (Tag.key tag, Tag.value tag))
 
@@ -80,6 +82,11 @@ let check_tags command_index command label expected actual =
     Alcotest.(list (pair string string))
     label expected (tags_of_set actual)
 
+let check_metadata command_index command label expected actual =
+  check_equal command_index command
+    Alcotest.(list (pair string string))
+    label expected (Metadata.to_list actual)
+
 let assert_get command_index command conn key expected =
   match expected with
   | Some object_ ->
@@ -90,6 +97,8 @@ let assert_get command_index command conn key expected =
       in
       check_equal command_index command Alcotest.string "get body" object_.body
         result.value;
+      check_metadata command_index command "get metadata" object_.metadata
+        result.metadata;
       check_version_id_presence command_index command "get version id"
         object_.has_version_id result.version_id
   | None ->
@@ -107,6 +116,8 @@ let assert_find command_index command conn key expected =
       | Some object_ ->
           check_equal command_index command Alcotest.string "find body"
             object_.body result.value;
+          check_metadata command_index command "find metadata" object_.metadata
+            result.metadata;
           check_version_id_presence command_index command "find version id"
             object_.has_version_id result.version_id
       | None -> fail command_index command "find_string expected Ok None")
@@ -128,6 +139,8 @@ let assert_head command_index command conn key expected =
         "head content length"
         (Some (Int64.of_int (String.length object_.body)))
         result.content_length;
+      check_metadata command_index command "head metadata" object_.metadata
+        result.metadata;
       check_version_id_presence command_index command "head version id"
         object_.has_version_id result.version_id
   | None ->
@@ -213,6 +226,55 @@ let assert_get_versioning command_index command conn expected =
     (status_to_string expected)
     (status_to_string result.status)
 
+let listed_version_to_string (version : Model.listed_version) =
+  Printf.sprintf "%s:%s:version_id=%b:latest=%b:size=%s" version.key
+    (match version.kind with `Object -> "object" | `Delete_marker -> "marker")
+    version.has_version_id version.is_latest
+    (Option.fold ~none:"-" ~some:Int64.to_string version.size)
+
+let actual_object_version_to_model (version : Object.Versions.object_version) :
+    Model.listed_version =
+  {
+    key = Object_key.to_string version.key;
+    kind = `Object;
+    has_version_id = Option.is_some version.version_id;
+    is_latest = Option.value ~default:false version.is_latest;
+    size = version.size;
+  }
+
+let actual_delete_marker_to_model (marker : Object.Versions.delete_marker) :
+    Model.listed_version =
+  {
+    key = Object_key.to_string marker.key;
+    kind = `Delete_marker;
+    has_version_id = Option.is_some marker.version_id;
+    is_latest = Option.value ~default:false marker.is_latest;
+    size = None;
+  }
+
+let assert_version_listing command_index command conn model =
+  let pages =
+    expect_ok command_index command "list object versions"
+      (Simulator.Object.Versions.pages conn ~bucket ~max_pages:128 ())
+  in
+  let actual =
+    List.concat_map
+      (fun (page : Object.Versions.page) ->
+        List.map actual_object_version_to_model page.versions
+        @ List.map actual_delete_marker_to_model page.delete_markers)
+      pages
+    |> List.map listed_version_to_string
+    |> List.sort String.compare
+  in
+  let expected =
+    Model.listed_versions model
+    |> List.map listed_version_to_string
+    |> List.sort String.compare
+  in
+  check_equal command_index command
+    Alcotest.(list string)
+    "list object versions" expected actual
+
 let check_store command_index command conn model =
   let store = Simulator.store conn in
   check_equal command_index command
@@ -225,7 +287,8 @@ let check_store command_index command conn model =
     "keys" (Model.keys model)
     (Simulator.keys store ~bucket);
   assert_bucket_tags command_index command conn model.bucket_tags;
-  assert_get_versioning command_index command conn model.versioning
+  assert_get_versioning command_index command conn model.versioning;
+  assert_version_listing command_index command conn model
 
 let assert_put_versioning command_index command conn status =
   ignore
@@ -268,8 +331,8 @@ let assert_list_prefix command_index command conn prefix model =
     (Model.keys_with_prefix prefix model)
     keys
 
-let assert_copy command_index command conn ~source_key ~destination_key
-    ~destination_has_version_id expected =
+let assert_copy command_index command conn ~source_key ~destination_key ?options
+    ~destination_has_version_id (expected : Model.object_ option) =
   match expected with
   | Some source ->
       let result =
@@ -278,7 +341,7 @@ let assert_copy command_index command conn ~source_key ~destination_key
              ~source_key:(key_to_object_key source_key)
              ~destination_bucket:bucket
              ~destination_key:(key_to_object_key destination_key)
-             ())
+             ?options ())
       in
       check_version_id_presence command_index command "copy source version id"
         source.has_version_id result.copy_source_version_id;
@@ -314,6 +377,25 @@ let apply_simulator_command command_index conn model command =
         assert_object_tags command_index command conn key
           (Model.find key next_model);
         next_model
+    | Put_string_metadata (key, body, tags, metadata) ->
+        let options =
+          Object.Put.options_exn
+            ~metadata:(metadata_to_store metadata)
+            ~tags:(tags_to_set tags) ()
+        in
+        let result =
+          expect_ok command_index command "put_string metadata"
+            (Simulator.Object.put_string conn ~bucket
+               ~key:(key_to_object_key key) ~options ~contents:body ())
+        in
+        check_version_id_presence command_index command "put version id"
+          (Model.versioning_keeps_history model)
+          result.version_id;
+        let next_model = Model.apply command model in
+        assert_get command_index command conn key (Model.find key next_model);
+        assert_object_tags command_index command conn key
+          (Model.find key next_model);
+        next_model
     | Get_string key ->
         assert_get command_index command conn key (Model.find key model);
         model
@@ -345,6 +427,30 @@ let apply_simulator_command command_index conn model command =
         (match source with
         | None -> ()
         | Some _ ->
+            assert_object_tags command_index command conn destination_key
+              (Model.find destination_key next_model));
+        next_model
+    | Copy_object_metadata (source_key, destination_key, metadata) ->
+        let source = Model.find source_key model in
+        let options =
+          match metadata with
+          | Command.Copy_source_metadata -> None
+          | Replace_metadata metadata ->
+              Some
+                (Object.Copy.options_exn
+                   ~metadata_directive:(`Replace (metadata_to_store metadata))
+                   ())
+        in
+        assert_copy command_index command conn ~source_key ~destination_key
+          ?options
+          ~destination_has_version_id:(Model.versioning_keeps_history model)
+          source;
+        let next_model = Model.apply command model in
+        (match source with
+        | None -> ()
+        | Some _ ->
+            assert_get command_index command conn destination_key
+              (Model.find destination_key next_model);
             assert_object_tags command_index command conn destination_key
               (Model.find destination_key next_model));
         next_model

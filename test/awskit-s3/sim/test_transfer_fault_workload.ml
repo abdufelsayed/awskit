@@ -14,7 +14,7 @@ let credentials =
 let bucket = Bucket_name.of_string_exn "transfer-fault-workload-bucket"
 let key = Object_key.of_string_exn "transfer.bin"
 let key_string = Object_key.to_string key
-let chunk_size = 64 * 1024
+let chunk_size = Model.chunk_size
 
 type counters = {
   mutable read_bytes : int;
@@ -300,10 +300,16 @@ let verify_success case store counts ~remote_body ~progress_final =
   check_int case "written bytes" progress_final counts.written_bytes;
   check_int case "progress final" progress_final counts.progress_bytes
 
-let verify_failure case store conn counts ~remote_absent ~owned_upload_aborted =
+let verify_failure case store conn counts ~remote_absent ~owned_upload_aborted
+    ~read_bytes ~written_bytes ~progress_bytes =
   if remote_absent then
     check_bool case "remote object absent" true
       (Option.is_none (stored_body case store));
+  check_int case "read bytes after failure" read_bytes counts.read_bytes;
+  check_int case "written bytes after failure" written_bytes
+    counts.written_bytes;
+  check_int case "progress bytes after failure" progress_bytes
+    counts.progress_bytes;
   let history = Simulator.history store in
   check_fault_history case store;
   if owned_upload_aborted then (
@@ -326,10 +332,17 @@ module Target = struct
         ignore (expect_ok case "transfer" result : unit);
         verify_success case store counts ~remote_body ~progress_final;
         true
-    | Model.Upload_fails { remote_absent; owned_upload_aborted } ->
+    | Model.Upload_fails
+        {
+          remote_absent;
+          owned_upload_aborted;
+          read_bytes;
+          written_bytes;
+          progress_bytes;
+        } ->
         ignore (expect_error case "transfer" result : Awskit.Error.t);
         verify_failure case store conn counts ~remote_absent
-          ~owned_upload_aborted;
+          ~owned_upload_aborted ~read_bytes ~written_bytes ~progress_bytes;
         true
 end
 

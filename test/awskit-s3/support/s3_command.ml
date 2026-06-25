@@ -1,7 +1,10 @@
 type tag_model = (string * string) list
+type metadata_model = (string * string) list
+type copy_metadata = Copy_source_metadata | Replace_metadata of metadata_model
 
 type t =
   | Put_string of string * string * tag_model
+  | Put_string_metadata of string * string * tag_model * metadata_model
   | Get_string of string
   | Find_string of string
   | Head_object of string
@@ -10,6 +13,7 @@ type t =
   | List_keys
   | List_prefix of string
   | Copy_object of string * string
+  | Copy_object_metadata of string * string * copy_metadata
   | Put_object_tags of string * tag_model
   | Get_object_tags of string
   | Delete_object_tags of string
@@ -36,6 +40,15 @@ let tag_sets_domain =
     [ ("path/key", "x@y") ];
   ]
 
+let metadata_sets_domain =
+  [
+    [];
+    [ ("author", "awskit") ];
+    [ ("trace-id", "sim-1") ];
+    [ ("purpose", "stateful-pbt"); ("owner", "sdk") ];
+    [ ("cache-key", "logs/a"); ("review", "broad") ];
+  ]
+
 let versioning_status_domain =
   [
     Awskit_s3.Bucket.Versioning.Status.Enabled;
@@ -48,12 +61,28 @@ let tags_to_string tags =
   |> String.concat ";"
   |> Printf.sprintf "[%s]"
 
+let metadata_to_string metadata =
+  metadata
+  |> List.map (fun (key, value) -> Printf.sprintf "%S=%S" key value)
+  |> String.concat ";"
+  |> Printf.sprintf "[%s]"
+
+let copy_metadata_to_string = function
+  | Copy_source_metadata -> "copy-source-metadata"
+  | Replace_metadata metadata ->
+      Printf.sprintf "replace-metadata metadata=%s"
+        (metadata_to_string metadata)
+
 let versioning_status_to_string = Awskit_s3.Bucket.Versioning.Status.to_string
 
 let to_string = function
   | Put_string (key, body, tags) ->
       Printf.sprintf "put-string key=%S body=%S tags=%s" key body
         (tags_to_string tags)
+  | Put_string_metadata (key, body, tags, metadata) ->
+      Printf.sprintf "put-string-metadata key=%S body=%S tags=%s metadata=%s"
+        key body (tags_to_string tags)
+        (metadata_to_string metadata)
   | Get_string key -> Printf.sprintf "get-string key=%S" key
   | Find_string key -> Printf.sprintf "find-string key=%S" key
   | Head_object key -> Printf.sprintf "head-object key=%S" key
@@ -64,6 +93,10 @@ let to_string = function
   | Copy_object (source_key, destination_key) ->
       Printf.sprintf "copy-object source=%S destination=%S" source_key
         destination_key
+  | Copy_object_metadata (source_key, destination_key, metadata) ->
+      Printf.sprintf "copy-object-metadata source=%S destination=%S %s"
+        source_key destination_key
+        (copy_metadata_to_string metadata)
   | Put_object_tags (key, tags) ->
       Printf.sprintf "put-object-tags key=%S tags=%s" key (tags_to_string tags)
   | Get_object_tags key -> Printf.sprintf "get-object-tags key=%S" key
@@ -86,7 +119,16 @@ let transcript commands =
 let gen_key = QCheck.Gen.oneof_list key_domain
 let gen_prefix = QCheck.Gen.oneof_list prefix_domain
 let gen_tags = QCheck.Gen.oneof_list tag_sets_domain
+let gen_metadata = QCheck.Gen.oneof_list metadata_sets_domain
 let gen_versioning_status = QCheck.Gen.oneof_list versioning_status_domain
+
+let gen_copy_metadata =
+  QCheck.Gen.(
+    oneof
+      [
+        return Copy_source_metadata;
+        map (fun metadata -> Replace_metadata metadata) gen_metadata;
+      ])
 
 let gen_body =
   QCheck.Gen.(
@@ -104,6 +146,11 @@ let generator =
         map3
           (fun key body tags -> Put_string (key, body, tags))
           gen_key gen_body gen_tags );
+      ( 3,
+        map4
+          (fun key body tags metadata ->
+            Put_string_metadata (key, body, tags, metadata))
+          gen_key gen_body gen_tags gen_metadata );
       (2, map (fun key -> Get_string key) gen_key);
       (2, map (fun key -> Find_string key) gen_key);
       (2, map (fun key -> Head_object key) gen_key);
@@ -112,6 +159,11 @@ let generator =
       (1, return List_keys);
       (1, map (fun prefix -> List_prefix prefix) gen_prefix);
       (2, map2 (fun source dest -> Copy_object (source, dest)) gen_key gen_key);
+      ( 2,
+        map3
+          (fun source dest metadata ->
+            Copy_object_metadata (source, dest, metadata))
+          gen_key gen_key gen_copy_metadata );
       (2, map2 (fun key tags -> Put_object_tags (key, tags)) gen_key gen_tags);
       (2, map (fun key -> Get_object_tags key) gen_key);
       (2, map (fun key -> Delete_object_tags key) gen_key);
@@ -137,6 +189,19 @@ let shrink_tags = function
   | [] -> QCheck.Iter.empty
   | _ :: _ -> QCheck.Iter.return []
 
+let shrink_metadata = function
+  | [] -> QCheck.Iter.empty
+  | _ :: _ -> QCheck.Iter.return []
+
+let shrink_copy_metadata = function
+  | Copy_source_metadata -> QCheck.Iter.empty
+  | Replace_metadata metadata ->
+      QCheck.Iter.append
+        (QCheck.Iter.return Copy_source_metadata)
+        (QCheck.Iter.map
+           (fun metadata -> Replace_metadata metadata)
+           (shrink_metadata metadata))
+
 let shrink_versioning_status = function
   | Awskit_s3.Bucket.Versioning.Status.Suspended ->
       QCheck.Iter.return Awskit_s3.Bucket.Versioning.Status.Enabled
@@ -155,6 +220,23 @@ let shrinker = function
           QCheck.Iter.map
             (fun tags -> Put_string (key, body, tags))
             (shrink_tags tags);
+        ]
+      |> QCheck.Iter.flatten
+  | Put_string_metadata (key, body, tags, metadata) ->
+      QCheck.Iter.of_list
+        [
+          QCheck.Iter.map
+            (fun key -> Put_string_metadata (key, body, tags, metadata))
+            (shrink_key key);
+          QCheck.Iter.map
+            (fun body -> Put_string_metadata (key, body, tags, metadata))
+            (shrink_body body);
+          QCheck.Iter.map
+            (fun tags -> Put_string_metadata (key, body, tags, metadata))
+            (shrink_tags tags);
+          QCheck.Iter.map
+            (fun metadata -> Put_string_metadata (key, body, tags, metadata))
+            (shrink_metadata metadata);
         ]
       |> QCheck.Iter.flatten
   | Get_string key ->
@@ -178,6 +260,23 @@ let shrinker = function
         (QCheck.Iter.map
            (fun destination_key -> Copy_object (source_key, destination_key))
            (shrink_key destination_key))
+  | Copy_object_metadata (source_key, destination_key, metadata) ->
+      QCheck.Iter.of_list
+        [
+          QCheck.Iter.map
+            (fun source_key ->
+              Copy_object_metadata (source_key, destination_key, metadata))
+            (shrink_key source_key);
+          QCheck.Iter.map
+            (fun destination_key ->
+              Copy_object_metadata (source_key, destination_key, metadata))
+            (shrink_key destination_key);
+          QCheck.Iter.map
+            (fun metadata ->
+              Copy_object_metadata (source_key, destination_key, metadata))
+            (shrink_copy_metadata metadata);
+        ]
+      |> QCheck.Iter.flatten
   | Put_object_tags (key, tags) ->
       QCheck.Iter.append
         (QCheck.Iter.map

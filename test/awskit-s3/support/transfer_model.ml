@@ -13,9 +13,16 @@ type upload_case = {
 
 type expected_upload =
   | Upload_succeeds of { remote_body : string; progress_final : int }
-  | Upload_fails of { remote_absent : bool; owned_upload_aborted : bool }
+  | Upload_fails of {
+      remote_absent : bool;
+      owned_upload_aborted : bool;
+      read_bytes : int;
+      written_bytes : int;
+      progress_bytes : int;
+    }
 
 let min_part_size = 5 * 1024 * 1024
+let chunk_size = 64 * 1024
 
 let part_count_for_length ~length ~part_size =
   if length = 0 then 0 else ((length - 1) / part_size) + 1
@@ -44,13 +51,87 @@ let owned_upload_aborted case = function
   | Multipart_complete_fails ->
       uses_multipart case
 
+let part_lengths case =
+  let length = String.length case.local_body in
+  if not (uses_multipart case) then [ length ]
+  else
+    let rec loop offset acc =
+      if offset >= length then List.rev acc
+      else
+        let part_length = min case.part_size (length - offset) in
+        loop (offset + part_length) (part_length :: acc)
+    in
+    loop 0 []
+
+let completed_part_bytes_before_offset case offset =
+  if not (uses_multipart case) then 0
+  else
+    min
+      (String.length case.local_body)
+      (offset / case.part_size * case.part_size)
+
+let bytes_before_part case part_number =
+  if part_number <= 1 then 0
+  else min (String.length case.local_body) ((part_number - 1) * case.part_size)
+
+let write_fault_counts case limit =
+  let rec chunks read_bytes written_bytes progress_bytes part_remaining =
+    if part_remaining = 0 then
+      `Part_complete (read_bytes, written_bytes, progress_bytes)
+    else
+      let length = min chunk_size part_remaining in
+      let read_bytes = read_bytes + length in
+      if written_bytes >= limit then
+        `Failed (read_bytes, written_bytes, progress_bytes)
+      else
+        let allowed = min length (limit - written_bytes) in
+        let written_bytes = written_bytes + allowed in
+        if allowed < length then
+          `Failed (read_bytes, written_bytes, progress_bytes)
+        else
+          chunks read_bytes written_bytes progress_bytes
+            (part_remaining - length)
+  in
+  let rec parts read_bytes written_bytes progress_bytes = function
+    | [] -> (read_bytes, written_bytes, progress_bytes)
+    | part_length :: rest -> (
+        match chunks read_bytes written_bytes progress_bytes part_length with
+        | `Failed counts -> counts
+        | `Part_complete (read_bytes, written_bytes, progress_bytes) ->
+            let progress_bytes =
+              if uses_multipart case then progress_bytes + part_length
+              else progress_bytes
+            in
+            parts read_bytes written_bytes progress_bytes rest)
+  in
+  parts 0 0 0 (part_lengths case)
+
+let failure_counts case = function
+  | Read_fails_after offset ->
+      let progress_bytes = completed_part_bytes_before_offset case offset in
+      (offset, offset, progress_bytes)
+  | Write_fails_after offset -> write_fault_counts case offset
+  | Multipart_create_fails -> (0, 0, 0)
+  | Multipart_part_fails part_number ->
+      let bytes = bytes_before_part case part_number in
+      (bytes, bytes, bytes)
+  | Multipart_complete_fails ->
+      let bytes = String.length case.local_body in
+      (bytes, bytes, bytes)
+
 let expected_upload case =
   match case.fault with
   | Some fault when fault_reaches case fault ->
+      let read_bytes, written_bytes, progress_bytes =
+        failure_counts case fault
+      in
       Upload_fails
         {
           remote_absent = true;
           owned_upload_aborted = owned_upload_aborted case fault;
+          read_bytes;
+          written_bytes;
+          progress_bytes;
         }
   | None | Some _ ->
       Upload_succeeds

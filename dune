@@ -10,6 +10,8 @@
  (name check-local)
  (deps
   dune-project
+  (alias awskit-core-contracts)
+  (alias awskit-runtime-contracts)
   (alias runtime-http-workload)
   (alias s3-sim-workload)
   (alias s3-transfer-faults)
@@ -33,6 +35,16 @@
  (deps
   (alias test/awskit/eio/runtime-http-workload)
   (alias test/awskit/lwt/runtime-http-workload)))
+
+(alias
+ (name awskit-core-contracts)
+ (deps
+  (alias test/awskit/awskit-core-contracts)))
+
+(alias
+ (name awskit-runtime-contracts)
+ (deps
+  (alias test/awskit/runtime/awskit-runtime-contracts)))
 
 (alias
  (name s3-sim-workload)

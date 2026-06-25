@@ -26,6 +26,22 @@ let body_of_length length = String.init length (body_char length)
 let part_count_for_length ~length ~part_size =
   Model.part_count_for_length ~length ~part_size
 
+let unique_offsets length part_size =
+  [
+    0;
+    length - 1;
+    Model.chunk_size - 1;
+    Model.chunk_size;
+    Model.chunk_size + 1;
+    part_size - 1;
+    part_size;
+    part_size + 1;
+    (2 * part_size) - 1;
+    2 * part_size;
+  ]
+  |> List.filter (fun offset -> offset >= 0 && offset < length)
+  |> List.sort_uniq Int.compare
+
 let part_size_gen =
   QCheck.Gen.int_range Model.min_part_size
     (Model.min_part_size + max_extra_part_bytes)
@@ -41,6 +57,14 @@ let length_gen part_size =
       (1, int_range ((2 * part_size) + 1) ((3 * part_size) + 257));
     ]
 
+let fault_offset_gen ~length ~part_size =
+  let offsets = unique_offsets length part_size in
+  let open QCheck.Gen in
+  match offsets with
+  | [] -> int_range 0 (length - 1)
+  | offsets ->
+      oneof_weighted [ (2, oneof_list offsets); (3, int_range 0 (length - 1)) ]
+
 let fault_gen ~length ~part_size =
   let open QCheck.Gen in
   let read_write_faults =
@@ -50,11 +74,11 @@ let fault_gen ~length ~part_size =
         ( 2,
           map
             (fun n -> Some (Model.Read_fails_after n))
-            (int_range 0 (length - 1)) );
+            (fault_offset_gen ~length ~part_size) );
         ( 2,
           map
             (fun n -> Some (Model.Write_fails_after n))
-            (int_range 0 (length - 1)) );
+            (fault_offset_gen ~length ~part_size) );
       ]
   in
   let multipart_faults =
@@ -184,6 +208,30 @@ let test_shrink_fault_excludes_original () =
            (iter_to_list (shrink_fault fault))))
     examples
 
+let case ?fault ~length ~part_size () =
+  { Model.local_body = body_of_length length; part_size; fault }
+
+let deterministic_cases =
+  let multipart_length = Model.min_part_size + 32 in
+  [
+    ( "single read fault reports partial movement",
+      case ~length:4096 ~part_size:Model.min_part_size
+        ~fault:(Model.Read_fails_after 17) () );
+    ( "multipart create fault moves no bytes",
+      case ~length:multipart_length ~part_size:Model.min_part_size
+        ~fault:Model.Multipart_create_fails () );
+    ( "multipart write fault reports partial failed part",
+      case ~length:multipart_length ~part_size:Model.min_part_size
+        ~fault:(Model.Write_fails_after (Model.min_part_size + 3))
+        () );
+    ( "multipart part fault skips failed body",
+      case ~length:multipart_length ~part_size:Model.min_part_size
+        ~fault:(Model.Multipart_part_fails 2) () );
+    ( "multipart complete fault reports all bytes before cleanup",
+      case ~length:multipart_length ~part_size:Model.min_part_size
+        ~fault:Model.Multipart_complete_fails () );
+  ]
+
 let unique_lengths lengths current =
   lengths
   |> List.filter (fun length -> length >= 0 && length <> current)
@@ -237,10 +285,13 @@ module Make (Target : TARGET) = struct
   let suite =
     [
       ( "workload:" ^ Target.name ^ ":transfer-faults",
-        [
-          Alcotest.test_case "fault shrink excludes original" `Quick
-            test_shrink_fault_excludes_original;
-          property;
-        ] );
+        Alcotest.test_case "fault shrink excludes original" `Quick
+          test_shrink_fault_excludes_original
+        :: List.map
+             (fun (name, case) ->
+               Alcotest.test_case name `Quick (fun () ->
+                   Alcotest.(check bool) name true (Target.run_upload_case case)))
+             deterministic_cases
+        @ [ property ] );
     ]
 end

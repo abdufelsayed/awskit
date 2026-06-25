@@ -1,0 +1,11 @@
+(test
+ (name test_core_contracts)
+ (package awskit)
+ (libraries awskit base ptime alcotest qcheck-core qcheck-alcotest))
+
+(rule
+ (alias awskit-core-contracts)
+ (package awskit)
+ (deps test_core_contracts.exe)
+ (action
+  (run ./test_core_contracts.exe)))

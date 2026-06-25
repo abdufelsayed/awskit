@@ -3,6 +3,8 @@ open S3_model
 module Bucket = Awskit_s3.Bucket
 module Bucket_name = Awskit_s3.Bucket_name
 module Command = S3_command
+module Content_type = Awskit_s3.Content_type
+module Metadata = Awskit_s3.Metadata
 module Multipart = Awskit_s3.Multipart
 module Model = S3_model
 module Object = Awskit_s3.Object
@@ -20,6 +22,23 @@ let unsafe_http = getenv_default "AWSKIT_S3_MINIO_UNSAFE_HTTP" ""
 let access_key = getenv_default "AWSKIT_S3_MINIO_ACCESS_KEY_ID" "minioadmin"
 let secret_key = getenv_default "AWSKIT_S3_MINIO_SECRET_ACCESS_KEY" "minioadmin"
 let region = getenv_default "AWSKIT_S3_MINIO_REGION" "us-east-1"
+
+let minio_config_vars =
+  [
+    "AWSKIT_S3_MINIO_ENDPOINT";
+    "AWSKIT_S3_MINIO_ACCESS_KEY_ID";
+    "AWSKIT_S3_MINIO_SECRET_ACCESS_KEY";
+    "AWSKIT_S3_MINIO_REGION";
+    "AWSKIT_S3_MINIO_UNSAFE_HTTP";
+  ]
+
+let minio_configured =
+  List.exists
+    (fun name ->
+      match Sys.getenv_opt name with
+      | Some value when value <> "" -> true
+      | _ -> false)
+    minio_config_vars
 
 let credentials =
   Awskit.Credentials.create_exn ~access_key_id:access_key
@@ -42,11 +61,26 @@ let compare_string_pair (left_key, left_value) (right_key, right_value) =
   | value -> value
 
 let normalize_tags tags = List.sort compare_string_pair tags
+let normalize_metadata metadata = List.sort compare_string_pair metadata
 
 let tags_of_set tags =
   Tag.Set.to_list tags
   |> List.map (fun tag -> (Tag.key tag, Tag.value tag))
   |> normalize_tags
+
+let metadata_to_set metadata = Metadata.to_list metadata |> normalize_metadata
+let metadata_of_model metadata = Metadata.of_list_exn metadata
+
+let skip_unconfigured_minio label error =
+  Format.eprintf
+    "@[<v>Skipping MinIO integration: no AWSKIT_S3_MINIO_* configuration was \
+     supplied and %s failed.@;\
+     Start local MinIO with default credentials or set \
+     AWSKIT_S3_MINIO_ENDPOINT, AWSKIT_S3_MINIO_ACCESS_KEY_ID, and \
+     AWSKIT_S3_MINIO_SECRET_ACCESS_KEY to require this gate.@;\
+     %a@]@."
+    label Awskit_s3.Error.pp error;
+  Alcotest.skip ()
 
 let endpoint_config () =
   let endpoint =
@@ -338,6 +372,13 @@ let check_tags command_index command label expected actual =
     Alcotest.(list (pair string string))
     label (normalize_tags expected) (tags_of_set actual)
 
+let check_metadata command_index command label expected actual =
+  check_equal command_index command
+    Alcotest.(list (pair string string))
+    label
+    (normalize_metadata expected)
+    (metadata_to_set actual)
+
 let assert_get command_index command conn key expected =
   match expected with
   | Some object_ ->
@@ -349,6 +390,8 @@ let assert_get command_index command conn key expected =
       in
       check_equal command_index command Alcotest.string "get body" object_.body
         result.value;
+      check_metadata command_index command "get metadata" object_.metadata
+        result.metadata;
       check_version_id_presence command_index command "get version id"
         object_.has_version_id result.version_id
   | None ->
@@ -368,6 +411,8 @@ let assert_find command_index command conn key expected =
       | Some object_ ->
           check_equal command_index command Alcotest.string "find body"
             object_.body result.value;
+          check_metadata command_index command "find metadata" object_.metadata
+            result.metadata;
           check_version_id_presence command_index command "find version id"
             object_.has_version_id result.version_id
       | None -> fail command_index command "find_string expected Ok None")
@@ -390,6 +435,8 @@ let assert_head command_index command conn key expected =
         "head content length"
         (Some (Int64.of_int (String.length object_.body)))
         result.content_length;
+      check_metadata command_index command "head metadata" object_.metadata
+        result.metadata;
       check_version_id_presence command_index command "head version id"
         object_.has_version_id result.version_id
   | None ->
@@ -525,7 +572,7 @@ let assert_list_prefix command_index command conn prefix model =
     (Model.keys_with_prefix prefix model)
     (list_keys command_index command conn ~options ())
 
-let assert_copy command_index command conn ~source_key ~destination_key
+let assert_copy command_index command conn ~source_key ~destination_key ?options
     ~destination_has_version_id expected =
   match expected with
   | Some _source ->
@@ -535,7 +582,7 @@ let assert_copy command_index command conn ~source_key ~destination_key
              (S3.Object.copy conn ~source_bucket:bucket
                 ~source_key:(object_key source_key) ~destination_bucket:bucket
                 ~destination_key:(object_key destination_key)
-                ()))
+                ?options ()))
       in
       check_version_id_presence command_index command
         "copy destination version id" destination_has_version_id
@@ -546,12 +593,23 @@ let assert_copy command_index command conn ~source_key ~destination_key
            (S3.Object.copy conn ~source_bucket:bucket
               ~source_key:(object_key source_key) ~destination_bucket:bucket
               ~destination_key:(object_key destination_key)
-              ()))
+              ?options ()))
+
+let put_options ~tags ~metadata =
+  let tags = match tags with [] -> None | tags -> Some (tags_to_set tags) in
+  let metadata =
+    match metadata with
+    | [] -> None
+    | metadata -> Some (metadata_of_model metadata)
+  in
+  match (tags, metadata) with
+  | None, None -> None
+  | _ -> Some (Object.Put.options_exn ?tags ?metadata ())
 
 let check_store command_index command conn model =
   assert_list_keys command_index command conn model;
-  List.iter
-    (fun (key, body) ->
+  Model.String_map.bindings model.objects
+  |> List.iter (fun (key, object_) ->
       let result =
         expect_ok command_index command "store get"
           (await_result "store get"
@@ -560,8 +618,10 @@ let check_store command_index command conn model =
       in
       check_equal command_index command Alcotest.string
         (Printf.sprintf "store body %s" key)
-        body result.value)
-    (Model.objects_as_strings model);
+        object_.body result.value;
+      check_metadata command_index command
+        (Printf.sprintf "store metadata %s" key)
+        object_.metadata result.metadata);
   assert_bucket_tags command_index command conn model.bucket_tags;
   assert_get_versioning command_index command conn model.versioning
 
@@ -569,11 +629,7 @@ let apply_minio_command command_index conn model command =
   let next_model =
     match command with
     | Command.Put_string (key, body, tags) ->
-        let options =
-          match tags with
-          | [] -> None
-          | _ -> Some (Object.Put.options_exn ~tags:(tags_to_set tags) ())
-        in
+        let options = put_options ~tags ~metadata:[] in
         let result =
           expect_ok command_index command "put_string"
             (await_result "put_string"
@@ -586,6 +642,23 @@ let apply_minio_command command_index conn model command =
         let next_model = Model.apply command model in
         assert_object_tags command_index command conn key
           (Model.find key next_model);
+        assert_head command_index command conn key (Model.find key next_model);
+        next_model
+    | Put_string_metadata (key, body, tags, metadata) ->
+        let options = put_options ~tags ~metadata in
+        let result =
+          expect_ok command_index command "put_string"
+            (await_result "put_string"
+               (S3.Object.put_string conn ~bucket ~key:(object_key key) ?options
+                  ~contents:body ()))
+        in
+        check_version_id_presence command_index command "put version id"
+          (Model.versioning_keeps_history model)
+          result.version_id;
+        let next_model = Model.apply command model in
+        assert_object_tags command_index command conn key
+          (Model.find key next_model);
+        assert_head command_index command conn key (Model.find key next_model);
         next_model
     | Get_string key ->
         assert_get command_index command conn key (Model.find key model);
@@ -621,6 +694,29 @@ let apply_minio_command command_index conn model command =
         | None -> ()
         | Some _ ->
             assert_object_tags command_index command conn destination_key
+              (Model.find destination_key next_model);
+            assert_head command_index command conn destination_key
+              (Model.find destination_key next_model));
+        next_model
+    | Copy_object_metadata (source_key, destination_key, metadata) ->
+        let metadata_directive =
+          match metadata with
+          | Command.Copy_source_metadata -> `Copy
+          | Replace_metadata metadata -> `Replace (metadata_of_model metadata)
+        in
+        let options = Object.Copy.options_exn ~metadata_directive () in
+        let source = Model.find source_key model in
+        assert_copy command_index command conn ~source_key ~destination_key
+          ~options
+          ~destination_has_version_id:(Model.versioning_keeps_history model)
+          source;
+        let next_model = Model.apply command model in
+        (match source with
+        | None -> ()
+        | Some _ ->
+            assert_object_tags command_index command conn destination_key
+              (Model.find destination_key next_model);
+            assert_head command_index command conn destination_key
               (Model.find destination_key next_model));
         next_model
     | Put_object_tags (key, tags) ->
@@ -689,9 +785,10 @@ module Minio_target : S3_workload.TARGET = struct
 end
 
 module Workload =
-  S3_workload.Make_profile
+  S3_workload.Make_with_config
     (struct
       let profile = S3_workload.Minio
+      let count = 125
     end)
     (Minio_target)
 
@@ -702,6 +799,201 @@ let with_minio_bucket f =
     (await_ok "create bucket" (S3.Bucket.create conn ~bucket ())
       : Bucket.Create.result);
   protect_with_bucket_cleanup conn ~bucket (fun () -> f conn ~bucket)
+
+let run_minio_transcript conn commands =
+  ignore
+    (List.fold_left
+       (fun model (index, command) ->
+         let next_model = apply_minio_command index conn model command in
+         check_store index command conn next_model;
+         next_model)
+       Model.empty
+       (List.mapi (fun index command -> (index + 1, command)) commands)
+      : Model.t)
+
+let test_state_transcript_covers_minio_profile () =
+  with_minio_bucket (fun conn ~bucket:_ ->
+      run_minio_transcript conn
+        [
+          Command.Put_string ("a.txt", "alpha", [ ("env", "dev") ]);
+          Put_string ("logs/a.txt", "log-a", [ ("team", "storage") ]);
+          Put_string_metadata ("meta.txt", "meta", [], [ ("author", "awskit") ]);
+          Get_string "a.txt";
+          Head_object "logs/a.txt";
+          Exists_object "missing.txt";
+          List_keys;
+          List_prefix "logs/";
+          Copy_object ("a.txt", "b.txt");
+          Copy_object_metadata
+            ( "meta.txt",
+              "meta-copy.txt",
+              Replace_metadata [ ("review", "broad") ] );
+          Head_object "meta-copy.txt";
+          Put_object_tags ("b.txt", [ ("env", "prod"); ("owner", "sdk") ]);
+          Get_object_tags "b.txt";
+          Delete_object_tags "b.txt";
+          Put_bucket_tags [ ("team", "storage"); ("mode", "pbt") ];
+          Get_bucket_tags;
+          Delete_bucket_tags;
+          Put_versioning Bucket.Versioning.Status.Enabled;
+          Put_string ("photos/2026.jpg", "image", []);
+          Delete_object "photos/2026.jpg";
+          Get_versioning;
+        ])
+
+let test_object_metadata_tags_and_delete () =
+  with_minio_bucket (fun conn ~bucket ->
+      let key = object_key "metadata/object.txt" in
+      let metadata =
+        Metadata.of_list_exn [ ("tenant", "minio"); ("trace-id", "abc123") ]
+      in
+      let tags = [ ("env", "dev"); ("owner", "sdk") ] in
+      let options =
+        Object.Put.options_exn
+          ~content_type:(Content_type.of_string_exn "text/plain")
+          ~metadata ~tags:(tags_to_set tags) ()
+      in
+      ignore
+        (await_ok "put metadata object"
+           (S3.Object.put_string conn ~bucket ~key ~options
+              ~contents:"metadata-body" ())
+          : Object.Put.result);
+      let head =
+        await_ok "head metadata object" (S3.Object.head conn ~bucket ~key ())
+      in
+      Alcotest.(check (option int64))
+        "metadata content length" (Some 13L) head.content_length;
+      Alcotest.(check (option string))
+        "metadata content type" (Some "text/plain")
+        (Option.map Content_type.to_string head.content_type);
+      Alcotest.(check (list (pair string string)))
+        "head metadata" (metadata_to_set metadata)
+        (metadata_to_set head.metadata);
+      let read =
+        await_ok "get metadata object"
+          (S3.Object.get_string conn ~bucket ~key ~max_bytes:32L ())
+      in
+      Alcotest.(check string) "metadata body" "metadata-body" read.value;
+      Alcotest.(check (list (pair string string)))
+        "get metadata" (metadata_to_set metadata)
+        (metadata_to_set read.metadata);
+      let tag_result =
+        await_ok "get object tags" (S3.Object.Tagging.get conn ~bucket ~key ())
+      in
+      Alcotest.(check (list (pair string string)))
+        "object tags" (normalize_tags tags)
+        (tags_of_set tag_result.tags);
+      ignore
+        (await_ok "delete metadata object"
+           (S3.Object.delete conn ~bucket ~key ())
+          : Object.Delete.result);
+      Alcotest.(check bool)
+        "deleted object absent" false
+        (await_ok "deleted object exists"
+           (S3.Object.exists conn ~bucket ~key ())))
+
+let test_list_pagination_is_service_backed () =
+  with_minio_bucket (fun conn ~bucket ->
+      let keys =
+        [ "page/a.txt"; "page/b.txt"; "page/c.txt"; "page/d.txt"; "page/e.txt" ]
+      in
+      List.iter
+        (fun key ->
+          ignore
+            (await_ok ("put " ^ key)
+               (S3.Object.put_string conn ~bucket ~key:(object_key key)
+                  ~contents:key ())
+              : Object.Put.result))
+        keys;
+      let options =
+        Object.List.options_exn
+          ~prefix:(Object_key.Prefix.of_string_exn "page/")
+          ~max_keys:2 ()
+      in
+      let pages =
+        await_ok "list paginated keys"
+          (S3.Object.List.pages conn ~bucket ~options ~max_pages:4 ())
+      in
+      Alcotest.(check bool)
+        "listing uses more than one page" true
+        (List.length pages > 1);
+      let actual =
+        pages
+        |> List.concat_map (fun (page : Object.List.page) -> page.objects)
+        |> List.map (fun (object_ : Object.List.object_summary) ->
+            Object_key.to_string object_.key)
+      in
+      Alcotest.(check (list string)) "paginated keys" keys actual)
+
+let test_manual_multipart_lifecycle () =
+  with_minio_bucket (fun conn ~bucket ->
+      let key = object_key "manual-multipart.bin" in
+      let metadata = Metadata.of_list_exn [ ("transfer", "manual") ] in
+      let create_options =
+        Multipart.Create.options_exn ~metadata
+          ~tags:(tags_to_set [ ("mode", "manual") ])
+          ()
+      in
+      let create =
+        await_ok "create manual multipart upload"
+          (S3.Multipart.create_upload conn ~bucket ~key ~options:create_options
+             ())
+      in
+      let part_size = Transfer.min_part_size in
+      let first_body = transfer_body part_size in
+      let second_body = transfer_body 113 in
+      let upload_part part_number contents =
+        await_ok
+          (Printf.sprintf "upload manual multipart part %d" part_number)
+          (S3.Multipart.upload_part conn ~upload:create.upload
+             ~part_number:(Multipart.Part_number.of_int_exn part_number)
+             ~body:(S3.Body.of_string contents)
+             ())
+      in
+      let first = upload_part 1 first_body in
+      let second = upload_part 2 second_body in
+      let listed_parts =
+        await_ok "list manual multipart parts"
+          (S3.Multipart.List_parts.parts conn ~upload:create.upload ~max_pages:2
+             ())
+      in
+      Alcotest.(check (list int))
+        "listed part numbers" [ 1; 2 ]
+        (List.map
+           (fun (part : Multipart.List_parts.part_info) ->
+             Multipart.Part_number.to_int part.part_number)
+           listed_parts);
+      Alcotest.(check (list (option int64)))
+        "listed part sizes"
+        [ Some (Int64.of_int part_size); Some (Int64.of_int 113) ]
+        (List.map
+           (fun (part : Multipart.List_parts.part_info) -> part.size)
+           listed_parts);
+      ignore
+        (await_ok "complete manual multipart upload"
+           (S3.Multipart.complete_upload conn ~upload:create.upload
+              ~parts:[ first.part; second.part ]
+              ())
+          : Multipart.Complete.result);
+      let body = first_body ^ second_body in
+      let object_ =
+        await_ok "get manual multipart object"
+          (S3.Object.get_string conn ~bucket ~key
+             ~max_bytes:(Int64.of_int (String.length body))
+             ())
+      in
+      Alcotest.(check string) "manual multipart body" body object_.value;
+      Alcotest.(check (list (pair string string)))
+        "manual multipart metadata" (metadata_to_set metadata)
+        (metadata_to_set object_.metadata);
+      let tags =
+        await_ok "manual multipart tags"
+          (S3.Object.Tagging.get conn ~bucket ~key ())
+      in
+      Alcotest.(check (list (pair string string)))
+        "manual multipart tags"
+        [ ("mode", "manual") ]
+        (tags_of_set tags.tags))
 
 let test_transfer_small_roundtrip () =
   with_minio_bucket (fun conn ~bucket ->
@@ -811,6 +1103,54 @@ let test_transfer_multipart_upload_bytes () =
           check_final_progress "multipart final progress"
             ~direction:Transfer.Upload ~phase:Transfer.Part ~total !progress))
 
+let test_transfer_ranged_download_bytes () =
+  with_minio_bucket (fun conn ~bucket ->
+      let download_path =
+        Filename.temp_file "awskit-minio-download-ranged" ".bin"
+      in
+      let part_size = Transfer.min_part_size in
+      let body = transfer_body (part_size + 2048) in
+      let total = Int64.of_int (String.length body) in
+      let progress = ref [] in
+      remove_file download_path;
+      Fun.protect
+        ~finally:(fun () -> remove_file download_path)
+        (fun () ->
+          ignore
+            (await_ok "put ranged transfer object"
+               (S3.Object.put_string conn ~bucket
+                  ~key:(object_key "ranged-transfer.bin")
+                  ~contents:body ())
+              : Object.Put.result);
+          let options =
+            Transfer.download_options_exn
+              ~multipart_threshold:(Int64.of_int part_size) ~part_size
+              ~concurrency:2 ()
+          in
+          let download_result =
+            await_ok "ranged transfer download"
+              (S3.Object.Transfer.download_file conn ~bucket
+                 ~key:(object_key "ranged-transfer.bin")
+                 ~options ~path:download_path
+                 ~on_progress:(fun event -> progress := event :: !progress)
+                 ())
+          in
+          Alcotest.(check bool)
+            "download strategy" true
+            (Transfer.download_strategy download_result = `Ranged);
+          Alcotest.(check int64)
+            "download bytes" total
+            (Transfer.download_bytes_transferred download_result);
+          (match download_result with
+          | Transfer.Ranged { parts; _ } ->
+              Alcotest.(check int) "ranged parts" 2 parts
+          | Transfer.Get _ -> Alcotest.fail "expected ranged download result");
+          Alcotest.(check string)
+            "ranged downloaded body" body (read_file download_path);
+          check_final_progress "ranged final progress"
+            ~direction:Transfer.Download ~phase:Transfer.Ranged_get ~total
+            !progress))
+
 let test_transfer_owned_multipart_failure_cleans_up () =
   with_minio_bucket (fun conn ~bucket ->
       let exception Progress_failed in
@@ -858,16 +1198,81 @@ let test_transfer_owned_multipart_failure_cleans_up () =
 
 let transfer_suite =
   [
+    ( "integration:minio:s3-state",
+      [
+        Alcotest.test_case "deterministic shared state transcript" `Quick
+          test_state_transcript_covers_minio_profile;
+      ] );
+    ( "integration:minio:object",
+      [
+        Alcotest.test_case "metadata tags and delete" `Quick
+          test_object_metadata_tags_and_delete;
+        Alcotest.test_case "paginated list keys" `Quick
+          test_list_pagination_is_service_backed;
+      ] );
+    ( "integration:minio:multipart",
+      [
+        Alcotest.test_case "manual multipart lifecycle" `Quick
+          test_manual_multipart_lifecycle;
+      ] );
     ( "integration:minio:transfer",
       [
         Alcotest.test_case "small upload/download byte roundtrip" `Quick
           test_transfer_small_roundtrip;
         Alcotest.test_case "multipart upload byte comparison" `Quick
           test_transfer_multipart_upload_bytes;
+        Alcotest.test_case "ranged download byte comparison" `Quick
+          test_transfer_ranged_download_bytes;
         Alcotest.test_case "owned multipart failure cleanup" `Quick
           test_transfer_owned_multipart_failure_cleans_up;
       ] );
   ]
 
-let () =
-  Alcotest.run "awskit-s3-minio-workload" (Workload.suite @ transfer_suite)
+type minio_gate =
+  | Available
+  | Missing_config of string * Awskit_s3.Error.t
+  | Setup_failed of string * Awskit_s3.Error.t
+
+let classify_setup_error label error =
+  if minio_configured then Setup_failed (label, error)
+  else Missing_config (label, error)
+
+let preflight_minio () =
+  let conn = connect () in
+  match Lwt_main.run (cleanup_bucket_result conn ~bucket) with
+  | Error error ->
+      classify_setup_error "clean MinIO bucket before workload" error
+  | Ok () -> (
+      match Lwt_main.run (S3.Bucket.create conn ~bucket ()) with
+      | Error error -> classify_setup_error "create bucket" error
+      | Ok (_ : Bucket.Create.result) -> (
+          match Lwt_main.run (cleanup_bucket_result conn ~bucket) with
+          | Ok () -> Available
+          | Error error ->
+              Setup_failed ("clean MinIO bucket after preflight", error)))
+
+let missing_config_suite label error =
+  [
+    ( "integration:minio:configuration",
+      [
+        Alcotest.test_case "missing local MinIO configuration" `Quick (fun () ->
+            skip_unconfigured_minio label error);
+      ] );
+  ]
+
+let setup_failed_suite label error =
+  [
+    ( "integration:minio:configuration",
+      [
+        Alcotest.test_case "configured MinIO setup fails" `Quick (fun () ->
+            Alcotest.failf "%s: %a" label Awskit_s3.Error.pp error);
+      ] );
+  ]
+
+let suite =
+  match preflight_minio () with
+  | Available -> Workload.suite @ transfer_suite
+  | Missing_config (label, error) -> missing_config_suite label error
+  | Setup_failed (label, error) -> setup_failed_suite label error
+
+let () = Alcotest.run "awskit-s3-minio-workload" suite

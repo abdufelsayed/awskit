@@ -3,3 +3,9 @@
  (modules runtime_http_model runtime_http_workload)
  (wrapped false)
  (libraries awskit base alcotest qcheck-core qcheck-alcotest))
+
+(library
+ (name awskit_runtime_test_support)
+ (modules recording_runtime)
+ (wrapped false)
+ (libraries awskit alcotest))

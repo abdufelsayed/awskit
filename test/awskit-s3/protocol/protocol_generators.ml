@@ -11,6 +11,44 @@ let query_chars =
 let tag_chars =
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 +-_=.:/@"
 
+let lower_digit_chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+let valid_bucket_name = gen_string ~min:3 ~max:40 ~chars:lower_digit_chars
+
+let valid_dotted_bucket_name =
+  let open QCheck.Gen in
+  let label = gen_string ~min:1 ~max:12 ~chars:lower_digit_chars in
+  let* first = label in
+  let* rest = list_size (int_range 1 3) label in
+  let labels =
+    match List.rev rest with
+    | [] -> [ first; "z" ]
+    | last :: prefix -> first :: List.rev ((last ^ "z") :: prefix)
+  in
+  return (String.concat "." labels)
+
+let object_key_chars =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 /._-~+="
+
+let protocol_object_key = gen_string ~min:1 ~max:80 ~chars:object_key_chars
+
+let upload_id =
+  gen_string ~min:1 ~max:64
+    ~chars:"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./="
+
+let valid_range =
+  let open QCheck.Gen in
+  oneof
+    [
+      (let* start = int_range 0 100_000 in
+       let* length = int_range 0 10_000 in
+       return (`Bytes (Int64.of_int start, Int64.of_int (start + length))));
+      map (fun start -> `From (Int64.of_int start)) (int_range 0 100_000);
+      map (fun length -> `Suffix (Int64.of_int length)) (int_range 1 100_000);
+    ]
+
+let invalid_presign_expires_seconds =
+  QCheck.Gen.oneof_list [ -3600; -1; 0; 604_801; 604_802; 1_000_000 ]
+
 let query_params =
   let open QCheck.Gen in
   let key = gen_string ~min:1 ~max:12 ~chars:query_chars in

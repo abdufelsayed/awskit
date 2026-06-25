@@ -22,11 +22,41 @@ let expanded_count params =
     (fun count (_key, values) -> count + max 1 (List.length values))
     0 params
 
+let test_region = Awskit.Region.of_string_exn "us-east-1"
+
 let print_query params =
   params
   |> List.map (fun (key, values) ->
       Fmt.str "%s=[%s]" key (String.concat "," values))
   |> String.concat ";"
+
+let print_bucket_key (bucket, key) = Fmt.str "%s/%s" bucket key
+
+let object_path key =
+  "/" ^ Protocol_wire_model.uri_encode ~encode_slash:false key
+
+let path_style_object_path ~bucket ~key = "/" ^ bucket ^ object_path key
+
+let query_values name uri =
+  Uri.query uri |> List.assoc_opt name |> Option.value ~default:[]
+
+let is_sigv4_query_param name =
+  match String.lowercase_ascii name with
+  | "x-amz-algorithm" | "x-amz-credential" | "x-amz-date" | "x-amz-expires"
+  | "x-amz-signedheaders" | "x-amz-signature" | "x-amz-security-token" ->
+      true
+  | _ -> false
+
+let has_no_sigv4_query_params uri =
+  Uri.query uri
+  |> List.for_all (fun (name, _) -> not (is_sigv4_query_param name))
+
+let range_of_generated = function
+  | `Bytes (start, finish) -> Range.bytes_exn ~start ~finish
+  | `From start -> Range.from_exn start
+  | `Suffix length -> Range.suffix_exn length
+
+let generated_range_header range = Range.to_header (range_of_generated range)
 
 let prop_canonical_query_params_sorted =
   QCheck.Test.make ~count:broad_count
@@ -87,6 +117,73 @@ let prop_endpoint_rejects_url_parts =
        Protocol_generators.malformed_endpoint_authority) (fun value ->
       Result.is_error (Awskit.Endpoint.of_string value))
 
+let prop_endpoint_auto_virtual_hosted_object_paths =
+  QCheck.Test.make ~count:default_count
+    ~name:"default endpoint auto style uses virtual-hosted object paths"
+    (QCheck.make ~print:print_bucket_key
+       QCheck.Gen.(
+         pair Protocol_generators.valid_bucket_name
+           Protocol_generators.protocol_object_key))
+    (fun (bucket, key) ->
+      let typed_bucket = Bucket_name.of_string_exn bucket in
+      let typed_key = Object_key.of_string_exn key in
+      match
+        Endpoint_resolver.resolve_object_request Endpoint_config.default
+          ~region:test_region ~bucket:typed_bucket ~key:typed_key
+      with
+      | Error _ -> false
+      | Ok resolved ->
+          String.equal
+            (bucket ^ ".s3.us-east-1.amazonaws.com")
+            (Awskit.Endpoint.authority resolved.endpoint)
+          && String.equal (object_path key) resolved.path
+          && String.equal ("/" ^ key) resolved.signing_path
+          && resolved.style = `Virtual_hosted
+          && Awskit.Region.equal test_region resolved.signing_region)
+
+let prop_endpoint_auto_dotted_bucket_uses_path_style =
+  QCheck.Test.make ~count:default_count
+    ~name:"default HTTPS endpoint uses path-style for dotted buckets"
+    (QCheck.make ~print:print_bucket_key
+       QCheck.Gen.(
+         pair Protocol_generators.valid_dotted_bucket_name
+           Protocol_generators.protocol_object_key))
+    (fun (bucket, key) ->
+      let typed_bucket = Bucket_name.of_string_exn bucket in
+      let typed_key = Object_key.of_string_exn key in
+      match
+        Endpoint_resolver.resolve_object_request Endpoint_config.default
+          ~region:test_region ~bucket:typed_bucket ~key:typed_key
+      with
+      | Error _ -> false
+      | Ok resolved ->
+          String.equal "s3.us-east-1.amazonaws.com"
+            (Awskit.Endpoint.authority resolved.endpoint)
+          && String.equal (path_style_object_path ~bucket ~key) resolved.path
+          && String.equal ("/" ^ bucket ^ "/" ^ key) resolved.signing_path
+          && resolved.style = `Path
+          && Awskit.Region.equal test_region resolved.signing_region)
+
+let prop_endpoint_accelerate_rejects_dotted_buckets =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"accelerate endpoint rejects dotted buckets"
+    (QCheck.make ~print:print_bucket_key
+       QCheck.Gen.(
+         pair Protocol_generators.valid_dotted_bucket_name
+           Protocol_generators.protocol_object_key))
+    (fun (bucket, key) ->
+      let endpoint_config =
+        Endpoint_config.aws ~endpoint_variant:`Accelerate ()
+      in
+      let typed_bucket = Bucket_name.of_string_exn bucket in
+      let typed_key = Object_key.of_string_exn key in
+      match
+        Endpoint_resolver.resolve_object_request endpoint_config
+          ~region:test_region ~bucket:typed_bucket ~key:typed_key
+      with
+      | Error error -> Awskit.Error.validation_field error = Some "bucket"
+      | Ok _ -> false)
+
 let prop_header_values_reject_newline =
   QCheck.Test.make ~count:default_count
     ~name:"request header values reject newline"
@@ -114,6 +211,83 @@ let prop_metadata_rejects_case_insensitive_duplicate_keys =
       Result.is_error
         (Metadata.of_list
            [ (key, first); (String.uppercase_ascii key, second) ]))
+
+let prop_presigned_upload_part_safe_uri_keeps_operation_query =
+  QCheck.Test.make ~count:default_count
+    ~name:"presigned upload-part safe URI keeps only operation query"
+    (QCheck.make
+       ~print:(fun (bucket, key, upload_id, part_number) ->
+         Fmt.str "%s/%s upload=%s part=%d" bucket key upload_id part_number)
+       QCheck.Gen.(
+         quad Protocol_generators.valid_bucket_name
+           Protocol_generators.protocol_object_key Protocol_generators.upload_id
+           (int_range 1 10_000)))
+    (fun (bucket, key, upload_id, part_number) ->
+      let upload_id = Multipart.Upload_id.of_string_exn upload_id in
+      let upload =
+        Multipart.Upload.resume
+          ~bucket:(Bucket_name.of_string_exn bucket)
+          ~key:(Object_key.of_string_exn key)
+          ~upload_id
+      in
+      let part_number = Multipart.Part_number.of_int_exn part_number in
+      match
+        Presigned.upload_part ~region:"us-east-1"
+          ~credentials:Protocol_support.credentials
+          ~now:Protocol_support.test_time ~upload ~part_number ()
+      with
+      | Error _ -> false
+      | Ok presigned ->
+          let safe_uri = Presigned.safe_uri presigned in
+          Presigned.method_ presigned = `PUT
+          && has_no_sigv4_query_params safe_uri
+          && query_values "partNumber" safe_uri
+             = [ Multipart.Part_number.to_int part_number |> string_of_int ]
+          && query_values "uploadId" safe_uri
+             = [ Multipart.Upload_id.to_string upload_id ]
+          && List.mem_assoc "host" (Presigned.signed_headers presigned)
+          && not (List.mem_assoc "host" (Presigned.request_headers presigned)))
+
+let prop_presigned_rejects_invalid_extra_signed_headers =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"presigned requests reject invalid extra signed headers"
+    (QCheck.make ~print:String.escaped Protocol_generators.newline_header_value)
+    (fun value ->
+      let options : Presigned.Get_object.options =
+        {
+          Presigned.Get_object.default_options with
+          extra_signed_headers = [ ("x-extra", value) ];
+        }
+      in
+      Result.is_error
+        (Presigned.get_object ~region:"us-east-1"
+           ~credentials:Protocol_support.credentials
+           ~now:Protocol_support.test_time
+           ~bucket:(Protocol_support.bucket_name "bucket")
+           ~key:(Protocol_support.object_key "file.txt")
+           ~options ()))
+
+let prop_presigned_rejects_invalid_expiration_bounds =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"presigned requests reject invalid expiration bounds"
+    (QCheck.make ~print:string_of_int
+       Protocol_generators.invalid_presign_expires_seconds) (fun seconds ->
+      let options : Presigned.Get_object.options =
+        {
+          Presigned.Get_object.default_options with
+          expires_in = Some (Ptime.Span.of_int_s seconds);
+        }
+      in
+      match
+        Presigned.get_object ~region:"us-east-1"
+          ~credentials:Protocol_support.credentials
+          ~now:Protocol_support.test_time
+          ~bucket:(Protocol_support.bucket_name "bucket")
+          ~key:(Protocol_support.object_key "file.txt")
+          ~options ()
+      with
+      | Error error -> Awskit.Error.validation_field error = Some "expires_in"
+      | Ok _ -> false)
 
 let tagging_result_from_xml body =
   let conn =
@@ -265,6 +439,94 @@ let prop_upload_parts_cover_content_length =
           && total = content_length
           && valid_parts 1 0 parts)
 
+let prop_get_request_emits_range_header =
+  QCheck.Test.make ~count:default_count
+    ~name:"GetObject range option emits exact Range header"
+    (QCheck.make ~print:generated_range_header Protocol_generators.valid_range)
+    (fun generated ->
+      let range = range_of_generated generated in
+      let options = Object.Get.options_exn ~range () in
+      let conn =
+        Protocol_recording_runtime.connect
+          [
+            Protocol_recording_runtime.response
+              ~headers:[ ("content-length", "0") ]
+              206 "";
+          ]
+      in
+      match
+        Protocol_recording_runtime.S3.Object.get conn
+          ~bucket:(Protocol_support.bucket_name "bucket")
+          ~key:(Protocol_support.object_key "file.txt")
+          ~options
+          ~consume:
+            (Protocol_recording_runtime.S3.Reader.to_string ~max_bytes:1L)
+          ()
+      with
+      | Error _ -> false
+      | Ok _ ->
+          let call = Protocol_recording_runtime.last_call conn in
+          Protocol_support.header "range" call.request.headers
+          = Some (Range.to_header range))
+
+let multipart_part_exn number size =
+  Multipart.Part.create_exn
+    ~part_number:(Multipart.Part_number.of_int_exn number)
+    ~etag:(Object.Etag.of_string_exn (Fmt.str "\"part-%d\"" number))
+    ~size ()
+
+let complete_upload_result parts =
+  let upload =
+    Multipart.Upload.resume
+      ~bucket:(Protocol_support.bucket_name "bucket")
+      ~key:(Protocol_support.object_key "large.bin")
+      ~upload_id:(Multipart.Upload_id.of_string_exn "upload-1")
+  in
+  let conn =
+    Protocol_recording_runtime.connect
+      [
+        Protocol_recording_runtime.response 200
+          {|<CompleteMultipartUploadResult><ETag>"final"</ETag></CompleteMultipartUploadResult>|};
+      ]
+  in
+  ( conn,
+    Protocol_recording_runtime.S3.Multipart.complete_upload conn ~upload ~parts
+      () )
+
+let prop_complete_upload_rejects_unsorted_parts_before_request =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"complete multipart rejects unsorted parts before request"
+    (QCheck.make ~print:string_of_int QCheck.Gen.(int_range 2 10_000))
+    (fun number ->
+      let parts =
+        [
+          multipart_part_exn number 5_242_880L;
+          multipart_part_exn (number - 1) 1L;
+        ]
+      in
+      let conn, result = complete_upload_result parts in
+      match result with
+      | Error error ->
+          Awskit.Error.validation_field error = Some "part_number"
+          && conn.Protocol_recording_runtime.Runtime.calls = []
+      | Ok _ -> false)
+
+let prop_complete_upload_rejects_small_nonfinal_parts =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"complete multipart rejects undersized non-final parts"
+    (QCheck.make ~print:Int64.to_string
+       QCheck.Gen.(map Int64.of_int (int_range 0 5_242_879)))
+    (fun first_size ->
+      let parts =
+        [ multipart_part_exn 1 first_size; multipart_part_exn 2 1L ]
+      in
+      let conn, result = complete_upload_result parts in
+      match result with
+      | Error error ->
+          Awskit.Error.validation_field error = Some "parts"
+          && conn.Protocol_recording_runtime.Runtime.calls = []
+      | Ok _ -> false)
+
 let suite =
   [
     ( "workload:awskit-s3:protocol-wire",
@@ -275,13 +537,22 @@ let suite =
           prop_content_range_valid_round_trips;
           prop_content_range_invalid_headers_decode_error;
           prop_endpoint_rejects_url_parts;
+          prop_endpoint_auto_virtual_hosted_object_paths;
+          prop_endpoint_auto_dotted_bucket_uses_path_style;
+          prop_endpoint_accelerate_rejects_dotted_buckets;
           prop_header_values_reject_newline;
           prop_metadata_rejects_case_insensitive_duplicate_keys;
+          prop_presigned_upload_part_safe_uri_keeps_operation_query;
+          prop_presigned_rejects_invalid_extra_signed_headers;
+          prop_presigned_rejects_invalid_expiration_bounds;
           prop_tagging_xml_rejects_invalid_tag_fields;
           prop_tagging_xml_rejects_duplicate_tag_keys;
           prop_tagging_xml_rejects_oversized_tag_sets;
           prop_download_ranges_cover_content_length;
           prop_upload_parts_cover_content_length;
+          prop_get_request_emits_range_header;
+          prop_complete_upload_rejects_unsorted_parts_before_request;
+          prop_complete_upload_rejects_small_nonfinal_parts;
         ] );
   ]
 

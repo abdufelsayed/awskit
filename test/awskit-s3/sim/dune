@@ -17,7 +17,20 @@
  (deps test_awskit_s3_sim.exe)
  (locks awskit-s3-sim-alcotest)
  (action
-  (run ./test_awskit_s3_sim.exe test "workload:awskit-s3-sim:s3-state")))
+  (progn
+   (run ./test_awskit_s3_sim.exe test "workload:awskit-s3-sim:s3-state")
+   (run
+    ./test_awskit_s3_sim.exe
+    test
+    "contract:awskit-s3-sim:multipart-validation")
+   (run
+    ./test_awskit_s3_sim.exe
+    test
+    "contract:awskit-s3-sim:list-pagination")
+   (run
+    ./test_awskit_s3_sim.exe
+    test
+    "contract:awskit-s3-sim:body-lifecycle"))))
 
 (rule
  (alias s3-transfer-faults)
@@ -29,12 +42,6 @@
    ./test_awskit_s3_sim.exe
    test
    "workload:awskit-s3-sim:transfer-faults")))
-
-(alias
- (name simulator-stateful-pbt)
- (package awskit-s3-sim)
- (deps
-  (alias s3-sim-workload)))
 
 (rule
  (alias discovery)

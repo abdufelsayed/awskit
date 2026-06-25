@@ -28,6 +28,8 @@ end
 let supports_command profile command =
   match (profile, command) with
   | Strict, _ -> true
+  | Minio, Command.Put_string_metadata _ -> false
+  | Minio, Command.Copy_object_metadata _ -> false
   | Minio, Command.Put_versioning status -> (
       match status with
       | Awskit_s3.Bucket.Versioning.Status.Suspended -> false
@@ -189,17 +191,5 @@ module Make (Target : TARGET) =
     (struct
       let profile = Strict
       let count = 150
-    end)
-    (Target)
-
-module Make_profile
-    (Config : sig
-      val profile : profile
-    end)
-    (Target : TARGET) =
-  Make_with_config
-    (struct
-      let profile = Config.profile
-      let count = match profile with Strict -> 150 | Minio -> 50
     end)
     (Target)
