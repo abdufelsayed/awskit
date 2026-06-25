@@ -971,12 +971,12 @@ let test_object_exists_forwards_head_options () =
     "expected owner" (Some "123456789012")
     (header "x-amz-expected-bucket-owner" call.request.headers)
 
-let test_object_unknown_storage_class_read_values () =
+let test_object_other_storage_class_read_values () =
   let expect_unknown label = function
-    | Some (Storage_class.Unknown value) ->
+    | Some (Storage_class.Other value) ->
         Alcotest.(check string) label "FUTURE_CLASS" value
     | Some storage_class ->
-        Alcotest.failf "%s: expected unknown storage class, got %s" label
+        Alcotest.failf "%s: expected other storage class, got %s" label
           (Storage_class.to_string storage_class)
     | None -> Alcotest.failf "%s: expected storage class" label
   in
@@ -1006,25 +1006,25 @@ let test_object_unknown_storage_class_read_values () =
       ~key:(object_key "a.txt")
       ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
       ()
-    |> ok_or_fail "get unknown storage class"
+    |> ok_or_fail "get other storage class"
   in
   expect_unknown "get storage class" get.storage_class;
   let head =
     Recording_s3.Object.head conn ~bucket:(bucket_name "my-bucket")
       ~key:(object_key "a.txt") ()
-    |> ok_or_fail "head unknown storage class"
+    |> ok_or_fail "head other storage class"
   in
   expect_unknown "head storage class" head.storage_class;
   let page =
     Recording_s3.Object.list conn ~bucket:(bucket_name "my-bucket") ()
-    |> ok_or_fail "list unknown storage class"
+    |> ok_or_fail "list other storage class"
   in
   (match page.objects with
   | [ object_ ] -> expect_unknown "list storage class" object_.storage_class
   | _ -> Alcotest.fail "expected one listed object");
   let versions =
     Recording_s3.Object.list_versions conn ~bucket:(bucket_name "my-bucket") ()
-    |> ok_or_fail "versions unknown storage class"
+    |> ok_or_fail "versions other storage class"
   in
   (match versions.versions with
   | [ version ] -> (
@@ -1050,40 +1050,52 @@ let test_object_unknown_storage_class_read_values () =
       | _ -> Alcotest.fail "expected structured marker owner")
   | _ -> Alcotest.fail "expected one delete marker"
 
-let test_object_observed_only_write_values_rejected () =
-  let unknown_storage = Storage_class.Unknown "FUTURE_CLASS" in
-  expect_validation_field "put builder storage" "storage_class"
-    (Object.Put.options ~storage_class:unknown_storage ());
+let test_object_other_storage_class_writes_are_sent () =
+  let other_storage = Storage_class.Other "FUTURE_CLASS" in
+  let put_options =
+    Object.Put.options ~storage_class:other_storage ()
+    |> ok_or_fail "put other storage option"
+  in
   expect_validation_field "checksum constructor" "checksum_algorithm"
     (Object.Checksum.value
        ~algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE_CHECKSUM")
        ~value:"checksum");
-  expect_validation_field "copy builder storage" "storage_class"
-    (Object.Copy.options ~storage_class:unknown_storage ());
+  let copy_options =
+    Object.Copy.options ~storage_class:other_storage ()
+    |> ok_or_fail "copy other storage option"
+  in
   expect_validation_field "copy builder checksum" "checksum_algorithm"
     (Object.Copy.options
        ~checksum_algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE_CHECKSUM")
        ());
-  let put_options =
-    { Object.Put.default_options with storage_class = Some unknown_storage }
-  in
-  let put_conn = Recording_runtime.connect [] in
-  expect_validation_field "put operation storage" "storage_class"
+  let put_conn = Recording_runtime.connect [ response 200 "" ] in
+  ignore
     (Recording_s3.Object.put put_conn ~bucket:(bucket_name "my-bucket")
        ~key:(object_key "file") ~options:put_options
        ~body:(Recording_s3.Body.of_string "body")
-       ());
-  Alcotest.(check int) "put not sent" 0 (List.length put_conn.calls);
-  let copy_options =
-    { Object.Copy.default_options with storage_class = Some unknown_storage }
+       ()
+    |> ok_or_fail "put other storage");
+  let put_call = Recording_runtime.last_call put_conn in
+  Alcotest.(check (option string))
+    "put storage class header" (Some "FUTURE_CLASS")
+    (header "x-amz-storage-class" put_call.request.headers);
+  let copy_conn =
+    Recording_runtime.connect
+      [
+        response 200
+          {|<CopyObjectResult><ETag>"copy"</ETag></CopyObjectResult>|};
+      ]
   in
-  let copy_conn = Recording_runtime.connect [] in
-  expect_validation_field "copy operation storage" "storage_class"
+  ignore
     (Recording_s3.Object.copy copy_conn ~source_bucket:(bucket_name "my-bucket")
        ~source_key:(object_key "file")
        ~destination_bucket:(bucket_name "my-bucket")
-       ~destination_key:(object_key "copy") ~options:copy_options ());
-  Alcotest.(check int) "copy not sent" 0 (List.length copy_conn.calls)
+       ~destination_key:(object_key "copy") ~options:copy_options ()
+    |> ok_or_fail "copy other storage");
+  let copy_call = Recording_runtime.last_call copy_conn in
+  Alcotest.(check (option string))
+    "copy storage class header" (Some "FUTURE_CLASS")
+    (header "x-amz-storage-class" copy_call.request.headers)
 
 let test_find_success_returns_some () =
   let conn =
@@ -1898,10 +1910,10 @@ let suite =
           test_object_exists_missing_bucket_returns_error;
         Alcotest.test_case "object exists forwards head options" `Quick
           test_object_exists_forwards_head_options;
-        Alcotest.test_case "object unknown storage class read values" `Quick
-          test_object_unknown_storage_class_read_values;
-        Alcotest.test_case "object observed-only write values rejected" `Quick
-          test_object_observed_only_write_values_rejected;
+        Alcotest.test_case "object other storage class read values" `Quick
+          test_object_other_storage_class_read_values;
+        Alcotest.test_case "object other storage class writes are sent" `Quick
+          test_object_other_storage_class_writes_are_sent;
         Alcotest.test_case "find success returns some" `Quick
           test_find_success_returns_some;
         Alcotest.test_case "find forwards get options" `Quick

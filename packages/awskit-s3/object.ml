@@ -243,9 +243,9 @@ module Put = struct
     }
 
   let validate_storage_class = function
-    | Some (Storage_class.Unknown value) ->
-        S3_error_context.invalid ~field:"storage_class"
-          "unknown storage class %S cannot be sent" value
+    | Some storage_class ->
+        S3_validation.validate_header_value ~field:"storage_class"
+          (Storage_class.to_string storage_class)
     | _ -> Ok ()
 
   let validate_checksum_value = function
@@ -477,9 +477,9 @@ module Copy = struct
     }
 
   let validate_storage_class = function
-    | Some (Storage_class.Unknown value) ->
-        S3_error_context.invalid ~field:"storage_class"
-          "unknown storage class %S cannot be sent" value
+    | Some storage_class ->
+        S3_validation.validate_header_value ~field:"storage_class"
+          (Storage_class.to_string storage_class)
     | _ -> Ok ()
 
   let validate_checksum_algorithm = function

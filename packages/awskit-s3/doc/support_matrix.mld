@@ -188,9 +188,10 @@ arbitrary S3-compatible providers.
     are recorded as MinIO capability differences.}
   {li {b Notes and boundaries}: unknown read-side checksum and encryption
     values are preserved where the public types model them. Unknown outbound
-    checksum algorithms and unknown write-side enum values are rejected.
-    Unmodeled checksum variants, SSE-C, arbitrary KMS policy behavior, Object
-    Lock retention, and ACL edge cases are out of scope.}
+    checksum algorithms are rejected, while unmodeled storage classes can be
+    sent through [Storage_class.Other]. Unmodeled checksum variants, SSE-C,
+    arbitrary KMS policy behavior, Object Lock retention, and ACL edge cases are
+    out of scope.}
 }
 
 {1 Bucket Operations}

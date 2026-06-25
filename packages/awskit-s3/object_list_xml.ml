@@ -26,7 +26,9 @@ let optional_storage_class ~path nodes =
   | None -> Ok None
   | Some "" ->
       Xml.decode_field_error ~path "<StorageClass> has invalid value %S" ""
-  | Some value -> Ok (Some (Storage_class.of_string value))
+  | Some value ->
+      Result.map Option.some
+        (parse_result ~path "StorageClass" Storage_class.of_string value)
 
 let parse_checksum_summary nodes =
   {

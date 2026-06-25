@@ -295,15 +295,24 @@ let test_storage_class_values () =
         (Storage_class.to_string storage_class);
       Alcotest.(check bool)
         (wire ^ " parse") true
-        (Storage_class.of_string wire = storage_class))
+        (expect_ok (wire ^ " parse") (Storage_class.of_string wire)
+        = storage_class))
     cases;
-  let unknown = Storage_class.of_string "FUTURE_CLASS" in
+  let other =
+    expect_ok "other storage class" (Storage_class.of_string "FUTURE_CLASS")
+  in
   Alcotest.(check string)
-    "unknown storage class round trips" "FUTURE_CLASS"
-    (Storage_class.to_string unknown);
+    "other storage class round trips" "FUTURE_CLASS"
+    (Storage_class.to_string other);
   Alcotest.(check bool)
-    "unknown constructor" true
-    (unknown = Storage_class.Unknown "FUTURE_CLASS")
+    "other constructor" true
+    (other = Storage_class.Other "FUTURE_CLASS");
+  Alcotest.(check bool)
+    "of_string_exn returns other" true
+    (Storage_class.of_string_exn "FUTURE_CLASS"
+    = Storage_class.Other "FUTURE_CLASS");
+  expect_error_field "storage_class" (Storage_class.of_string "");
+  expect_error_field "storage_class" (Storage_class.of_string "bad\nclass")
 
 let test_metadata_collection () =
   let metadata =

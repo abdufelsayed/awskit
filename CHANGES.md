@@ -111,8 +111,9 @@ release evidence that downstream runtime authors can rely on.
 - Preserved supported compatibility behavior while tightening validation:
   empty `ListObjectVersions` marker elements are treated as absent, supported
   S3-compatible payload-hash forms remain accepted, future response-only
-  checksum and enum values are preserved when modeled, and unknown outbound
-  checksum/storage-class values are rejected before request construction.
+  checksum and enum values are preserved when modeled, unknown outbound checksum
+  values are rejected before request construction, and unmodeled storage classes
+  can be sent through `Storage_class.Other`.
   (fa14e23, e83d337, ba454b1, a23f2ee, e8d7032)
 - S3 helpers now reuse the same lower request primitives as the primitive
   operations, so `Object.find` shares `Object.get` request construction and

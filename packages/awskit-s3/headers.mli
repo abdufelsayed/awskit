@@ -69,7 +69,7 @@ val validate_checksum_value :
 (** Validate that a checksum value has a supported algorithm/header shape. *)
 
 val validate_storage_class : Storage_class.t -> (unit, Awskit.Error.t) result
-(** Validate that a storage class can be sent to S3. *)
+(** Validate that a storage class can be rendered as an S3 header value. *)
 
 val validate_encryption_request :
   Object.Encryption.request option -> (unit, Awskit.Error.t) result

@@ -41,5 +41,8 @@ _opam/
 # Agent plans
 .plans
 
+# Local feature worktrees
+.worktrees/
+
 # DS_Store
 .DS_Store

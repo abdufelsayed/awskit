@@ -126,7 +126,14 @@ let storage_class response =
         (S3_error_context.decode_with_context
            ~what:"x-amz-storage-class response header"
            "storage class must be non-empty")
-  | Some value -> Ok (Some (Storage_class.of_string value))
+  | Some value -> (
+      match Storage_class.of_string value with
+      | Ok storage_class -> Ok (Some storage_class)
+      | Error error ->
+          Error
+            (S3_error_context.decode_with_context
+               ~what:"x-amz-storage-class response header"
+               (Awskit.Error.to_string_hum error)))
 
 let response_content_type response =
   match Awskit.Response.header response "content-type" with

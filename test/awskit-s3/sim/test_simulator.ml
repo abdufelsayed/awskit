@@ -650,19 +650,30 @@ let expect_validation_field label field = function
       Alcotest.failf "%s: unexpected error: %a" label Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected validation field %s" label field
 
-let test_simulator_rejects_unknown_storage_class_writes () =
+let test_simulator_accepts_other_storage_class_writes () =
   let conn = make_simulator () in
-  let unknown_storage = Storage_class.Unknown "FUTURE_CLASS" in
-  let put_options =
-    { Object.Put.default_options with storage_class = Some unknown_storage }
+  let other_storage = Storage_class.Other "FUTURE_CLASS" in
+  let check_storage label key =
+    let head =
+      Simulator.Object.head conn
+        ~bucket:(bucket_name "test-bucket")
+        ~key:(object_key key) ()
+      |> ok_or_fail (label ^ " head")
+    in
+    Alcotest.(check bool) label true (head.storage_class = Some other_storage)
   in
-  expect_validation_field "simulator put storage" "storage_class"
+  let put_options =
+    { Object.Put.default_options with storage_class = Some other_storage }
+  in
+  ignore
     (Simulator.Object.put conn
        ~bucket:(bucket_name "test-bucket")
-       ~key:(object_key "unknown-storage")
+       ~key:(object_key "other-storage")
        ~options:put_options
        ~body:(Simulator.Body.of_string "body")
-       ());
+       ()
+    |> ok_or_fail "simulator put storage");
+  check_storage "put storage class" "other-storage";
   ignore
     (Simulator.Object.put conn
        ~bucket:(bucket_name "test-bucket")
@@ -671,24 +682,37 @@ let test_simulator_rejects_unknown_storage_class_writes () =
        ()
     |> ok_or_fail "put source");
   let copy_options =
-    { Object.Copy.default_options with storage_class = Some unknown_storage }
+    { Object.Copy.default_options with storage_class = Some other_storage }
   in
-  expect_validation_field "simulator copy storage" "storage_class"
+  ignore
     (Simulator.Object.copy conn
        ~source_bucket:(bucket_name "test-bucket")
        ~source_key:(object_key "source.txt")
        ~destination_bucket:(bucket_name "test-bucket")
-       ~destination_key:(object_key "copy.txt") ~options:copy_options ());
+       ~destination_key:(object_key "copy.txt") ~options:copy_options ()
+    |> ok_or_fail "simulator copy storage");
+  check_storage "copy storage class" "copy.txt";
   let create_options =
-    {
-      Multipart.Create.default_options with
-      storage_class = Some unknown_storage;
-    }
+    { Multipart.Create.default_options with storage_class = Some other_storage }
   in
-  expect_validation_field "simulator multipart storage" "storage_class"
-    (Simulator.Multipart.create_upload conn
-       ~bucket:(bucket_name "test-bucket")
-       ~key:(object_key "large.bin") ~options:create_options ())
+  let upload =
+    Simulator.Multipart.create_upload conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "large.bin") ~options:create_options ()
+    |> ok_or_fail "simulator multipart storage"
+  in
+  let part =
+    Simulator.Multipart.upload_part conn ~upload:upload.upload
+      ~part_number:(Multipart.Part_number.of_int_exn 1)
+      ~body:(Simulator.Body.of_string "part")
+      ()
+    |> ok_or_fail "simulator multipart part"
+  in
+  ignore
+    (Simulator.Multipart.complete_upload conn ~upload:upload.upload
+       ~parts:[ part.part ] ()
+    |> ok_or_fail "simulator multipart complete");
+  check_storage "multipart storage class" "large.bin"
 
 let test_simulator_multipart_complete_validates_sizes () =
   let conn = make_simulator () in
@@ -1030,8 +1054,8 @@ let suite =
           test_simulator_conveniences_validate_max_bytes_before_lookup;
         Alcotest.test_case "simulator rejects unknown checksum writes" `Quick
           test_simulator_rejects_unknown_checksum_writes;
-        Alcotest.test_case "simulator rejects unknown storage class writes"
-          `Quick test_simulator_rejects_unknown_storage_class_writes;
+        Alcotest.test_case "simulator accepts other storage class writes" `Quick
+          test_simulator_accepts_other_storage_class_writes;
         Alcotest.test_case "simulator validates multipart complete sizes" `Quick
           test_simulator_multipart_complete_validates_sizes;
         Alcotest.test_case "simulator validates multipart complete checksums"

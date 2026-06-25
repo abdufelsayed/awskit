@@ -45,7 +45,9 @@ module type DOMAIN = sig
       | Express_onezone
       | Fsx_openzfs
       | Fsx_ontap
-      | Unknown of string
+      | Other of string
+
+    val to_string : t -> string
   end
 
   module Object : sig
@@ -187,6 +189,7 @@ module Make (Domain : DOMAIN) (Config : CONFIG) : sig
 
   val validate_storage_class :
     Domain.Storage_class.t -> (unit, Awskit.Error.t) result
+  (** Validate that a storage class can be rendered as an S3 header value. *)
 
   val validate_encryption_request :
     Domain.Object.Encryption.request option -> (unit, Awskit.Error.t) result

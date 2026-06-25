@@ -40,7 +40,9 @@ module type DOMAIN = sig
       | Express_onezone
       | Fsx_openzfs
       | Fsx_ontap
-      | Unknown of string
+      | Other of string
+
+    val to_string : t -> string
   end
 
   module Object : sig
@@ -240,11 +242,9 @@ module Make (Domain : DOMAIN) (Config : CONFIG) = struct
     let* () = validate_checksum_algorithm checksum.algorithm in
     Config.validate_header_value ~field:"checksum_value" checksum.value
 
-  let validate_storage_class = function
-    | Domain.Storage_class.Unknown value ->
-        invalid ~field:"storage_class" "unknown storage class %S cannot be sent"
-          value
-    | _ -> Ok ()
+  let validate_storage_class storage_class =
+    Config.validate_header_value ~field:"storage_class"
+      (Domain.Storage_class.to_string storage_class)
 
   let validate_encryption_request = function
     | None | Some `AES256 -> Ok ()
