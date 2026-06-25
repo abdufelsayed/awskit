@@ -1,5 +1,11 @@
 (library
  (name awskit_s3_workload)
- (modules s3_command s3_model s3_replay s3_workload)
+ (modules
+  s3_command
+  s3_model
+  s3_replay
+  s3_workload
+  transfer_fault_workload
+  transfer_model)
  (wrapped false)
  (libraries awskit awskit-s3 alcotest qcheck-core qcheck-alcotest))

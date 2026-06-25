@@ -19,14 +19,19 @@ The suite IDs are `workload:awskit-eio:runtime-http` and
 S3 workload support lives in `test/awskit-s3/support`. The private
 `awskit_s3_workload` library provides reusable command generation, pure model
 state, replay text helpers, and a target functor for package-owned runners.
+It also provides `transfer_model.ml` and `transfer_fault_workload.ml` for
+runtime-neutral transfer byte-movement, progress, and cleanup workloads.
 
 The simulator runner lives in `test/awskit-s3/sim` and runs the shared S3 state
-workload without network access:
+workload and generated transfer fault workload without network access:
 
 - `@test/awskit-s3/sim/s3-sim-workload`
+- `@test/awskit-s3/sim/s3-transfer-faults`
 - `@s3-sim-workload`
+- `@s3-transfer-faults`
 
-The suite ID is `workload:awskit-s3-sim:s3-state`.
+The suite IDs are `workload:awskit-s3-sim:s3-state` and
+`workload:awskit-s3-sim:transfer-faults`.
 
 S3 protocol wire workloads live in `test/awskit-s3/protocol`. The private
 `awskit_s3_protocol_test_support` library keeps fixture diffing, independent
@@ -56,13 +61,14 @@ The suite IDs are `workload:awskit-s3:protocol-wire`,
 `fixture:awskit-s3:protocol-wire`, and `replay:awskit-s3:protocol-wire`.
 
 The MinIO runner lives in `test/awskit-s3/lwt/unix` and runs a bounded profile
-of the same shared S3 state workload against Docker-backed MinIO:
+of the same shared S3 state workload plus deterministic transfer cases against
+Docker-backed MinIO:
 
 - `@test/awskit-s3/lwt/unix/s3-minio-workload`
 - `@s3-minio-workload`
 
-The suite ID is `workload:minio:s3-state`. The compatibility alias
-`@minio-contract` points at the same workload.
+The suite IDs are `workload:minio:s3-state` and `integration:minio:transfer`.
+The compatibility alias `@minio-contract` points at the same workload.
 
 During the migration, the previous test tree may exist locally as `test.o/`.
 That directory is historical reference material only. Do not stage it, do not

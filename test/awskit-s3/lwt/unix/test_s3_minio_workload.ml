@@ -3,10 +3,12 @@ open S3_model
 module Bucket = Awskit_s3.Bucket
 module Bucket_name = Awskit_s3.Bucket_name
 module Command = S3_command
+module Multipart = Awskit_s3.Multipart
 module Model = S3_model
 module Object = Awskit_s3.Object
 module Object_key = Awskit_s3.Object_key
 module Tag = Awskit_s3.Tag
+module Transfer = Awskit_s3.Transfer
 
 let getenv_default name default =
   match Sys.getenv_opt name with
@@ -94,6 +96,45 @@ let ok_or_fail label = function
 let await_result _label promise = Lwt_main.run promise
 let await_ok label promise = Lwt_main.run promise |> ok_or_fail label
 let delete_object_key key = Object.Delete_many.object_ ~key ()
+
+let write_file path body =
+  let channel = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel body)
+
+let read_file path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () ->
+      let length = in_channel_length channel in
+      really_input_string channel length)
+
+let remove_file path = try Sys.remove path with Sys_error _ -> ()
+
+let transfer_body length =
+  String.init length (fun index ->
+      match index mod 17 with
+      | 0 -> '\000'
+      | 1 -> '\255'
+      | _ -> Char.chr (32 + (index * 13 mod 91)))
+
+let has_final_progress ~direction ~phase ~total (event : Transfer.progress) =
+  event.direction = direction
+  && event.phase = phase
+  && Int64.equal event.transferred total
+  && event.total = Some total
+
+let check_final_progress label ~direction ~phase ~total progress =
+  Alcotest.(check bool)
+    label true
+    (List.exists (has_final_progress ~direction ~phase ~total) progress)
+
+let observe_lwt promise =
+  Lwt.catch
+    (fun () -> Lwt.map (fun result -> `Returned result) promise)
+    (fun exn -> Lwt.return (`Raised exn))
 
 let delete_object_version key version_id =
   match version_id with
@@ -654,4 +695,179 @@ module Workload =
     end)
     (Minio_target)
 
-let () = Alcotest.run "awskit-s3-minio-workload" Workload.suite
+let with_minio_bucket f =
+  let conn = connect () in
+  cleanup_bucket_or_fail conn ~bucket;
+  ignore
+    (await_ok "create bucket" (S3.Bucket.create conn ~bucket ())
+      : Bucket.Create.result);
+  protect_with_bucket_cleanup conn ~bucket (fun () -> f conn ~bucket)
+
+let test_transfer_small_roundtrip () =
+  with_minio_bucket (fun conn ~bucket ->
+      let upload_path = Filename.temp_file "awskit-minio-upload-small" ".bin" in
+      let download_path =
+        Filename.temp_file "awskit-minio-download-small" ".bin"
+      in
+      let body = transfer_body ((128 * 1024) + 17) in
+      let total = Int64.of_int (String.length body) in
+      let upload_progress = ref [] in
+      let download_progress = ref [] in
+      write_file upload_path body;
+      remove_file download_path;
+      Fun.protect
+        ~finally:(fun () ->
+          remove_file upload_path;
+          remove_file download_path)
+        (fun () ->
+          let upload_options =
+            Transfer.upload_options_exn ~multipart_threshold:(Int64.succ total)
+              ()
+          in
+          let download_options =
+            Transfer.download_options_exn
+              ~multipart_threshold:(Int64.succ total) ()
+          in
+          let upload_result =
+            await_ok "small transfer upload"
+              (S3.Object.Transfer.upload_file conn ~bucket
+                 ~key:(object_key "small-transfer.bin")
+                 ~options:upload_options ~path:upload_path
+                 ~on_progress:(fun event ->
+                   upload_progress := event :: !upload_progress)
+                 ())
+          in
+          let download_result =
+            await_ok "small transfer download"
+              (S3.Object.Transfer.download_file conn ~bucket
+                 ~key:(object_key "small-transfer.bin")
+                 ~options:download_options ~path:download_path
+                 ~on_progress:(fun event ->
+                   download_progress := event :: !download_progress)
+                 ())
+          in
+          Alcotest.(check bool)
+            "upload strategy" true
+            (Transfer.upload_strategy upload_result = `Put);
+          Alcotest.(check bool)
+            "download strategy" true
+            (Transfer.download_strategy download_result = `Get);
+          Alcotest.(check int64)
+            "upload bytes" total
+            (Transfer.upload_bytes_transferred upload_result);
+          Alcotest.(check int64)
+            "download bytes" total
+            (Transfer.download_bytes_transferred download_result);
+          Alcotest.(check string)
+            "downloaded body" body (read_file download_path);
+          check_final_progress "upload final progress"
+            ~direction:Transfer.Upload ~phase:Transfer.Single_request ~total
+            !upload_progress;
+          check_final_progress "download final progress"
+            ~direction:Transfer.Download ~phase:Transfer.Single_request ~total
+            !download_progress))
+
+let test_transfer_multipart_upload_bytes () =
+  with_minio_bucket (fun conn ~bucket ->
+      let path = Filename.temp_file "awskit-minio-upload-multipart" ".bin" in
+      let part_size = Transfer.min_part_size in
+      let body = transfer_body (part_size + 4099) in
+      let total = Int64.of_int (String.length body) in
+      let progress = ref [] in
+      write_file path body;
+      Fun.protect
+        ~finally:(fun () -> remove_file path)
+        (fun () ->
+          let options =
+            Transfer.upload_options_exn
+              ~multipart_threshold:(Int64.of_int part_size) ~part_size
+              ~concurrency:2 ()
+          in
+          let upload_result =
+            await_ok "multipart transfer upload"
+              (S3.Object.Transfer.upload_file conn ~bucket
+                 ~key:(object_key "multipart-transfer.bin")
+                 ~options ~path
+                 ~on_progress:(fun event -> progress := event :: !progress)
+                 ())
+          in
+          Alcotest.(check bool)
+            "upload strategy" true
+            (Transfer.upload_strategy upload_result = `Multipart);
+          Alcotest.(check int64)
+            "upload bytes" total
+            (Transfer.upload_bytes_transferred upload_result);
+          (match upload_result with
+          | Transfer.Multipart { parts; _ } ->
+              Alcotest.(check int) "multipart parts" 2 (List.length parts)
+          | Transfer.Put _ -> Alcotest.fail "expected multipart upload result");
+          let remote =
+            await_ok "get multipart transfer"
+              (S3.Object.get_string conn ~bucket
+                 ~key:(object_key "multipart-transfer.bin")
+                 ~max_bytes:total ())
+          in
+          Alcotest.(check string) "remote body" body remote.value;
+          check_final_progress "multipart final progress"
+            ~direction:Transfer.Upload ~phase:Transfer.Part ~total !progress))
+
+let test_transfer_owned_multipart_failure_cleans_up () =
+  with_minio_bucket (fun conn ~bucket ->
+      let exception Progress_failed in
+      let path = Filename.temp_file "awskit-minio-upload-failing" ".bin" in
+      let part_size = Transfer.min_part_size in
+      let body = transfer_body (part_size + 1024) in
+      let progress_seen = ref false in
+      write_file path body;
+      Fun.protect
+        ~finally:(fun () -> remove_file path)
+        (fun () ->
+          let options =
+            Transfer.upload_options_exn
+              ~multipart_threshold:(Int64.of_int part_size) ~part_size
+              ~concurrency:1 ()
+          in
+          let observed =
+            Lwt_main.run
+              (observe_lwt
+                 (S3.Object.Transfer.multipart_upload_file conn ~bucket
+                    ~key:(object_key "failed-multipart-transfer.bin")
+                    ~options ~path
+                    ~on_progress:(fun _event ->
+                      progress_seen := true;
+                      raise Progress_failed)
+                    ()))
+          in
+          (match observed with
+          | `Raised exn ->
+              Alcotest.(check bool)
+                "raised progress exception" true (exn == Progress_failed)
+          | `Returned (Error error) ->
+              Alcotest.failf "progress exception returned as error: %a"
+                Awskit_s3.Error.pp error
+          | `Returned (Ok _) ->
+              Alcotest.fail
+                "multipart transfer succeeded despite progress exception");
+          Alcotest.(check bool) "progress observed" true !progress_seen;
+          Alcotest.(check bool)
+            "failed transfer object absent" false
+            (await_ok "failed transfer exists"
+               (S3.Object.exists conn ~bucket
+                  ~key:(object_key "failed-multipart-transfer.bin")
+                  ()))))
+
+let transfer_suite =
+  [
+    ( "integration:minio:transfer",
+      [
+        Alcotest.test_case "small upload/download byte roundtrip" `Quick
+          test_transfer_small_roundtrip;
+        Alcotest.test_case "multipart upload byte comparison" `Quick
+          test_transfer_multipart_upload_bytes;
+        Alcotest.test_case "owned multipart failure cleanup" `Quick
+          test_transfer_owned_multipart_failure_cleans_up;
+      ] );
+  ]
+
+let () =
+  Alcotest.run "awskit-s3-minio-workload" (Workload.suite @ transfer_suite)

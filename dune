@@ -12,6 +12,7 @@
   dune-project
   (alias runtime-http-workload)
   (alias s3-sim-workload)
+  (alias s3-transfer-faults)
   (alias s3-protocol-wire)
   (alias s3-protocol-fixtures)
   (alias s3-protocol-replay)))
@@ -44,6 +45,11 @@
  (name s3-sim-workload)
  (deps
   (alias test/awskit-s3/sim/s3-sim-workload)))
+
+(alias
+ (name s3-transfer-faults)
+ (deps
+  (alias test/awskit-s3/sim/s3-transfer-faults)))
 
 (alias
  (name s3-protocol-wire)
