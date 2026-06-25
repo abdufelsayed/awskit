@@ -193,7 +193,9 @@
   (base64
    (>= 3.5.2))
   uri
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-s3-lwt)
