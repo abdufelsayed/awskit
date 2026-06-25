@@ -86,3 +86,4 @@ rm -rf "$dist_dir" "$dist_log"
 docker compose up -d
 MINIO_STARTED=1
 opam exec -- dune build --force @minio-contract
+opam exec -- dune build --force @test/awskit-s3/eio/minio-smoke-eio

@@ -91,6 +91,7 @@ Reproduce locally with the closest command. For MinIO failures:
 ```sh
 docker compose up -d
 opam exec -- dune build --force @minio-contract
+opam exec -- dune build --force @test/awskit-s3/eio/minio-smoke-eio
 docker compose down -v
 ```
 

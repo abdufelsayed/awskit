@@ -88,7 +88,7 @@ Required release-branch checks:
 - Eio package build and tests.
 - Documentation and examples.
 - Protocol evidence.
-- MinIO S3 contract.
+- MinIO S3 contract and Eio MinIO smoke.
 
 The `publish-docs` job is expected to skip on release branches because it only
 runs on pushes to `main`.
@@ -102,8 +102,8 @@ scripts/release-check.sh
 ```
 
 This validates package metadata, formatting, tests, examples, protocol
-evidence, generated documentation, distribution archives, and the MinIO
-contract.
+evidence, generated documentation, distribution archives, the MinIO contract,
+and the Eio MinIO smoke.
 
 ## Release Gates
 

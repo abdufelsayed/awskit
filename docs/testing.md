@@ -15,8 +15,8 @@ docs, or releases.
 | Property tests | Parsers, formatters, validators, endpoint policy, canonical query/header normalization, pagination, retry jitter bounds, and transfer planning. Explore fresh generated cases by default and replay failures with `QCHECK_SEED`. | `opam exec -- dune build @protocol-pbt` |
 | Golden fixtures | Exact protocol artifacts that reviewers should inspect: presigned artifacts, endpoint resolution, XML decode/encode bodies, pagination, multipart XML, service errors, and normalized wire summaries. | `opam exec -- dune build @protocol-fixtures` |
 | Fuzz replay | Minimized failures found by manual or mutation fuzzing. Commit the reduced input and replay it as an ordinary deterministic test before treating the bug as fixed. | `opam exec -- dune build @fuzz-replay` |
-| Simulator contracts | No-network S3 behavior, model-oracle state, fault injection, and docs/test backend behavior. The simulator is not an AWS wire authority. | `opam exec -- dune build @simulator-contract` |
-| Runtime conformance | Runtime authoring laws: request/response body ownership, retry sleep/random/timeout capability, scoped readers, drains, and error precedence. | `opam exec -- dune build @runtime-conformance` |
+| Simulator contracts | No-network S3 behavior, stateful model-oracle PBT, fault injection, and docs/test backend behavior. The simulator is not an AWS wire authority. | `opam exec -- dune build @simulator-contract` |
+| Runtime conformance | Runtime authoring laws and HTTP contract checks: request/response body ownership, retry sleep/random/timeout capability, scoped readers, drains, and error precedence. | `opam exec -- dune build @runtime-conformance` |
 | MinIO contracts | Local adapter interoperability through a real S3-compatible test double. Requires Docker and cleanup, and remains outside no-network protocol gates. | `opam exec -- dune build --force @minio-contract` |
 | Examples/docs | Extracted examples, odoc pages, and future MDX/docs checks. Examples should compile, and simulator-backed examples should execute when practical. | `opam exec -- dune build @examples @doc` |
 | Release gates | The composed local evidence plus opam/install/archive/docs checks and external-service lifecycle. | `scripts/release-check.sh` |
@@ -39,6 +39,10 @@ mentioning a field name.
 | `@runtime-conformance` | Runtime capability and lifecycle conformance checks. | No |
 | `@minio-contract` | MinIO-backed S3-compatible contract tests. | Local Docker |
 | `@examples` | Build example executables. | No |
+| `@test/awskit/eio/runtime-http-contract` | Focused Eio runtime HTTP contract under runtime conformance. | No |
+| `@test/awskit/lwt/runtime-http-contract` | Focused Lwt runtime HTTP contract under runtime conformance. | No |
+| `@test/awskit-s3/sim/simulator-stateful-pbt` | Focused simulator stateful model-oracle PBT under simulator contracts. | No |
+| `@test/awskit-s3/eio/minio-smoke-eio` | Focused Eio MinIO smoke for local adapter integration. | Local Docker |
 
 Long-running mutation fuzzing, live AWS account tests, and broader provider
 compatibility tests are opt-in unless a support policy explicitly promotes them
@@ -192,6 +196,7 @@ For S3 contract work:
 ```sh
 docker compose up -d
 opam exec -- dune build --force @minio-contract
+opam exec -- dune build --force @test/awskit-s3/eio/minio-smoke-eio
 docker compose down -v
 ```
 
