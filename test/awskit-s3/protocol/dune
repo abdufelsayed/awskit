@@ -3,6 +3,7 @@
  (modules
   protocol_fixture_diff
   protocol_generators
+  protocol_mutation
   protocol_recording_runtime
   protocol_replay
   protocol_support

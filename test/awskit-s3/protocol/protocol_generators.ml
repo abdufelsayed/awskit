@@ -2,19 +2,25 @@ type family =
   | Query
   | Duplicate_query
   | Endpoint_malformed
+  | Endpoint_mutation
   | Header_newline
   | Invalid_content_range
   | Invalid_tag_field
   | Oversized_tag_set
+  | Percent_encoded_object_key
+  | Tagging_xml_mutation
 
 let family_bin = function
   | Query -> "protocol.family.query"
   | Duplicate_query -> "protocol.family.duplicate-query"
   | Endpoint_malformed -> "protocol.family.endpoint-malformed"
+  | Endpoint_mutation -> "protocol.family.endpoint-mutation"
   | Header_newline -> "protocol.family.header-newline"
   | Invalid_content_range -> "protocol.family.invalid-content-range"
   | Invalid_tag_field -> "protocol.family.invalid-tag-field"
   | Oversized_tag_set -> "protocol.family.oversized-tag-set"
+  | Percent_encoded_object_key -> "protocol.family.percent-encoded-object-key"
+  | Tagging_xml_mutation -> "protocol.family.tagging-xml-mutation"
 
 let chars_of_string value = List.init (String.length value) (String.get value)
 let gen_from_chars chars = QCheck.Gen.oneof_list (chars_of_string chars)
@@ -48,6 +54,19 @@ let object_key_chars =
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 /._-~+="
 
 let protocol_object_key = gen_string ~min:1 ~max:80 ~chars:object_key_chars
+
+let percent_encoded_object_key =
+  QCheck.Gen.oneof_list
+    [
+      "space%20key.txt";
+      "%2Fleading-encoded-slash";
+      "folder%2Fchild.txt";
+      "plus+literal";
+      "unicode-%CE%B4.txt";
+      "bad-percent-%";
+      "bad-hex-%GG";
+      "literal-percent-%25";
+    ]
 
 let upload_id =
   gen_string ~min:1 ~max:64

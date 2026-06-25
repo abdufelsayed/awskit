@@ -70,6 +70,13 @@ The golden protocol fixture corpus lives in
 `test/awskit-s3/fixtures/protocol`. The deterministic replay corpus lives under
 `test/awskit-s3/fixtures/protocol/fuzz-replay`.
 
+Protocol wire properties cover canonical query ordering, endpoint URL-part
+rejection, endpoint path selection, percent-encoded object-key spellings,
+tagging XML validation boundaries, request header validation, presigned URL
+safety, transfer planning laws, and multipart request prevalidation. Mutation
+properties exercise hostile endpoint bytes and tagging XML fragments; minimized
+failures belong in the replay corpus as public error-category checks.
+
 Protocol wire runners use no network access. The `s3-protocol-wire` alias also
 runs pure S3 domain validation properties and deterministic boundary
 regressions:

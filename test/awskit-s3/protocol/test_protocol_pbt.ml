@@ -117,6 +117,23 @@ let prop_endpoint_rejects_url_parts =
        Protocol_generators.malformed_endpoint_authority) (fun value ->
       Result.is_error (Awskit.Endpoint.of_string value))
 
+let is_safe_canonical_endpoint endpoint =
+  Awskit.Endpoint.scheme endpoint = `Https
+  && String.equal (Awskit.Endpoint.host endpoint) "s3.us-east-1.amazonaws.com"
+  && Option.is_none (Awskit.Endpoint.port endpoint)
+  && String.equal
+       (Awskit.Endpoint.to_url_prefix endpoint)
+       Protocol_mutation.endpoint_seed
+
+let prop_mutated_endpoint_values_are_rejected_or_canonical =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"mutated endpoint values are rejected or canonical"
+    (QCheck.make ~print:String.escaped Protocol_mutation.mutated_endpoint)
+    (fun value ->
+      match Awskit.Endpoint.of_string value with
+      | Error _ -> true
+      | Ok endpoint -> is_safe_canonical_endpoint endpoint)
+
 let prop_endpoint_auto_virtual_hosted_object_paths =
   QCheck.Test.make ~count:default_count
     ~name:"default endpoint auto style uses virtual-hosted object paths"
@@ -163,6 +180,38 @@ let prop_endpoint_auto_dotted_bucket_uses_path_style =
           && String.equal ("/" ^ bucket ^ "/" ^ key) resolved.signing_path
           && resolved.style = `Path
           && Awskit.Region.equal test_region resolved.signing_region)
+
+let prop_endpoint_paths_preserve_percent_encoded_object_keys =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"endpoint paths preserve percent-encoded object-key spellings"
+    (QCheck.make ~print:Fun.id Protocol_generators.percent_encoded_object_key)
+    (fun key ->
+      match Object_key.of_string key with
+      | Error _ -> true
+      | Ok typed_key -> (
+          let path_bucket = "bucket.example" in
+          match
+            ( Endpoint_resolver.resolve_object_request Endpoint_config.default
+                ~region:test_region
+                ~bucket:(Bucket_name.of_string_exn "bucket")
+                ~key:typed_key,
+              Endpoint_resolver.resolve_object_request Endpoint_config.default
+                ~region:test_region
+                ~bucket:(Bucket_name.of_string_exn path_bucket)
+                ~key:typed_key )
+          with
+          | Ok virtual_hosted, Ok path_style ->
+              String.equal (object_path key) virtual_hosted.path
+              && String.equal ("/" ^ key) virtual_hosted.signing_path
+              && virtual_hosted.style = `Virtual_hosted
+              && String.equal
+                   (path_style_object_path ~bucket:path_bucket ~key)
+                   path_style.path
+              && String.equal
+                   ("/" ^ path_bucket ^ "/" ^ key)
+                   path_style.signing_path
+              && path_style.style = `Path
+          | Error _, _ | _, Error _ -> false))
 
 let prop_endpoint_accelerate_rejects_dotted_buckets =
   QCheck.Test.make ~count:boundary_count
@@ -346,6 +395,21 @@ let prop_tagging_xml_rejects_oversized_tag_sets =
       match tagging_result_from_xml (Protocol_wire_model.tagging_xml tags) with
       | Error error -> Protocol_support.is_decode_error error
       | Ok _ -> false)
+
+let is_decode_or_validation_error error =
+  match Awskit.Error.kind error with
+  | Decode _ -> true
+  | Validation _ -> true
+  | _ -> Awskit.Error.is_validation error
+
+let prop_mutated_tagging_xml_decodes_or_fails_safely =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"mutated tagging XML decodes or fails safely"
+    (QCheck.make ~print:String.escaped Protocol_mutation.mutated_tagging_xml)
+    (fun body ->
+      match tagging_result_from_xml body with
+      | Ok result -> List.length (Tag.Set.to_list result.tags) <= 10
+      | Error error -> is_decode_or_validation_error error)
 
 let planned_part_count ~content_length ~part_size =
   if content_length = 0 then 0 else ((content_length - 1) / part_size) + 1
@@ -534,11 +598,17 @@ let protocol_family_properties =
     ( Protocol_generators.Invalid_content_range,
       prop_content_range_invalid_headers_decode_error );
     (Protocol_generators.Endpoint_malformed, prop_endpoint_rejects_url_parts);
+    ( Protocol_generators.Endpoint_mutation,
+      prop_mutated_endpoint_values_are_rejected_or_canonical );
     (Protocol_generators.Header_newline, prop_header_values_reject_newline);
     ( Protocol_generators.Invalid_tag_field,
       prop_tagging_xml_rejects_invalid_tag_fields );
     ( Protocol_generators.Oversized_tag_set,
       prop_tagging_xml_rejects_oversized_tag_sets );
+    ( Protocol_generators.Percent_encoded_object_key,
+      prop_endpoint_paths_preserve_percent_encoded_object_keys );
+    ( Protocol_generators.Tagging_xml_mutation,
+      prop_mutated_tagging_xml_decodes_or_fails_safely );
   ]
 
 let remaining_protocol_properties =
@@ -564,10 +634,13 @@ let required_protocol_family_bins =
     "protocol.family.query";
     "protocol.family.duplicate-query";
     "protocol.family.endpoint-malformed";
+    "protocol.family.endpoint-mutation";
     "protocol.family.header-newline";
     "protocol.family.invalid-content-range";
     "protocol.family.invalid-tag-field";
     "protocol.family.oversized-tag-set";
+    "protocol.family.percent-encoded-object-key";
+    "protocol.family.tagging-xml-mutation";
   ]
 
 let test_protocol_family_coverage () =
