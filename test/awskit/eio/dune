@@ -1,0 +1,32 @@
+(test
+ (name test_runtime_http_workload_eio)
+ (package awskit-eio)
+ (libraries
+  awskit
+  awskit-eio
+  awskit_runtime_http_workload
+  base
+  cohttp-eio
+  eio
+  eio_main
+  ptime
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  unix))
+
+(rule
+ (alias runtime-http-workload)
+ (package awskit-eio)
+ (deps test_runtime_http_workload_eio.exe)
+ (action
+  (run
+   ./test_runtime_http_workload_eio.exe
+   test
+   "workload:awskit-eio:runtime-http")))
+
+(alias
+ (name runtime-conformance)
+ (package awskit-eio)
+ (deps
+  (alias runtime-http-workload)))

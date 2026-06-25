@@ -8,7 +8,9 @@
 
 (alias
  (name check-local)
- (deps dune-project))
+ (deps
+  dune-project
+  (alias runtime-http-workload)))
 
 (alias
  (name check-docker)
@@ -20,6 +22,17 @@
 
 ; Compatibility aliases stay usable while the test tree is rebuilt. Focused
 ; workload passes replace these no-op deps with the aliases they introduce.
+
+(alias
+ (name runtime-http-workload)
+ (deps
+  (alias test/awskit/eio/runtime-http-workload)
+  (alias test/awskit/lwt/runtime-http-workload)))
+
+(alias
+ (name runtime-conformance)
+ (deps
+  (alias runtime-http-workload)))
 
 (alias
  (name check-protocol)
@@ -44,7 +57,9 @@
 (alias
  (name check-protocol)
  (package awskit-lwt)
- (deps dune-project))
+ (deps
+  dune-project
+  (alias test/awskit/lwt/runtime-conformance)))
 
 (alias
  (name check-protocol)
@@ -54,7 +69,9 @@
 (alias
  (name check-protocol)
  (package awskit-eio)
- (deps dune-project))
+ (deps
+  dune-project
+  (alias test/awskit/eio/runtime-conformance)))
 
 (alias
  (name check-protocol)

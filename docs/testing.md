@@ -16,7 +16,7 @@ docs, or releases.
 | Golden fixtures | Exact protocol artifacts that reviewers should inspect: presigned artifacts, endpoint resolution, XML decode/encode bodies, pagination, multipart XML, service errors, and normalized wire summaries. | `opam exec -- dune build @protocol-fixtures` |
 | Fuzz replay | Minimized failures found by manual or mutation fuzzing. Commit the reduced input and replay it as an ordinary deterministic test before treating the bug as fixed. | `opam exec -- dune build @fuzz-replay` |
 | Simulator contracts | No-network S3 behavior, stateful model-oracle PBT, fault injection, and docs/test backend behavior. The simulator is not an AWS wire authority. | `opam exec -- dune build @simulator-contract` |
-| Runtime conformance | Runtime authoring laws and HTTP contract checks: request/response body ownership, retry sleep/random/timeout capability, scoped readers, drains, and error precedence. | `opam exec -- dune build @runtime-conformance` |
+| Runtime HTTP workloads | Package-owned runtime HTTP adapter workloads against loopback servers, including bodiless responses, framing, body-reader, and error-path behavior. | `opam exec -- dune build @runtime-http-workload` |
 | MinIO contracts | Local adapter interoperability through a real S3-compatible test double. Requires Docker and cleanup, and remains outside no-network protocol gates. | `opam exec -- dune build --force @minio-contract` |
 | Examples/docs | Extracted examples, odoc pages, and future MDX/docs checks. Examples should compile, and simulator-backed examples should execute when practical. | `opam exec -- dune build @examples @doc` |
 | Release gates | The composed local evidence plus opam/install/archive/docs checks and external-service lifecycle. | `scripts/release-check.sh` |
@@ -32,15 +32,17 @@ mentioning a field name.
 | --- | --- | --- |
 | `@check-fast` | Local `runtest` and examples. | No |
 | `@check-protocol` | Protocol PBT, protocol fixtures, fuzz replay, simulator contract, and runtime conformance. | No |
+| `@check-local` | Local composed gate for repository changes; currently includes runtime HTTP workloads. | No |
 | `@protocol-pbt` | Fast deterministic protocol property tests. | No |
 | `@protocol-fixtures` | Fixture-backed protocol artifact tests with normalized comparisons. | No |
 | `@fuzz-replay` | Deterministic replay of committed minimized parser/validator failures. | No |
 | `@simulator-contract` | Simulator contract and simulator-specific fault/lifecycle tests. | No |
-| `@runtime-conformance` | Runtime capability and lifecycle conformance checks. | No |
+| `@runtime-http-workload` | Eio and Lwt runtime HTTP workload gates. | No |
+| `@runtime-conformance` | Compatibility alias for runtime workload gates while the test tree is rebuilt. | No |
 | `@minio-contract` | MinIO-backed S3-compatible contract tests. | Local Docker |
 | `@examples` | Build example executables. | No |
-| `@test/awskit/eio/runtime-http-contract` | Focused Eio runtime HTTP contract under runtime conformance. | No |
-| `@test/awskit/lwt/runtime-http-contract` | Focused Lwt runtime HTTP contract under runtime conformance. | No |
+| `@test/awskit/eio/runtime-http-workload` | Focused Eio runtime HTTP workload. | No |
+| `@test/awskit/lwt/runtime-http-workload` | Focused Lwt runtime HTTP workload. | No |
 | `@test/awskit-s3/sim/simulator-stateful-pbt` | Focused simulator stateful model-oracle PBT under simulator contracts. | No |
 | `@test/awskit-s3/eio/minio-smoke-eio` | Focused Eio MinIO smoke for local adapter integration. | Local Docker |
 
@@ -60,6 +62,13 @@ instead of weakening assertions globally. For example, the simulator can run the
 strict profile while MinIO uses a documented S3-compatible profile for APIs it
 actually supports.
 
+During the testing foundation rebuild, the tracked `test/` tree is reset around
+focused package-owned workloads and support libraries. A local `test.o/`
+directory may exist as historical reference material only; do not stage it, do
+not treat it as evidence, and do not use it as a replacement for tracked tests.
+Planning notes under `docs/testing-foundation/` are not part of the committed
+test surface.
+
 ## Test Identity
 
 Keep test identifiers scoped and stable so maintainers and agents can select
@@ -68,8 +77,8 @@ the same behavior without guessing local naming conventions.
 Test identities have three layers:
 
 - Dune aliases are command-facing evidence IDs. Keep them kebab-case, such as
-  `@protocol-pbt`, `@runtime-conformance`, or
-  `@test/awskit/eio/runtime-http-contract`.
+  `@protocol-pbt`, `@runtime-http-workload`, or
+  `@test/awskit/eio/runtime-http-workload`.
 - Alcotest executable names identify the runnable package or evidence binary.
   Keep them close to the package or evidence name, such as `awskit-s3` or
   `awskit-s3-protocol-pbt`.
@@ -81,7 +90,8 @@ Test identities have three layers:
   ```
 
 Use lowercase ASCII and kebab-case inside each segment. Supported evidence
-segments are `unit`, `integration`, `contract`, `pbt`, `fixture`, and `replay`.
+segments are `unit`, `integration`, `contract`, `workload`, `pbt`, `fixture`,
+and `replay`.
 The subject should be the package, runtime adapter, or backend under test, such
 as `awskit`, `awskit-eio`, `awskit-s3`, `awskit-s3-sim`, or `minio`.
 
@@ -89,7 +99,7 @@ Examples:
 
 - `pbt:awskit:signing:canonical-query`
 - `pbt:awskit-s3:domain:bucket`
-- `contract:awskit-eio:runtime-http`
+- `workload:awskit-eio:runtime-http`
 - `contract:awskit-s3-sim:bucket`
 - `contract:minio:multipart`
 - `fixture:awskit-s3:protocol`
@@ -203,7 +213,7 @@ docker compose down -v
 For runtime contract work:
 
 ```sh
-opam exec -- dune build @runtime-conformance
+opam exec -- dune build @runtime-http-workload
 ```
 
 For releases:

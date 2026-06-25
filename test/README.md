@@ -7,6 +7,15 @@ models, and package-owned runners under this directory. Use concise names that
 describe behavior, such as `runtime_http_workload`, `s3_model`,
 `s3_workload`, `protocol_wire`, and `transfer_fault_workload`.
 
+Runtime HTTP adapter work runs through package-owned aliases:
+
+- `@test/awskit/eio/runtime-http-workload`
+- `@test/awskit/lwt/runtime-http-workload`
+- `@runtime-http-workload`
+
+The suite IDs are `workload:awskit-eio:runtime-http` and
+`workload:awskit-lwt:runtime-http`.
+
 During the migration, the previous test tree may exist locally as `test.o/`.
 That directory is historical reference material only. Do not stage it, do not
 add ignore rules for it, and do not use it as replacement evidence for tracked

@@ -86,7 +86,9 @@
    (and
     :with-test
     (>= 6.2.1)))
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-lwt-unix)
@@ -142,7 +144,9 @@
    (and
     :with-test
     (>= 1.3)))
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-s3)
