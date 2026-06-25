@@ -1,0 +1,8 @@
+status=206
+body=cdef
+content-length=4
+content-range=bytes 2-5/10
+range-start=2
+range-finish=5
+range-complete=10
+metadata-origin=fixture

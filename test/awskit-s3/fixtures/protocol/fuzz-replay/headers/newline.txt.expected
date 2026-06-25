@@ -1,0 +1,3 @@
+kind=validation
+field=header
+retry-class=fatal

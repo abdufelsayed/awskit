@@ -11,7 +11,10 @@
  (deps
   dune-project
   (alias runtime-http-workload)
-  (alias s3-sim-workload)))
+  (alias s3-sim-workload)
+  (alias s3-protocol-wire)
+  (alias s3-protocol-fixtures)
+  (alias s3-protocol-replay)))
 
 (alias
  (name check-docker)
@@ -43,6 +46,36 @@
   (alias test/awskit-s3/sim/s3-sim-workload)))
 
 (alias
+ (name s3-protocol-wire)
+ (deps
+  (alias test/awskit-s3/protocol/s3-protocol-wire)))
+
+(alias
+ (name s3-protocol-fixtures)
+ (deps
+  (alias test/awskit-s3/protocol/s3-protocol-fixtures)))
+
+(alias
+ (name s3-protocol-replay)
+ (deps
+  (alias test/awskit-s3/protocol/s3-protocol-replay)))
+
+(alias
+ (name protocol-pbt)
+ (deps
+  (alias s3-protocol-wire)))
+
+(alias
+ (name protocol-fixtures)
+ (deps
+  (alias s3-protocol-fixtures)))
+
+(alias
+ (name fuzz-replay)
+ (deps
+  (alias s3-protocol-replay)))
+
+(alias
  (name s3-minio-workload)
  (deps
   (alias test/awskit-s3/lwt/unix/s3-minio-workload)))
@@ -65,7 +98,11 @@
 (alias
  (name check-protocol)
  (package awskit-s3)
- (deps dune-project))
+ (deps
+  dune-project
+  (alias test/awskit-s3/protocol/s3-protocol-wire)
+  (alias test/awskit-s3/protocol/s3-protocol-fixtures)
+  (alias test/awskit-s3/protocol/s3-protocol-replay)))
 
 (alias
  (name check-protocol)

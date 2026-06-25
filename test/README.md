@@ -28,6 +28,33 @@ workload without network access:
 
 The suite ID is `workload:awskit-s3-sim:s3-state`.
 
+S3 protocol wire workloads live in `test/awskit-s3/protocol`. The private
+`awskit_s3_protocol_test_support` library keeps fixture diffing, independent
+wire-model helpers, protocol generators, fixed credentials/time helpers, and
+the recording runtime local to those tests.
+
+The golden protocol fixture corpus lives in
+`test/awskit-s3/fixtures/protocol`. The deterministic replay corpus lives under
+`test/awskit-s3/fixtures/protocol/fuzz-replay`.
+
+Protocol wire runners use no network access:
+
+- `@test/awskit-s3/protocol/s3-protocol-wire`
+- `@test/awskit-s3/protocol/s3-protocol-fixtures`
+- `@test/awskit-s3/protocol/s3-protocol-replay`
+- `@s3-protocol-wire`
+- `@s3-protocol-fixtures`
+- `@s3-protocol-replay`
+
+Compatibility shims remain available:
+
+- `@protocol-pbt` points at `@s3-protocol-wire`
+- `@protocol-fixtures` points at `@s3-protocol-fixtures`
+- `@fuzz-replay` points at `@s3-protocol-replay`
+
+The suite IDs are `workload:awskit-s3:protocol-wire`,
+`fixture:awskit-s3:protocol-wire`, and `replay:awskit-s3:protocol-wire`.
+
 The MinIO runner lives in `test/awskit-s3/lwt/unix` and runs a bounded profile
 of the same shared S3 state workload against Docker-backed MinIO:
 

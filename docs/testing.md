@@ -50,10 +50,16 @@ mentioning a field name.
 | Alias | Purpose | External service |
 | --- | --- | --- |
 | `@check-fast` | Local `runtest` and examples. | No |
-| `@check-protocol` | Compatibility no-network protocol gate used by CI and release checks while the test tree is rebuilt. It currently delegates only to tracked package-owned runtime and simulator workloads where wired. | No |
-| `@check-local` | Local composed gate for repository changes; currently includes runtime HTTP workloads and the simulator S3 workload. | No |
+| `@check-protocol` | Compatibility no-network protocol gate used by CI and release checks while the test tree is rebuilt. Package-scoped gates delegate to tracked package-owned workloads where wired, including the S3 protocol wire aliases. | No |
+| `@check-local` | Local composed gate for repository changes; currently includes runtime HTTP workloads, the simulator S3 workload, and S3 protocol wire workloads. | No |
 | `@check-docker` | Docker-backed local integration gates, currently the MinIO S3 workload. | Local Docker |
 | `@s3-sim-workload` | No-network simulator run of the shared S3 state workload. | No |
+| `@s3-protocol-wire` | No-network S3 protocol wire property workload. | No |
+| `@s3-protocol-fixtures` | Golden S3 protocol fixture comparisons. | No |
+| `@s3-protocol-replay` | Deterministic S3 protocol fuzz replay corpus. | No |
+| `@protocol-pbt` | Compatibility alias for `@s3-protocol-wire`. | No |
+| `@protocol-fixtures` | Compatibility alias for `@s3-protocol-fixtures`. | No |
+| `@fuzz-replay` | Compatibility alias for `@s3-protocol-replay`. | No |
 | `@runtime-http-workload` | Eio and Lwt runtime HTTP workload gates. | No |
 | `@runtime-conformance` | Compatibility alias for runtime workload gates while the test tree is rebuilt. | No |
 | `@s3-minio-workload` | Docker-backed MinIO run of the shared S3 state workload. | Local Docker |
@@ -62,10 +68,10 @@ mentioning a field name.
 | `@test/awskit/eio/runtime-http-workload` | Focused Eio runtime HTTP workload. | No |
 | `@test/awskit/lwt/runtime-http-workload` | Focused Lwt runtime HTTP workload. | No |
 | `@test/awskit-s3/sim/s3-sim-workload` | Focused simulator run of the shared S3 state workload. | No |
+| `@test/awskit-s3/protocol/s3-protocol-wire` | Focused S3 protocol wire property workload. | No |
+| `@test/awskit-s3/protocol/s3-protocol-fixtures` | Focused S3 protocol fixture comparisons. | No |
+| `@test/awskit-s3/protocol/s3-protocol-replay` | Focused S3 protocol fuzz replay corpus. | No |
 | `@test/awskit-s3/lwt/unix/s3-minio-workload` | Focused MinIO run of the shared S3 state workload. | Local Docker |
-
-Aliases such as `@protocol-pbt`, `@protocol-fixtures`, and `@fuzz-replay`
-should be added to this table only when their tracked runners exist.
 
 Long-running mutation fuzzing, live AWS account tests, and broader provider
 compatibility tests are opt-in unless a support policy explicitly promotes them
@@ -73,6 +79,9 @@ to release gates. `@s3-minio-workload` is the named local MinIO test-double gate
 for the shared S3 workload; it is part of `@check-docker`, not `@check-fast` or
 `@check-protocol`, and a passing run is not a claim about arbitrary
 S3-compatible providers. `@minio-contract` remains as a compatibility alias.
+S3 protocol wire property, fixture, and replay aliases are no-network gates and
+therefore participate in `@check-local` and the package-scoped `@check-protocol`
+for `awskit-s3`.
 
 `@docs-mdx` does not exist yet. Do not add a placeholder alias. Add it only
 when README or package-guide snippets are normalized into real MDX or extracted

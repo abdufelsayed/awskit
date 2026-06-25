@@ -1,0 +1,7 @@
+method=PUT
+path=/
+query=versioning=
+content-md5=8qj8HSeDu3APPMQZVG06WQ==
+content-type=application/xml
+expected-owner=123456789012
+body=<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>
