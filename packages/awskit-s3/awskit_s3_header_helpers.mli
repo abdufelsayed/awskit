@@ -50,6 +50,35 @@ module type DOMAIN = sig
     val to_string : t -> string
   end
 
+  module Encryption : sig
+    module Kms : sig
+      type t
+
+      val key_id : t -> string option
+      val bucket_key_enabled : t -> bool option
+    end
+
+    module Customer_key : sig
+      type t
+
+      val algorithm : t -> string
+      val key_base64 : t -> string
+      val key_md5_base64 : t -> string
+    end
+
+    module Destination : sig
+      type t =
+        | Sse_s3
+        | Sse_kms of Kms.t
+        | Dsse_kms of Kms.t
+        | Sse_c of Customer_key.t
+    end
+
+    module Source : sig
+      type t = Sse_c of Customer_key.t
+    end
+  end
+
   module Object : sig
     module Etag : sig
       type t
@@ -124,11 +153,6 @@ module type DOMAIN = sig
 
       type value = private { algorithm : Algorithm.t; value : string }
     end
-
-    module Encryption : sig
-      type kms = { key_id : string option; bucket_key_enabled : bool option }
-      type request = [ `AES256 | `Aws_kms of kms ]
-    end
   end
 end
 
@@ -191,8 +215,11 @@ module Make (Domain : DOMAIN) (Config : CONFIG) : sig
     Domain.Storage_class.t -> (unit, Awskit.Error.t) result
   (** Validate that a storage class can be rendered as an S3 header value. *)
 
-  val validate_encryption_request :
-    Domain.Object.Encryption.request option -> (unit, Awskit.Error.t) result
+  val validate_destination_encryption :
+    Domain.Encryption.Destination.t option -> (unit, Awskit.Error.t) result
+
+  val validate_source_encryption :
+    Domain.Encryption.Source.t option -> (unit, Awskit.Error.t) result
 
   val checksum_value_headers :
     Domain.Object.Checksum.value option -> (string * string) list
@@ -208,6 +235,15 @@ module Make (Domain : DOMAIN) (Config : CONFIG) : sig
 
   val multipart_object_size_header : int64 option -> (string * string) list
 
-  val encryption_request_headers :
-    Domain.Object.Encryption.request option -> (string * string) list
+  val destination_encryption_headers :
+    Domain.Encryption.Destination.t option -> (string * string) list
+
+  val source_encryption_headers :
+    Domain.Encryption.Source.t option -> (string * string) list
+
+  val copy_source_encryption_headers :
+    Domain.Encryption.Source.t option -> (string * string) list
+
+  val customer_key_headers :
+    Domain.Encryption.Customer_key.t option -> (string * string) list
 end

@@ -36,7 +36,7 @@ let get_result (info : Object.Get.info) value : _ Object.Get.result =
     storage_class = info.storage_class;
     version_id = info.version_id;
     checksum = info.checksum;
-    server_side_encryption = info.server_side_encryption;
+    encryption = info.encryption;
     response = info.response;
   }
 

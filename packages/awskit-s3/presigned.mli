@@ -75,8 +75,8 @@ module Put_object : sig
             same value. *)
     checksum : Object.Checksum.value option;
         (** Optional checksum header to sign. *)
-    server_side_encryption : Object.Encryption.request option;
-        (** Optional server-side encryption headers to sign. *)
+    encryption : Encryption.Destination.t option;
+        (** Optional encryption headers to sign. *)
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
@@ -99,6 +99,8 @@ module Get_object : sig
     response_content_disposition : Header_value.t option;
         (** Optional [response-content-disposition] query override. *)
     version_id : Object.Version_id.t option;  (** Object version to presign. *)
+    source_encryption : Encryption.Source.t option;
+        (** Optional SSE-C source-object key headers to sign. *)
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
@@ -120,6 +122,8 @@ module Head_object : sig
     response_content_disposition : Header_value.t option;
         (** Optional [response-content-disposition] query override. *)
     version_id : Object.Version_id.t option;  (** Object version to presign. *)
+    source_encryption : Encryption.Source.t option;
+        (** Optional SSE-C source-object key headers to sign. *)
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
@@ -138,6 +142,8 @@ module Upload_part : sig
             authentication. *)
     checksum : Object.Checksum.value option;
         (** Optional checksum header to sign for the part body. *)
+    customer_key : Encryption.Customer_key.t option;
+        (** Optional SSE-C customer key headers to sign for the part upload. *)
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;

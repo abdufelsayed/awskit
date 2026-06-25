@@ -130,6 +130,7 @@ let test_multipart_checksum_and_expected_owner_headers () =
   let upload_options =
     {
       Multipart.Upload_part.checksum = Some part_checksum;
+      customer_key = None;
       expected_bucket_owner = Some expected_owner;
     }
   in
@@ -157,6 +158,7 @@ let test_multipart_checksum_and_expected_owner_headers () =
       Multipart.Complete.expected_bucket_owner = Some expected_owner;
       checksum = Some complete_checksum;
       checksum_type = Some Object.Checksum.Type.Composite;
+      customer_key = None;
       multipart_object_size = Some 5L;
     }
   in
@@ -210,6 +212,74 @@ let test_multipart_checksum_and_expected_owner_headers () =
            ~substring:"<ChecksumSHA256>provided-sha256</ChecksumSHA256>"
            complete.body)
   | _ -> Alcotest.fail "expected three multipart calls"
+
+let test_multipart_encryption_headers () =
+  let key =
+    Encryption.Customer_key.of_bytes_exn
+      (Bytes.of_string "0123456789abcdef0123456789abcdef")
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          "<InitiateMultipartUploadResult><UploadId>upload-1</UploadId></InitiateMultipartUploadResult>";
+        response 200 ~headers:[ ("etag", "\"etag-1\"") ] "";
+        response 200
+          {|<CompleteMultipartUploadResult><ETag>"final"</ETag></CompleteMultipartUploadResult>|};
+      ]
+  in
+  let create_options =
+    {
+      Multipart.Create.default_options with
+      encryption = Some (Encryption.Destination.Sse_c key);
+    }
+  in
+  let upload =
+    Recording_s3.Multipart.create_upload conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "large.bin") ~options:create_options ()
+    |> ok_or_fail "create multipart encryption"
+  in
+  let upload_part_options =
+    { Multipart.Upload_part.default_options with customer_key = Some key }
+  in
+  let part =
+    Recording_s3.Multipart.upload_part conn ~upload:upload.upload
+      ~part_number:(Multipart.Part_number.of_int_exn 1)
+      ~body:(Recording_runtime.string_request_body "hello")
+      ~options:upload_part_options ()
+    |> ok_or_fail "upload part encryption"
+  in
+  let complete_options =
+    { Multipart.Complete.default_options with customer_key = Some key }
+  in
+  ignore
+    (Recording_s3.Multipart.complete_upload conn ~upload:upload.upload
+       ~parts:[ part.part ] ~options:complete_options ()
+    |> ok_or_fail "complete multipart encryption");
+  match List.rev conn.calls with
+  | [ create; upload_part; complete ] ->
+      List.iter
+        (fun (label, (call : Recording_runtime.call)) ->
+          Alcotest.(check (option string))
+            (label ^ " sse-c algorithm")
+            (Some "AES256")
+            (header "x-amz-server-side-encryption-customer-algorithm"
+               call.request.headers);
+          Alcotest.(check (option string))
+            (label ^ " sse-c key")
+            (Some "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+            (header "x-amz-server-side-encryption-customer-key"
+               call.request.headers);
+          Alcotest.(check (option string))
+            (label ^ " sse-c md5") (Some "hRasmdxgYDKV3nvbahU1MA==")
+            (header "x-amz-server-side-encryption-customer-key-MD5"
+               call.request.headers))
+        [
+          ("create", create);
+          ("upload part", upload_part);
+          ("complete", complete);
+        ]
+  | _ -> Alcotest.fail "expected create, upload part, and complete calls"
 
 let test_complete_multipart_retryable_embedded_error_retries_then_succeeds () =
   let slow_down =
@@ -390,6 +460,8 @@ let suite =
           test_multipart_other_storage_class_is_sent;
         Alcotest.test_case "multipart checksum and expected owner headers"
           `Quick test_multipart_checksum_and_expected_owner_headers;
+        Alcotest.test_case "multipart encryption headers" `Quick
+          test_multipart_encryption_headers;
         Alcotest.test_case "complete multipart retryable embedded error" `Quick
           test_complete_multipart_retryable_embedded_error_retries_then_succeeds;
         Alcotest.test_case "complete multipart non-retryable embedded error"

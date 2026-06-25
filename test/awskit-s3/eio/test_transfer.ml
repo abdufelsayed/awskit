@@ -372,7 +372,7 @@ let get_info ?etag ?version_id content_length : Awskit_s3.Object.Get.info =
     storage_class = None;
     version_id;
     checksum = empty_checksum;
-    server_side_encryption = None;
+    encryption = None;
     response = response 200;
   }
 
@@ -390,7 +390,7 @@ let get_result ?etag ?version_id content_length value :
     storage_class = info.storage_class;
     version_id = info.version_id;
     checksum = info.checksum;
-    server_side_encryption = info.server_side_encryption;
+    encryption = info.encryption;
     response = info.response;
   }
 

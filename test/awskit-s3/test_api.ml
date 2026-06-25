@@ -415,7 +415,7 @@ let test_public_operation_modules () =
           storage_class = None;
           version_id = None;
           checksum = { Object.Checksum.values = []; checksum_type = None };
-          server_side_encryption = None;
+          encryption = None;
           response = Awskit.Response.create_exn ~status:200 ();
         };
       bytes_transferred = 5L;
@@ -443,7 +443,7 @@ let test_public_operation_modules () =
           storage_class = None;
           version_id = None;
           checksum = { Object.Checksum.values = []; checksum_type = None };
-          server_side_encryption = None;
+          encryption = None;
           response = Awskit.Response.create_exn ~status:200 ();
         };
       parts = 2;

@@ -80,6 +80,6 @@ let info_of_object ?content_length response (obj : stored_object) :
     storage_class = obj.storage_class;
     version_id = obj.version_id;
     checksum = obj.checksum;
-    server_side_encryption = None;
+    encryption = None;
     response;
   }

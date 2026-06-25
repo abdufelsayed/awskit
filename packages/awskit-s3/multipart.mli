@@ -177,8 +177,8 @@ module Create : sig
         (** Checksum algorithm requested for the multipart upload. *)
     checksum_type : Object.Checksum.Type.t option;
         (** Whether S3 should treat checksums as full-object or composite. *)
-    server_side_encryption : Object.Encryption.request option;
-        (** Server-side encryption for the final object. *)
+    encryption : Encryption.Destination.t option;
+        (** Encryption for the final object. *)
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
@@ -200,7 +200,7 @@ module Create : sig
     ?tags:Tag.Set.t ->
     ?checksum_algorithm:Object.Checksum.Algorithm.t ->
     ?checksum_type:Object.Checksum.Type.t ->
-    ?server_side_encryption:Object.Encryption.request ->
+    ?encryption:Encryption.Destination.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
@@ -213,7 +213,7 @@ module Create : sig
     ?tags:Tag.Set.t ->
     ?checksum_algorithm:Object.Checksum.Algorithm.t ->
     ?checksum_type:Object.Checksum.Type.t ->
-    ?server_side_encryption:Object.Encryption.request ->
+    ?encryption:Encryption.Destination.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     options
@@ -224,6 +224,8 @@ module Upload_part : sig
   type options = {
     checksum : Object.Checksum.value option;
         (** Explicit checksum for this part body. *)
+    customer_key : Encryption.Customer_key.t option;
+        (** SSE-C customer key headers for this uploaded part. *)
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
@@ -242,6 +244,7 @@ module Upload_part : sig
 
   val options :
     ?checksum:Object.Checksum.value ->
+    ?customer_key:Encryption.Customer_key.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
@@ -249,6 +252,7 @@ module Upload_part : sig
 
   val options_exn :
     ?checksum:Object.Checksum.value ->
+    ?customer_key:Encryption.Customer_key.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     options
@@ -263,6 +267,9 @@ module Complete : sig
         (** Optional full-object checksum supplied at completion time. *)
     checksum_type : Object.Checksum.Type.t option;
         (** Checksum aggregation mode for S3 to apply. *)
+    customer_key : Encryption.Customer_key.t option;
+        (** SSE-C customer key headers for completing an SSE-C multipart upload.
+        *)
     multipart_object_size : int64 option;
         (** Expected final object size sent as [x-amz-mp-object-size]. *)
   }
@@ -284,6 +291,7 @@ module Complete : sig
     ?expected_bucket_owner:Account_id.t ->
     ?checksum:Object.Checksum.value ->
     ?checksum_type:Object.Checksum.Type.t ->
+    ?customer_key:Encryption.Customer_key.t ->
     ?multipart_object_size:int64 ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
@@ -293,6 +301,7 @@ module Complete : sig
     ?expected_bucket_owner:Account_id.t ->
     ?checksum:Object.Checksum.value ->
     ?checksum_type:Object.Checksum.Type.t ->
+    ?customer_key:Encryption.Customer_key.t ->
     ?multipart_object_size:int64 ->
     unit ->
     options

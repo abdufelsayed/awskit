@@ -71,10 +71,14 @@ val validate_checksum_value :
 val validate_storage_class : Storage_class.t -> (unit, Awskit.Error.t) result
 (** Validate that a storage class can be rendered as an S3 header value. *)
 
-val validate_encryption_request :
-  Object.Encryption.request option -> (unit, Awskit.Error.t) result
-(** Validate server-side encryption request headers before they are sent to S3.
+val validate_destination_encryption :
+  Encryption.Destination.t option -> (unit, Awskit.Error.t) result
+(** Validate destination encryption request headers before they are sent to S3.
 *)
+
+val validate_source_encryption :
+  Encryption.Source.t option -> (unit, Awskit.Error.t) result
+(** Validate source encryption request headers before they are sent to S3. *)
 
 val checksum_value_headers :
   Object.Checksum.value option -> (string * string) list
@@ -95,6 +99,19 @@ val checksum_mode_header :
 val multipart_object_size_header : int64 option -> (string * string) list
 (** Render the optional multipart object size completion header. *)
 
-val encryption_request_headers :
-  Object.Encryption.request option -> (string * string) list
-(** Render optional server-side encryption request headers. *)
+val destination_encryption_headers :
+  Encryption.Destination.t option -> (string * string) list
+(** Render optional destination encryption request headers. *)
+
+val source_encryption_headers :
+  Encryption.Source.t option -> (string * string) list
+(** Render optional source encryption request headers for GetObject/HeadObject.
+*)
+
+val copy_source_encryption_headers :
+  Encryption.Source.t option -> (string * string) list
+(** Render optional copy-source encryption request headers. *)
+
+val customer_key_headers :
+  Encryption.Customer_key.t option -> (string * string) list
+(** Render optional SSE-C customer-key headers. *)

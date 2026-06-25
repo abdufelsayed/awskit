@@ -125,7 +125,7 @@ module Create = struct
     tags : Tag.Set.t;
     checksum_algorithm : Object.Checksum.Algorithm.t option;
     checksum_type : Object.Checksum.Type.t option;
-    server_side_encryption : Object.Encryption.request option;
+    encryption : Encryption.Destination.t option;
     expected_bucket_owner : Account_id.t option;
   }
 
@@ -142,7 +142,7 @@ module Create = struct
       tags = Tag.Set.empty;
       checksum_algorithm = None;
       checksum_type = None;
-      server_side_encryption = None;
+      encryption = None;
       expected_bucket_owner = None;
     }
 
@@ -165,8 +165,8 @@ module Create = struct
     | _ -> Ok ()
 
   let options ?content_type ?(metadata = Metadata.empty) ?storage_class
-      ?(tags = Tag.Set.empty) ?checksum_algorithm ?checksum_type
-      ?server_side_encryption ?expected_bucket_owner () =
+      ?(tags = Tag.Set.empty) ?checksum_algorithm ?checksum_type ?encryption
+      ?expected_bucket_owner () =
     let* () = S3_validation.validate_metadata metadata in
     let* () = S3_validation.validate_tags tags in
     let* () = validate_storage_class storage_class in
@@ -180,21 +180,21 @@ module Create = struct
         tags;
         checksum_algorithm;
         checksum_type;
-        server_side_encryption;
+        encryption;
         expected_bucket_owner;
       }
 
   let options_exn ?content_type ?metadata ?storage_class ?tags
-      ?checksum_algorithm ?checksum_type ?server_side_encryption
-      ?expected_bucket_owner () =
+      ?checksum_algorithm ?checksum_type ?encryption ?expected_bucket_owner () =
     S3_result.result_exn
       (options ?content_type ?metadata ?storage_class ?tags ?checksum_algorithm
-         ?checksum_type ?server_side_encryption ?expected_bucket_owner ())
+         ?checksum_type ?encryption ?expected_bucket_owner ())
 end
 
 module Upload_part = struct
   type options = {
     checksum : Object.Checksum.value option;
+    customer_key : Encryption.Customer_key.t option;
     expected_bucket_owner : Account_id.t option;
   }
 
@@ -204,7 +204,8 @@ module Upload_part = struct
     response : Awskit.Response.t;
   }
 
-  let default_options = { checksum = None; expected_bucket_owner = None }
+  let default_options =
+    { checksum = None; customer_key = None; expected_bucket_owner = None }
 
   let validate_checksum = function
     | Some { Object.Checksum.algorithm = Unknown value; _ } ->
@@ -214,12 +215,13 @@ module Upload_part = struct
         S3_validation.validate_header_value ~field:"checksum_value" value
     | _ -> Ok ()
 
-  let options ?checksum ?expected_bucket_owner () =
+  let options ?checksum ?customer_key ?expected_bucket_owner () =
     let* () = validate_checksum checksum in
-    Ok { checksum; expected_bucket_owner }
+    Ok { checksum; customer_key; expected_bucket_owner }
 
-  let options_exn ?checksum ?expected_bucket_owner () =
-    S3_result.result_exn (options ?checksum ?expected_bucket_owner ())
+  let options_exn ?checksum ?customer_key ?expected_bucket_owner () =
+    S3_result.result_exn
+      (options ?checksum ?customer_key ?expected_bucket_owner ())
 end
 
 module Complete = struct
@@ -227,6 +229,7 @@ module Complete = struct
     expected_bucket_owner : Account_id.t option;
     checksum : Object.Checksum.value option;
     checksum_type : Object.Checksum.Type.t option;
+    customer_key : Encryption.Customer_key.t option;
     multipart_object_size : int64 option;
   }
 
@@ -242,6 +245,7 @@ module Complete = struct
       expected_bucket_owner = None;
       checksum = None;
       checksum_type = None;
+      customer_key = None;
       multipart_object_size = None;
     }
 
@@ -259,7 +263,7 @@ module Complete = struct
           "unknown checksum type %S cannot be sent" value
     | _ -> Ok ()
 
-  let options ?expected_bucket_owner ?checksum ?checksum_type
+  let options ?expected_bucket_owner ?checksum ?checksum_type ?customer_key
       ?multipart_object_size () =
     let* () = validate_checksum checksum in
     let* () = validate_checksum_type checksum_type in
@@ -270,12 +274,19 @@ module Complete = struct
             "multipart object size must be non-negative"
       | _ -> Ok ()
     in
-    Ok { expected_bucket_owner; checksum; checksum_type; multipart_object_size }
+    Ok
+      {
+        expected_bucket_owner;
+        checksum;
+        checksum_type;
+        customer_key;
+        multipart_object_size;
+      }
 
-  let options_exn ?expected_bucket_owner ?checksum ?checksum_type
+  let options_exn ?expected_bucket_owner ?checksum ?checksum_type ?customer_key
       ?multipart_object_size () =
     S3_result.result_exn
-      (options ?expected_bucket_owner ?checksum ?checksum_type
+      (options ?expected_bucket_owner ?checksum ?checksum_type ?customer_key
          ?multipart_object_size ())
 end
 

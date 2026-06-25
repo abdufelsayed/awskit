@@ -65,6 +65,10 @@ let multipart_upload ?(bucket = bucket_name "bucket")
     ?(upload_id = Multipart.Upload_id.of_string_exn "upload-1") () =
   Multipart.Upload.resume ~bucket ~key ~upload_id
 
+let customer_key () =
+  Encryption.Customer_key.of_bytes_exn
+    (Bytes.of_string "0123456789abcdef0123456789abcdef")
+
 let temporary_credentials ?session_token expires_at =
   Awskit.Credentials.create_exn ~access_key_id:"AKIA_TEST_TEMP"
     ~secret_access_key:"temp-secret" ?session_token ~expires_at ()
@@ -106,6 +110,7 @@ let test_presigned_safe_artifact_redacts_bearer_material () =
       response_content_disposition =
         Some (header_value ~field:"response-content-disposition" "attachment");
       version_id = Some version_id;
+      source_encryption = None;
       expected_bucket_owner = Some (account_id "123456789012");
       extra_signed_headers = [ ("x-user-secret", header_secret) ];
     }
@@ -253,6 +258,7 @@ let test_presigned_head_uses_dedicated_options () =
       response_content_disposition =
         Some (header_value ~field:"response-content-disposition" "attachment");
       version_id = Some (Object.Version_id.of_string_exn "head-version");
+      source_encryption = None;
       expected_bucket_owner = Some (account_id "123456789012");
       extra_signed_headers = [ ("x-head-context", "present") ];
     }
@@ -415,6 +421,96 @@ let test_presigned_put_checksum_headers () =
     "signed checksum value" true
     (contains_string "x-amz-checksum-sha1" signed_headers)
 
+let test_presigned_put_signs_encryption_headers () =
+  let customer_key = customer_key () in
+  let options =
+    {
+      Presigned.Put_object.default_options with
+      encryption = Some (Encryption.Destination.Sse_c customer_key);
+    }
+  in
+  let result =
+    Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ~options ()
+    |> ok_or_fail "presigned put encryption"
+  in
+  Alcotest.(check (option string))
+    "sse-c algorithm" (Some "AES256")
+    (header "x-amz-server-side-encryption-customer-algorithm"
+       (Presigned.signed_headers result));
+  Alcotest.(check (option string))
+    "sse-c key" (Some "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+    (header "x-amz-server-side-encryption-customer-key"
+       (Presigned.signed_headers result));
+  Alcotest.(check (option string))
+    "sse-c md5" (Some "hRasmdxgYDKV3nvbahU1MA==")
+    (header "x-amz-server-side-encryption-customer-key-md5"
+       (Presigned.signed_headers result));
+  let signed_headers = signed_headers_or_fail (Presigned.reveal_url result) in
+  Alcotest.(check bool)
+    "signed sse-c algorithm" true
+    (contains_string "x-amz-server-side-encryption-customer-algorithm"
+       signed_headers);
+  Alcotest.(check bool)
+    "signed sse-c key" true
+    (contains_string "x-amz-server-side-encryption-customer-key" signed_headers);
+  Alcotest.(check bool)
+    "signed sse-c md5" true
+    (contains_string "x-amz-server-side-encryption-customer-key-md5"
+       signed_headers)
+
+let test_presigned_get_head_sign_source_encryption_headers () =
+  let source_encryption = Encryption.Source.Sse_c (customer_key ()) in
+  let get_options =
+    {
+      Presigned.Get_object.default_options with
+      source_encryption = Some source_encryption;
+    }
+  in
+  let get =
+    Presigned.get_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt")
+      ~options:get_options ()
+    |> ok_or_fail "presigned get source encryption"
+  in
+  let head_options =
+    {
+      Presigned.Head_object.default_options with
+      source_encryption = Some source_encryption;
+    }
+  in
+  let head =
+    Presigned.head_object ~region:"us-east-1" ~credentials:creds ~now:test_time
+      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt")
+      ~options:head_options ()
+    |> ok_or_fail "presigned head source encryption"
+  in
+  List.iter
+    (fun (label, result) ->
+      Alcotest.(check (option string))
+        (label ^ " sse-c algorithm")
+        (Some "AES256")
+        (header "x-amz-server-side-encryption-customer-algorithm"
+           (Presigned.signed_headers result));
+      Alcotest.(check (option string))
+        (label ^ " sse-c key")
+        (Some "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+        (header "x-amz-server-side-encryption-customer-key"
+           (Presigned.signed_headers result));
+      Alcotest.(check (option string))
+        (label ^ " sse-c md5") (Some "hRasmdxgYDKV3nvbahU1MA==")
+        (header "x-amz-server-side-encryption-customer-key-md5"
+           (Presigned.signed_headers result));
+      let signed_headers =
+        signed_headers_or_fail (Presigned.reveal_url result)
+      in
+      Alcotest.(check bool)
+        (label ^ " signed sse-c md5")
+        true
+        (contains_string "x-amz-server-side-encryption-customer-key-md5"
+           signed_headers))
+    [ ("get", get); ("head", head) ]
+
 let test_presigned_expected_bucket_owner_headers () =
   let owner = account_id "123456789012" in
   let owner_string = Account_id.to_string owner in
@@ -519,12 +615,17 @@ let test_presigned_expected_bucket_owner_headers () =
 
 let test_presigned_upload_part () =
   let upload = multipart_upload () in
+  let customer_key = customer_key () in
   let checksum : Object.Checksum.value =
     Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
       ~value:"provided-sha256"
   in
   let options =
-    { Presigned.Upload_part.default_options with checksum = Some checksum }
+    {
+      Presigned.Upload_part.default_options with
+      checksum = Some checksum;
+      customer_key = Some customer_key;
+    }
   in
   let result =
     Presigned.upload_part ~region:"us-east-1" ~credentials:creds ~now:test_time
@@ -549,10 +650,26 @@ let test_presigned_upload_part () =
   Alcotest.(check (option string))
     "no checksum algorithm header" None
     (header "x-amz-checksum-algorithm" (Presigned.signed_headers result));
+  Alcotest.(check (option string))
+    "sse-c algorithm" (Some "AES256")
+    (header "x-amz-server-side-encryption-customer-algorithm"
+       (Presigned.signed_headers result));
+  Alcotest.(check (option string))
+    "sse-c key" (Some "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+    (header "x-amz-server-side-encryption-customer-key"
+       (Presigned.signed_headers result));
+  Alcotest.(check (option string))
+    "sse-c md5" (Some "hRasmdxgYDKV3nvbahU1MA==")
+    (header "x-amz-server-side-encryption-customer-key-md5"
+       (Presigned.signed_headers result));
   let signed_headers = signed_headers_or_fail (Presigned.reveal_url result) in
   Alcotest.(check bool)
     "signed checksum value" true
-    (contains_string "x-amz-checksum-sha256" signed_headers)
+    (contains_string "x-amz-checksum-sha256" signed_headers);
+  Alcotest.(check bool)
+    "signed sse-c md5" true
+    (contains_string "x-amz-server-side-encryption-customer-key-md5"
+       signed_headers)
 
 let test_presigned_default_helpers_match_endpoint_config_helpers () =
   let region = Region.of_string_exn "us-east-1" in
@@ -564,6 +681,7 @@ let test_presigned_default_helpers_match_endpoint_config_helpers () =
     Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
       ~value:"provided-sha256"
   in
+  let customer_key = customer_key () in
   let check label normal explicit =
     check_presigned_equal label
       (normal |> ok_or_fail (label ^ " default helper"))
@@ -575,6 +693,7 @@ let test_presigned_default_helpers_match_endpoint_config_helpers () =
       expires_in = Some (Ptime.Span.of_int_s 900);
       response_content_type = Some (content_type "text/plain");
       version_id = Some (Object.Version_id.of_string_exn "version-1");
+      source_encryption = Some (Encryption.Source.Sse_c customer_key);
       expected_bucket_owner = Some owner;
       extra_signed_headers = [ ("x-get-context", "present") ];
     }
@@ -591,6 +710,7 @@ let test_presigned_default_helpers_match_endpoint_config_helpers () =
       response_content_disposition =
         Some (header_value ~field:"response-content-disposition" "attachment");
       version_id = Some (Object.Version_id.of_string_exn "version-2");
+      source_encryption = Some (Encryption.Source.Sse_c customer_key);
       expected_bucket_owner = Some owner;
       extra_signed_headers = [ ("x-head-context", "present") ];
     }
@@ -633,6 +753,7 @@ let test_presigned_default_helpers_match_endpoint_config_helpers () =
     {
       expires_in = Some (Ptime.Span.of_int_s 904);
       checksum = Some checksum;
+      customer_key = Some customer_key;
       expected_bucket_owner = Some owner;
       extra_signed_headers = [ ("x-upload-part-context", "present") ];
     }
@@ -679,17 +800,7 @@ let test_presigned_rejects_header_newline () =
   | Ok _ -> Alcotest.fail "expected header validation error"
 
 let test_presigned_rejects_invalid_sse_kms_key_id () =
-  let options =
-    {
-      Presigned.Put_object.default_options with
-      server_side_encryption =
-        Some (`Aws_kms { key_id = Some "bad\nkey"; bucket_key_enabled = None });
-    }
-  in
-  match
-    Presigned.put_object ~region:"us-east-1" ~credentials:creds ~now:test_time
-      ~bucket:(bucket_name "bucket") ~key:(object_key "file.txt") ~options ()
-  with
+  match Encryption.Kms.create ~key_id:"bad\nkey" () with
   | Error error when is_validation_field "sse_kms_key_id" error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected invalid SSE-KMS key id validation"
@@ -795,6 +906,10 @@ let suite =
           test_presigned_expiry_validation_boundaries;
         Alcotest.test_case "presigned put checksum headers" `Quick
           test_presigned_put_checksum_headers;
+        Alcotest.test_case "presigned put signs encryption headers" `Quick
+          test_presigned_put_signs_encryption_headers;
+        Alcotest.test_case "presigned get head signs source encryption headers"
+          `Quick test_presigned_get_head_sign_source_encryption_headers;
         Alcotest.test_case "presigned expected owner headers" `Quick
           test_presigned_expected_bucket_owner_headers;
         Alcotest.test_case "presigned multipart upload part" `Quick

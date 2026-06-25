@@ -63,5 +63,14 @@ val checksum_mode_header :
 
 val multipart_object_size_header : int64 option -> (string * string) list
 
-val encryption_request_headers :
-  Awskit_s3.Object.Encryption.request option -> (string * string) list
+val destination_encryption_headers :
+  Awskit_s3.Encryption.Destination.t option -> (string * string) list
+
+val source_encryption_headers :
+  Awskit_s3.Encryption.Source.t option -> (string * string) list
+
+val copy_source_encryption_headers :
+  Awskit_s3.Encryption.Source.t option -> (string * string) list
+
+val customer_key_headers :
+  Awskit_s3.Encryption.Customer_key.t option -> (string * string) list

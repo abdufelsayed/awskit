@@ -45,6 +45,35 @@ module type DOMAIN = sig
     val to_string : t -> string
   end
 
+  module Encryption : sig
+    module Kms : sig
+      type t
+
+      val key_id : t -> string option
+      val bucket_key_enabled : t -> bool option
+    end
+
+    module Customer_key : sig
+      type t
+
+      val algorithm : t -> string
+      val key_base64 : t -> string
+      val key_md5_base64 : t -> string
+    end
+
+    module Destination : sig
+      type t =
+        | Sse_s3
+        | Sse_kms of Kms.t
+        | Dsse_kms of Kms.t
+        | Sse_c of Customer_key.t
+    end
+
+    module Source : sig
+      type t = Sse_c of Customer_key.t
+    end
+  end
+
   module Object : sig
     module Etag : sig
       type t
@@ -118,11 +147,6 @@ module type DOMAIN = sig
       end
 
       type value = private { algorithm : Algorithm.t; value : string }
-    end
-
-    module Encryption : sig
-      type kms = { key_id : string option; bucket_key_enabled : bool option }
-      type request = [ `AES256 | `Aws_kms of kms ]
     end
   end
 end
@@ -246,14 +270,26 @@ module Make (Domain : DOMAIN) (Config : CONFIG) = struct
     Config.validate_header_value ~field:"storage_class"
       (Domain.Storage_class.to_string storage_class)
 
-  let validate_encryption_request = function
-    | None | Some `AES256 -> Ok ()
-    | Some (`Aws_kms kms) -> (
-        let kms : Domain.Object.Encryption.kms = kms in
-        match kms.key_id with
-        | None -> Ok ()
-        | Some key_id ->
-            Config.validate_header_value ~field:"sse_kms_key_id" key_id)
+  let validate_kms ~allow_bucket_key kms =
+    let* () =
+      match Domain.Encryption.Kms.key_id kms with
+      | None -> Ok ()
+      | Some key_id ->
+          Config.validate_header_value ~field:"sse_kms_key_id" key_id
+    in
+    match (allow_bucket_key, Domain.Encryption.Kms.bucket_key_enabled kms) with
+    | false, Some _ ->
+        invalid ~field:"sse_bucket_key_enabled"
+          "bucket keys are not supported for DSSE-KMS request encryption"
+    | _ -> Ok ()
+
+  let validate_destination_encryption = function
+    | None | Some Domain.Encryption.Destination.Sse_s3 | Some (Sse_c _) -> Ok ()
+    | Some (Sse_kms kms) -> validate_kms ~allow_bucket_key:true kms
+    | Some (Dsse_kms kms) -> validate_kms ~allow_bucket_key:false kms
+
+  let validate_source_encryption = function
+    | None | Some (Domain.Encryption.Source.Sse_c _) -> Ok ()
 
   let checksum_value_headers = function
     | None -> []
@@ -287,16 +323,48 @@ module Make (Domain : DOMAIN) (Config : CONFIG) = struct
     | None -> []
     | Some size -> [ ("x-amz-mp-object-size", Int64.to_string size) ]
 
-  let encryption_request_headers = function
+  let kms_headers kms headers =
+    headers
+    |> add_opt_header "x-amz-server-side-encryption-aws-kms-key-id"
+         (Domain.Encryption.Kms.key_id kms)
+    |> add_opt_header "x-amz-server-side-encryption-bucket-key-enabled"
+         (Option.map string_of_bool
+            (Domain.Encryption.Kms.bucket_key_enabled kms))
+
+  let customer_key_headers_with_prefix prefix key =
+    [
+      (prefix ^ "algorithm", Domain.Encryption.Customer_key.algorithm key);
+      (prefix ^ "key", Domain.Encryption.Customer_key.key_base64 key);
+      (prefix ^ "key-MD5", Domain.Encryption.Customer_key.key_md5_base64 key);
+    ]
+
+  let customer_key_headers = function
     | None -> []
-    | Some `AES256 -> [ ("x-amz-server-side-encryption", "AES256") ]
-    | Some (`Aws_kms kms) ->
-        let kms : Domain.Object.Encryption.kms = kms in
-        ("x-amz-server-side-encryption", "aws:kms")
+    | Some key ->
+        customer_key_headers_with_prefix
+          "x-amz-server-side-encryption-customer-" key
+
+  let destination_encryption_headers = function
+    | None -> []
+    | Some Domain.Encryption.Destination.Sse_s3 ->
+        [ ("x-amz-server-side-encryption", "AES256") ]
+    | Some (Sse_kms kms) ->
+        kms_headers kms [ ("x-amz-server-side-encryption", "aws:kms") ]
+    | Some (Dsse_kms kms) ->
+        ("x-amz-server-side-encryption", "aws:kms:dsse")
         :: add_opt_header "x-amz-server-side-encryption-aws-kms-key-id"
-             kms.key_id []
-        |> fun headers ->
-        add_opt_header "x-amz-server-side-encryption-bucket-key-enabled"
-          (Option.map string_of_bool kms.bucket_key_enabled)
-          headers
+             (Domain.Encryption.Kms.key_id kms)
+             []
+    | Some (Sse_c key) -> customer_key_headers (Some key)
+
+  let source_encryption_headers = function
+    | None -> []
+    | Some (Domain.Encryption.Source.Sse_c key) ->
+        customer_key_headers (Some key)
+
+  let copy_source_encryption_headers = function
+    | None -> []
+    | Some (Domain.Encryption.Source.Sse_c key) ->
+        customer_key_headers_with_prefix
+          "x-amz-copy-source-server-side-encryption-customer-" key
 end

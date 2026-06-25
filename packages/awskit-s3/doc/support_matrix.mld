@@ -41,9 +41,9 @@ arbitrary S3-compatible providers.
   {li {b Notes and boundaries}: request bodies must have a known content
     length. Modeled write options include content type, user metadata, storage
     class, object tags, cache/content headers, write preconditions, explicit
-    checksum values, modeled server-side encryption request headers, and
-    expected bucket owner. ACLs, Object Lock headers, SSE-C, and unmodeled
-    encryption variants are out of scope.}
+    checksum values, typed destination encryption request headers, and expected
+    bucket owner. Object Lock headers, ACLs, and arbitrary outbound encryption
+    variants are out of scope.}
 }
 
 {2 GetObject, Optional Reads, and Streaming Readers}
@@ -116,10 +116,11 @@ arbitrary S3-compatible providers.
     source-version echo for current-version copies.}
   {li {b Notes and boundaries}: modeled options include source version id,
     copy-source preconditions, metadata copy or replacement, storage class,
-    checksum algorithm, modeled destination encryption request headers, and
-    source/destination expected-owner guards. Multipart copy, access-point copy
-    sources, Object Lock headers, ACLs, tagging directives, SSE-C, Local Zone
-    restrictions, and Outposts-specific behavior are out of scope.}
+    checksum algorithm, typed destination encryption request headers, SSE-C
+    source encryption headers, and source/destination expected-owner guards.
+    Multipart copy, access-point copy sources, Object Lock headers, ACLs,
+    tagging directives, Local Zone restrictions, and Outposts-specific behavior
+    are out of scope.}
 }
 
 {2 ListObjectsV2 and Pagination}
@@ -189,9 +190,11 @@ arbitrary S3-compatible providers.
   {li {b Notes and boundaries}: unknown read-side checksum and encryption
     values are preserved where the public types model them. Unknown outbound
     checksum algorithms are rejected, while unmodeled storage classes can be
-    sent through [Storage_class.Other]. Unmodeled checksum variants, SSE-C,
-    arbitrary KMS policy behavior, Object Lock retention, and ACL edge cases are
-    out of scope.}
+    sent through [Storage_class.Other]. Outbound object encryption is limited to
+    the typed {!module:Awskit_s3.Encryption} destination and source models.
+    Unmodeled checksum variants, arbitrary outbound encryption strings, KMS
+    policy behavior, Object Lock retention, and ACL edge cases are out of
+    scope.}
 }
 
 {1 Bucket Operations}
@@ -257,9 +260,10 @@ arbitrary S3-compatible providers.
   {li {b Notes and boundaries}: part numbers are limited to S3's 1 to 10,000
     range. Part bodies require known content lengths. Modeled options include
     metadata, tags, storage class, content type, checksum algorithm/type or
-    values, modeled server-side encryption request headers, multipart object
-    size, and expected bucket owner. Multipart copy and Object Lock multipart
-    headers are out of scope.}
+    values, typed destination encryption request headers, SSE-C customer-key
+    headers for upload-part and completion requests, multipart object size, and
+    expected bucket owner. Multipart copy and Object Lock multipart headers are
+    out of scope.}
 }
 
 {1 Transfer Helpers}
@@ -302,9 +306,10 @@ arbitrary S3-compatible providers.
   {li {b Notes and boundaries}: artifacts use SigV4 query authentication and
     [UNSIGNED-PAYLOAD]. Raw bearer URLs are hidden behind explicit reveal APIs.
     Supported options include expiry, selected response overrides, version id,
-    expected bucket owner, checksum headers for [PUT] and [UploadPart],
-    modeled encryption request headers for [PUT], and extra signed headers.
-    Presigning is not provided for arbitrary S3 APIs.}
+    expected bucket owner, checksum headers for [PUT] and [UploadPart], SSE-C
+    source encryption headers for [GET] and [HEAD], typed destination encryption
+    request headers for [PUT], SSE-C customer-key headers for [UploadPart], and
+    extra signed headers. Presigning is not provided for arbitrary S3 APIs.}
 }
 
 {1 Runtime, Simulator, and Provider Scope}
@@ -357,7 +362,7 @@ Awskit does not claim support for these S3 feature families in this release:
     logging, website hosting, and requester-pays configuration}
   {li broad ACL management, IAM policy semantics, public-access edge semantics,
     and unmodeled bucket policy behavior}
-  {li arbitrary server-side encryption variants, SSE-C, and KMS policy behavior
+  {li arbitrary outbound server-side encryption strings and KMS policy behavior
     beyond modeled request and response fields}
   {li multipart copy and arbitrary presigning for APIs not listed above}
   {li arbitrary S3-compatible providers and live AWS account release-gate

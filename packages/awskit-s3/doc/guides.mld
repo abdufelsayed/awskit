@@ -34,7 +34,7 @@ known content lengths, which lets S3 sign and retry the request safely. Use
 [Object.put] with [Body] values when the body is custom or should be streamed.
 
 Options carry object metadata, content type, storage class, tags,
-preconditions, checksum headers, and server-side encryption headers:
+preconditions, checksum headers, and typed destination encryption headers:
 
 {[
 let options =
@@ -44,6 +44,7 @@ let options =
     ~tags:
       (Awskit_s3.Tag.Set.of_list_exn
          [ Awskit_s3.Tag.create_exn ~key:"env" ~value:"dev" ])
+    ~encryption:Awskit_s3.Encryption.Destination.Sse_s3
     ()
 in
 Awskit_s3_eio.Object.put_string s3
@@ -628,8 +629,10 @@ explicitly when executing the request. [Awskit_s3.Presigned.reveal_url] is the
 explicit bearer-token handoff boundary for the component that will execute the
 request. Use [extra_signed_headers] only for additional headers that must be
 included in the signature. Presigned [PUT] and [UploadPart] helpers sign
-explicit checksum value headers when configured, and object presigning options
-support [expected_bucket_owner] guard rails.
+explicit checksum value headers when configured. Presigned [GET] and [HEAD]
+sign SSE-C source headers, presigned [PUT] signs typed destination encryption
+headers, presigned [UploadPart] signs SSE-C customer-key headers, and object
+presigning options support [expected_bucket_owner] guard rails.
 
 A typical direct-upload multipart flow is:
 

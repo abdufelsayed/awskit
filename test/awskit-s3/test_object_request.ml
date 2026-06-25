@@ -453,25 +453,237 @@ let test_object_get_rejects_malformed_content_range () =
   | Ok _ -> Alcotest.fail "expected malformed Content-Range decode error"
 
 let test_object_put_rejects_invalid_sse_kms_key_id () =
-  let conn = Recording_runtime.connect [ response 200 "" ] in
-  let options =
-    {
-      Object.Put.default_options with
-      server_side_encryption =
-        Some
-          (`Aws_kms { key_id = Some "bad\nkey"; bucket_key_enabled = Some true });
-    }
-  in
   match
-    Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
-      ~key:(object_key "file")
-      ~body:(Recording_s3.Body.of_string "hello")
-      ~options ()
+    Encryption.Kms.create ~key_id:"bad\nkey" ~bucket_key_enabled:true ()
   with
-  | Error error when is_validation_field "sse_kms_key_id" error ->
-      Alcotest.(check int) "transport not called" 0 (List.length conn.calls)
+  | Error error when is_validation_field "sse_kms_key_id" error -> ()
   | Error error -> Alcotest.failf "unexpected error: %a" Error.pp error
   | Ok _ -> Alcotest.fail "expected invalid SSE-KMS key id validation"
+
+let customer_key () =
+  Encryption.Customer_key.of_bytes_exn
+    (Bytes.of_string "0123456789abcdef0123456789abcdef")
+
+let test_customer_key_computes_md5 () =
+  let key = customer_key () in
+  Alcotest.(check string)
+    "algorithm" "AES256"
+    (Encryption.Customer_key.algorithm key);
+  Alcotest.(check string)
+    "key base64" "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+    (Encryption.Customer_key.key_base64 key);
+  Alcotest.(check string)
+    "key md5" "hRasmdxgYDKV3nvbahU1MA=="
+    (Encryption.Customer_key.key_md5_base64 key);
+  match
+    Encryption.Customer_key.of_base64
+      "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+  with
+  | Ok key ->
+      Alcotest.(check string)
+        "base64 md5" "hRasmdxgYDKV3nvbahU1MA=="
+        (Encryption.Customer_key.key_md5_base64 key)
+  | Error error ->
+      Alcotest.failf "unexpected base64 key error: %a" Error.pp error
+
+let test_customer_key_rejects_invalid_length () =
+  expect_validation_field "short sse-c key" "sse_customer_key"
+    (Encryption.Customer_key.of_bytes (Bytes.of_string "hello"))
+
+let test_object_put_encryption_headers () =
+  let key = customer_key () in
+  let kms =
+    Encryption.Kms.create_exn ~key_id:"kms-key" ~bucket_key_enabled:true ()
+  in
+  let dsse_kms = Encryption.Kms.create_exn ~key_id:"dsse-key" () in
+  let conn =
+    Recording_runtime.connect
+      [ response 200 ""; response 200 ""; response 200 ""; response 200 "" ]
+  in
+  let put encryption =
+    Recording_s3.Object.put conn ~bucket:(bucket_name "my-bucket")
+      ~key:(object_key "file")
+      ~options:{ Object.Put.default_options with encryption = Some encryption }
+      ~body:(Recording_s3.Body.of_string "hello")
+      ()
+    |> ok_or_fail "put encryption"
+    |> ignore
+  in
+  put Encryption.Destination.Sse_s3;
+  put (Encryption.Destination.Sse_kms kms);
+  put (Encryption.Destination.Dsse_kms dsse_kms);
+  put (Encryption.Destination.Sse_c key);
+  match List.rev conn.calls with
+  | [ sse_s3; sse_kms; dsse_kms; sse_c ] ->
+      Alcotest.(check (option string))
+        "sse-s3" (Some "AES256")
+        (header "x-amz-server-side-encryption" sse_s3.request.headers);
+      Alcotest.(check (option string))
+        "sse-kms" (Some "aws:kms")
+        (header "x-amz-server-side-encryption" sse_kms.request.headers);
+      Alcotest.(check (option string))
+        "sse-kms key" (Some "kms-key")
+        (header "x-amz-server-side-encryption-aws-kms-key-id"
+           sse_kms.request.headers);
+      Alcotest.(check (option string))
+        "sse-kms bucket key" (Some "true")
+        (header "x-amz-server-side-encryption-bucket-key-enabled"
+           sse_kms.request.headers);
+      Alcotest.(check (option string))
+        "dsse-kms" (Some "aws:kms:dsse")
+        (header "x-amz-server-side-encryption" dsse_kms.request.headers);
+      Alcotest.(check (option string))
+        "dsse-kms key" (Some "dsse-key")
+        (header "x-amz-server-side-encryption-aws-kms-key-id"
+           dsse_kms.request.headers);
+      Alcotest.(check (option string))
+        "sse-c algorithm" (Some "AES256")
+        (header "x-amz-server-side-encryption-customer-algorithm"
+           sse_c.request.headers);
+      Alcotest.(check (option string))
+        "sse-c key" (Some "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+        (header "x-amz-server-side-encryption-customer-key"
+           sse_c.request.headers);
+      Alcotest.(check (option string))
+        "sse-c md5" (Some "hRasmdxgYDKV3nvbahU1MA==")
+        (header "x-amz-server-side-encryption-customer-key-MD5"
+           sse_c.request.headers)
+  | _ -> Alcotest.fail "expected four put calls"
+
+let test_object_get_head_source_encryption_headers () =
+  let key = customer_key () in
+  let source_encryption = Encryption.Source.Sse_c key in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200 ~headers:[ ("content-length", "0") ] "";
+        response 200 ~headers:[ ("content-length", "0") ] "";
+      ]
+  in
+  let get_options = Object.Get.options_exn ~source_encryption () in
+  ignore
+    (Recording_s3.Object.get conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ~options:get_options
+       ~consume:(Recording_s3.Reader.to_string ~max_bytes:16L)
+       ()
+    |> ok_or_fail "get source encryption");
+  let head_options = Object.Head.options_exn ~source_encryption () in
+  ignore
+    (Recording_s3.Object.head conn ~bucket:(bucket_name "my-bucket")
+       ~key:(object_key "file") ~options:head_options ()
+    |> ok_or_fail "head source encryption");
+  match List.rev conn.calls with
+  | [ get; head ] ->
+      List.iter
+        (fun (label, (call : Recording_runtime.call)) ->
+          Alcotest.(check (option string))
+            (label ^ " algorithm") (Some "AES256")
+            (header "x-amz-server-side-encryption-customer-algorithm"
+               call.request.headers);
+          Alcotest.(check (option string))
+            (label ^ " key")
+            (Some "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+            (header "x-amz-server-side-encryption-customer-key"
+               call.request.headers);
+          Alcotest.(check (option string))
+            (label ^ " md5") (Some "hRasmdxgYDKV3nvbahU1MA==")
+            (header "x-amz-server-side-encryption-customer-key-MD5"
+               call.request.headers))
+        [ ("get", get); ("head", head) ]
+  | _ -> Alcotest.fail "expected get and head calls"
+
+let test_object_copy_encryption_headers () =
+  let key = customer_key () in
+  let kms = Encryption.Kms.create_exn ~key_id:"kms-key" () in
+  let options =
+    Object.Copy.options_exn
+      ~destination_encryption:(Encryption.Destination.Sse_kms kms)
+      ~source_encryption:(Encryption.Source.Sse_c key) ()
+  in
+  let conn =
+    Recording_runtime.connect
+      [
+        response 200
+          {|<CopyObjectResult><ETag>"copy"</ETag></CopyObjectResult>|};
+      ]
+  in
+  ignore
+    (Recording_s3.Object.copy conn
+       ~source_bucket:(bucket_name "source-bucket")
+       ~source_key:(object_key "source")
+       ~destination_bucket:(bucket_name "dest-bucket")
+       ~destination_key:(object_key "dest") ~options ()
+    |> ok_or_fail "copy encryption");
+  let call = Recording_runtime.last_call conn in
+  Alcotest.(check (option string))
+    "destination encryption" (Some "aws:kms")
+    (header "x-amz-server-side-encryption" call.request.headers);
+  Alcotest.(check (option string))
+    "destination kms key" (Some "kms-key")
+    (header "x-amz-server-side-encryption-aws-kms-key-id" call.request.headers);
+  Alcotest.(check (option string))
+    "copy source algorithm" (Some "AES256")
+    (header "x-amz-copy-source-server-side-encryption-customer-algorithm"
+       call.request.headers);
+  Alcotest.(check (option string))
+    "copy source key" (Some "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+    (header "x-amz-copy-source-server-side-encryption-customer-key"
+       call.request.headers);
+  Alcotest.(check (option string))
+    "copy source md5" (Some "hRasmdxgYDKV3nvbahU1MA==")
+    (header "x-amz-copy-source-server-side-encryption-customer-key-MD5"
+       call.request.headers)
+
+let test_object_response_encryption_parsing () =
+  let cases =
+    [
+      ( "dsse-kms",
+        [
+          ("content-length", "0");
+          ("x-amz-server-side-encryption", "aws:kms:dsse");
+          ("x-amz-server-side-encryption-aws-kms-key-id", "dsse-key");
+        ],
+        function
+        | Some (Encryption.Observed.Dsse_kms kms) ->
+            Encryption.Kms.key_id kms = Some "dsse-key"
+        | _ -> false );
+      ( "sse-c",
+        [
+          ("content-length", "0");
+          ("x-amz-server-side-encryption-customer-algorithm", "AES256");
+        ],
+        function Some Encryption.Observed.Sse_c -> true | _ -> false );
+      ( "unknown sse-c algorithm",
+        [
+          ("content-length", "0");
+          ("x-amz-server-side-encryption-customer-algorithm", "future-sse-c");
+        ],
+        function
+        | Some (Encryption.Observed.Unknown "future-sse-c") -> true
+        | _ -> false );
+      ( "fsx",
+        [ ("content-length", "0"); ("x-amz-server-side-encryption", "aws:fsx") ],
+        function Some Encryption.Observed.Aws_fsx -> true | _ -> false );
+      ( "unknown",
+        [
+          ("content-length", "0");
+          ("x-amz-server-side-encryption", "future-value");
+        ],
+        function
+        | Some (Encryption.Observed.Unknown "future-value") -> true
+        | _ -> false );
+    ]
+  in
+  List.iter
+    (fun (label, headers, matches) ->
+      let conn = Recording_runtime.connect [ response 200 ~headers "" ] in
+      let result =
+        Recording_s3.Object.head conn ~bucket:(bucket_name "my-bucket")
+          ~key:(object_key "file") ()
+        |> ok_or_fail (label ^ " head")
+      in
+      Alcotest.(check bool) label true (matches result.encryption))
+    cases
 
 let test_object_head_parses_int64_content_length () =
   let large_content_length = 9_223_372_036_854_775_807L in
@@ -1872,6 +2084,18 @@ let suite =
           test_object_get_rejects_malformed_content_range;
         Alcotest.test_case "object put rejects invalid sse kms key id" `Quick
           test_object_put_rejects_invalid_sse_kms_key_id;
+        Alcotest.test_case "customer key computes md5" `Quick
+          test_customer_key_computes_md5;
+        Alcotest.test_case "customer key rejects invalid length" `Quick
+          test_customer_key_rejects_invalid_length;
+        Alcotest.test_case "object put encryption headers" `Quick
+          test_object_put_encryption_headers;
+        Alcotest.test_case "object get head source encryption headers" `Quick
+          test_object_get_head_source_encryption_headers;
+        Alcotest.test_case "object copy encryption headers" `Quick
+          test_object_copy_encryption_headers;
+        Alcotest.test_case "object response encryption parsing" `Quick
+          test_object_response_encryption_parsing;
         Alcotest.test_case "object head parses int64 content length" `Quick
           test_object_head_parses_int64_content_length;
         Alcotest.test_case "object head accepts HTTP-date Last-Modified" `Quick

@@ -1,5 +1,6 @@
 module Multipart = Multipart
 module Object = Object
+module Encryption = Encryption
 module Endpoint_resolver = Endpoint_resolver
 
 let ( let* ) = S3_result.( let* )
@@ -34,7 +35,7 @@ module Put_object = struct
     expires_in : Ptime.Span.t option;
     content_type : Content_type.t option;
     checksum : Object.Checksum.value option;
-    server_side_encryption : Object.Encryption.request option;
+    encryption : Encryption.Destination.t option;
     expected_bucket_owner : Account_id.t option;
     extra_signed_headers : (string * string) list;
   }
@@ -44,7 +45,7 @@ module Put_object = struct
       expires_in = None;
       content_type = None;
       checksum = None;
-      server_side_encryption = None;
+      encryption = None;
       expected_bucket_owner = None;
       extra_signed_headers = [];
     }
@@ -56,6 +57,7 @@ module Get_object = struct
     response_content_type : Content_type.t option;
     response_content_disposition : Header_value.t option;
     version_id : Object.Version_id.t option;
+    source_encryption : Encryption.Source.t option;
     expected_bucket_owner : Account_id.t option;
     extra_signed_headers : (string * string) list;
   }
@@ -66,6 +68,7 @@ module Get_object = struct
       response_content_type = None;
       response_content_disposition = None;
       version_id = None;
+      source_encryption = None;
       expected_bucket_owner = None;
       extra_signed_headers = [];
     }
@@ -77,6 +80,7 @@ module Head_object = struct
     response_content_type : Content_type.t option;
     response_content_disposition : Header_value.t option;
     version_id : Object.Version_id.t option;
+    source_encryption : Encryption.Source.t option;
     expected_bucket_owner : Account_id.t option;
     extra_signed_headers : (string * string) list;
   }
@@ -87,6 +91,7 @@ module Head_object = struct
       response_content_type = None;
       response_content_disposition = None;
       version_id = None;
+      source_encryption = None;
       expected_bucket_owner = None;
       extra_signed_headers = [];
     }
@@ -96,6 +101,7 @@ module Upload_part = struct
   type options = {
     expires_in : Ptime.Span.t option;
     checksum : Object.Checksum.value option;
+    customer_key : Encryption.Customer_key.t option;
     expected_bucket_owner : Account_id.t option;
     extra_signed_headers : (string * string) list;
   }
@@ -104,6 +110,7 @@ module Upload_part = struct
     {
       expires_in = None;
       checksum = None;
+      customer_key = None;
       expected_bucket_owner = None;
       extra_signed_headers = [];
     }
@@ -383,8 +390,10 @@ let head_query (options : Head_object.options) =
 let get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
   let options = Option.value ~default:Get_object.default_options options in
+  let* () = Headers.validate_source_encryption options.source_encryption in
   let signed_headers =
-    expected_owner_header options.expected_bucket_owner
+    Headers.source_encryption_headers options.source_encryption
+    @ expected_owner_header options.expected_bucket_owner
     @ options.extra_signed_headers
   in
   generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
@@ -394,8 +403,10 @@ let get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
 let head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
   let options = Option.value ~default:Head_object.default_options options in
+  let* () = Headers.validate_source_encryption options.source_encryption in
   let signed_headers =
-    expected_owner_header options.expected_bucket_owner
+    Headers.source_encryption_headers options.source_encryption
+    @ expected_owner_header options.expected_bucket_owner
     @ options.extra_signed_headers
   in
   generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
@@ -406,13 +417,11 @@ let put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
   let options = Option.value ~default:Put_object.default_options options in
   let* () = validate_opt Headers.validate_checksum_value options.checksum in
-  let* () =
-    Headers.validate_encryption_request options.server_side_encryption
-  in
+  let* () = Headers.validate_destination_encryption options.encryption in
   let headers =
     option_content_type_header "content-type" options.content_type
     @ Headers.checksum_value_headers options.checksum
-    @ Headers.encryption_request_headers options.server_side_encryption
+    @ Headers.destination_encryption_headers options.encryption
     @ expected_owner_header options.expected_bucket_owner
     @ options.extra_signed_headers
   in
@@ -439,6 +448,7 @@ let upload_part_query ~upload_id ~part_number =
 
 let upload_part_headers (options : Upload_part.options) =
   Headers.checksum_value_headers options.checksum
+  @ Headers.customer_key_headers options.customer_key
   @ expected_owner_header options.expected_bucket_owner
   @ options.extra_signed_headers
 
