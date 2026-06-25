@@ -327,8 +327,10 @@ module Minio_subject = struct
 
   let bucket = bucket_of_string (bucket_name_string "shared-contract")
 
-  (* MinIO supports the core S3 contract here, but not every AWS bucket-control
-     API or exact response echo used by the strict simulator profile. *)
+  (* MinIO is a local S3-compatible test double, not Awskit's AWS S3 semantic
+     oracle. Capability differences belong here only when the shared contract
+     or assertion branches in test/awskit-s3/support/s3_contract.ml encode
+     them. *)
   let capabilities : S3_contract.capabilities =
     {
       S3_contract.exclusive_bucket_list = false;

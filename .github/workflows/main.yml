@@ -26,6 +26,9 @@ env:
     awskit awskit-unix awskit-eio awskit-s3 awskit-s3-eio
   EIO_DUNE_PACKAGES: >-
     awskit,awskit-unix,awskit-eio,awskit-s3,awskit-s3-eio
+  MINIO_OPAM_PACKAGES: >-
+    awskit awskit-unix awskit-lwt awskit-lwt-unix awskit-eio
+    awskit-s3 awskit-s3-lwt awskit-s3-lwt-unix awskit-s3-eio
   EXAMPLE_OPAM_PACKAGES: >-
     eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
 
@@ -176,17 +179,18 @@ jobs:
           dune-cache: true
           opam-local-packages: |
             *.opam
-            !awskit-eio.opam
-            !awskit-s3-eio.opam
 
       - name: Install dependencies
-        run: opam install --with-test --deps-only ${{ env.DEFAULT_OPAM_PACKAGES }}
+        run: opam install --with-test --deps-only ${{ env.MINIO_OPAM_PACKAGES }}
 
       - name: Start MinIO
         run: docker compose up -d
 
-      - name: Run S3 contract
+      - name: Run S3 Lwt Unix contract
         run: opam exec -- dune build --force @minio-contract
+
+      - name: Run S3 Eio smoke
+        run: opam exec -- dune build --force @test/awskit-s3/eio/minio-smoke-eio
 
       - name: Dump MinIO logs on failure
         if: failure()

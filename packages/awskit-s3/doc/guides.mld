@@ -767,9 +767,11 @@ exponential delay; the default policy uses jitter.
 {1 Local MinIO Contract Testing}
 
 Most tests do not require a network service. The simulator is deterministic
-application-level evidence, not live AWS coverage. For local wire-level checks
-against the named MinIO contract target, start the included Compose stack and
-run the opt-in alias:
+application-level evidence, not live AWS coverage. MinIO is used here as a
+local S3-compatible development and testing double for adapter interoperability,
+not as a provider support guarantee. For local wire-level checks against the
+named MinIO contract target, start the included Compose stack and run the
+opt-in alias:
 
 {[
 docker compose up -d

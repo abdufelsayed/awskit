@@ -384,7 +384,9 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
          if Content-Length is present; reading it would block until timeout. *)
       let is_head = match request.method_ with `HEAD -> true | _ -> false in
       let response_is_bodiless status =
-        is_head || status = 204 || status = 304
+        is_head
+        || status = 204
+        || status = 304
         || (status >= 100 && status < 200)
       in
       let make_response_body ~status body =

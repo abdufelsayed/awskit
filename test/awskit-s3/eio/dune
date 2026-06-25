@@ -4,6 +4,7 @@
  (modules
   test_awskit_s3_eio
   test_integration
+  test_minio_smoke
   test_transfer
   transfer_under_test)
  (libraries
@@ -17,10 +18,18 @@
   eio
   eio_main
   ptime
-  digestif))
+  digestif
+  unix))
 
 (rule
  (target transfer_under_test.ml)
  (deps ../../../packages/awskit-s3/eio/transfer.ml)
  (action
   (copy %{deps} %{target})))
+
+(rule
+ (alias minio-smoke-eio)
+ (package awskit-s3-eio)
+ (deps test_awskit_s3_eio.exe)
+ (action
+  (run ./test_awskit_s3_eio.exe test "integration:awskit-s3-eio:minio-smoke")))

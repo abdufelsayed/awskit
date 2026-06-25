@@ -44,12 +44,18 @@ as release branch pushes, scheduled runs, and manual dispatches.
 - Runs on Ubuntu with the latest OCaml 5 compiler.
 - Installs test and documentation dependencies for all packages.
 - Builds protocol evidence with `opam exec -- dune build @check-protocol`.
+- Does not start Docker services; local MinIO adapter evidence stays in the
+  separate `s3-minio-contract` job.
 
 `s3-minio-contract`
 
 - Runs on Ubuntu.
-- Starts MinIO with Docker Compose.
+- Starts MinIO with Docker Compose as a local S3-compatible test double.
 - Runs `opam exec -- dune build --force @minio-contract`.
+- Runs the focused Eio smoke with
+  `opam exec -- dune build --force @test/awskit-s3/eio/minio-smoke-eio`.
+- Provides local adapter integration evidence, separate from no-network
+  protocol evidence.
 - Dumps MinIO logs on failure.
 
 `publish-docs`
