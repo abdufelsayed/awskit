@@ -12,6 +12,9 @@ let gen_string ~min ~max ~chars =
 let query_chars =
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_.~"
 
+let is_decode_error error =
+  match Awskit.Error.kind error with Decode _ -> true | _ -> false
+
 let query_params_gen =
   let open QCheck.Gen in
   let key_gen = gen_string ~min:1 ~max:12 ~chars:query_chars in
@@ -57,21 +60,151 @@ let prop_canonical_query_params_sorted =
       List.length pairs = expanded_count params
       && String.equal canonical (expected_canonical_query params))
 
+let content_range_valid_gen =
+  let open QCheck.Gen in
+  let* start = int_range 0 100_000 in
+  let* length = int_range 1 10_000 in
+  let finish = start + length - 1 in
+  let* complete_length =
+    oneof_weighted
+      [
+        (1, return None);
+        (3, map (fun extra -> Some (finish + extra)) (int_range 1 10_000));
+      ]
+  in
+  return
+    ( Int64.of_int start,
+      Int64.of_int finish,
+      Option.map Int64.of_int complete_length )
+
+let content_range_header (start, finish, complete_length) =
+  let length =
+    match complete_length with
+    | None -> "*"
+    | Some length -> Int64.to_string length
+  in
+  Fmt.str "bytes %Ld-%Ld/%s" start finish length
+
+let content_range_matches (start, finish, complete_length)
+    (value : Range.Content_range.t) =
+  Int64.equal start value.start
+  && Int64.equal finish value.finish
+  && Option.equal Int64.equal complete_length value.complete_length
+
+let content_range_equal (left : Range.Content_range.t)
+    (right : Range.Content_range.t) =
+  Int64.equal left.start right.start
+  && Int64.equal left.finish right.finish
+  && Option.equal Int64.equal left.complete_length right.complete_length
+
+let prop_content_range_valid_round_trips =
+  QCheck.Test.make ~count:500 ~name:"Content-Range valid values round-trip"
+    (QCheck.make
+       ~print:(fun value -> content_range_header value)
+       content_range_valid_gen)
+    (fun generated ->
+      let header = content_range_header generated in
+      match Range.Content_range.of_header header with
+      | Error _ -> false
+      | Ok value -> (
+          match
+            Range.Content_range.to_header value |> Range.Content_range.of_header
+          with
+          | Error _ -> false
+          | Ok reparsed ->
+              content_range_matches generated value
+              && content_range_equal value reparsed))
+
+let content_range_invalid_gen =
+  let open QCheck.Gen in
+  let* start = int_range 0 1000 in
+  let* finish_delta = int_range 0 1000 in
+  let finish = start + finish_delta in
+  oneof
+    [
+      return (Fmt.str "items %d-%d/%d" start finish (finish + 1));
+      return (Fmt.str "bytes x-%d/%d" finish (finish + 1));
+      return (Fmt.str "bytes %d-x/%d" start (finish + 1));
+      return (Fmt.str "bytes %d-%d/x" start finish);
+      return (Fmt.str "bytes %d-%d/%d" (finish + 1) finish (finish + 2));
+      return (Fmt.str "bytes %d-%d/%d" start finish finish);
+      return
+        (Fmt.str "bytes %d-%d/%d/%d" start finish (finish + 1) (finish + 2));
+      return
+        (Fmt.str "bytes %d-%d-%d/%d" start finish (finish + 1) (finish + 2));
+    ]
+
+let prop_content_range_invalid_headers_decode_error =
+  QCheck.Test.make ~count:300
+    ~name:"Content-Range invalid boundary families are decode errors"
+    (QCheck.make ~print:Fun.id content_range_invalid_gen) (fun header ->
+      match Range.Content_range.of_header header with
+      | Error error -> is_decode_error error
+      | Ok _ -> false)
+
 let prop_endpoint_rejects_url_parts =
   let gen =
     let open QCheck.Gen in
     let host = gen_string ~min:3 ~max:20 ~chars:"abcdefghijklmnopqrstuvwxyz" in
     let path = gen_string ~min:1 ~max:12 ~chars:"abcdefghijklmnopqrstuvwxyz" in
+    let fragment =
+      map2 (fun host path -> Fmt.str "https://%s#%s" host path) host path
+    in
+    let bad_port =
+      map2
+        (fun host port -> Fmt.str "https://%s:%s" host port)
+        host
+        (oneof_list [ "0"; "65536"; "-1"; "abc"; "" ])
+    in
+    let empty_host =
+      oneof_list [ "https://"; "http://"; "https://:443"; "http://:80" ]
+    in
+    let malformed_ipv6 =
+      oneof_list
+        [
+          "https://[::1";
+          "https://[::1]extra";
+          "https://::1";
+          "https://[::1]:abc";
+        ]
+    in
+    let unsupported_scheme =
+      map2
+        (fun scheme host -> Fmt.str "%s://%s" scheme host)
+        (oneof_list [ "ftp"; "s3"; "file"; "https+unix" ])
+        host
+    in
+    let userinfo =
+      map2 (fun host path -> Fmt.str "https://user:%s@%s" path host) host path
+    in
+    let with_path =
+      map2 (fun host path -> Fmt.str "https://%s/%s" host path) host path
+    in
+    let with_query =
+      map2 (fun host path -> Fmt.str "https://%s?%s=1" host path) host path
+    in
+    let control =
+      map2
+        (fun host char -> Fmt.str "https://%s%cexample.com" host char)
+        host
+        (oneof_list [ '\000'; '\n'; '\r'; '\t'; '\127' ])
+    in
     oneof
       [
-        map2 (fun host path -> Fmt.str "https://%s/%s" host path) host path;
-        map2 (fun host path -> Fmt.str "https://%s?%s=1" host path) host path;
-        map2 (fun host path -> Fmt.str "https://user@%s/%s" host path) host path;
+        fragment;
+        bad_port;
+        empty_host;
+        malformed_ipv6;
+        unsupported_scheme;
+        userinfo;
+        with_path;
+        with_query;
+        control;
       ]
   in
   QCheck.Test.make ~count:200
-    ~name:"endpoint parser rejects path query and userinfo"
-    (QCheck.make ~print:Fun.id gen) (fun value ->
+    ~name:"endpoint parser rejects URL parts and malformed authorities"
+    (QCheck.make ~print:String.escaped gen) (fun value ->
       Result.is_error (Awskit.Endpoint.of_string value))
 
 let prop_header_values_reject_newline =
@@ -166,6 +299,8 @@ let suite =
       List.map to_alcotest
         [
           prop_canonical_query_params_sorted;
+          prop_content_range_valid_round_trips;
+          prop_content_range_invalid_headers_decode_error;
           prop_endpoint_rejects_url_parts;
           prop_header_values_reject_newline;
           prop_metadata_rejects_case_insensitive_duplicate_keys;

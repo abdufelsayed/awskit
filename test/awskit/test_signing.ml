@@ -15,6 +15,48 @@ let fixed_time =
 
 let qcheck_seed = 0xA5110
 let to_alcotest = Awskit_test.Qcheck.to_alcotest ~seed:qcheck_seed
+let chars_of_string value = List.init (String.length value) (String.get value)
+let gen_from_chars chars = QCheck.Gen.oneof_list (chars_of_string chars)
+
+let gen_string ~min ~max ~chars =
+  let open QCheck.Gen in
+  string_size ~gen:(gen_from_chars chars) (int_range min max)
+
+let split_ampersand value =
+  if String.equal value "" then [] else String.split_on_char '&' value
+
+let split_pair pair =
+  match String.split_on_char '=' pair with
+  | [ key; value ] -> Some (key, value)
+  | _ -> None
+
+let expanded_query_pairs params =
+  List.concat_map
+    (fun (key, values) ->
+      match values with
+      | [] -> [ (key, "") ]
+      | values -> List.map (fun value -> (key, value)) values)
+    params
+
+let expanded_query_pair_count params = List.length (expanded_query_pairs params)
+
+let expected_canonical_query_pairs params =
+  expanded_query_pairs params
+  |> List.map (fun (key, value) ->
+      (Signing.uri_encode key, Signing.uri_encode value))
+  |> List.sort (fun (left_key, left_value) (right_key, right_value) ->
+      match String.compare left_key right_key with
+      | 0 -> String.compare left_value right_value
+      | order -> order)
+
+let expected_canonical_query params =
+  expected_canonical_query_pairs params
+  |> List.map (fun (key, value) -> key ^ "=" ^ value)
+  |> String.concat "&"
+
+let get_auth_header headers =
+  List.assoc "authorization"
+    (List.map (fun (key, value) -> (String.lowercase_ascii key, value)) headers)
 
 (* ── uri_encode ──────────────────────────────────────────────────── *)
 
@@ -95,6 +137,32 @@ let query_pair_gen =
   in
   QCheck.Gen.pair key_gen val_gen
 
+let query_value_chars =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789%/ \t-_.~"
+
+let special_query_params_gen =
+  let open QCheck.Gen in
+  let key_gen =
+    oneof_weighted
+      [
+        (1, return "dup");
+        (1, return "");
+        (6, gen_string ~min:0 ~max:8 ~chars:query_value_chars);
+      ]
+  in
+  let value_gen =
+    oneof_weighted
+      [
+        (1, return "%2F");
+        (1, return "%zz");
+        (1, return "/");
+        (1, return "");
+        (6, gen_string ~min:0 ~max:8 ~chars:query_value_chars);
+      ]
+  in
+  list_size (int_range 0 12)
+    (pair key_gen (list_size (int_range 0 3) value_gen))
+
 let test_canonical_query_sorted =
   QCheck.Test.make ~count:1000 ~name:"output is sorted"
     QCheck.(make Gen.(list_size (int_range 1 10) query_pair_gen))
@@ -126,6 +194,31 @@ let test_canonical_query_preserves_pairs =
       let result_pairs = String.split_on_char '&' result in
       List.length pairs = List.length result_pairs)
 
+let test_canonical_query_generated_edge_cases =
+  QCheck.Test.make ~count:1000
+    ~name:"generated query params expand encode and sort"
+    (QCheck.make
+       ~print:(fun params ->
+         params
+         |> List.map (fun (key, values) ->
+             Fmt.str "%S=[%s]" key
+               (values |> List.map (Fmt.str "%S") |> String.concat ","))
+         |> String.concat ";")
+       special_query_params_gen)
+    (fun params ->
+      let result = Signing.canonical_query_params params in
+      let result_pairs = split_ampersand result in
+      let decoded_pairs = List.filter_map split_pair result_pairs in
+      List.length result_pairs = expanded_query_pair_count params
+      && List.length decoded_pairs = List.length result_pairs
+      && List.equal
+           (fun (left_key, left_value) (right_key, right_value) ->
+             String.equal left_key right_key
+             && String.equal left_value right_value)
+           decoded_pairs
+           (expected_canonical_query_pairs params)
+      && String.equal result (expected_canonical_query params))
+
 (* ── sign_request ────────────────────────────────────────────────── *)
 
 let test_sign_deterministic =
@@ -141,11 +234,7 @@ let test_sign_deterministic =
       in
       let r1 = sign () in
       let r2 = sign () in
-      let get_auth h =
-        List.assoc "authorization"
-          (List.map (fun (k, v) -> (String.lowercase_ascii k, v)) h)
-      in
-      String.equal (get_auth r1.headers) (get_auth r2.headers))
+      String.equal (get_auth_header r1.headers) (get_auth_header r2.headers))
 
 let test_sign_has_required_headers =
   QCheck.Test.make ~count:500 ~name:"always has required headers"
@@ -212,12 +301,77 @@ let test_sign_different_payloads =
           ~payload_hash:(Payload_hash.sha256_of_string payload)
           ~now:fixed_time
       in
-      let get_auth h =
-        List.assoc "authorization"
-          (List.map (fun (k, v) -> (String.lowercase_ascii k, v)) h)
-      in
       not
-        (String.equal (get_auth (sign p1).headers) (get_auth (sign p2).headers)))
+        (String.equal
+           (get_auth_header (sign p1).headers)
+           (get_auth_header (sign p2).headers)))
+
+let header_word_gen =
+  gen_string ~min:1 ~max:8
+    ~chars:"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+let header_newline_gen =
+  let open QCheck.Gen in
+  let* left = gen_string ~min:0 ~max:12 ~chars:"abcdefghijklmnopqrstuvwxyz" in
+  let* sep = oneof_list [ "\n"; "\r"; "\r\n" ] in
+  let* right = gen_string ~min:0 ~max:12 ~chars:"abcdefghijklmnopqrstuvwxyz" in
+  return (left ^ sep ^ right)
+
+let test_header_values_reject_line_breaks =
+  QCheck.Test.make ~count:300
+    ~name:"request and signing reject CR/LF header values"
+    (QCheck.make ~print:String.escaped header_newline_gen) (fun value ->
+      let headers = [ ("host", "s3.amazonaws.com"); ("x-test", value) ] in
+      match Awskit.Request.validate_headers headers with
+      | Ok _ -> false
+      | Error request_error when Awskit.Error.is_validation request_error -> (
+          match
+            Signing.sign_request_params ~credentials:creds ~region ~service:"s3"
+              ~method_:`GET ~path:"/bucket/key" ~query_params:[] ~headers
+              ~payload_hash:(Payload_hash.sha256_of_string "")
+              ~now:fixed_time
+          with
+          | Error signing_error -> Awskit.Error.is_validation signing_error
+          | Ok _ -> false)
+      | Error _ -> false)
+
+let test_canonical_headers_groups_case_insensitive_duplicates =
+  QCheck.Test.make ~count:300
+    ~name:"canonical headers group duplicate names case-insensitively"
+    (QCheck.make
+       ~print:(fun (first, second) -> Fmt.str "%S/%S" first second)
+       QCheck.Gen.(pair header_word_gen header_word_gen))
+    (fun (first, second) ->
+      match
+        Signing.canonical_headers [ ("X-Test", first); ("x-test", second) ]
+      with
+      | [ (name, value) ] ->
+          String.equal name "x-test" && String.equal value (first ^ "," ^ second)
+      | _ -> false)
+
+let test_sign_normalized_header_whitespace_is_deterministic =
+  let gen = QCheck.Gen.(list_size (int_range 1 5) header_word_gen) in
+  QCheck.Test.make ~count:300
+    ~name:"equivalent normalized headers produce deterministic signatures"
+    (QCheck.make ~print:(String.concat ",") gen)
+    (fun words ->
+      let normalized = String.concat " " words in
+      let messy = " \t" ^ String.concat "\t  " words ^ "  " in
+      let sign headers =
+        Signing.sign_request_params ~credentials:creds ~region ~service:"s3"
+          ~method_:`GET ~path:"/bucket/key" ~query_params:[] ~headers
+          ~payload_hash:(Payload_hash.sha256_of_string "")
+          ~now:fixed_time
+      in
+      match
+        ( sign [ ("host", "s3.amazonaws.com"); ("X-Test", messy) ],
+          sign [ ("HOST", "s3.amazonaws.com"); ("x-test", normalized) ] )
+      with
+      | Ok left, Ok right ->
+          String.equal
+            (get_auth_header left.headers)
+            (get_auth_header right.headers)
+      | _ -> false)
 
 let expect_validation label = function
   | Error error when Awskit.Error.is_validation error -> ()
@@ -300,6 +454,7 @@ let suite =
           test_canonical_query_sorted;
           test_canonical_query_empty;
           test_canonical_query_preserves_pairs;
+          test_canonical_query_generated_edge_cases;
         ] );
     ( "pbt:signing:sign-request",
       List.map to_alcotest
@@ -308,6 +463,9 @@ let suite =
           test_sign_has_required_headers;
           test_sign_signature_is_hex;
           test_sign_different_payloads;
+          test_header_values_reject_line_breaks;
+          test_canonical_headers_groups_case_insensitive_duplicates;
+          test_sign_normalized_header_whitespace_is_deterministic;
         ] );
     ( "signing:validation",
       [

@@ -10,6 +10,12 @@ let is_validation_field field error =
 
 let qcheck_seed = 0xA5111
 let to_alcotest = Awskit_test.Qcheck.to_alcotest ~seed:qcheck_seed
+let chars_of_string value = List.init (String.length value) (String.get value)
+let gen_from_chars chars = QCheck.Gen.oneof_list (chars_of_string chars)
+
+let gen_string ~min ~max ~chars =
+  let open QCheck.Gen in
+  string_size ~gen:(gen_from_chars chars) (int_range min max)
 
 let chunk size values =
   let rec take n acc = function
@@ -40,6 +46,91 @@ let list_pages_for_keys ~page_size keys =
       list_page ?continuation_token ?next_continuation_token
         ~truncated:(index < last_index) keys)
     chunks
+
+let token_xml name = function
+  | None -> ""
+  | Some value -> Fmt.str "<%s>%s</%s>" name value name
+
+let generated_list_objects_v2_xml ?is_truncated ?next_continuation_token keys =
+  let is_truncated_xml =
+    match is_truncated with
+    | None -> ""
+    | Some value -> Fmt.str "<IsTruncated>%b</IsTruncated>" value
+  in
+  let contents =
+    keys
+    |> List.map (fun key ->
+        Fmt.str
+          "<Contents><UnknownObjectField>ignored</UnknownObjectField><Key>%s</Key><Size>1</Size><ETag>\"etag\"</ETag></Contents>"
+          key)
+    |> String.concat ""
+  in
+  Fmt.str
+    "<ListBucketResult><UnknownRootField>ignored</UnknownRootField><Name>my-bucket</Name>%s%s%s</ListBucketResult>"
+    is_truncated_xml
+    (token_xml "NextContinuationToken" next_continuation_token)
+    contents
+
+let list_objects_page_from_xml body =
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  Recording_s3.Object.List.fold_pages_until conn
+    ~bucket:(bucket_name "my-bucket") ~init:None
+    ~f:(fun _ page -> Ok (Recording_s3.Object.List.Stop (Some page)))
+    ()
+
+let generated_list_objects_v2_gen =
+  let open QCheck.Gen in
+  let key_gen =
+    gen_string ~min:1 ~max:12 ~chars:"abcdefghijklmnopqrstuvwxyz0123456789-_"
+  in
+  let* keys = list_size (int_range 0 5) key_gen in
+  let* is_truncated = option bool in
+  let* next_continuation_token =
+    option
+      (gen_string ~min:1 ~max:12 ~chars:"abcdefghijklmnopqrstuvwxyz0123456789-_")
+  in
+  return (keys, is_truncated, next_continuation_token)
+
+let prop_list_objects_v2_decodes_generated_xml =
+  QCheck.Test.make ~count:300
+    ~name:"ListObjectsV2 decodes generated XML and ignores unknown children"
+    (QCheck.make
+       ~print:(fun (keys, is_truncated, next_token) ->
+         Fmt.str "keys=[%s] truncated=%s next=%s" (String.concat "," keys)
+           (Option.fold ~none:"<absent>" ~some:string_of_bool is_truncated)
+           (Option.value ~default:"<absent>" next_token))
+       generated_list_objects_v2_gen)
+    (fun (keys, is_truncated, next_continuation_token) ->
+      let body =
+        generated_list_objects_v2_xml ?is_truncated ?next_continuation_token
+          keys
+      in
+      match list_objects_page_from_xml body with
+      | Error _ | Ok None -> false
+      | Ok (Some page) ->
+          List.equal String.equal keys
+            (List.map
+               (fun (object_ : Object.List.object_summary) ->
+                 Object_key.to_string object_.key)
+               page.objects)
+          && page.is_truncated = Option.value ~default:false is_truncated
+          && Option.equal String.equal next_continuation_token
+               (Option.map Object.List.Continuation_token.to_string
+                  page.next_continuation_token))
+
+let prop_list_objects_v2_rejects_malformed_is_truncated =
+  QCheck.Test.make ~count:50 ~name:"ListObjectsV2 rejects malformed IsTruncated"
+    (QCheck.make ~print:Fun.id
+       QCheck.Gen.(oneof_list [ "maybe"; "1"; "yes"; "truthy"; "" ]))
+    (fun bool_text ->
+      let body =
+        Fmt.str
+          "<ListBucketResult><Name>my-bucket</Name><IsTruncated>%s</IsTruncated></ListBucketResult>"
+          bool_text
+      in
+      match list_objects_page_from_xml body with
+      | Error error -> is_decode_error error
+      | Ok _ -> false)
 
 let prop_list_paginator_collects_ordered_keys =
   let gen = QCheck.Gen.(pair (int_range 0 30) (int_range 1 7)) in
@@ -342,7 +433,13 @@ let test_multipart_list_parts_rejects_invalid_numeric_fields () =
 
 let suite =
   [
-    ("pbt:paginator", [ to_alcotest prop_list_paginator_collects_ordered_keys ]);
+    ( "pbt:paginator",
+      List.map to_alcotest
+        [
+          prop_list_paginator_collects_ordered_keys;
+          prop_list_objects_v2_decodes_generated_xml;
+          prop_list_objects_v2_rejects_malformed_is_truncated;
+        ] );
     ( "paginator",
       [
         Alcotest.test_case "object paginator follows tokens" `Quick

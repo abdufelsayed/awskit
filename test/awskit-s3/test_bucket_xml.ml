@@ -8,6 +8,85 @@ let is_validation_field field error =
 let is_decode_error error =
   match Awskit.Error.kind error with Decode _ -> true | _ -> false
 
+let qcheck_seed = 0xA5111
+let to_alcotest = Awskit_test.Qcheck.to_alcotest ~seed:qcheck_seed
+let chars_of_string value = List.init (String.length value) (String.get value)
+let gen_from_chars chars = QCheck.Gen.oneof_list (chars_of_string chars)
+
+let gen_string ~min ~max ~chars =
+  let open QCheck.Gen in
+  string_size ~gen:(gen_from_chars chars) (int_range min max)
+
+let tagging_xml tags =
+  let tag_xml =
+    tags
+    |> List.map (fun (key, value) ->
+        Fmt.str
+          "<Tag><UnknownTagChild>ignored</UnknownTagChild><Key>%s</Key><Value>%s</Value></Tag>"
+          key value)
+    |> String.concat ""
+  in
+  Fmt.str
+    "<Tagging><UnknownRootChild>ignored</UnknownRootChild><TagSet>%s</TagSet></Tagging>"
+    tag_xml
+
+let tagging_result_from_xml body =
+  let conn = Recording_runtime.connect [ response 200 body ] in
+  Recording_s3.Bucket.Tagging.get conn ~bucket:(bucket_name "my-bucket") ()
+
+let generated_tagging_tags_gen =
+  let open QCheck.Gen in
+  let value_gen =
+    gen_string ~min:0 ~max:12
+      ~chars:
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \
+         +-=._:/@"
+  in
+  let* count = int_range 0 10 in
+  let* values = list_size (return count) value_gen in
+  return
+    (List.mapi (fun index value -> (Fmt.str "key-%02d" index, value)) values)
+
+let prop_bucket_tagging_decodes_generated_xml =
+  QCheck.Test.make ~count:300
+    ~name:"bucket tagging decodes generated XML and ignores unknown children"
+    (QCheck.make
+       ~print:(fun tags ->
+         tags
+         |> List.map (fun (key, value) -> Fmt.str "%s=%S" key value)
+         |> String.concat ";")
+       generated_tagging_tags_gen)
+    (fun tags ->
+      match tagging_result_from_xml (tagging_xml tags) with
+      | Error _ -> false
+      | Ok result ->
+          let actual =
+            result.tags
+            |> Tag.Set.to_list
+            |> List.map (fun tag -> (Tag.key tag, Tag.value tag))
+          in
+          List.equal
+            (fun (left_key, left_value) (right_key, right_value) ->
+              String.equal left_key right_key
+              && String.equal left_value right_value)
+            tags actual)
+
+let malformed_tagging_xml_gen =
+  QCheck.Gen.(
+    oneof_list
+      [
+        "<Tagging><TagSet><Tag><Key></Key><Value>prod</Value></Tag></TagSet></Tagging>";
+        "<Tagging><TagSet><Tag><Key>env</Key></Tag></TagSet></Tagging>";
+      ])
+
+let prop_bucket_tagging_rejects_malformed_known_fields =
+  QCheck.Test.make ~count:50
+    ~name:"bucket tagging rejects malformed known fields as decode errors"
+    (QCheck.make ~print:Fun.id malformed_tagging_xml_gen) (fun body ->
+      match tagging_result_from_xml body with
+      | Error error -> is_decode_error error
+      | Ok _ -> false)
+
 let test_bucket_config_parse () =
   let versioning =
     {|<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>|}
@@ -404,6 +483,12 @@ let test_bucket_tagging_rejects_invalid_tag_xml_as_decode_error () =
 
 let suite =
   [
+    ( "pbt:bucket-xml",
+      List.map to_alcotest
+        [
+          prop_bucket_tagging_decodes_generated_xml;
+          prop_bucket_tagging_rejects_malformed_known_fields;
+        ] );
     ( "bucket xml",
       [
         Alcotest.test_case "bucket config parse" `Quick test_bucket_config_parse;

@@ -21,4 +21,5 @@
    (run ./test_awskit_s3.exe test "pbt:domain:key")
    (run ./test_awskit_s3.exe test "pbt:domain:account-metadata-tags")
    (run ./test_awskit_s3.exe test "pbt:paginator")
+   (run ./test_awskit_s3.exe test "pbt:bucket-xml")
    (run ./test_awskit_s3.exe test "pbt:transfer-plan"))))
