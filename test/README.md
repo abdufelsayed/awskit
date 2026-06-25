@@ -35,6 +35,12 @@ target functor for package-owned runners. It also provides `transfer_model.ml`
 and `transfer_fault_workload.ml` for runtime-neutral transfer byte-movement,
 progress, and cleanup workloads.
 
+Pure S3 model contracts run through the support-owned alias:
+
+- `@test/awskit-s3/support/s3-model-contracts`
+
+The suite ID is `contract:awskit-s3:model`.
+
 The simulator runner lives in `test/awskit-s3/sim` and runs the shared S3 state
 workload, deterministic simulator contracts, and generated transfer fault
 workload without network access:

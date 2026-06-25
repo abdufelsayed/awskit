@@ -16,3 +16,16 @@
   alcotest
   qcheck-core
   qcheck-alcotest))
+
+(test
+ (name test_s3_model_contracts)
+ (package awskit-s3)
+ (modules test_s3_model_contracts)
+ (libraries awskit awskit-s3 awskit_s3_workload alcotest))
+
+(rule
+ (alias s3-model-contracts)
+ (package awskit-s3)
+ (deps test_s3_model_contracts.exe)
+ (action
+  (run ./test_s3_model_contracts.exe)))

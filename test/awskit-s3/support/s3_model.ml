@@ -193,6 +193,27 @@ let is_prefix ~prefix value =
 let keys_with_prefix prefix model =
   model |> keys |> List.filter (is_prefix ~prefix)
 
+let keys_for_page ?prefix model =
+  match prefix with
+  | None -> keys model
+  | Some prefix -> keys_with_prefix prefix model
+
+let take n values =
+  let rec loop n values acc =
+    match (n, values) with
+    | n, _ when n <= 0 -> List.rev acc
+    | _, [] -> List.rev acc
+    | n, value :: rest -> loop (n - 1) rest (value :: acc)
+  in
+  loop n values []
+
+let list_keys_page ?prefix ~max_keys model =
+  let keys = keys_for_page ?prefix model in
+  take max_keys keys
+
+let list_keys_page_is_truncated ?prefix ~max_keys model =
+  List.length (keys_for_page ?prefix model) > max_keys
+
 let version_id_kind_has_id = function
   | No_version -> false
   | Generated_version | Null_version -> true
@@ -236,6 +257,11 @@ let listed_versions model =
                   (Object_version (object_, No_version));
               ]))
 
+let list_versions_page ~max_keys model = take max_keys (listed_versions model)
+
+let list_versions_page_is_truncated ~max_keys model =
+  List.length (listed_versions model) > max_keys
+
 let object_versions model =
   listed_versions model |> List.filter (fun version -> version.kind = `Object)
 
@@ -249,7 +275,8 @@ let apply command model =
   | Put_string_metadata (key, body, tags, metadata) ->
       put_with_metadata key body tags metadata model
   | Get_string _ | Find_string _ | Head_object _ | Exists_object _ | List_keys
-  | List_prefix _ | Get_object_tags _ | Get_bucket_tags | Get_versioning ->
+  | List_prefix _ | List_keys_page _ | List_versions_page _ | Get_object_tags _
+  | Get_bucket_tags | Get_versioning ->
       model
   | Delete_object key -> delete key model
   | Copy_object (source_key, destination_key) ->

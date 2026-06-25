@@ -577,6 +577,48 @@ let assert_list_prefix command_index command conn prefix model =
     (Model.keys_with_prefix prefix model)
     (list_keys command_index command conn ~options ())
 
+let expected_list_keys_page prefix ~max_keys model =
+  match prefix with
+  | None -> Model.list_keys_page ~max_keys model
+  | Some prefix -> Model.list_keys_page ~prefix ~max_keys model
+
+let expected_list_keys_page_is_truncated prefix ~max_keys model =
+  match prefix with
+  | None -> Model.list_keys_page_is_truncated ~max_keys model
+  | Some prefix -> Model.list_keys_page_is_truncated ~prefix ~max_keys model
+
+let assert_list_keys_page command_index command conn prefix max_keys model =
+  let options =
+    match prefix with
+    | None -> Object.List.options_exn ~max_keys ()
+    | Some prefix ->
+        Object.List.options_exn
+          ~prefix:(Object_key.Prefix.of_string_exn prefix)
+          ~max_keys ()
+  in
+  let page =
+    expect_ok command_index command "list keys page"
+      (await_result "list keys page" (S3.Object.list conn ~bucket ~options ()))
+  in
+  let actual =
+    List.map
+      (fun (object_ : Object.List.object_summary) ->
+        Object_key.to_string object_.key)
+      page.objects
+  in
+  let expected = expected_list_keys_page prefix ~max_keys model in
+  let expected_is_truncated =
+    expected_list_keys_page_is_truncated prefix ~max_keys model
+  in
+  check_equal command_index command
+    Alcotest.(list string)
+    "list keys page" expected actual;
+  check_equal command_index command Alcotest.bool "list keys page truncated"
+    expected_is_truncated page.is_truncated;
+  check_equal command_index command Alcotest.bool "list keys page next token"
+    expected_is_truncated
+    (Option.is_some page.next_continuation_token)
+
 let assert_copy command_index command conn ~source_key ~destination_key ?options
     ~destination_has_version_id expected =
   match expected with
@@ -690,6 +732,12 @@ let apply_minio_command command_index conn model command =
     | List_prefix prefix ->
         assert_list_prefix command_index command conn prefix model;
         model
+    | List_keys_page { prefix; max_keys } ->
+        assert_list_keys_page command_index command conn prefix max_keys model;
+        model
+    | List_versions_page _ ->
+        fail command_index command
+          "list versions page is unsupported by the MinIO workload profile"
     | Copy_object (source_key, destination_key) ->
         let source = Model.find source_key model in
         assert_copy command_index command conn ~source_key ~destination_key
@@ -829,6 +877,7 @@ let test_state_transcript_covers_minio_profile () =
           Exists_object "missing.txt";
           List_keys;
           List_prefix "logs/";
+          List_keys_page { prefix = Some "logs/"; max_keys = 1 };
           Copy_object ("a.txt", "b.txt");
           Copy_object_metadata
             ( "meta.txt",

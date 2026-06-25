@@ -337,6 +337,115 @@ let assert_list_prefix command_index command conn prefix model =
     (Model.keys_with_prefix prefix model)
     keys
 
+let expected_list_keys_page prefix ~max_keys model =
+  match prefix with
+  | None -> Model.list_keys_page ~max_keys model
+  | Some prefix -> Model.list_keys_page ~prefix ~max_keys model
+
+let expected_list_keys_page_is_truncated prefix ~max_keys model =
+  match prefix with
+  | None -> Model.list_keys_page_is_truncated ~max_keys model
+  | Some prefix -> Model.list_keys_page_is_truncated ~prefix ~max_keys model
+
+let assert_list_keys_page command_index command conn prefix max_keys model =
+  let options =
+    match prefix with
+    | None -> Object.List.options_exn ~max_keys ()
+    | Some prefix ->
+        Object.List.options_exn
+          ~prefix:(Object_key.Prefix.of_string_exn prefix)
+          ~max_keys ()
+  in
+  let page =
+    expect_ok command_index command "list keys page"
+      (Simulator.Object.list conn ~bucket ~options ())
+  in
+  let actual =
+    List.map
+      (fun (object_ : Object.List.object_summary) ->
+        Object_key.to_string object_.key)
+      page.objects
+  in
+  let expected = expected_list_keys_page prefix ~max_keys model in
+  let expected_is_truncated =
+    expected_list_keys_page_is_truncated prefix ~max_keys model
+  in
+  check_equal command_index command
+    Alcotest.(list string)
+    "list keys page" expected actual;
+  check_equal command_index command Alcotest.bool "list keys page truncated"
+    expected_is_truncated page.is_truncated;
+  check_equal command_index command Alcotest.bool "list keys page next token"
+    expected_is_truncated
+    (Option.is_some page.next_continuation_token)
+
+let listed_object_version_summaries versions =
+  versions
+  |> List.filter (fun (version : Model.listed_version) ->
+      version.kind = `Object)
+  |> List.map listed_version_to_string
+
+let listed_delete_marker_summaries versions =
+  versions
+  |> List.filter (fun (version : Model.listed_version) ->
+      version.kind = `Delete_marker)
+  |> List.map listed_version_to_string
+
+let last = function [] -> None | values -> Some (List.hd (List.rev values))
+
+let assert_list_versions_page command_index command conn max_keys model =
+  let options = Object.Versions.options_exn ~max_keys () in
+  let page =
+    expect_ok command_index command "list object versions page"
+      (Simulator.Object.list_versions conn ~bucket ~options ())
+  in
+  let actual_object_versions =
+    List.map actual_object_version_to_model page.versions
+    |> List.map listed_version_to_string
+  in
+  let actual_delete_markers =
+    List.map actual_delete_marker_to_model page.delete_markers
+    |> List.map listed_version_to_string
+  in
+  let expected_page = Model.list_versions_page ~max_keys model in
+  let expected_is_truncated =
+    Model.list_versions_page_is_truncated ~max_keys model
+  in
+  let expected_next_entry =
+    if expected_is_truncated then last expected_page else None
+  in
+  let expected_next_key_marker =
+    Option.map
+      (fun (version : Model.listed_version) -> version.key)
+      expected_next_entry
+  in
+  let expected_next_version_id_marker =
+    match expected_next_entry with
+    | None -> false
+    | Some version -> version.has_version_id
+  in
+  check_equal command_index command
+    Alcotest.(list string)
+    "list object versions page objects"
+    (listed_object_version_summaries expected_page)
+    actual_object_versions;
+  check_equal command_index command
+    Alcotest.(list string)
+    "list object versions page delete markers"
+    (listed_delete_marker_summaries expected_page)
+    actual_delete_markers;
+  check_equal command_index command Alcotest.bool
+    "list object versions page truncated" expected_is_truncated
+    page.is_truncated;
+  check_equal command_index command
+    Alcotest.(option string)
+    "list object versions page next key marker" expected_next_key_marker
+    (Option.map Object_key.to_string page.next_key_marker);
+  check_equal command_index command Alcotest.bool
+    "list object versions page next version marker"
+    expected_next_version_id_marker
+    (Option.is_some page.next_version_id_marker)
+
 let assert_copy command_index command conn ~source_key ~destination_key ?options
     ~destination_has_version_id (expected : Model.object_ option) =
   match expected with
@@ -423,6 +532,12 @@ let apply_simulator_command command_index conn model command =
         model
     | List_prefix prefix ->
         assert_list_prefix command_index command conn prefix model;
+        model
+    | List_keys_page { prefix; max_keys } ->
+        assert_list_keys_page command_index command conn prefix max_keys model;
+        model
+    | List_versions_page { max_keys } ->
+        assert_list_versions_page command_index command conn max_keys model;
         model
     | Copy_object (source_key, destination_key) ->
         let source = Model.find source_key model in

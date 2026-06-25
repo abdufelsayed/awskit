@@ -13,6 +13,8 @@ type t =
   | Delete_object of string
   | List_keys
   | List_prefix of string
+  | List_keys_page of { prefix : string option; max_keys : int }
+  | List_versions_page of { max_keys : int }
   | Copy_object of string * string
   | Copy_object_metadata of string * string * copy_metadata
   | Put_object_tags of string * tag_model
@@ -107,6 +109,12 @@ let to_string = function
   | Delete_object key -> Printf.sprintf "delete-object key=%S" key
   | List_keys -> "list-keys"
   | List_prefix prefix -> Printf.sprintf "list-prefix prefix=%S" prefix
+  | List_keys_page { prefix; max_keys } ->
+      Printf.sprintf "list-keys-page prefix=%S max=%d"
+        (Option.value ~default:"" prefix)
+        max_keys
+  | List_versions_page { max_keys } ->
+      Printf.sprintf "list-versions-page max=%d" max_keys
   | Copy_object (source_key, destination_key) ->
       Printf.sprintf "copy-object source=%S destination=%S" source_key
         destination_key
@@ -137,6 +145,8 @@ let command_bin = function
   | Delete_object _ -> "s3.command.delete"
   | List_keys -> "s3.command.list"
   | List_prefix _ -> "s3.command.list-prefix"
+  | List_keys_page _ -> "s3.command.list-keys-page"
+  | List_versions_page _ -> "s3.command.list-versions-page"
   | Copy_object _ -> "s3.command.copy"
   | Copy_object_metadata _ -> "s3.command.copy-metadata"
   | Put_object_tags _ -> "s3.command.put-object-tags"
@@ -236,6 +246,14 @@ let generator_with ~gen_key ~gen_body =
         (2, map (fun key -> Delete_object key) gen_key);
         (1, return List_keys);
         (1, map (fun prefix -> List_prefix prefix) gen_prefix);
+        ( 2,
+          map2
+            (fun prefix max_keys -> List_keys_page { prefix; max_keys })
+            (oneof [ return None; map Option.some gen_prefix ])
+            (int_range 1 3) );
+        ( 1,
+          map (fun max_keys -> List_versions_page { max_keys }) (int_range 1 3)
+        );
         (2, map2 (fun source dest -> Copy_object (source, dest)) gen_key gen_key);
         ( 2,
           map3
@@ -266,6 +284,15 @@ let shrink_to_domain_first domain value =
 
 let shrink_key = shrink_to_domain_first key_domain
 let shrink_prefix = shrink_to_domain_first prefix_domain
+
+let shrink_optional_prefix = function
+  | None -> QCheck.Iter.empty
+  | Some prefix ->
+      QCheck.Iter.append (QCheck.Iter.return None)
+        (QCheck.Iter.map (fun prefix -> Some prefix) (shrink_prefix prefix))
+
+let shrink_max_keys max_keys =
+  if max_keys > 1 then QCheck.Iter.return 1 else QCheck.Iter.empty
 
 let shrink_body body =
   QCheck.Shrink.string ~shrink:QCheck.Shrink.char_printable body
@@ -337,6 +364,18 @@ let shrinker = function
   | List_keys -> QCheck.Iter.empty
   | List_prefix prefix ->
       QCheck.Iter.map (fun prefix -> List_prefix prefix) (shrink_prefix prefix)
+  | List_keys_page { prefix; max_keys } ->
+      QCheck.Iter.append
+        (QCheck.Iter.map
+           (fun prefix -> List_keys_page { prefix; max_keys })
+           (shrink_optional_prefix prefix))
+        (QCheck.Iter.map
+           (fun max_keys -> List_keys_page { prefix; max_keys })
+           (shrink_max_keys max_keys))
+  | List_versions_page { max_keys } ->
+      QCheck.Iter.map
+        (fun max_keys -> List_versions_page { max_keys })
+        (shrink_max_keys max_keys)
   | Copy_object (source_key, destination_key) ->
       QCheck.Iter.append
         (QCheck.Iter.map

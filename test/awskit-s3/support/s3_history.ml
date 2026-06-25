@@ -27,6 +27,7 @@ let command_supported config command =
   match (config.target_profile, command) with
   | Strict, _ -> true
   | Minio, S3_command.Put_string_metadata _ -> false
+  | Minio, List_versions_page _ -> false
   | Minio, Copy_object_metadata _ -> false
   | Minio, Put_versioning status -> (
       match status with
@@ -157,6 +158,20 @@ let command_gen config model =
           map
             (fun prefix -> S3_command.List_prefix prefix)
             S3_command.gen_prefix );
+        ( 2,
+          map2
+            (fun prefix max_keys ->
+              S3_command.List_keys_page { prefix; max_keys })
+            (oneof [ return None; map Option.some S3_command.gen_prefix ])
+            (int_range 1 3) );
+      ]
+    @ maybe_supported config
+        (S3_command.List_versions_page { max_keys = 1 })
+        1
+        (map
+           (fun max_keys -> S3_command.List_versions_page { max_keys })
+           (int_range 1 3))
+    @ [
         ( 2,
           map2
             (fun key tags -> S3_command.Put_object_tags (key, tags))

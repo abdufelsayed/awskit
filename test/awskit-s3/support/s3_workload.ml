@@ -41,6 +41,8 @@ let required_strict_bins =
     "s3.command.delete";
     "s3.command.list";
     "s3.command.list-prefix";
+    "s3.command.list-keys-page";
+    "s3.command.list-versions-page";
     "s3.command.copy";
     "s3.command.copy-metadata";
     "s3.command.put-object-tags";
