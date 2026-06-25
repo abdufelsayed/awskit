@@ -15,10 +15,7 @@ module Expect = struct
 end
 
 module Qcheck = struct
-  let to_alcotest ~seed test =
-    QCheck_alcotest.to_alcotest ~speed_level:`Quick
-      ~rand:(Random.State.make [| seed |])
-      test
+  let to_alcotest test = QCheck_alcotest.to_alcotest ~speed_level:`Quick test
 end
 
 module Header = struct

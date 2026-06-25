@@ -12,7 +12,7 @@ docs, or releases.
 | --- | --- | --- |
 | Deterministic examples | Named regressions, common workflows, and resource/lifecycle stories whose expected behavior is clearest as a short scenario. | `opam exec -- dune runtest <dir>` |
 | Unit tests | Pure validation, option builders, error classification, request construction, and focused parser failures. | package or directory `runtest` |
-| Property tests | Parsers, formatters, validators, endpoint policy, canonical query/header normalization, pagination, retry jitter bounds, and transfer planning. Keep seeds fixed in CI and print generated cases clearly. | `opam exec -- dune build @protocol-pbt` |
+| Property tests | Parsers, formatters, validators, endpoint policy, canonical query/header normalization, pagination, retry jitter bounds, and transfer planning. Explore fresh generated cases by default and replay failures with `QCHECK_SEED`. | `opam exec -- dune build @protocol-pbt` |
 | Golden fixtures | Exact protocol artifacts that reviewers should inspect: presigned artifacts, endpoint resolution, XML decode/encode bodies, pagination, multipart XML, service errors, and normalized wire summaries. | `opam exec -- dune build @protocol-fixtures` |
 | Fuzz replay | Minimized failures found by manual or mutation fuzzing. Commit the reduced input and replay it as an ordinary deterministic test before treating the bug as fixed. | `opam exec -- dune build @fuzz-replay` |
 | Simulator contracts | No-network S3 behavior, model-oracle state, fault injection, and docs/test backend behavior. The simulator is not an AWS wire authority. | `opam exec -- dune build @simulator-contract` |
@@ -92,6 +92,15 @@ QCheck property names can remain short human-readable sentences because they
 are reported inside a scoped PBT suite. Fixture corpus paths use filesystem
 scoping under `test/*/fixtures/**`; do not duplicate the full suite ID in every
 fixture filename.
+
+Property tests should not hard-code `Random.State` seeds in ordinary Dune
+aliases. Let `QCheck_alcotest` choose and print a fresh `qcheck random seed` on
+each run so repeated CI and local runs explore different examples. To reproduce
+a failure, re-run the same alias with the printed seed:
+
+```sh
+QCHECK_SEED=<seed> opam exec -- dune build @protocol-pbt
+```
 
 When touching an older unscoped suite ID, normalize it to the scoped form and
 update any Dune rule that selects it. Do not use a Dune alias name as an

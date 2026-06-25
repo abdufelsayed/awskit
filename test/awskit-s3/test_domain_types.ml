@@ -40,8 +40,7 @@ let header_value_chars =
 let tag_chars =
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 +-_=.:/@"
 
-let qcheck_seed = 0xA5111
-let to_alcotest = Awskit_test.Qcheck.to_alcotest ~seed:qcheck_seed
+let to_alcotest = Awskit_test.Qcheck.to_alcotest
 let qstring gen = QCheck.make ~print:(fun value -> value) gen
 
 let equal_string_pair (left_key, left_value) (right_key, right_value) =

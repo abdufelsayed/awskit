@@ -1,7 +1,6 @@
 open Awskit_s3
 
-let qcheck_seed = 0xA5111
-let to_alcotest = Awskit_test.Qcheck.to_alcotest ~seed:qcheck_seed
+let to_alcotest = Awskit_test.Qcheck.to_alcotest
 
 let expect_error_field label field = function
   | Ok _ -> Alcotest.failf "%s: expected validation field %s" label field

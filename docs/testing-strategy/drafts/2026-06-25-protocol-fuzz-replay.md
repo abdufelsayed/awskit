@@ -173,7 +173,7 @@ CI.
 
 Generator guidance:
 
-- Fixed seeds.
+- Fresh generated cases by default; replay failures with `QCHECK_SEED`.
 - Useful `print` functions.
 - Low rejection rates.
 - XML mini-ASTs or compact string builders.
@@ -184,7 +184,7 @@ Generator guidance:
 ## Offline Fuzzing Discipline
 
 Offline fuzzing is a discovery tool, not a release gate. Keep it no-network,
-deterministic by seed, bounded by time and case count, and runnable outside
+replayable by seed, bounded by time and case count, and runnable outside
 default Dune aliases. Prefer QCheck-style generators and small mutation drivers
 before adding new fuzzing dependencies.
 

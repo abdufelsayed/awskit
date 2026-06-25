@@ -38,8 +38,8 @@ and `Simulator.history`.
 
 Use the repo's existing QCheck style:
 
-- Fixed seed, such as `0xA5111`.
 - `Awskit_test.Qcheck.to_alcotest`.
+- Fresh generated cases by default; replay failures with `QCHECK_SEED`.
 - Alcotest suite ID `pbt:awskit-s3-sim:simulator-stateful`.
 - Compact printers for generated scenarios.
 - Explicit list and command-field shrinkers.

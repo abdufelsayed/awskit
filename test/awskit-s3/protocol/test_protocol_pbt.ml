@@ -1,7 +1,6 @@
 open Awskit_s3
 
-let qcheck_seed = 0xA5111
-let to_alcotest = Awskit_test.Qcheck.to_alcotest ~seed:qcheck_seed
+let to_alcotest = Awskit_test.Qcheck.to_alcotest
 let chars_of_string value = List.init (String.length value) (String.get value)
 let gen_from_chars chars = QCheck.Gen.oneof_list (chars_of_string chars)
 

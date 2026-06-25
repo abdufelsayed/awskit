@@ -60,12 +60,22 @@ Examples:
 QCheck property names may be readable sentences because the enclosing Alcotest
 suite provides the stable scoped ID.
 
+PBT suites use fresh QCheck seeds by default. Do not add fixed
+`Random.State.make` seeds to ordinary checked-in aliases. QCheck prints the
+run seed; replay a failure with:
+
+```sh
+QCHECK_SEED=<seed> opam exec -- dune build <alias>
+```
+
 ## Agent Rules
 
 - Add new suite IDs using the colon-scoped form.
 - Update any Dune rule that selects a renamed suite ID.
 - Keep Dune aliases kebab-case and document new maintained aliases in
   `docs/testing.md`.
+- Let QCheck choose fresh seeds by default; use `QCHECK_SEED` only to replay a
+  failing case.
 - Put shared test helpers in private test libraries; do not expose them through
   production packages.
 - When touching a legacy unscoped suite ID, normalize it instead of adding a

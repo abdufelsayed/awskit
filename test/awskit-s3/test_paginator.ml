@@ -8,8 +8,7 @@ let is_validation_field field error =
   Awskit.Error.is_validation error
   && Awskit.Error.validation_field error = Some field
 
-let qcheck_seed = 0xA5111
-let to_alcotest = Awskit_test.Qcheck.to_alcotest ~seed:qcheck_seed
+let to_alcotest = Awskit_test.Qcheck.to_alcotest
 let chars_of_string value = List.init (String.length value) (String.get value)
 let gen_from_chars chars = QCheck.Gen.oneof_list (chars_of_string chars)
 
