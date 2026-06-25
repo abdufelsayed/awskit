@@ -25,12 +25,6 @@
    "workload:awskit-lwt:runtime-http")))
 
 (alias
- (name runtime-conformance)
- (package awskit-lwt)
- (deps
-  (alias runtime-http-workload)))
-
-(alias
  (name discovery)
  (package awskit-lwt)
  (deps

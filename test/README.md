@@ -51,31 +51,24 @@ Protocol wire runners use no network access:
 - `@s3-protocol-fixtures`
 - `@s3-protocol-replay`
 
-Compatibility shims remain available:
-
-- `@protocol-pbt` points at `@s3-protocol-wire`
-- `@protocol-fixtures` points at `@s3-protocol-fixtures`
-- `@fuzz-replay` points at `@s3-protocol-replay`
-
 The suite IDs are `workload:awskit-s3:protocol-wire`,
 `fixture:awskit-s3:protocol-wire`, and `replay:awskit-s3:protocol-wire`.
 
 The MinIO runner lives in `test/awskit-s3/lwt/unix` and runs a bounded profile
 of the same shared S3 state workload plus deterministic transfer cases against
-Docker-backed MinIO:
+local MinIO:
 
 - `@test/awskit-s3/lwt/unix/s3-minio-workload`
 - `@s3-minio-workload`
 
 The suite IDs are `workload:minio:s3-state` and `integration:minio:transfer`.
-The compatibility alias `@minio-contract` points at the same workload.
 
 ## Discovery And Backtesting
 
 `@check-discovery` is the opt-in no-network discovery gate. It recurses through
 focused `discovery` aliases for runtime HTTP, S3 simulator, S3 transfer faults,
-S3 protocol wire properties, and S3 protocol replay. Docker-backed MinIO stays
-under `@s3-minio-workload` and `@check-docker`.
+S3 protocol wire properties, and S3 protocol replay. Local MinIO stays
+under `@s3-minio-workload` and `@check-integration`.
 
 Use `AWSKIT_QCHECK_COUNT=<positive-int>` to override generated workload counts,
 optionally raising them for deeper discovery. Unset or invalid values keep the

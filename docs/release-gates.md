@@ -12,9 +12,8 @@ scripts/release-check.sh
 ```
 
 `scripts/release-check.sh` also validates generated opam metadata, formatting,
-tests, protocol evidence, examples, odoc output, install artifacts,
-distribution archive documentation, the Lwt Unix MinIO contract, and the
-focused Eio MinIO smoke.
+tests, no-network correctness evidence, examples, odoc output, install
+artifacts, distribution archive documentation, and MinIO integration evidence.
 
 ## CI Gates
 
@@ -24,8 +23,8 @@ evidence is:
 - default package build and tests on Linux and macOS;
 - Eio package build and tests on Linux and macOS;
 - docs and examples;
-- protocol evidence aliases;
-- Lwt Unix MinIO S3 contract and focused Eio MinIO smoke.
+- no-network correctness evidence;
+- MinIO S3 integration evidence.
 
 Check PR state with:
 

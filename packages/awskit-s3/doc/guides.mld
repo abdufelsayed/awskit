@@ -560,10 +560,9 @@ S3.Runtime.Response_body.read reader bytes ~off ~len
 For custom S3 callers, prefer [Body.of_stream] and [Reader.read] so code stays
 within the S3 adapter API.
 
-Runtime authors should also run [opam exec -- dune build @runtime-conformance]
-alongside the S3 tests. The conformance suite captures shared expectations for
-request body descriptors, retry sleep/random, timeout visibility, and
-response-body cleanup precedence.
+Runtime authors should also run [opam exec -- dune build @runtime-http-workload]
+alongside the S3 tests. The runtime workload captures shared HTTP expectations
+for bodiless responses, framing, body-reader, and error-path behavior.
 
 {1 Presigned Request Artifacts}
 
@@ -764,21 +763,20 @@ Awskit_s3_lwt_unix.create ~retry_policy ()
 delays. Values greater than zero spread retry waits below the capped
 exponential delay; the default policy uses jitter.
 
-{1 Local MinIO Contract Testing}
+{1 Local MinIO Integration Testing}
 
 Most tests do not require a network service. The simulator is deterministic
 application-level evidence, not live AWS coverage. MinIO is used here as a
 local S3-compatible development and testing double for adapter interoperability,
-not as a provider support guarantee. For local wire-level checks against the
-named MinIO contract target, start the included Compose stack and run the
-opt-in alias:
+not as a provider support guarantee. For local checks against the named MinIO
+integration target, start the included Compose stack and run the opt-in alias:
 
 {[
 docker compose up -d
-opam exec -- dune build --force @minio-contract
+opam exec -- dune build --force @s3-minio-workload
 ]}
 
-The contract runner defaults to [http://127.0.0.1:9000] with the
+The integration runner defaults to [http://127.0.0.1:9000] with the
 [minioadmin]/[minioadmin] credentials from [docker-compose.yml]. Override with
 [AWSKIT_S3_MINIO_ENDPOINT], [AWSKIT_S3_MINIO_ACCESS_KEY_ID],
 [AWSKIT_S3_MINIO_SECRET_ACCESS_KEY], and [AWSKIT_S3_MINIO_REGION]. Non-local

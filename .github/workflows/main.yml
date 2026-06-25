@@ -140,7 +140,7 @@ jobs:
       - name: Build examples and documentation
         run: opam exec -- dune build @examples @doc
 
-  protocol-evidence:
+  no-network-correctness:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -160,10 +160,10 @@ jobs:
       - name: Install dependencies
         run: opam install --with-test --with-doc --deps-only .
 
-      - name: Build protocol evidence
-        run: opam exec -- dune build @check-protocol
+      - name: Build no-network correctness evidence
+        run: opam exec -- dune build @check-local
 
-  s3-minio-contract:
+  s3-minio-integration:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -186,8 +186,8 @@ jobs:
       - name: Start MinIO
         run: docker compose up -d
 
-      - name: Run Docker-backed S3 checks
-        run: opam exec -- dune build --force @check-docker
+      - name: Run MinIO integration checks
+        run: opam exec -- dune build --force @check-integration
 
       - name: Dump MinIO logs on failure
         if: failure()
@@ -203,8 +203,8 @@ jobs:
       - build-test-default
       - build-test-eio
       - docs-examples
-      - protocol-evidence
-      - s3-minio-contract
+      - no-network-correctness
+      - s3-minio-integration
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

@@ -32,7 +32,7 @@ build plumbing.
 | Service runtime package | `packages/awskit-s3/lwt`, `packages/awskit-s3/eio`, `packages/awskit-s3/lwt/unix` | Owns service-specific client entrypoints for the selected runtime. |
 | Simulator package | `packages/awskit-s3/sim` | Public root simulator API; implementation modules stay private. |
 | Examples | `examples/<runtime-or-backend>` | Buildable workflows using supported public APIs. |
-| Tests | `test/<package-or-contract>` | Deterministic tests, protocol evidence, runtime conformance, simulator contracts, and integration contracts. |
+| Tests | `test/<package-or-surface>` | Deterministic tests, protocol evidence, runtime workloads, simulator workloads, and integration workloads. |
 
 Public `.mli` files live beside their implementation. Package overview docs
 live in `packages/*/doc`. Test helpers live under `test/support` or a
@@ -40,8 +40,8 @@ package-scoped `test/*/support` library and remain private unless a later
 design intentionally publishes a conformance contract.
 
 Protocol fixtures belong under `test/*/fixtures`. Property tests, fuzz replay,
-simulator contracts, runtime conformance, and MinIO contracts belong under
-named test directories with Dune aliases documented in `docs/testing.md`.
+simulator workloads, runtime workloads, and MinIO integration tests belong
+under named test directories with Dune aliases documented in `docs/testing.md`.
 
 Package boundaries are public design. Add a dependency only when it improves
 correctness or gives a clear DX benefit, and keep it in the smallest package

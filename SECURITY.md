@@ -110,5 +110,7 @@ Relevant executable evidence lives in:
 - `test/awskit/lwt/unix/test_integration.ml`;
 - `test/awskit-s3/test_presigned.ml`;
 - `test/awskit-s3/test_endpoint.ml`;
-- `test/runtime-conformance/test_runtime_conformance.ml`;
+- `test/support/runtime_http_workload.ml`;
+- `test/awskit/eio/test_runtime_http_workload_eio.ml`;
+- `test/awskit/lwt/test_runtime_http_workload_lwt.ml`;
 - `docs/security-threat-model.md`.

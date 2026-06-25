@@ -1,7 +1,7 @@
 # CI Workflow
 
-Awskit uses `.github/workflows/main.yml` for build, test, MinIO contract, and
-documentation publishing workflows.
+Awskit uses `.github/workflows/main.yml` for build, test, MinIO integration,
+and documentation publishing workflows.
 
 ## Events
 
@@ -39,28 +39,29 @@ as release branch pushes, scheduled runs, and manual dispatches.
 - Builds executable examples and odoc documentation with
   `opam exec -- dune build @examples @doc`.
 
-`protocol-evidence`
+`no-network-correctness`
 
 - Runs on Ubuntu with the latest OCaml 5 compiler.
 - Installs test and documentation dependencies for all packages.
-- Builds protocol evidence with `opam exec -- dune build @check-protocol`.
-- Does not start Docker services; local MinIO adapter evidence stays in the
-  separate `s3-minio-contract` job.
+- Builds no-network correctness evidence with
+  `opam exec -- dune build @check-local`.
+- Does not start local services; MinIO adapter evidence stays in the separate
+  `s3-minio-integration` job.
 
-`s3-minio-contract`
+`s3-minio-integration`
 
 - Runs on Ubuntu.
 - Starts MinIO with Docker Compose as a local S3-compatible test double.
-- Runs `opam exec -- dune build --force @check-docker`.
+- Runs `opam exec -- dune build --force @check-integration`.
 - Provides local adapter integration evidence, separate from no-network
-  protocol evidence.
+  correctness evidence.
 - Dumps MinIO logs on failure.
 
 `publish-docs`
 
 - Runs only on pushes to `main`.
 - Requires build/test, docs/examples, and MinIO jobs to pass.
-- Also requires the protocol evidence job to pass.
+- Also requires the no-network correctness job to pass.
 - Builds odoc documentation and deploys `_build/default/_doc/_html` to GitHub
   Pages.
 
@@ -88,7 +89,7 @@ Reproduce locally with the closest command. For MinIO failures:
 
 ```sh
 docker compose up -d
-opam exec -- dune build --force @check-docker
+opam exec -- dune build --force @check-integration
 docker compose down -v
 ```
 

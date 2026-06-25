@@ -38,7 +38,7 @@ done
 opam install --yes --working-dir --with-test --with-doc --with-dev-setup "$@"
 opam exec -- dune fmt
 opam exec -- dune runtest --force
-opam exec -- dune build @check-protocol
+opam exec -- dune build @check-local
 if [ -n "$AWSKIT_EXAMPLE_OPAM_PACKAGES" ]; then
   opam install --yes $AWSKIT_EXAMPLE_OPAM_PACKAGES
 fi
@@ -85,4 +85,4 @@ rm -rf "$dist_dir" "$dist_log"
 
 docker compose up -d
 MINIO_STARTED=1
-opam exec -- dune build --force @check-docker
+opam exec -- dune build --force @check-integration

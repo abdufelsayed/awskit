@@ -19,8 +19,8 @@ Rows are intentionally conservative:
 
 The simulator is deterministic application-level evidence. It is not live AWS
 coverage and is not a wire-protocol authority. MinIO evidence is the opt-in
-local S3-compatible test-double profile run by [@minio-contract]; it does not
-imply support for arbitrary S3-compatible providers.
+local S3-compatible test-double profile run by [@s3-minio-workload]; it does
+not imply support for arbitrary S3-compatible providers.
 
 {1 Object Operations}
 
@@ -223,8 +223,8 @@ imply support for arbitrary S3-compatible providers.
     [Bucket.Ownership_controls].}
   {li {b Simulator coverage}: yes for the strict shared contract profile and
     modeled simulator state.}
-  {li {b MinIO/evidence coverage}: partial. MinIO contract tests cover policy,
-    versioning, and tagging roundtrips, with known profile differences for
+  {li {b MinIO/evidence coverage}: partial. MinIO integration tests cover
+    policy, versioning, and tagging roundtrips, with known profile differences for
     exact policy JSON and deleted bucket tags. Bucket encryption, CORS,
     public-access-block, and ownership-controls are not enabled in the MinIO
     capability profile.}
@@ -296,7 +296,7 @@ imply support for arbitrary S3-compatible providers.
   {li {b Simulator coverage}: yes for adapter-bound generation using simulator
     credentials, region, clock, and endpoint configuration.}
   {li {b MinIO/evidence coverage}: fixture and unit evidence covers artifact
-    construction; MinIO contract tests primarily exercise runtime operations,
+    construction; MinIO integration tests primarily exercise runtime operations,
     not a separate presigned HTTP execution flow.}
   {li {b Notes and boundaries}: artifacts use SigV4 query authentication and
     [UNSIGNED-PAYLOAD]. Raw bearer URLs are hidden behind explicit reveal APIs.
@@ -320,8 +320,8 @@ imply support for arbitrary S3-compatible providers.
   {li {b Simulator coverage}: the simulator implements the synchronous client
     shape, in-memory store, operation history, deterministic clock, and fault
     injection.}
-  {li {b MinIO/evidence coverage}: the named MinIO contract target is tested
-    through [awskit-s3-lwt-unix].}
+  {li {b MinIO/evidence coverage}: the named MinIO integration target is
+    tested through [awskit-s3-lwt-unix].}
   {li {b Notes and boundaries}: there is no ready Eio Unix aggregate package.
     Eio callers own HTTPS/TLS, CA roots, RNG initialization, and platform
     policy. Generic Lwt callers own their Cohttp client and required retry or
@@ -337,7 +337,7 @@ imply support for arbitrary S3-compatible providers.
     provider compatibility promise.}
   {li {b Simulator coverage}: no, simulator evidence is local model evidence.}
   {li {b MinIO/evidence coverage}: MinIO is the named local S3-compatible test
-    double where [@minio-contract] states coverage.}
+    double where [@s3-minio-workload] states coverage.}
   {li {b Notes and boundaries}: arbitrary S3-compatible providers, provider
     extensions, and provider-specific behavior are unsupported. Live AWS account
     compatibility is optional/manual and is not a release gate for this support

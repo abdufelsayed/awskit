@@ -18,7 +18,7 @@
   (alias s3-protocol-replay)))
 
 (alias
- (name check-docker)
+ (name check-integration)
  (deps
   dune-project
   (alias s3-minio-workload)))
@@ -28,19 +28,11 @@
  (deps
   (alias_rec discovery)))
 
-; Compatibility aliases stay usable while the test tree is rebuilt. Focused
-; workload passes replace these no-op deps with the aliases they introduce.
-
 (alias
  (name runtime-http-workload)
  (deps
   (alias test/awskit/eio/runtime-http-workload)
   (alias test/awskit/lwt/runtime-http-workload)))
-
-(alias
- (name runtime-conformance)
- (deps
-  (alias runtime-http-workload)))
 
 (alias
  (name s3-sim-workload)
@@ -68,86 +60,6 @@
   (alias test/awskit-s3/protocol/s3-protocol-replay)))
 
 (alias
- (name protocol-pbt)
- (deps
-  (alias s3-protocol-wire)))
-
-(alias
- (name protocol-fixtures)
- (deps
-  (alias s3-protocol-fixtures)))
-
-(alias
- (name fuzz-replay)
- (deps
-  (alias s3-protocol-replay)))
-
-(alias
  (name s3-minio-workload)
  (deps
   (alias test/awskit-s3/lwt/unix/s3-minio-workload)))
-
-(alias
- (name minio-contract)
- (deps
-  (alias s3-minio-workload)))
-
-(alias
- (name check-protocol)
- (package awskit)
- (deps dune-project))
-
-(alias
- (name check-protocol)
- (package awskit-unix)
- (deps dune-project))
-
-(alias
- (name check-protocol)
- (package awskit-s3)
- (deps
-  dune-project
-  (alias test/awskit-s3/protocol/s3-protocol-wire)
-  (alias test/awskit-s3/protocol/s3-protocol-fixtures)
-  (alias test/awskit-s3/protocol/s3-protocol-replay)))
-
-(alias
- (name check-protocol)
- (package awskit-s3-sim)
- (deps
-  dune-project
-  (alias test/awskit-s3/sim/s3-sim-workload)))
-
-(alias
- (name check-protocol)
- (package awskit-lwt)
- (deps
-  dune-project
-  (alias test/awskit/lwt/runtime-conformance)))
-
-(alias
- (name check-protocol)
- (package awskit-lwt-unix)
- (deps dune-project))
-
-(alias
- (name check-protocol)
- (package awskit-eio)
- (deps
-  dune-project
-  (alias test/awskit/eio/runtime-conformance)))
-
-(alias
- (name check-protocol)
- (package awskit-s3-lwt)
- (deps dune-project))
-
-(alias
- (name check-protocol)
- (package awskit-s3-lwt-unix)
- (deps dune-project))
-
-(alias
- (name check-protocol)
- (package awskit-s3-eio)
- (deps dune-project))

@@ -20,9 +20,3 @@
  (deps test_s3_minio_workload.exe)
  (action
   (run ./test_s3_minio_workload.exe)))
-
-(alias
- (name minio-contract)
- (package awskit-s3-lwt-unix)
- (deps
-  (alias s3-minio-workload)))

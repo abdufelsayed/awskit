@@ -275,9 +275,9 @@ S3-compatible endpoint. Plain HTTP is explicit: loopback endpoints use
 - structured S3 error classifiers.
 
 Awskit targets AWS S3 semantics. S3-compatible services such as MinIO are useful
-for local contract testing where stated in the support policy, but application
-behavior should be written against AWS S3 semantics unless a provider-specific
-difference is intentional.
+for local integration testing where stated in the support policy, but
+application behavior should be written against AWS S3 semantics unless a
+provider-specific difference is intentional.
 
 Optional lookup helpers convert object-not-found responses to `Ok None` while
 leaving other failures structured. S3 can return status-only `HeadObject` 404
@@ -407,15 +407,15 @@ opam exec -- dune test
 opam exec -- dune build @examples @doc
 ```
 
-Optional MinIO contract tests:
+Optional MinIO integration tests:
 
 ```sh
 docker compose up -d
-opam exec -- dune build --force @minio-contract
+opam exec -- dune build --force @s3-minio-workload
 docker compose down -v
 ```
 
-The MinIO contract runner defaults to `http://127.0.0.1:9000` with the
+The MinIO integration runner defaults to `http://127.0.0.1:9000` with the
 `minioadmin` credentials from `docker-compose.yml`. Override with:
 
 ```text

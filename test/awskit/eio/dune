@@ -26,12 +26,6 @@
    "workload:awskit-eio:runtime-http")))
 
 (alias
- (name runtime-conformance)
- (package awskit-eio)
- (deps
-  (alias runtime-http-workload)))
-
-(alias
  (name discovery)
  (package awskit-eio)
  (deps

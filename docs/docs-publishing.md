@@ -25,8 +25,8 @@ No custom domain, `CNAME`, or Cloudflare configuration is required.
 The `publish-docs` job in `.github/workflows/main.yml`:
 
 - Runs only on pushes to `main`.
-- Waits for build/test, docs/examples, protocol evidence, and MinIO contract
-  jobs.
+- Waits for build/test, docs/examples, no-network correctness, and MinIO
+  integration jobs.
 - Installs documentation dependencies with `opam install --with-doc --deps-only .`.
 - Builds docs with `opam exec -- dune build @doc`.
 - Uploads `_build/default/_doc/_html`.

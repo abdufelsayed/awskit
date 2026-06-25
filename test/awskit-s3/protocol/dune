@@ -39,12 +39,6 @@
  (action
   (run ./test_protocol_pbt.exe test "workload:awskit-s3:protocol-wire")))
 
-(alias
- (name protocol-pbt)
- (package awskit-s3)
- (deps
-  (alias s3-protocol-wire)))
-
 (test
  (name test_protocol_fixtures)
  (package awskit-s3)
@@ -69,12 +63,6 @@
  (action
   (run ./test_protocol_fixtures.exe test "fixture:awskit-s3:protocol-wire")))
 
-(alias
- (name protocol-fixtures)
- (package awskit-s3)
- (deps
-  (alias s3-protocol-fixtures)))
-
 (test
  (name test_fuzz_replay)
  (package awskit-s3)
@@ -97,12 +85,6 @@
   (source_tree ../fixtures/protocol/fuzz-replay))
  (action
   (run ./test_fuzz_replay.exe test "replay:awskit-s3:protocol-wire")))
-
-(alias
- (name fuzz-replay)
- (package awskit-s3)
- (deps
-  (alias s3-protocol-replay)))
 
 (alias
  (name discovery)

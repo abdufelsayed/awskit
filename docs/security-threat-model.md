@@ -30,8 +30,9 @@ local S3-compatible contract target where executable contract coverage exists.
   container metadata endpoints.
 - The simulator is an in-process test/runtime boundary and does not prove live
   AWS behavior.
-- MinIO is the named local S3-compatible contract target covered by contract
-  tests; coverage does not imply provider-wide S3-compatible support.
+- MinIO is the named local S3-compatible integration target covered by
+  service-backed tests; coverage does not imply provider-wide S3-compatible
+  support.
 - Documentation examples are public artifacts and must avoid printing bearer
   presigned URLs or raw credentials by default.
 - CI is the automated evidence boundary for builds, documentation, and tests.
