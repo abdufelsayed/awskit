@@ -20,11 +20,11 @@ artifacts, distribution archive documentation, and MinIO integration evidence.
 Release branch CI must be green before merging the release PR. The required CI
 evidence is:
 
-- default package build and tests on Linux and macOS;
-- Eio package build and tests on Linux and macOS;
-- docs and examples;
-- no-network correctness evidence;
-- MinIO S3 integration evidence.
+- `Required CI` from `.github/workflows/ci.yml`, covering package metadata,
+  default package build and tests on Linux and macOS, Eio package build and
+  tests on Linux and macOS, docs/examples, no-network correctness evidence,
+  and MinIO S3 integration evidence;
+- `Release check` from `.github/workflows/release-validation.yml`.
 
 Check PR state with:
 
@@ -53,6 +53,7 @@ The release PR must record:
 
 - release branch head SHA used for validation;
 - `gh pr checks` result;
+- `Release check` result;
 - `scripts/release-check.sh` result;
 - public API review status;
 - support/security docs status;

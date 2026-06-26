@@ -31,7 +31,7 @@ List the release-facing files changed in this PR. Common release files include:
 - `README.md`, `SUPPORT.md`, `SECURITY.md`, and `docs/*.md`
 - package documentation under `packages/*/doc`
 - examples under `examples/`
-- release and CI automation such as `.github/workflows/main.yml` and `scripts/`
+- release and CI automation such as `.github/workflows/*.yml` and `scripts/`
 
 ## Validation
 

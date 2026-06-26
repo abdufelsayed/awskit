@@ -22,17 +22,18 @@ No custom domain, `CNAME`, or Cloudflare configuration is required.
 
 ## Workflow
 
-The `publish-docs` job in `.github/workflows/main.yml`:
+The `Publish docs` workflow in `.github/workflows/docs.yml`:
 
-- Runs only on pushes to `main`.
-- Waits for build/test, docs/examples, no-network correctness, and MinIO
-  integration jobs.
+- Runs after `.github/workflows/ci.yml` succeeds on `main`.
+- Can be dispatched manually from `main`.
+- Checks out the exact commit whose `CI` workflow completed when triggered by
+  `workflow_run`.
 - Installs documentation dependencies with `opam install --with-doc --deps-only .`.
 - Builds docs with `opam exec -- dune build @doc`.
 - Uploads `_build/default/_doc/_html`.
 - Deploys with `actions/deploy-pages`.
 
-The job is expected to skip on release branch pushes and pull requests.
+The workflow is expected to skip on release branch pushes and pull requests.
 
 ## Updating Documentation URLs
 

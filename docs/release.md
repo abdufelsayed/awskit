@@ -84,14 +84,15 @@ gh pr checks <pr-number> --watch=false
 
 Required release-branch checks:
 
-- Default package build and tests.
-- Eio package build and tests.
-- Documentation and examples.
-- No-network correctness evidence.
-- MinIO S3 integration evidence.
+- `Required CI` from `.github/workflows/ci.yml`, which aggregates package
+  metadata, default package build/tests, Eio package build/tests,
+  documentation/examples, no-network correctness evidence, and MinIO S3
+  integration evidence.
+- `Release check` from `.github/workflows/release-validation.yml`, which runs
+  `scripts/release-check.sh` for release branch pushes.
 
-The `publish-docs` job is expected to skip on release branches because it only
-runs on pushes to `main`.
+The `Publish docs` workflow is expected to skip on release branches because it
+only runs after `CI` succeeds on `main`.
 
 ## Local Release Validation
 

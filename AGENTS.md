@@ -30,7 +30,8 @@ changes, writing descriptions, updating release notes, or opening pull requests.
   ledger.
 - Public package documentation lives in `packages/*/doc`.
 - Maintainer workflows live in `docs`.
-- CI and documentation publishing live in `.github/workflows/main.yml`.
+- CI, stress evidence, release validation, and documentation publishing live in
+  `.github/workflows/*.yml`.
 - Release validation lives in `scripts/release-check.sh`.
 
 ## Required Checks
