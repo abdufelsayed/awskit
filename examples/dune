@@ -1,6 +1,7 @@
 (alias
  (name examples)
  (deps
+  (alias sim/simulator-contract)
   lwt/put_get.exe
   lwt/list_prefix.exe
   lwt/presign.exe

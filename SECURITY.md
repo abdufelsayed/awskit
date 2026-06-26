@@ -105,12 +105,14 @@ coverage.
 
 Relevant executable evidence lives in:
 
-- `test/awskit/test_error_redaction.ml`;
-- `test/awskit/test_core_contract.ml`;
-- `test/awskit/lwt/unix/test_integration.ml`;
-- `test/awskit-s3/test_presigned.ml`;
-- `test/awskit-s3/test_endpoint.ml`;
+- `test/awskit/test_core_contracts.ml`;
+- `test/awskit/runtime/test_runtime_contracts.ml`;
 - `test/support/runtime_http_workload.ml`;
 - `test/awskit/eio/test_runtime_http_workload_eio.ml`;
 - `test/awskit/lwt/test_runtime_http_workload_lwt.ml`;
+- `test/awskit-s3/protocol/test_protocol_pbt.ml`;
+- `test/awskit-s3/protocol/test_protocol_fixtures.ml`;
+- `test/awskit-s3/protocol/test_fuzz_replay.ml`;
+- `test/awskit-s3/fixtures/protocol/presign/`;
+- `test/awskit-s3/fixtures/protocol/fuzz-replay/`;
 - `docs/security-threat-model.md`.

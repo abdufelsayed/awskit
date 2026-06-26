@@ -32,10 +32,12 @@ surfaces, and publication targets. -->
 <!-- Fill in completed release evidence with links, SHAs, and command results. -->
 
 - Branch head:
-- CI:
+- Required CI:
+- Release check:
 - Local release check:
 - Public API review:
 - Support/security docs:
+- Live AWS scope:
 - Documentation publishing:
 
 ## Publication

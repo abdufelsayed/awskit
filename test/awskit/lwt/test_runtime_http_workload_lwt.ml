@@ -338,6 +338,101 @@ end
 
 module Workload = Runtime_http_workload.Make (Target)
 
+let sensitive_transport_exception =
+  "Authorization: AWS4-HMAC-SHA256 X-Amz-Signature=secret"
+
+module Failing_client = struct
+  include Cohttp_lwt_unix.Client
+
+  let call ?ctx:_ ?headers:_ ?body:_ ?chunked:_ _meth _uri =
+    Lwt.fail (Failure sensitive_transport_exception)
+end
+
+module Failing_aws = Awskit_lwt.Make (Failing_client)
+
+let awskit_lwt_log_src () =
+  match
+    List.find (Logs.Src.list ()) ~f:(fun src ->
+        String.equal (Logs.Src.name src) "awskit-lwt")
+  with
+  | Some src -> src
+  | None -> Alcotest.fail "missing awskit-lwt log source"
+
+let capture_awskit_lwt_warnings f =
+  let awskit_lwt_src = awskit_lwt_log_src () in
+  let previous_reporter = Logs.reporter () in
+  let previous_level = Logs.Src.level awskit_lwt_src in
+  let messages = ref [] in
+  let reporter =
+    {
+      Logs.report =
+        (fun src level ~over k msgf ->
+          let capture ?header:_ ?tags:_ fmt =
+            Stdlib.Format.kasprintf
+              (fun message ->
+                if
+                  String.equal (Logs.Src.name src) "awskit-lwt"
+                  && Poly.equal level Logs.Warning
+                then messages := message :: !messages;
+                over ();
+                k ())
+              fmt
+          in
+          msgf capture);
+    }
+  in
+  Exn.protect
+    ~f:(fun () ->
+      Logs.Src.set_level awskit_lwt_src (Some Logs.Warning);
+      Logs.set_reporter reporter;
+      let result = f () in
+      (result, List.rev !messages))
+    ~finally:(fun () ->
+      Logs.set_reporter previous_reporter;
+      Logs.Src.set_level awskit_lwt_src previous_level)
+
+let test_transport_failure_log_is_redacted () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AK" ~secret_access_key:"SK" ()
+  in
+  let conn =
+    Failing_aws.create ~endpoint:"http://127.0.0.1:9000" ~region:"us-east-1"
+      ~credentials
+      ~clock:(fun () -> Ptime.epoch)
+      ~retry_policy:Awskit.Retry.disabled
+      ~sleep:(fun span -> Lwt_unix.sleep (Ptime.Span.to_float_s span))
+      ~random_float:(fun ~upper_bound:_ -> 0.0)
+      ~timeout_policy ()
+    |> conn_or_fail
+  in
+  let request =
+    let target =
+      Awskit.Request.Target.create_exn ~scheme:`Http ~host:"127.0.0.1"
+        ~port:9000 ~path:"/" ()
+    in
+    Awskit.Request.create_exn ~method_:`GET ~target ()
+  in
+  let result, warnings =
+    capture_awskit_lwt_warnings (fun () ->
+        Lwt_main.run
+          (Failing_aws.Runtime.Transport.with_response conn request
+             ~body:Failing_aws.Runtime.Request_body.empty
+             ~consume:(fun _response _body -> Lwt.return_ok ())))
+  in
+  (match result with
+  | Error error ->
+      Alcotest.(check bool)
+        "transport error redacts public diagnostic" false
+        (String.is_substring
+           (Awskit.Error.to_string_hum error)
+           ~substring:sensitive_transport_exception)
+  | Ok () -> Alcotest.fail "transport exception should fail request");
+  Alcotest.(check bool) "warning captured" true (not (List.is_empty warnings));
+  List.iter warnings ~f:(fun warning ->
+      Alcotest.(check bool)
+        "warning log redacts transport exception" false
+        (String.is_substring warning ~substring:sensitive_transport_exception))
+
 let suite =
   List.map Workload.suite ~f:(fun (name, cases) ->
       if String.equal name "workload:awskit-lwt:runtime-http" then
@@ -346,6 +441,8 @@ let suite =
           @ [
               Alcotest.test_case "read error invalidates reader" `Quick
                 test_reader_invalidated_after_read_error;
+              Alcotest.test_case "transport failure log is redacted" `Quick
+                test_transport_failure_log_is_redacted;
             ] )
       else (name, cases))
 

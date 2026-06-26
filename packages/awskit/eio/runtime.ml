@@ -569,10 +569,13 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
                 | Some (Error error) -> Error error
                 | _ ->
                     let message = Exn.to_string exn in
-                    Log.warn (fun m -> m "HTTP call failed: %s" message);
-                    Error
-                      (Awskit.Error.Producer.transport ~retryable:true message))
-            )
+                    let error =
+                      Awskit.Error.Producer.transport ~retryable:true message
+                    in
+                    Log.warn (fun m ->
+                        m "HTTP call failed: %s"
+                          (Awskit.Error.to_string_hum error));
+                    Error error))
       in
       let run_attempt () =
         try

@@ -64,7 +64,7 @@ release evidence that downstream runtime authors can rely on.
   instead of `server_side_encryption`; SSE-C multipart uploads can now send
   customer-key headers on create, upload-part, and complete requests, and
   unknown encryption strings are preserved only in read-side response metadata.
-  (ffaba1a)
+  (04e5603)
 - Removed accidental public implementation surfaces: flat S3 root operation
   aliases, request builders, XML parsers, runtime internals, adapter transfer
   internals, the S3 signature-sharing implementation module, and simulator
@@ -120,9 +120,10 @@ release evidence that downstream runtime authors can rely on.
   empty `ListObjectVersions` marker elements are treated as absent, supported
   S3-compatible payload-hash forms remain accepted, future response-only
   checksum and enum values are preserved when modeled, unknown outbound checksum
-  values are rejected before request construction, and unmodeled storage classes
-  can be sent through `Storage_class.Other`.
-  (fa14e23, e83d337, ba454b1, a23f2ee, e8d7032)
+  values are rejected before request construction, unmodeled storage classes can
+  be sent through `Storage_class.Other`, and bodiless HTTP responses do not
+  consume response bodies even when framing headers are present.
+  (fa14e23, e83d337, ba454b1, a23f2ee, e8d7032, c86e4de, 15a57ec)
 - S3 helpers now reuse the same lower request primitives as the primitive
   operations, so `Object.find` shares `Object.get` request construction and
   context behavior, presigned helpers share endpoint-config signing paths, and
@@ -149,9 +150,10 @@ release evidence that downstream runtime authors can rely on.
   OCaml 4.14 non-Eio package builds. (058c0db, 8631060)
 - Expanded local and CI release evidence to cover examples, generated package
   documentation, distribution artifacts, package-scoped release gates, MinIO
-  contracts, protocol fixtures, fuzz replay, paginator property tests, and
-  runtime-conformance suites. (7c08cb7, bc860a0, d804565, d523c8c, 3187e10,
-  107a815, 5009f56, be2e099, f569daa)
+  contracts, protocol fixtures, fuzz replay, paginator property tests, runtime
+  conformance suites, and stricter release validation scripts. (7c08cb7,
+  bc860a0, d804565, d523c8c, 3187e10, 107a815, 5009f56, be2e099, f569daa,
+  6d99629)
 - Added GitHub Pages publishing for generated package documentation on `main`
   pushes and updated package documentation URLs to the Pages site. (d5abfa6)
 

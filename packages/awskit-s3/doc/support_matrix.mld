@@ -151,9 +151,11 @@ not imply support for arbitrary S3-compatible providers.
   {li {b Simulator coverage}: yes, including version ids, delete markers,
     suspended versioning behavior, and version-list pagination.}
   {li {b MinIO/evidence coverage}: yes for enabling versioning, reading prior
-    versions, copying prior versions, delete markers, version listings, and
-    restoring a current object. Suspended-versioning null-version behavior is
-    not part of the MinIO capability profile.}
+    versions, copying prior versions, delete markers, and restoring a current
+    object. Version-listing pagination is simulator/protocol evidence in this
+    release rather than part of the MinIO capability profile. Suspended
+    versioning null-version behavior is not part of the MinIO capability
+    profile.}
   {li {b Notes and boundaries}: this is S3 object versioning, not Object Lock,
     retention, legal hold, MFA delete, lifecycle expiration, replication, or
     compliance governance.}

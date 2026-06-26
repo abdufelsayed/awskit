@@ -41,10 +41,10 @@ branch until the next release replaces it.
 | Credential source | Status | Notes |
 | --- | --- | --- |
 | Explicit static credentials | supported | Useful for tests and controlled configuration. Long-lived credentials in source code are not recommended. |
-| Environment variables | supported | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN`. |
-| Shared credentials/config profiles | supported | Static profiles from standard AWS files. |
-| ECS/container credentials | supported in Lwt Unix | Uses the Lwt Unix metadata provider where implemented. |
-| EC2 IMDS credentials | supported in Lwt Unix | Uses IMDSv2 when available and supports documented opt-outs/fallback controls. |
+| Environment variables | supported, scoped | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN`. Covered by the core provider-chain contract and package docs; provider-specific parser evidence is a follow-up target. |
+| Shared credentials/config profiles | supported, scoped | Static profiles from standard AWS files. Covered by the core provider-chain contract and package docs; provider-specific parser evidence is a follow-up target. |
+| ECS/container credentials | supported in Lwt Unix, scoped | Uses the Lwt Unix metadata provider where implemented. Metadata-provider parser, cache, and endpoint-policy evidence is a follow-up target. |
+| EC2 IMDS credentials | supported in Lwt Unix, scoped | Uses IMDSv2 when available and supports documented opt-outs/fallback controls. Metadata-provider parser, cache, timeout, cancellation, and fallback-policy evidence is a follow-up target. |
 | Web identity, process, SSO, STS assume-role profiles | unsupported | Add executable provider evidence before documenting these as supported. |
 
 ## S3 Scope

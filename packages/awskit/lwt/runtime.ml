@@ -657,10 +657,13 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                   | Some escaped -> Lwt.fail escaped
                   | None ->
                       let message = Exn.to_string exn in
-                      Log.warn (fun m -> m "HTTP call failed: %s" message);
-                      Lwt.return_error
-                        (Awskit.Error.Producer.transport ~retryable:true message)
-                  )))
+                      let error =
+                        Awskit.Error.Producer.transport ~retryable:true message
+                      in
+                      Log.warn (fun m ->
+                          m "HTTP call failed: %s"
+                            (Awskit.Error.to_string_hum error));
+                      Lwt.return_error error)))
     in
     Lwt.finalize
       (fun () ->
