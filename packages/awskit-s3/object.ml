@@ -435,6 +435,7 @@ module Delete_many = struct
 
   type item_error = {
     key : Object_key.t;
+    version_id : Version_id.t option;
     code : string;
     message : string option;
   }

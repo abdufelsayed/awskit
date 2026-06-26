@@ -21,17 +21,15 @@ let seed_scenarios =
     scenario ~name:"get-304-content-length" ~method_:`GET ~status:304
       ~framing:(Content_length { declared = 5; actual = "hello" })
       ~connection:Keep_alive ();
+    scenario ~name:"get-100-content-length" ~method_:`GET ~status:100
+      ~framing:(Content_length { declared = 5; actual = "hello" })
+      ~connection:Keep_alive ();
     scenario ~name:"get-200-chunked" ~method_:`GET ~status:200
       ~framing:(Chunked [ "he"; "llo" ])
       ~connection:Keep_alive ();
     scenario ~name:"get-200-content-length-underflow" ~method_:`GET ~status:200
       ~framing:(Content_length { declared = 6; actual = "hello" })
       ~connection:Close ();
-    scenario ~name:"get-200-malformed-chunked" ~method_:`GET ~status:200
-      ~framing:(Malformed_chunked "5\r\nhello\r\nnot-hex\r\n") ~connection:Close
-      ();
-    scenario ~name:"get-200-malformed-chunked-truncated-data" ~method_:`GET
-      ~status:200 ~framing:(Malformed_chunked "5\r\nhell") ~connection:Close ();
     scenario ~name:"head-200-malformed-chunked-bodiless" ~method_:`HEAD
       ~status:200 ~framing:(Malformed_chunked "5\r\nhello\r\nnot-hex\r\n")
       ~connection:Close ();
@@ -40,6 +38,30 @@ let seed_scenarios =
       ~connection:Close ();
     scenario ~name:"get-304-malformed-chunked-bodiless" ~method_:`GET
       ~status:304 ~framing:(Malformed_chunked "5\r\nhello\r\nnot-hex\r\n")
+      ~connection:Close ();
+    scenario ~name:"head-200-conflicting-length-and-chunked-bodiless"
+      ~method_:`HEAD ~status:200
+      ~framing:
+        (Conflicting_length_and_chunked { declared = 5; chunks = [ "hi" ] })
+      ~connection:Close ();
+    scenario ~name:"get-204-conflicting-length-and-chunked-bodiless"
+      ~method_:`GET ~status:204
+      ~framing:
+        (Conflicting_length_and_chunked { declared = 5; chunks = [ "hi" ] })
+      ~connection:Close ();
+    scenario ~name:"head-200-transfer-encoding-with-content-length-bodiless"
+      ~method_:`HEAD ~status:200
+      ~framing:
+        (Malformed_header_block
+           "Transfer-Encoding: gzip\r\nContent-Length: 5\r\n") ~connection:Close
+      ();
+    scenario ~name:"head-200-duplicate-content-length-mismatch-strict"
+      ~method_:`HEAD ~status:200
+      ~framing:
+        (Duplicate_content_length { first = 5; second = 6; actual = "hello" })
+      ~connection:Close ();
+    scenario ~name:"head-200-content-length-plus-strict" ~method_:`HEAD
+      ~status:200 ~framing:(Malformed_header_block "Content-Length: +5\r\n")
       ~connection:Close ();
     scenario ~name:"get-200-duplicate-content-length" ~method_:`GET ~status:200
       ~framing:
@@ -212,6 +234,36 @@ let framing_gen =
         (1, malformed_header_block_gen);
       ])
 
+let method_status_gen =
+  QCheck.Gen.(
+    oneof_list
+      [
+        (`GET, 200);
+        (`GET, 204);
+        (`GET, 206);
+        (`GET, 304);
+        (`GET, 400);
+        (`GET, 404);
+        (`GET, 500);
+        (`HEAD, 200);
+        (`HEAD, 204);
+        (`HEAD, 304);
+        (`HEAD, 400);
+        (`HEAD, 404);
+        (`HEAD, 500);
+      ])
+
+let bodiless_method_status_gen =
+  QCheck.Gen.(
+    oneof_list [ (`GET, 100); (`GET, 204); (`GET, 304); (`HEAD, 200) ])
+
+let method_status_gen_for_framing = function
+  | Model.Malformed_chunked _ -> bodiless_method_status_gen
+  | Empty | Content_length _ | Duplicate_content_length _
+  | Conflicting_length_and_chunked _ | Early_close _ | Chunked _
+  | Malformed_header_block _ ->
+      method_status_gen
+
 let connection_for_scenario_gen ~method_ ~status framing =
   let bodiless = Model.is_bodiless_response ~method_ ~status in
   match framing with
@@ -231,9 +283,8 @@ let connection_for_scenario_gen ~method_ ~status framing =
 
 let scenario_gen =
   let open QCheck.Gen in
-  oneof_list [ `GET; `HEAD ] >>= fun method_ ->
-  oneof_list [ 200; 204; 206; 304; 400; 404; 500 ] >>= fun status ->
   framing_gen >>= fun framing ->
+  method_status_gen_for_framing framing >>= fun (method_, status) ->
   connection_for_scenario_gen ~method_ ~status framing >>= fun connection ->
   consume_gen >>= fun consume ->
   return
@@ -266,12 +317,23 @@ let normalize_connection ~method_ ~status framing connection =
   if connection_allowed ~method_ ~status framing connection then connection
   else Model.Close
 
+let normalize_method_status framing method_ status =
+  match framing with
+  | Model.Malformed_chunked _
+    when not (Model.is_bodiless_response ~method_ ~status) ->
+      (`HEAD, status)
+  | Empty | Content_length _ | Duplicate_content_length _
+  | Conflicting_length_and_chunked _ | Early_close _ | Chunked _
+  | Malformed_header_block _ | Malformed_chunked _ ->
+      (method_, status)
+
 let rebuild_scenario scenario ?name ?method_ ?status ?framing ?connection
     ?consume () =
   let name = Option.value name ~default:scenario.Model.name in
   let method_ = Option.value method_ ~default:scenario.method_ in
   let status = Option.value status ~default:scenario.status in
   let framing = Option.value framing ~default:scenario.framing in
+  let method_, status = normalize_method_status framing method_ status in
   let connection = Option.value connection ~default:scenario.connection in
   let connection = normalize_connection ~method_ ~status framing connection in
   let consume = Option.value consume ~default:scenario.consume in
@@ -589,6 +651,56 @@ let test_body_prefix_allows_bounded_short_read () =
     "empty read accepted when modeled prefix is empty" true
     (valid_body_prefix ~max_prefix:"" "")
 
+let test_malformed_chunked_oracle_requires_body_error () =
+  let scenario =
+    Model.scenario ~name:"oracle-malformed-chunked" ~method_:`GET ~status:200
+      ~framing:(Malformed_chunked "5\r\nhello\r\nnot-hex\r\n") ~connection:Close
+      ()
+  in
+  Alcotest.(check string)
+    "malformed chunked is not a successful body" "body-error"
+    (Model.expected_body_to_string scenario.expected_body);
+  Alcotest.(check string)
+    "malformed chunked read-all expects body error" "body-error"
+    (expected_observation_to_string scenario
+       (Model.expected_observation scenario))
+
+let test_bodiless_oracle_applies_body_length_precedence () =
+  let conflicting =
+    Model.scenario ~name:"oracle-bodiless-conflicting-framing" ~method_:`HEAD
+      ~status:200
+      ~framing:
+        (Conflicting_length_and_chunked { declared = 5; chunks = [ "hi" ] })
+      ~connection:Close ()
+  in
+  let strict_metadata =
+    Model.scenario ~name:"oracle-bodiless-strict-content-length" ~method_:`HEAD
+      ~status:200
+      ~framing:
+        (Duplicate_content_length { first = 5; second = 6; actual = "hello" })
+      ~connection:Close ()
+  in
+  let informational =
+    Model.scenario ~name:"oracle-100-content-length" ~method_:`GET ~status:100
+      ~framing:(Content_length { declared = 5; actual = "hello" })
+      ~connection:Keep_alive ()
+  in
+  Alcotest.(check string)
+    "parseable framing conflict ignored for bodiless response" "no-body"
+    (Model.expected_body_to_string conflicting.expected_body);
+  Alcotest.(check bool)
+    "parseable framing conflict is not pre-consumer metadata failure" false
+    (Model.rejects_before_body_consumer conflicting);
+  Alcotest.(check string)
+    "strict content-length metadata still rejects" "body-error"
+    (Model.expected_body_to_string strict_metadata.expected_body);
+  Alcotest.(check bool)
+    "strict content-length metadata rejects before consumer" true
+    (Model.rejects_before_body_consumer strict_metadata);
+  Alcotest.(check string)
+    "informational response is bodiless" "no-body"
+    (Model.expected_body_to_string informational.expected_body)
+
 let check_scenario ~target_name run_scenario scenario =
   let expected = Model.expected_observation scenario in
   let observed = run_scenario scenario in
@@ -658,6 +770,10 @@ module Make (Target : TARGET) = struct
               test_failure_report_contains_replay_reduction_fields;
             Alcotest.test_case "body prefix streaming bounds" `Quick
               test_body_prefix_allows_bounded_short_read;
+            Alcotest.test_case "malformed chunked oracle" `Quick
+              test_malformed_chunked_oracle_requires_body_error;
+            Alcotest.test_case "bodiless oracle precedence" `Quick
+              test_bodiless_oracle_applies_body_length_precedence;
             Alcotest.test_case "generator semantic coverage" `Quick
               test_generator_coverage;
             generated_case;

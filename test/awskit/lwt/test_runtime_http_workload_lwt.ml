@@ -204,6 +204,38 @@ let read_body_once n body =
         | Error _ as error -> Lwt.return error
         | Ok read -> Lwt.return_ok (Stdlib.Bytes.sub_string bytes 0 read)))
 
+let rec read_until_error reader =
+  let bytes = Bytes.create 3 in
+  Lwt.bind
+    (Aws.Runtime.Response_body.read reader bytes ~off:0
+       ~len:(Bytes.length bytes))
+    (function
+      | Error error -> Lwt.return_ok error
+      | Ok 0 ->
+          Lwt.return_error
+            (Awskit.Error.Producer.body "expected response body read error")
+      | Ok _ -> read_until_error reader)
+
+let assert_reader_invalidated reader =
+  let bytes = Bytes.create 1 in
+  Lwt.bind (Aws.Runtime.Response_body.read reader bytes ~off:0 ~len:1) (function
+    | Error error ->
+        Alcotest.(check bool)
+          "reader invalidated" true
+          (String.is_substring
+             (Awskit.Error.to_string_hum error)
+             ~substring:"outside its scope");
+        Lwt.return_ok ()
+    | Ok _ ->
+        Lwt.return_error
+          (Awskit.Error.Producer.body
+             "response body reader remained usable after read error"))
+
+let is_content_length_underflow_error error =
+  String.is_substring
+    (Awskit.Error.to_string_hum error)
+    ~substring:"ended before declared Content-Length"
+
 let consume_body scenario body =
   match scenario.Model.consume with
   | Model.Read_all -> read_body_to_string body
@@ -235,6 +267,47 @@ let run_scenario scenario =
            (timeout_error "runtime HTTP scenario timed out"))
   | Stdlib.Exit -> Model.Observed_exception
 
+let reader_invalidation_scenario =
+  Model.scenario ~name:"lwt-reader-invalidated-after-read-error" ~method_:`GET
+    ~status:200
+    ~framing:(Content_length { declared = 6; actual = "hello" })
+    ~connection:Close ()
+
+let run_reader_invalidation_check () =
+  Lwt_unix.with_timeout 0.75 (fun () ->
+      with_loopback_server reader_invalidation_scenario (fun endpoint ->
+          let conn = request_conn () in
+          let request =
+            request_for_endpoint reader_invalidation_scenario endpoint
+          in
+          Lwt.bind
+            (Aws.Runtime.Transport.with_response conn request
+               ~body:Aws.Runtime.Request_body.empty
+               ~consume:(fun _response response_body ->
+                 Aws.Runtime.Response_body.with_reader response_body
+                   ~consume:(fun reader ->
+                     Lwt.bind (read_until_error reader) (function
+                       | Error _ as error -> Lwt.return error
+                       | Ok first_error ->
+                           Lwt.bind (assert_reader_invalidated reader) (function
+                             | Error _ as error -> Lwt.return error
+                             | Ok () -> Lwt.return_error first_error)))))
+            (function
+              | Error error when is_content_length_underflow_error error ->
+                  Lwt.return_ok ()
+              | Error _ as error -> Lwt.return error
+              | Ok () ->
+                  Lwt.return_error
+                    (Awskit.Error.Producer.body
+                       "expected response body read error"))))
+
+let test_reader_invalidated_after_read_error () =
+  match Lwt_main.run (run_reader_invalidation_check ()) with
+  | Ok () -> ()
+  | Error error -> Alcotest.failf "%a" Awskit.Error.pp error
+  | exception Lwt_unix.Timeout ->
+      Alcotest.fail "reader invalidation scenario timed out"
+
 module Target = struct
   let name = "awskit-lwt"
   let run_scenario = run_scenario
@@ -242,4 +315,15 @@ end
 
 module Workload = Runtime_http_workload.Make (Target)
 
-let () = Alcotest.run "awskit-lwt" Workload.suite
+let suite =
+  List.map Workload.suite ~f:(fun (name, cases) ->
+      if String.equal name "workload:awskit-lwt:runtime-http" then
+        ( name,
+          cases
+          @ [
+              Alcotest.test_case "read error invalidates reader" `Quick
+                test_reader_invalidated_after_read_error;
+            ] )
+      else (name, cases))
+
+let () = Alcotest.run "awskit-lwt" suite

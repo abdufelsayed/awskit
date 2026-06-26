@@ -9,6 +9,11 @@ Each replay file uses a small line-oriented format owned by
 followed by lowercase hex bytes so reduced malformed wire data can be reviewed
 without escaping ambiguity.
 
+Runtime adapters receive response bodies after Cohttp has decoded transfer
+coding. Cohttp's public Lwt and Eio body APIs do not expose whether a chunked
+body ended with the required zero-size chunk, so this corpus must not preserve
+decoded malformed chunked prefixes as successful body-bearing responses.
+
 ```text
 runtime-http-replay-v1
 name=<case-name>

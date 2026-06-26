@@ -216,7 +216,9 @@ let prop_mutated_endpoint_values_are_rejected_or_canonical =
 
 let prop_endpoint_auto_virtual_hosted_object_paths =
   QCheck.Test.make ~count:default_count
-    ~name:"default endpoint auto style uses virtual-hosted object paths"
+    ~name:
+      "default endpoint auto style uses virtual-hosted object paths when \
+       supported"
     (QCheck.make ~print:print_bucket_key
        QCheck.Gen.(
          pair Protocol_generators.valid_bucket_name
@@ -230,13 +232,109 @@ let prop_endpoint_auto_virtual_hosted_object_paths =
       with
       | Error _ -> false
       | Ok resolved ->
-          String.equal
-            (bucket ^ ".s3.us-east-1.amazonaws.com")
-            (Awskit.Endpoint.authority resolved.endpoint)
-          && String.equal (object_path key) resolved.path
-          && String.equal ("/" ^ key) resolved.signing_path
-          && resolved.style = `Virtual_hosted
-          && Awskit.Region.equal test_region resolved.signing_region)
+          if String.equal key "soap" then
+            String.equal "s3.us-east-1.amazonaws.com"
+              (Awskit.Endpoint.authority resolved.endpoint)
+            && String.equal (path_style_object_path ~bucket ~key) resolved.path
+            && String.equal ("/" ^ bucket ^ "/" ^ key) resolved.signing_path
+            && resolved.style = `Path
+            && Awskit.Region.equal test_region resolved.signing_region
+          else
+            String.equal
+              (bucket ^ ".s3.us-east-1.amazonaws.com")
+              (Awskit.Endpoint.authority resolved.endpoint)
+            && String.equal (object_path key) resolved.path
+            && String.equal ("/" ^ key) resolved.signing_path
+            && resolved.style = `Virtual_hosted
+            && Awskit.Region.equal test_region resolved.signing_region)
+
+let resolved_style_to_string = function
+  | `Path -> "path"
+  | `Virtual_hosted -> "virtual-hosted"
+
+let endpoint_or_fail label config ~region =
+  Endpoint_config.endpoint config ~region |> Protocol_support.ok_or_fail label
+
+let test_endpoint_china_partition_hosts () =
+  let cases =
+    [
+      ( "regional cn-north-1",
+        Endpoint_config.aws ~endpoint_variant:`Regional (),
+        "cn-north-1",
+        "s3.cn-north-1.amazonaws.com.cn" );
+      ( "dualstack cn-northwest-1",
+        Endpoint_config.aws ~endpoint_variant:`Dualstack (),
+        "cn-northwest-1",
+        "s3.dualstack.cn-northwest-1.amazonaws.com.cn" );
+      ( "accelerate cn-north-1",
+        Endpoint_config.aws ~endpoint_variant:`Accelerate (),
+        "cn-north-1",
+        "s3-accelerate.amazonaws.com.cn" );
+      ( "fips dualstack cn-northwest-1",
+        Endpoint_config.aws ~endpoint_variant:`Fips_dualstack (),
+        "cn-northwest-1",
+        "s3-fips.dualstack.cn-northwest-1.amazonaws.com.cn" );
+    ]
+  in
+  List.iter
+    (fun (label, config, region, expected_host) ->
+      let endpoint =
+        endpoint_or_fail label config
+          ~region:(Awskit.Region.of_string_exn region)
+      in
+      Alcotest.(check string)
+        label expected_host
+        (Awskit.Endpoint.host endpoint))
+    cases
+
+let resolve_object_or_fail label config ~bucket ~key =
+  Endpoint_resolver.resolve_object_request config ~region:test_region
+    ~bucket:(Bucket_name.of_string_exn bucket)
+    ~key:(Object_key.of_string_exn key)
+  |> Protocol_support.ok_or_fail label
+
+let test_endpoint_soap_key_addressing () =
+  let auto =
+    resolve_object_or_fail "auto soap object" Endpoint_config.default
+      ~bucket:"bucket" ~key:"soap"
+  in
+  Alcotest.(check string)
+    "auto soap host" "s3.us-east-1.amazonaws.com"
+    (Awskit.Endpoint.authority auto.endpoint);
+  Alcotest.(check string) "auto soap path" "/bucket/soap" auto.path;
+  Alcotest.(check string)
+    "auto soap signing path" "/bucket/soap" auto.signing_path;
+  Alcotest.(check string)
+    "auto soap style" "path"
+    (resolved_style_to_string auto.style);
+  let normal =
+    resolve_object_or_fail "auto soapbox object" Endpoint_config.default
+      ~bucket:"bucket" ~key:"soapbox"
+  in
+  Alcotest.(check string)
+    "auto soapbox host" "bucket.s3.us-east-1.amazonaws.com"
+    (Awskit.Endpoint.authority normal.endpoint);
+  Alcotest.(check string)
+    "auto soapbox style" "virtual-hosted"
+    (resolved_style_to_string normal.style);
+  let virtual_hosted =
+    Endpoint_config.aws ~addressing_style:`Virtual_hosted ()
+  in
+  match
+    Endpoint_resolver.resolve_object_request virtual_hosted ~region:test_region
+      ~bucket:(Bucket_name.of_string_exn "bucket")
+      ~key:(Object_key.of_string_exn "soap")
+  with
+  | Error error ->
+      Alcotest.(check (option string))
+        "virtual-hosted soap validation field" (Some "key")
+        (Awskit.Error.validation_field error)
+  | Ok resolved ->
+      Alcotest.failf
+        "expected virtual-hosted soap to fail, got endpoint=%s path=%s style=%s"
+        (Awskit.Endpoint.to_url_prefix resolved.endpoint)
+        resolved.path
+        (resolved_style_to_string resolved.style)
 
 let prop_endpoint_auto_dotted_bucket_uses_path_style =
   QCheck.Test.make ~count:default_count
@@ -646,6 +744,16 @@ let multipart_part_exn number size =
     ~etag:(Object.Etag.of_string_exn (Fmt.str "\"part-%d\"" number))
     ~size ()
 
+let multipart_checksum_part_exn number =
+  let checksum =
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:(Fmt.str "sha256-part-%d" number)
+  in
+  Multipart.Part.create_exn
+    ~part_number:(Multipart.Part_number.of_int_exn number)
+    ~etag:(Object.Etag.of_string_exn (Fmt.str "\"part-%d\"" number))
+    ~checksum ()
+
 let complete_upload_result parts =
   let upload =
     Multipart.Upload.resume
@@ -695,6 +803,37 @@ let prop_complete_upload_rejects_small_nonfinal_parts =
       match result with
       | Error error ->
           Awskit.Error.validation_field error = Some "parts"
+          && conn.Protocol_recording_runtime.Runtime.calls = []
+      | Ok _ -> false)
+
+let prop_complete_upload_rejects_checksum_parts_not_starting_at_one =
+  QCheck.Test.make ~count:boundary_count
+    ~name:
+      "complete multipart rejects checksumed parts not starting at one before \
+       request"
+    (QCheck.make ~print:string_of_int QCheck.Gen.(int_range 2 10_000))
+    (fun number ->
+      let conn, result =
+        complete_upload_result [ multipart_checksum_part_exn number ]
+      in
+      match result with
+      | Error error ->
+          Awskit.Error.validation_field error = Some "part_number"
+          && conn.Protocol_recording_runtime.Runtime.calls = []
+      | Ok _ -> false)
+
+let prop_complete_upload_rejects_checksum_part_gaps =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"complete multipart rejects checksumed part gaps before request"
+    (QCheck.make ~print:string_of_int QCheck.Gen.(int_range 3 10_000))
+    (fun number ->
+      let conn, result =
+        complete_upload_result
+          [ multipart_checksum_part_exn 1; multipart_checksum_part_exn number ]
+      in
+      match result with
+      | Error error ->
+          Awskit.Error.validation_field error = Some "part_number"
           && conn.Protocol_recording_runtime.Runtime.calls = []
       | Ok _ -> false)
 
@@ -932,6 +1071,8 @@ let remaining_protocol_properties =
     prop_get_request_emits_range_header;
     prop_complete_upload_rejects_unsorted_parts_before_request;
     prop_complete_upload_rejects_small_nonfinal_parts;
+    prop_complete_upload_rejects_checksum_parts_not_starting_at_one;
+    prop_complete_upload_rejects_checksum_part_gaps;
   ]
 
 let required_protocol_property_registration_bins =
@@ -980,6 +1121,10 @@ let suite =
     ( "workload:awskit-s3:protocol-wire",
       Alcotest.test_case "generator sample observability (not replay coverage)"
         `Quick test_protocol_generator_sample_observability
+      :: Alcotest.test_case "AWS China endpoint partition hosts" `Quick
+           test_endpoint_china_partition_hosts
+      :: Alcotest.test_case "soap object key addressing" `Quick
+           test_endpoint_soap_key_addressing
       :: Alcotest.test_case "property family registration coverage" `Quick
            test_protocol_property_family_registration
       :: List.map Protocol_support.to_alcotest

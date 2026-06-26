@@ -43,7 +43,8 @@ let connection_header = function
   | Close -> ("Connection", "close")
   | Keep_alive -> ("Connection", "keep-alive")
 
-let is_bodiless_status status = status = 204 || status = 304
+let is_bodiless_status status =
+  (status >= 100 && status < 200) || status = 204 || status = 304
 
 let is_bodiless_response ~method_ ~status =
   match method_ with
@@ -112,37 +113,6 @@ let expected_content_length_body ~declared ~actual =
   else if declared < actual_length then Body (String.prefix actual declared)
   else Body_error
 
-(* Cohttp parses response framing before Awskit sees the body reader. Some raw
-   wire syntax errors are therefore collapsed into observable decoded data
-   instead of surfaced as parser errors. Keep that boundary explicit here; byte
-   parser laws belong in a lower-level protocol parser, not this adapter model. *)
-let decoded_malformed_chunked_prefix wire =
-  let line_end_from offset =
-    String.substr_index ~pos:offset wire ~pattern:"\r\n"
-  in
-  let rec loop offset acc =
-    match line_end_from offset with
-    | None -> String.concat (List.rev acc)
-    | Some line_end -> (
-        let line = String.sub wire ~pos:offset ~len:(line_end - offset) in
-        match Int64.of_string_opt ("0x" ^ line) with
-        | None -> String.concat (List.rev acc)
-        | Some 0L -> String.concat (List.rev acc)
-        | Some length ->
-            let body_start = line_end + 2 in
-            let available = String.length wire - body_start in
-            if available <= 0 then String.concat (List.rev acc)
-            else if Stdlib.Int64.compare length (Int64.of_int available) > 0
-            then
-              let chunk = String.drop_prefix wire body_start in
-              String.concat (List.rev (chunk :: acc))
-            else
-              let length = Int64.to_int_exn length in
-              let chunk = String.sub wire ~pos:body_start ~len:length in
-              loop (body_start + length + 2) (chunk :: acc))
-  in
-  loop 0 []
-
 let visible_header_lines_and_hidden_body block =
   let block = raw_header_block block in
   let rec loop offset headers =
@@ -209,18 +179,23 @@ let visible_header_rejects_before_body_consumer headers =
   || visible_content_length_present headers
      && visible_transfer_encoding_present headers
 
+let bodiless_header_rejects_before_body_consumer headers =
+  visible_content_length_error headers
+
 let visible_header_pairs_for_framing = function
   | Malformed_header_block block ->
       fst (visible_header_lines_and_hidden_body block)
   | framing -> headers_for_framing framing
 
-let visible_headers_reject_before_body_consumer ~headers framing =
-  visible_header_rejects_before_body_consumer
-    (headers @ visible_header_pairs_for_framing framing)
+let visible_headers_reject_before_body_consumer ~headers ~bodiless framing =
+  let headers = headers @ visible_header_pairs_for_framing framing in
+  if bodiless then bodiless_header_rejects_before_body_consumer headers
+  else visible_header_rejects_before_body_consumer headers
 
-let malformed_header_block_rejects_before_body_consumer block =
+let malformed_header_block_rejects_before_body_consumer ~bodiless block =
   let headers, _hidden_body = visible_header_lines_and_hidden_body block in
-  visible_header_rejects_before_body_consumer headers
+  if bodiless then bodiless_header_rejects_before_body_consumer headers
+  else visible_header_rejects_before_body_consumer headers
 
 let malformed_header_block_hidden_body block =
   let _headers, hidden_body = visible_header_lines_and_hidden_body block in
@@ -228,22 +203,21 @@ let malformed_header_block_hidden_body block =
 
 let rejects_before_body_consumer scenario =
   visible_headers_reject_before_body_consumer ~headers:scenario.headers
-    scenario.framing
+    ~bodiless:(is_bodiless scenario) scenario.framing
 
 let expected_body_for ~headers ~bodiless framing =
   match framing with
   | Malformed_header_block block
-    when malformed_header_block_rejects_before_body_consumer block ->
+    when malformed_header_block_rejects_before_body_consumer ~bodiless block ->
       Body_error
-  | Duplicate_content_length { first; second; _ }
-    when not (Int.equal first second) ->
-      Body_error
-  | Conflicting_length_and_chunked _ -> Body_error
-  | _ when visible_headers_reject_before_body_consumer ~headers framing ->
+  | _
+    when visible_headers_reject_before_body_consumer ~headers ~bodiless framing
+    ->
       Body_error
   | Duplicate_content_length { first; actual; _ } ->
       if bodiless then No_body
       else expected_content_length_body ~declared:first ~actual
+  | Conflicting_length_and_chunked _ -> if bodiless then No_body else Body_error
   | _ when bodiless -> No_body
   | Malformed_header_block block ->
       Body (malformed_header_block_hidden_body block)
@@ -252,7 +226,7 @@ let expected_body_for ~headers ~bodiless framing =
   | Content_length { declared; actual } ->
       expected_content_length_body ~declared ~actual
   | Chunked chunks -> Body (String.concat chunks)
-  | Malformed_chunked wire -> Body (decoded_malformed_chunked_prefix wire)
+  | Malformed_chunked _ -> Body_error
 
 let method_bin scenario =
   "http.method." ^ String.lowercase (method_to_string scenario.method_)

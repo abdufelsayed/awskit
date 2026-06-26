@@ -190,7 +190,11 @@ let delete_marker_error ~current marker =
     version_headers (Some marker.version_id) @ delete_marker_headers (Some true)
   in
   if current then service ~headers ~status:404 ~code:"NoSuchKey" ()
-  else method_not_allowed ~headers ()
+  else
+    method_not_allowed
+      ~headers:
+        (headers @ [ ("last-modified", ptime_to_header marker.last_modified) ])
+      ()
 
 let object_size (obj : stored_object) = Int64.of_int (String.length obj.body)
 

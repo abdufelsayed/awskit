@@ -139,6 +139,37 @@ let read_body_once n body =
       | Error _ as error -> error
       | Ok read -> Ok (Stdlib.Bytes.sub_string bytes 0 read))
 
+let rec read_until_error reader =
+  let bytes = Bytes.create 3 in
+  match
+    Awskit_eio.Runtime.Response_body.read reader bytes ~off:0
+      ~len:(Bytes.length bytes)
+  with
+  | Error error -> Ok error
+  | Ok 0 ->
+      Error (Awskit.Error.Producer.body "expected response body read error")
+  | Ok _ -> read_until_error reader
+
+let assert_reader_invalidated reader =
+  let bytes = Bytes.create 1 in
+  match Awskit_eio.Runtime.Response_body.read reader bytes ~off:0 ~len:1 with
+  | Error error ->
+      Alcotest.(check bool)
+        "reader invalidated" true
+        (String.is_substring
+           (Awskit.Error.to_string_hum error)
+           ~substring:"outside its scope");
+      Ok ()
+  | Ok _ ->
+      Error
+        (Awskit.Error.Producer.body
+           "response body reader remained usable after read error")
+
+let is_content_length_underflow_error error =
+  String.is_substring
+    (Awskit.Error.to_string_hum error)
+    ~substring:"ended before declared Content-Length"
+
 let consume_body scenario body =
   match scenario.Model.consume with
   | Model.Read_all -> read_body_to_string body
@@ -171,12 +202,63 @@ let observe_run env scenario =
     | Error error -> Model.Observed_error (Awskit.Error.to_string_hum error)
   with Stdlib.Exit -> Model.Observed_exception
 
+let reader_invalidation_scenario =
+  Model.scenario ~name:"eio-reader-invalidated-after-read-error" ~method_:`GET
+    ~status:200
+    ~framing:(Content_length { declared = 6; actual = "hello" })
+    ~connection:Close ()
+
+let run_reader_invalidation_check env =
+  let clock = Eio.Stdenv.clock env in
+  with_loopback_server env reader_invalidation_scenario (fun endpoint ->
+      try
+        Eio.Time.with_timeout_exn clock 0.75 (fun () ->
+            Eio.Switch.run @@ fun sw ->
+            let conn = request_conn env sw in
+            let request =
+              request_for_endpoint reader_invalidation_scenario endpoint
+            in
+            match
+              Awskit_eio.Runtime.Transport.with_response conn request
+                ~body:Awskit_eio.Runtime.Request_body.empty
+                ~consume:(fun _response response_body ->
+                  Awskit_eio.Runtime.Response_body.with_reader response_body
+                    ~consume:(fun reader ->
+                      match read_until_error reader with
+                      | Error _ as error -> error
+                      | Ok first_error -> (
+                          match assert_reader_invalidated reader with
+                          | Error _ as error -> error
+                          | Ok () -> Error first_error)))
+            with
+            | Error error when is_content_length_underflow_error error -> Ok ()
+            | Error _ as error -> error
+            | Ok () ->
+                Error
+                  (Awskit.Error.Producer.body
+                     "expected response body read error"))
+      with Eio.Time.Timeout ->
+        Error (timeout_error "reader invalidation scenario timed out"))
+
+let test_reader_invalidated_after_read_error env () =
+  match run_reader_invalidation_check env with
+  | Ok () -> ()
+  | Error error -> Alcotest.failf "%a" Awskit.Error.pp error
+
 let suite env =
   let module Target = struct
     let name = "awskit-eio"
     let run_scenario scenario = observe_run env scenario
   end in
   let module Workload = Runtime_http_workload.Make (Target) in
-  Workload.suite
+  List.map Workload.suite ~f:(fun (name, cases) ->
+      if String.equal name "workload:awskit-eio:runtime-http" then
+        ( name,
+          cases
+          @ [
+              Alcotest.test_case "read error invalidates reader" `Quick
+                (test_reader_invalidated_after_read_error env);
+            ] )
+      else (name, cases))
 
 let () = Eio_main.run @@ fun env -> Alcotest.run "awskit-eio" (suite env)

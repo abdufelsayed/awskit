@@ -24,6 +24,26 @@ let version_page_summary (page : Object.Versions.page) =
   @ List.map (fun marker -> `Delete_marker marker) page.delete_markers
   |> List.map version_summary
 
+let enable_versioning conn =
+  ignore
+    (Simulator.Bucket.Versioning.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~status:Bucket.Versioning.Status.Enabled ()
+    |> ok_or_fail "enable versioning")
+
+let put_versioned_string conn key contents =
+  let result = put_string conn key contents in
+  match result.version_id with
+  | Some version_id -> version_id
+  | None -> Alcotest.failf "put %s did not return a version id" key
+
+let version_ids (page : Object.Versions.page) =
+  List.map
+    (fun (version : Object.Versions.object_version) ->
+      ( Object_key.to_string version.key,
+        Option.map Object.Version_id.to_string version.version_id ))
+    page.versions
+
 let test_delimiter_common_prefixes () =
   let conn = make_simulator () in
   ignore (put_string conn "logs/a" "a");
@@ -112,11 +132,7 @@ let test_control_character_continuation_token () =
 
 let test_version_paginator_delete_markers () =
   let conn = make_simulator () in
-  ignore
-    (Simulator.Bucket.Versioning.put conn
-       ~bucket:(bucket_name "test-bucket")
-       ~status:Bucket.Versioning.Status.Enabled ()
-    |> ok_or_fail "enable versioning");
+  enable_versioning conn;
   ignore (put_string conn "logs/a.txt" "one");
   ignore (put_string conn "logs/a.txt" "two-two");
   ignore
@@ -143,13 +159,79 @@ let test_version_paginator_delete_markers () =
     ]
     (List.concat_map version_page_summary pages)
 
+let test_version_next_markers_name_first_unreturned_key () =
+  let conn = make_simulator () in
+  enable_versioning conn;
+  ignore (put_versioned_string conn "a.txt" "a");
+  let b_version = put_versioned_string conn "b.txt" "b" in
+  let options = Object.Versions.options_exn ~max_keys:1 () in
+  let first =
+    Simulator.Object.list_versions conn
+      ~bucket:(bucket_name "test-bucket")
+      ~options ()
+    |> ok_or_fail "first version page"
+  in
+  Alcotest.(check bool) "first truncated" true first.is_truncated;
+  Alcotest.(check (option string))
+    "next key marker" (Some "b.txt")
+    (Option.map Object_key.to_string first.next_key_marker);
+  Alcotest.(check (option string))
+    "next version id marker"
+    (Some (Object.Version_id.to_string b_version))
+    (Option.map Object.Version_id.to_string first.next_version_id_marker);
+  let options =
+    Object.Versions.options_exn ~max_keys:1 ?key_marker:first.next_key_marker
+      ?version_id_marker:first.next_version_id_marker ()
+  in
+  let second =
+    Simulator.Object.list_versions conn
+      ~bucket:(bucket_name "test-bucket")
+      ~options ()
+    |> ok_or_fail "second version page"
+  in
+  Alcotest.(check (list (pair string (option string))))
+    "second page versions"
+    [ ("b.txt", Some (Object.Version_id.to_string b_version)) ]
+    (version_ids second)
+
+let test_version_next_markers_name_first_unreturned_version () =
+  let conn = make_simulator () in
+  enable_versioning conn;
+  let older_version = put_versioned_string conn "same.txt" "old" in
+  ignore (put_versioned_string conn "same.txt" "new");
+  let options = Object.Versions.options_exn ~max_keys:1 () in
+  let first =
+    Simulator.Object.list_versions conn
+      ~bucket:(bucket_name "test-bucket")
+      ~options ()
+    |> ok_or_fail "first same-key version page"
+  in
+  Alcotest.(check bool) "first truncated" true first.is_truncated;
+  Alcotest.(check (option string))
+    "next key marker" (Some "same.txt")
+    (Option.map Object_key.to_string first.next_key_marker);
+  Alcotest.(check (option string))
+    "next version id marker"
+    (Some (Object.Version_id.to_string older_version))
+    (Option.map Object.Version_id.to_string first.next_version_id_marker);
+  let options =
+    Object.Versions.options_exn ~max_keys:1 ?key_marker:first.next_key_marker
+      ?version_id_marker:first.next_version_id_marker ()
+  in
+  let second =
+    Simulator.Object.list_versions conn
+      ~bucket:(bucket_name "test-bucket")
+      ~options ()
+    |> ok_or_fail "second same-key version page"
+  in
+  Alcotest.(check (list (pair string (option string))))
+    "second page versions"
+    [ ("same.txt", Some (Object.Version_id.to_string older_version)) ]
+    (version_ids second)
+
 let test_version_delimiter_common_prefixes () =
   let conn = make_simulator () in
-  ignore
-    (Simulator.Bucket.Versioning.put conn
-       ~bucket:(bucket_name "test-bucket")
-       ~status:Bucket.Versioning.Status.Enabled ()
-    |> ok_or_fail "enable versioning");
+  enable_versioning conn;
   ignore (put_string conn "logs/2026/a.txt" "nested");
   ignore
     (Simulator.Object.delete conn
@@ -190,6 +272,10 @@ let suite =
           test_control_character_continuation_token;
         Alcotest.test_case "version paginator delete markers" `Quick
           test_version_paginator_delete_markers;
+        Alcotest.test_case "version next marker first unreturned key" `Quick
+          test_version_next_markers_name_first_unreturned_key;
+        Alcotest.test_case "version next marker first unreturned version" `Quick
+          test_version_next_markers_name_first_unreturned_version;
         Alcotest.test_case "version delimiter common prefixes" `Quick
           test_version_delimiter_common_prefixes;
       ] );

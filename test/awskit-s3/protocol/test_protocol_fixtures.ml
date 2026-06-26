@@ -374,6 +374,7 @@ let test_range_get_fixture () =
       ("content-length", "4");
       ("content-range", "bytes 2-5/10");
       ("x-amz-meta-origin", "fixture");
+      ("x-amz-meta-title", "=?UTF-8?B?UmVzdW3DqQ==?=");
     ]
   in
   let options =
@@ -401,7 +402,8 @@ let test_range_get_fixture () =
        range-start=%Ld\n\
        range-finish=%Ld\n\
        range-complete=%s\n\
-       metadata-origin=%s"
+       metadata-origin=%s\n\
+       metadata-title=%s"
       (Awskit.Response.status result.response)
       result.value
       (option_to_string Int64.to_string result.content_length)
@@ -418,8 +420,19 @@ let test_range_get_fixture () =
          result.content_range)
       (Option.value ~default:""
          (List.assoc_opt "origin" (Metadata.to_list result.metadata)))
+      (Option.value ~default:""
+         (Option.map String.escaped
+            (List.assoc_opt "title" (Metadata.to_list result.metadata))))
   in
   check_fixture "range GET response" [ "object"; "range-get.expected" ] ~actual
+
+let expect_validation_field field = function
+  | Ok _ -> Alcotest.failf "expected validation error for %s" field
+  | Error error ->
+      Alcotest.(check (option string))
+        ("validation field " ^ field)
+        (Some field)
+        (Awskit.Error.validation_field error)
 
 let describe_request (call : Protocol_recording_runtime.call) =
   let request = call.request in
@@ -466,7 +479,7 @@ let test_bucket_encryption_xml_fixture () =
         [
           {
             Bucket.Encryption.Rule.sse_algorithm =
-              Some Bucket.Encryption.Algorithm.Aws_kms_dsse;
+              Some Bucket.Encryption.Algorithm.Aws_kms;
             kms_master_key_id =
               Some "arn:aws:kms:us-east-1:123456789012:key/test";
             bucket_key_enabled = Some true;
@@ -493,6 +506,36 @@ let test_bucket_encryption_xml_fixture () =
   check_fixture "bucket encryption XML"
     [ "bucket"; "encryption-put.expected" ]
     ~actual:(describe_request (Protocol_recording_runtime.last_call conn))
+
+let test_bucket_encryption_rejects_dsse_bucket_key () =
+  let config =
+    {
+      Bucket.Encryption.rules =
+        [
+          {
+            Bucket.Encryption.Rule.sse_algorithm =
+              Some Bucket.Encryption.Algorithm.Aws_kms_dsse;
+            kms_master_key_id =
+              Some "arn:aws:kms:us-east-1:123456789012:key/test";
+            bucket_key_enabled = Some true;
+            blocked_encryption_types = [];
+          };
+        ];
+    }
+  in
+  let conn =
+    Protocol_recording_runtime.connect
+      [ Protocol_recording_runtime.response 200 "" ]
+  in
+  let result =
+    Protocol_recording_runtime.S3.Bucket.Encryption.put conn
+      ~bucket:(Protocol_support.bucket_name "my-bucket")
+      ~config ()
+  in
+  expect_validation_field "bucket_key_enabled" result;
+  Alcotest.(check int)
+    "no request sent" 0
+    (List.length conn.Protocol_recording_runtime.Runtime.calls)
 
 let describe_list_page (page : Object.List.page) =
   let render_prefix = Object_key.Prefix.to_string in
@@ -578,6 +621,62 @@ let test_service_error_fixture () =
       | _ -> Alcotest.failf "unexpected error kind: %a" Awskit.Error.pp error)
   | Ok _ -> Alcotest.fail "expected SlowDown service error"
 
+let test_delete_objects_cr_xml_fixture () =
+  let objects =
+    [
+      Object.Delete_many.object_
+        ~key:(Protocol_support.object_key "line\rbreak")
+        ();
+    ]
+  in
+  let conn =
+    Protocol_recording_runtime.connect
+      [ Protocol_recording_runtime.response 200 "<DeleteResult />" ]
+  in
+  ignore
+    (Protocol_recording_runtime.S3.Object.delete_objects conn
+       ~bucket:(Protocol_support.bucket_name "bucket")
+       ~objects ()
+    |> Protocol_support.ok_or_fail "delete objects CR fixture");
+  check_fixture "DeleteObjects CR XML"
+    [ "object"; "delete-cr.expected" ]
+    ~actual:(describe_request (Protocol_recording_runtime.last_call conn))
+
+let test_delete_objects_error_preserves_version_id () =
+  let body =
+    {|<DeleteResult><Error><Key>locked.txt</Key><VersionId>version-1</VersionId><Code>AccessDenied</Code><Message>denied</Message></Error></DeleteResult>|}
+  in
+  let objects =
+    [
+      Object.Delete_many.object_
+        ~key:(Protocol_support.object_key "locked.txt")
+        ();
+    ]
+  in
+  let conn =
+    Protocol_recording_runtime.connect
+      [ Protocol_recording_runtime.response 200 body ]
+  in
+  let result =
+    Protocol_recording_runtime.S3.Object.delete_objects conn
+      ~bucket:(Protocol_support.bucket_name "bucket")
+      ~objects ()
+    |> Protocol_support.ok_or_fail "delete objects error version"
+  in
+  match result.errors with
+  | [ error ] ->
+      Alcotest.(check string)
+        "error key" "locked.txt"
+        (Object_key.to_string error.key);
+      Alcotest.(check (option string))
+        "error version id" (Some "version-1")
+        (Option.map Object.Version_id.to_string error.version_id);
+      Alcotest.(check string) "error code" "AccessDenied" error.code;
+      Alcotest.(check (option string))
+        "error message" (Some "denied") error.message
+  | errors ->
+      Alcotest.failf "expected one item error, got %d" (List.length errors)
+
 let checksum value : Object.Checksum.value =
   Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256 ~value
 
@@ -633,9 +732,15 @@ let suite =
           test_bucket_versioning_xml_fixture;
         Alcotest.test_case "bucket encryption XML" `Quick
           test_bucket_encryption_xml_fixture;
+        Alcotest.test_case "bucket encryption rejects DSSE bucket key" `Quick
+          test_bucket_encryption_rejects_dsse_bucket_key;
         Alcotest.test_case "ListObjectsV2 XML" `Quick
           test_list_objects_v2_fixture;
         Alcotest.test_case "service error XML" `Quick test_service_error_fixture;
+        Alcotest.test_case "DeleteObjects CR XML" `Quick
+          test_delete_objects_cr_xml_fixture;
+        Alcotest.test_case "DeleteObjects error VersionId" `Quick
+          test_delete_objects_error_preserves_version_id;
         Alcotest.test_case "CompleteMultipartUpload XML" `Quick
           test_multipart_complete_xml_fixture;
       ] );

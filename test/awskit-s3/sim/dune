@@ -37,6 +37,10 @@
    (run
     ./test_awskit_s3_sim.exe
     test
+    "contract:awskit-s3-sim:response-metadata")
+   (run
+    ./test_awskit_s3_sim.exe
+    test
     "contract:awskit-s3-sim:body-lifecycle"))))
 
 (rule

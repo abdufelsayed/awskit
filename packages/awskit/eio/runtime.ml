@@ -300,6 +300,12 @@ let response_body_framing headers =
   | Ok None when transfer_encoding_chunked -> Ok Response_chunked
   | Ok None -> Ok Response_unknown
 
+let validate_bodiless_response_headers headers =
+  Result.map
+    (content_length_from_headers
+       (Http.Header.get_multi headers "content-length"))
+    ~f:(fun _ -> ())
+
 let timeout_phase_name = function
   | `Connect -> "connect"
   | `Attempt -> "attempt"
@@ -472,7 +478,14 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
       in
       let make_response_body ~status response body =
         let bodiless = response_is_bodiless status in
-        match response_body_framing (Http.Response.headers response) with
+        let headers = Http.Response.headers response in
+        let framing =
+          if bodiless then
+            Result.map (validate_bodiless_response_headers headers)
+              ~f:(fun () -> Response_unknown)
+          else response_body_framing headers
+        in
+        match framing with
         | Error _ as error -> error
         | Ok framing ->
             Ok
@@ -687,9 +700,6 @@ let discard_response_body_reader (reader : response_body_reader)
         ~max_response_drain_bytes:body.max_response_drain_bytes)
 
 let discard_response_body_after_exception reader body = function
-  | Eio.Cancel.Cancelled _ as exn ->
-      close_response_body_reader reader;
-      raise exn
   | exn ->
       Eio.Cancel.protect (fun () ->
           match discard_response_body_reader reader body with

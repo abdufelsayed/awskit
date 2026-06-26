@@ -670,7 +670,13 @@ let listed_delete_marker_summaries versions =
       version.kind = `Delete_marker)
   |> List.map listed_version_to_string
 
-let last = function [] -> None | values -> Some (List.hd (List.rev values))
+let nth index values =
+  let rec loop index = function
+    | [] -> None
+    | value :: _ when index = 0 -> Some value
+    | _ :: values -> loop (index - 1) values
+  in
+  if index < 0 then None else loop index values
 
 let assert_list_versions_page command_index command conn max_keys model =
   let options = Object.Versions.options_exn ~max_keys () in
@@ -691,7 +697,8 @@ let assert_list_versions_page command_index command conn max_keys model =
     Model.list_versions_page_is_truncated ~max_keys model
   in
   let expected_next_entry =
-    if expected_is_truncated then last expected_page else None
+    if expected_is_truncated then nth max_keys (Model.listed_versions model)
+    else None
   in
   let expected_next_key_marker =
     Option.map

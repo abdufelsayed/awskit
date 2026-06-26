@@ -75,11 +75,11 @@ module Object = struct
                     let next_key_marker, next_version_id_marker =
                       if not is_truncated then (None, None)
                       else
-                        match List.rev selected with
-                        | [] -> (None, None)
-                        | entry :: _ ->
+                        match List.nth_opt all (List.length selected) with
+                        | Some entry ->
                             ( Some (listing_entry_key_marker entry),
                               listing_entry_id entry )
+                        | None -> (None, None)
                     in
                     let versions, delete_markers, common_prefixes =
                       List.fold_right

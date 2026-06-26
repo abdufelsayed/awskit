@@ -14,7 +14,9 @@ val empty : t
 (** Empty metadata collection. *)
 
 val of_list : (string * string) list -> (t, Awskit.Error.t) result
-(** Validate metadata entries and preserve their insertion order. *)
+(** Validate metadata entries and preserve their insertion order. The aggregate
+    byte length of unprefixed keys and values must fit S3's 2 KiB user-metadata
+    limit. *)
 
 val of_list_exn : (string * string) list -> t
 (** Like {!val:of_list}, but raises [Awskit.Error.Awskit_error] carrying the
@@ -28,7 +30,7 @@ val entries : t -> entry list
 
 val add : key:string -> value:string -> t -> (t, Awskit.Error.t) result
 (** Add one metadata entry at the end of the collection, rejecting invalid or
-    duplicate keys. *)
+    duplicate keys and collections above S3's 2 KiB user-metadata limit. *)
 
 val pp : Format.formatter -> t -> unit
 (** Pretty-print metadata as raw key/value pairs. *)

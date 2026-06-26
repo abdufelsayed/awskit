@@ -111,15 +111,21 @@ let endpoint_variant = function
   | Aws config -> Some config.endpoint_variant
   | S3_compatible _ -> None
 
+let aws_dns_suffix ~region =
+  if String.length region >= 3 && String.sub region 0 3 = "cn-" then
+    "amazonaws.com.cn"
+  else "amazonaws.com"
+
 let endpoint_host variant ~region =
   let region = Region.to_string region in
+  let dns_suffix = aws_dns_suffix ~region in
   match variant with
-  | `Regional -> Fmt.str "s3.%s.amazonaws.com" region
-  | `Dualstack -> Fmt.str "s3.dualstack.%s.amazonaws.com" region
-  | `Fips -> Fmt.str "s3-fips.%s.amazonaws.com" region
-  | `Fips_dualstack -> Fmt.str "s3-fips.dualstack.%s.amazonaws.com" region
-  | `Accelerate -> "s3-accelerate.amazonaws.com"
-  | `Accelerate_dualstack -> "s3-accelerate.dualstack.amazonaws.com"
+  | `Regional -> Fmt.str "s3.%s.%s" region dns_suffix
+  | `Dualstack -> Fmt.str "s3.dualstack.%s.%s" region dns_suffix
+  | `Fips -> Fmt.str "s3-fips.%s.%s" region dns_suffix
+  | `Fips_dualstack -> Fmt.str "s3-fips.dualstack.%s.%s" region dns_suffix
+  | `Accelerate -> Fmt.str "s3-accelerate.%s" dns_suffix
+  | `Accelerate_dualstack -> Fmt.str "s3-accelerate.dualstack.%s" dns_suffix
 
 let endpoint t ~region =
   match t with

@@ -1,6 +1,6 @@
 runtime-http-replay-v1
-name=malformed-chunked-decoded-prefix
-method=GET
+name=head-malformed-chunked-bodiless
+method=HEAD
 status=200
 headers=0
 framing=malformed-chunked h350d0a68656c6c6f0d0a6e6f742d6865780d0a

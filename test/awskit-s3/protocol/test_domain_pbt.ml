@@ -48,6 +48,9 @@ let header_value_chars =
 let tag_chars =
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 +-_=.:/@"
 
+let object_key_chars =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ ;="
+
 let valid_bucket_name =
   QCheck.Gen.(gen_string ~min:3 ~max:63 ~chars:lower_digit_chars)
 
@@ -154,6 +157,7 @@ let prop_bucket_rejects_invalid_boundary_families =
     (fun value -> is_error (Bucket_name.of_string value))
 
 let valid_object_token = gen_string ~min:1 ~max:128 ~chars:header_value_chars
+let valid_object_key_token = gen_string ~min:1 ~max:128 ~chars:object_key_chars
 
 let oversized_object_key =
   QCheck.Gen.map
@@ -162,7 +166,7 @@ let oversized_object_key =
 
 let prop_object_keys_round_trip =
   QCheck.Test.make ~count:broad_count ~name:"object keys round-trip"
-    (qstring valid_object_token) (fun value ->
+    (qstring valid_object_key_token) (fun value ->
       match Object_key.of_string value with
       | Ok key -> String.equal value (Object_key.to_string key)
       | Error _ -> false)
@@ -192,7 +196,7 @@ let prop_object_keys_reject_over_1024_bytes =
 let prop_object_key_equality_agrees_with_original_spelling =
   QCheck.Test.make ~count:default_count
     ~name:"object key equality agrees with original spelling"
-    (qstring valid_object_token) (fun value ->
+    (qstring valid_object_key_token) (fun value ->
       let other = value ^ "-other" in
       match
         ( Object_key.of_string value,
@@ -566,6 +570,11 @@ let test_object_key_prefix_delimiter_boundaries () =
   Alcotest.(check string)
     "key round trips" "logs/2026/06/file.txt" (Object_key.to_string key);
   ignore
+    (expect_ok "balanced relative key"
+       (Object_key.of_string "videos/2014/../../video1.wmv"));
+  ignore
+    (expect_ok "period segment key" (Object_key.of_string "folder/./file.txt"));
+  ignore
     (expect_ok "max byte key" (Object_key.of_string (repeat_char 1024 'a')));
   ignore
     (expect_ok "max byte utf8 key"
@@ -574,6 +583,8 @@ let test_object_key_prefix_delimiter_boundaries () =
   expect_error_field "key" (Object_key.of_string (repeat_char 1025 'a'));
   expect_error_field "key" (Object_key.of_string (repeat 513 "\195\169"));
   expect_error_field "key" (Object_key.of_string "\xC0\x80");
+  expect_error_field "key" (Object_key.of_string "../video1.wmv");
+  expect_error_field "key" (Object_key.of_string "videos/../../video1.wmv");
   let prefix = expect_ok "prefix" (Object_key.Prefix.of_string "logs/") in
   Alcotest.(check string)
     "prefix round trips" "logs/"
@@ -670,7 +681,16 @@ let test_metadata_collection_boundaries () =
   expect_error_field "metadata"
     (Metadata.of_list [ ("Source", "one"); ("source", "two") ]);
   expect_error_field "metadata source"
-    (Metadata.of_list [ ("source", "bad\nvalue") ])
+    (Metadata.of_list [ ("source", "bad\nvalue") ]);
+  ignore
+    (expect_ok "metadata 2 KiB aggregate"
+       (Metadata.of_list [ ("k", repeat 1023 "\195\169" ^ "x") ]));
+  expect_error_field "metadata"
+    (Metadata.of_list [ ("k", repeat 1023 "\195\169" ^ "xx") ]);
+  let full_metadata =
+    expect_ok "full metadata" (Metadata.of_list [ ("a", repeat_char 2047 'x') ])
+  in
+  expect_error_field "metadata" (Metadata.add ~key:"b" ~value:"c" full_metadata)
 
 let test_range_boundaries () =
   let bytes = expect_ok "bytes range" (Range.bytes ~start:2L ~finish:5L) in

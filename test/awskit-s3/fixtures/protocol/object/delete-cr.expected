@@ -1,0 +1,7 @@
+method=POST
+path=/
+query=delete=
+content-md5=UbaRzc9b4iJBNoY935WhgA==
+content-type=application/xml
+expected-owner=
+body=<Delete><Object><Key>line&#xD;break</Key></Object></Delete>
