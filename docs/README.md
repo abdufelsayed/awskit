@@ -1,12 +1,12 @@
-# Maintenance Workflows
+# Maintainer Documentation
 
-This directory documents maintainer and agent workflows for Awskit.
+This directory contains Awskit's maintainer policies and workflows.
 
-- `agent-workflow.md` explains how agents should work in this repository.
+- `maintainer-workflow.md` is the starting point for repository maintenance.
 - `architecture.md` defines Awskit's repository-specific engineering
   constraints, including package boundaries, runtime adapters, error handling,
   resource ownership, wire formats, streaming, and compatibility.
-- `ocaml-development.md` defines OCaml implementation and API style guidance.
+- `development.md` defines Awskit package, API, and implementation guidance.
 - `testing.md` defines test and validation rules.
 - `security-threat-model.md` summarizes protected SDK assets, trust
   boundaries, and the executable evidence for security-sensitive behavior.
@@ -21,4 +21,5 @@ This directory documents maintainer and agent workflows for Awskit.
 Repository root `SUPPORT.md` and `SECURITY.md` define public support and
 security policy.
 
-For repository-wide rules, start with `AGENTS.md`.
+Automation-specific instructions live in repository root `AGENTS.md`; they
+point back to these maintainer docs as the source of durable project policy.

@@ -1,66 +1,93 @@
 (alias
- (name check-fast)
+ (name check-quick)
  (deps
-  (alias_rec runtest)
-  (alias_rec examples)))
+  dune-project
+  (alias awskit-test-contracts)
+  (alias awskit-core-contracts)
+  (alias awskit-runtime-contracts)
+  (alias runtime-http)
+  (alias s3-sim)
+  (alias s3-transfer)
+  (alias s3-domain)
+  (alias s3-protocol)
+  (alias s3-protocol-fixtures)
+  (alias s3-protocol-replay)))
 
 (alias
- (name check-protocol)
- (package awskit)
+ (name check-integration)
  (deps
-  (alias_rec protocol-pbt)))
-
-; Keep package-filtered @check-protocol usable for packages whose protocol
-; evidence is covered by another package-specific gate.
+  dune-project
+  (alias s3-minio)))
 
 (alias
- (name check-protocol)
- (package awskit-unix)
- (deps dune-project))
-
-(alias
- (name check-protocol)
- (package awskit-s3)
+ (name check-full)
  (deps
-  (alias_rec protocol-pbt)
-  (alias_rec protocol-fixtures)
-  (alias_rec fuzz-replay)
-  (alias_rec runtime-conformance)))
+  dune-project
+  (alias check-quick)
+  (alias_rec examples)
+  (alias_rec doc)
+  (alias check-integration)))
 
 (alias
- (name check-protocol)
- (package awskit-s3-sim)
+ (name check-stress)
  (deps
-  (alias_rec simulator-contract)))
+  dune-project
+  (alias check-quick)
+  (alias_rec discovery)))
 
 (alias
- (name check-protocol)
- (package awskit-lwt)
+ (name awskit-test-contracts)
  (deps
-  (alias_rec runtime-conformance)))
+  (alias test/support/runtest)))
 
 (alias
- (name check-protocol)
- (package awskit-lwt-unix)
- (deps dune-project))
-
-(alias
- (name check-protocol)
- (package awskit-eio)
+ (name runtime-http)
  (deps
-  (alias_rec runtime-conformance)))
+  (alias test/awskit/eio/runtime-http)
+  (alias test/awskit/lwt/runtime-http)))
 
 (alias
- (name check-protocol)
- (package awskit-s3-lwt)
- (deps dune-project))
+ (name awskit-core-contracts)
+ (deps
+  (alias test/awskit/awskit-core-contracts)))
 
 (alias
- (name check-protocol)
- (package awskit-s3-lwt-unix)
- (deps dune-project))
+ (name awskit-runtime-contracts)
+ (deps
+  (alias test/awskit/runtime/awskit-runtime-contracts)))
 
 (alias
- (name check-protocol)
- (package awskit-s3-eio)
- (deps dune-project))
+ (name s3-sim)
+ (deps
+  (alias test/awskit-s3/support/s3-model-contracts)
+  (alias test/awskit-s3/sim/s3-state)))
+
+(alias
+ (name s3-transfer)
+ (deps
+  (alias test/awskit-s3/sim/s3-transfer)))
+
+(alias
+ (name s3-domain)
+ (deps
+  (alias test/awskit-s3/protocol/domain)))
+
+(alias
+ (name s3-protocol)
+ (deps
+  (alias test/awskit-s3/protocol/wire)))
+
+(alias
+ (name s3-protocol-fixtures)
+ (deps
+  (alias test/awskit-s3/protocol/fixtures)))
+
+(alias
+ (name s3-protocol-replay)
+ (deps
+  (alias test/awskit-s3/protocol/replay)))
+
+(alias
+ (name s3-minio)
+ (deps
+  (alias test/awskit-s3/lwt/unix/s3-minio)))

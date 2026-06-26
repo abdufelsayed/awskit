@@ -386,7 +386,7 @@ authors can see exactly which law belongs to which part of the runtime:
 
 S3 adapters extend the core runtime with [S3_endpoint.s3_endpoint_config] so S3
 endpoint resolution can stay AWS-aware without putting S3 concepts into the core
-AWS runtime abstraction. Run [opam exec -- dune build @runtime-conformance] when
-changing a runtime implementation; the conformance suite checks the shared
-runtime laws for retry, timeout visibility, request body descriptors, and
-response-body cleanup precedence.
+AWS runtime abstraction. Run [opam exec -- dune build @runtime-http]
+when changing a runtime implementation; the workload checks shared runtime HTTP
+behavior, including bodiless responses, framing, body-reader, and error-path
+behavior.

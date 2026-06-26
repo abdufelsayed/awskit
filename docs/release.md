@@ -1,6 +1,25 @@
 # Release Playbook
 
-This is the release workflow for Awskit.
+This is the release workflow for Awskit. A release is ready to merge when the
+release PR, release gates, changelog, package metadata, and publication plan all
+describe the same version and evidence.
+
+Related maintainer docs:
+
+- `docs/changelog.md` defines `CHANGES.md` entry format and selection rules.
+- `docs/release-gates.md` defines production-ready release evidence.
+- `docs/ci.md` maps release branch CI jobs.
+- `docs/docs-publishing.md` covers generated documentation publication.
+
+## Release Flow
+
+1. Create `release/vX.Y.Z` from `main`.
+2. Build the `CHANGES.md` release ledger from the branch timeline.
+3. Update release-facing metadata and regenerate opam files when needed.
+4. Open a release PR with the release template.
+5. Record CI and local release-gate evidence.
+6. Merge, tag from updated `main`, create the GitHub release, and confirm docs
+   publication.
 
 ## Release Branch
 
@@ -32,7 +51,7 @@ Update `CHANGES.md` with the entries for the release. Follow
 - Include every PR and commit that materially contributed to a release entry.
 - Use the timeline as source material, not as one public entry per commit.
 - Order entries by release-branch timeline inside each section.
-- Describe shipped changes, not process commentary.
+- Describe shipped changes.
 
 ## Package Metadata
 
@@ -57,26 +76,27 @@ gh pr create \
   --body-file .github/PULL_REQUEST_TEMPLATE/release.md
 ```
 
-Then replace the template placeholders with the actual release notes preview.
-The preview should use the same curated entries as `CHANGES.md`: one bullet per
-meaningful released item, with all material PR and commit references attached
-to that bullet.
+Replace template placeholders with concrete, reviewable content. The release
+notes preview should use the same curated entries as `CHANGES.md`: one bullet
+per meaningful released item, with all material PR and commit references
+attached to that bullet.
 
 The release PR body must include:
 
-- A short statement that this is the release vehicle.
-- A release notes preview with PR and commit references visible in the bullets.
-  Do not expand the preview into one bullet per commit.
-- Release files touched.
-- CI and local validation status.
-- Release gates before merge.
-- Publication steps after merge.
+- a short statement that this is the release vehicle;
+- a release notes preview with PR and commit references visible in the bullets;
+- release files touched;
+- CI and local validation status;
+- release gates before merge;
+- publication steps after merge.
 
-The PR body previews `CHANGES.md`; it does not replace it.
+The PR body previews `CHANGES.md`; it does not replace it. Release PRs may
+describe release mechanics because reviewers need that context. Public
+`CHANGES.md` entries should describe shipped changes only.
 
-## CI Requirements
+## Validate Before Merge
 
-Release branch pushes must run CI. Before merging, confirm:
+Release branch pushes must run CI. Check PR state with:
 
 ```sh
 gh pr checks <pr-number> --watch=false
@@ -84,38 +104,37 @@ gh pr checks <pr-number> --watch=false
 
 Required release-branch checks:
 
-- Default package build and tests.
-- Eio package build and tests.
-- Documentation and examples.
-- Protocol evidence.
-- MinIO S3 contract.
+- `Required CI` from `.github/workflows/ci.yml`, which aggregates package
+  metadata, default package build/tests, Eio package build/tests,
+  documentation/examples, no-network correctness evidence, and MinIO S3
+  integration evidence.
+- `Release check` from `.github/workflows/release-validation.yml`, which runs
+  `scripts/release-check.sh` for release branch pushes.
 
-The `publish-docs` job is expected to skip on release branches because it only
-runs on pushes to `main`.
+The `Publish docs` workflow is expected to skip on release branches because it
+only runs after `CI` succeeds on `main`.
 
-## Local Release Validation
-
-Before tagging, run:
+Before marking the release PR ready to merge, run:
 
 ```sh
 scripts/release-check.sh
 ```
 
-This validates package metadata, formatting, tests, examples, protocol
-evidence, generated documentation, distribution archives, and the MinIO
-contract.
-
-## Release Gates
+This validates package metadata, formatting, tests, examples, no-network
+correctness evidence, generated documentation, distribution archives, and MinIO
+integration evidence. The script requires a clean worktree before building the
+distribution archive.
 
 Follow `docs/release-gates.md` before merging a production-ready release PR.
-In particular:
+Record:
 
-- record the release branch head SHA used for validation;
-- run `scripts/release-check.sh`;
-- confirm public API diffs were reviewed;
-- confirm `SUPPORT.md` and `SECURITY.md` match the release scope;
-- state that live AWS is not a release gate unless `SUPPORT.md` promises live
-  AWS coverage.
+- the release branch head SHA used for validation;
+- the `gh pr checks` result;
+- the `Release check` result;
+- the local `scripts/release-check.sh` result;
+- public API review status;
+- support/security docs status;
+- whether live AWS tests are outside the support promise.
 
 ## Merge, Tag, And Publish
 
@@ -141,21 +160,3 @@ the generated docs are available at:
 ```text
 https://abdufelsayed.github.io/awskit/
 ```
-
-## Release PR Writing Rules
-
-Release PR descriptions must not say:
-
-```md
-We discussed that the changelog should mention PRs.
-```
-
-They should say:
-
-```md
-The release notes preview mirrors `CHANGES.md` with curated entries and all
-material PR and commit references.
-```
-
-Release PRs can describe release mechanics because reviewers need that context.
-`CHANGES.md` entries should describe only the shipped changes.

@@ -1,66 +1,90 @@
-# CI Workflow
+# CI Workflows
 
-Awskit uses `.github/workflows/main.yml` for build, test, MinIO contract, and
-documentation publishing workflows.
+Awskit uses separate GitHub Actions workflows for required CI, generated
+documentation publishing, advisory stress evidence, and release validation.
 
-## Events
+Related maintainer docs:
 
-The workflow runs on:
+- `docs/testing.md` explains the local evidence behind each CI job.
+- `docs/release-gates.md` defines release evidence required before merge.
+- `docs/docs-publishing.md` covers the GitHub Pages workflow.
 
-- `pull_request`
-- pushes to `main`
-- pushes to `release/**`
-- manual dispatch
-- weekly schedule
+## Workflow Map
 
-Build and test jobs skip draft pull requests. They run for non-PR events such
-as release branch pushes, scheduled runs, and manual dispatches.
+| Workflow | File | Purpose | Runs on |
+| --- | --- | --- | --- |
+| `CI` | `.github/workflows/ci.yml` | Required build, test, docs/examples, no-network correctness, and MinIO evidence. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, and manual dispatch. Draft pull requests are skipped. |
+| `Publish docs` | `.github/workflows/docs.yml` | Publishes generated odoc documentation to GitHub Pages. | Successful `CI` workflow runs on `main`, and manual dispatch from `main`. |
+| `Stress evidence` | `.github/workflows/stress.yml` | Runs high-cost discovery evidence outside required PR CI. | Weekly schedule and manual dispatch. |
+| `Release validation` | `.github/workflows/release-validation.yml` | Mirrors the local release script in CI. | Pushes to `release/**` and manual dispatch. |
 
-## Jobs
+## Required CI
 
-`build-test-default`
+Branch protection should require the aggregate `Required CI` check. It depends
+on these jobs:
 
-- Runs on Ubuntu and macOS.
-- Tests OCaml 4.14 and the latest OCaml 5 compiler.
-- Excludes Eio packages.
+| Job | Evidence |
+| --- | --- |
+| `Package metadata` | Builds generated opam metadata with `opam exec -- dune build @opam`, runs `opam lint ./*.opam`, and checks formatting/generated-file drift with `opam exec -- dune fmt`, `git diff --check`, and `git diff --exit-code`. |
+| `Default packages` | Runs on Ubuntu and macOS for OCaml 4.14 and the latest OCaml 5 compiler. Covers the default package set and excludes Eio packages. |
+| `Eio packages` | Runs on Ubuntu and macOS for OCaml 5.2 and the latest OCaml 5 compiler. Covers Eio packages. |
+| `Documentation and examples` | Installs test and documentation dependencies for all packages, installs Eio HTTPS example-only packages separately, and builds `opam exec -- dune build @examples @doc`. |
+| `No-network correctness` | Runs `scripts/test-report.sh quick --label no-network-correctness` and uploads `.logs/` as an artifact with `if: always()`. |
+| `S3 MinIO integration` | Runs `scripts/test-report.sh integration --label s3-minio-integration` against script-managed local MinIO and uploads `.logs/` as an artifact with `if: always()`. |
 
-`build-test-eio`
+`No-network correctness` does not start local services. MinIO adapter evidence
+stays in `S3 MinIO integration`.
 
-- Runs on Ubuntu and macOS.
-- Tests OCaml 5 and 5.2.
-- Covers Eio packages.
+## Advisory Stress Evidence
 
-`docs-examples`
+The `Stress evidence` workflow is not a required PR gate. It is scheduled and
+manually dispatched discovery pressure:
 
-- Runs on Ubuntu with the latest OCaml 5 compiler.
-- Installs test and documentation dependencies for all packages.
-- Installs Eio HTTPS example-only packages separately because they are not part
-  of the published package dependency graph.
-- Builds executable examples and odoc documentation with
-  `opam exec -- dune build @examples @doc`.
+```sh
+scripts/test-report.sh stress --label stress-evidence
+```
 
-`protocol-evidence`
+Manual dispatch accepts:
 
-- Runs on Ubuntu with the latest OCaml 5 compiler.
-- Installs test and documentation dependencies for all packages.
-- Builds protocol evidence with `opam exec -- dune build @check-protocol`.
+- `qcheck_count`: no-network stress alias count. Defaults to `2000`.
+- `minio_qcheck_count`: optional count override for script-managed MinIO
+  phases. Empty means the MinIO profile defaults apply.
 
-`s3-minio-contract`
+Treat stress failures as regressions to triage. Keep the workflow separate from
+normal PR feedback so expensive exploration does not slow every change.
 
-- Runs on Ubuntu.
-- Starts MinIO with Docker Compose.
-- Runs `opam exec -- dune build --force @minio-contract`.
-- Dumps MinIO logs on failure.
+## Release Validation
 
-`publish-docs`
+Release branch pushes run both required CI and the release validation workflow.
+Before merging a release PR, record:
 
-- Runs only on pushes to `main`.
-- Requires build/test, docs/examples, and MinIO jobs to pass.
-- Also requires the protocol evidence job to pass.
-- Builds odoc documentation and deploys `_build/default/_doc/_html` to GitHub
-  Pages.
+- the `Required CI` result;
+- the `Release check` result from `.github/workflows/release-validation.yml`;
+- the local `scripts/release-check.sh` result when required by
+  `docs/release-gates.md`.
 
-## Debugging Failed CI
+The release validation workflow uses the release branch name to infer
+`AWSKIT_RELEASE_VERSION`, or a manual `release_version` input when validating
+another ref. It uploads `.logs/` as an artifact.
+
+The workflow is a CI mirror for the local release script. It does not replace
+the release gate policy in `docs/release-gates.md`.
+
+## Documentation Publishing
+
+Generated documentation is published by `.github/workflows/docs.yml` after the
+`CI` workflow succeeds on `main`, or by manual dispatch from `main`. The
+workflow builds:
+
+```sh
+opam exec -- dune build @doc
+```
+
+and deploys `_build/default/_doc/_html` to GitHub Pages. See
+`docs/docs-publishing.md` for repository settings, URL policy, and local
+validation.
+
+## Debug Failed CI
 
 Start with the PR check summary:
 
@@ -80,19 +104,19 @@ Watch a rerun:
 gh run watch <run-id> --interval 10 --exit-status
 ```
 
-Reproduce locally with the closest command. For MinIO failures:
+For `No-network correctness`, `S3 MinIO integration`, `Stress evidence`, and
+`Release check` failures, download the `.logs/` artifact and reproduce locally
+with the closest command. For MinIO failures:
 
 ```sh
-docker compose up -d
-opam exec -- dune build --force @minio-contract
-docker compose down -v
+scripts/test-report.sh integration --label minio-debug
 ```
 
-Fix the underlying contract mismatch. Do not paper over CI with looser checks,
-skips, or unrelated retries unless the failure is proven to be infrastructure
-only.
+Fix the underlying contract mismatch. Use skips, looser checks, or retries only
+after the failure is proven to be infrastructure-only.
 
 ## Regression Fix Standard
 
-Follow `docs/testing.md` for regression-test and validation rules.
-Do not add tests that only assert removed APIs or old behavior are absent.
+Follow `docs/testing.md` for regression-test and validation rules. Regression
+tests should protect current supported behavior rather than tombstoning removed
+APIs.

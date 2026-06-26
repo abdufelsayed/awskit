@@ -24,6 +24,9 @@ module Multipart = struct
     let* () =
       validate_opt validate_checksum_algorithm options.checksum_algorithm
     in
+    let* () =
+      validate_opt validate_supported_algorithm options.checksum_algorithm
+    in
     validate_opt validate_checksum_type options.checksum_type
 
   let upload_handle_bucket upload =
@@ -126,34 +129,37 @@ module Multipart = struct
                 | None -> (
                     match request_body_result body with
                     | Error error -> return_error error
-                    | Ok body ->
+                    | Ok body -> (
                         let etag = etag body in
-                        let checksum = checksum_for_value options.checksum in
-                        let part =
-                          {
-                            part_number = part_number_int;
-                            body;
-                            etag;
-                            checksum;
-                            last_modified = now conn;
-                          }
-                        in
-                        Hashtbl.replace stored_upload.parts part_number_int part;
-                        let size = Int64.of_int (String.length body) in
-                        let part =
-                          Multipart_model.Part.create_exn ~part_number ~etag
-                            ?checksum:options.checksum ~size ()
-                        in
-                        Ok
-                          {
-                            Multipart_model.Upload_part.part;
-                            checksum;
-                            response =
-                              response 200
-                                ~headers:
-                                  (("etag", Object_model.Etag.to_string etag)
-                                  :: checksum_response_headers checksum);
-                          }))))
+                        match checksum_for_value ~body options.checksum with
+                        | Error error -> return_error error
+                        | Ok checksum ->
+                            let part =
+                              {
+                                part_number = part_number_int;
+                                body;
+                                etag;
+                                checksum;
+                                last_modified = now conn;
+                              }
+                            in
+                            Hashtbl.replace stored_upload.parts part_number_int
+                              part;
+                            let size = Int64.of_int (String.length body) in
+                            let part =
+                              Multipart_model.Part.create_exn ~part_number ~etag
+                                ?checksum:options.checksum ~size ()
+                            in
+                            Ok
+                              {
+                                Multipart_model.Upload_part.part;
+                                checksum;
+                                response =
+                                  response 200
+                                    ~headers:
+                                      (("etag", Object_model.Etag.to_string etag)
+                                      :: checksum_response_headers checksum);
+                              })))))
 
   let validate_complete_options (options : Multipart_model.Complete.options) =
     Multipart_model.Complete.options
@@ -271,66 +277,66 @@ module Multipart = struct
                         (Some key)
                     with
                     | Some error -> return_error error
-                    | None ->
-                        let body =
+                    | None -> (
+                        let part_bodies =
                           parts
                           |> List.map (fun (part : Multipart_model.Part.t) ->
                               (Hashtbl.find upload.parts
                                  (completed_part_number part))
                                 .body)
-                          |> String.concat ""
                         in
-                        let etag = etag body in
-                        let checksum =
-                          match checksum_for_value options.checksum with
-                          | { Object_model.Checksum.values = []; _ } ->
-                              let checksum =
-                                checksum_for_algorithm ~body
-                                  upload.checksum_algorithm
-                              in
-                              {
-                                checksum with
-                                checksum_type =
-                                  (match options.checksum_type with
-                                  | Some _ as value -> value
-                                  | None -> upload.checksum_type);
-                              }
-                          | checksum ->
-                              {
-                                checksum with
-                                checksum_type =
-                                  (match options.checksum_type with
-                                  | Some _ as value -> value
-                                  | None -> upload.checksum_type);
-                              }
-                        in
-                        let obj =
-                          {
-                            body;
-                            etag;
-                            version_id = None;
-                            content_type = upload.content_type;
-                            metadata = upload.metadata;
-                            storage_class = upload.storage_class;
-                            tags = upload.tags;
-                            checksum;
-                            last_modified = now conn;
-                          }
-                        in
-                        let obj = store_object conn bucket_state key obj in
-                        Hashtbl.remove bucket_state.multipart_uploads
-                          (upload_key upload_id);
-                        Ok
-                          {
-                            Multipart_model.Complete.etag = Some etag;
-                            version_id = obj.version_id;
-                            checksum;
-                            response =
-                              response 200
-                                ~headers:
-                                  (version_headers obj.version_id
-                                  @ checksum_response_headers checksum);
-                          }))))
+                        let body = String.concat "" part_bodies in
+                        let etag = multipart_etag part_bodies in
+                        match checksum_for_value ~body options.checksum with
+                        | Error error -> return_error error
+                        | Ok supplied_checksum -> (
+                            match
+                              match supplied_checksum.values with
+                              | [] ->
+                                  checksum_for_algorithm ~body
+                                    upload.checksum_algorithm
+                              | _ -> Ok supplied_checksum
+                            with
+                            | Error error -> return_error error
+                            | Ok checksum ->
+                                let checksum =
+                                  {
+                                    checksum with
+                                    checksum_type =
+                                      (match options.checksum_type with
+                                      | Some _ as value -> value
+                                      | None -> upload.checksum_type);
+                                  }
+                                in
+                                let obj =
+                                  {
+                                    body;
+                                    etag;
+                                    version_id = None;
+                                    content_type = upload.content_type;
+                                    metadata = upload.metadata;
+                                    storage_class = upload.storage_class;
+                                    tags = upload.tags;
+                                    checksum;
+                                    last_modified = now conn;
+                                  }
+                                in
+                                let obj =
+                                  store_object conn bucket_state key obj
+                                in
+                                Hashtbl.remove bucket_state.multipart_uploads
+                                  (upload_key upload_id);
+                                Ok
+                                  {
+                                    Multipart_model.Complete.etag = Some etag;
+                                    version_id = obj.version_id;
+                                    checksum;
+                                    response =
+                                      response 200
+                                        ~headers:
+                                          (version_headers obj.version_id
+                                          @ checksum_response_headers checksum);
+                                  }))))))
 
   let abort_upload conn ~upload ?options:_ () =
     let bucket = upload_handle_bucket upload in

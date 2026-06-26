@@ -1,4 +1,31 @@
 (library
- (name awskit_s3_test)
+ (name awskit_s3_workload)
+ (modules
+  s3_command
+  s3_history
+  s3_model
+  s3_replay
+  s3_workload
+  transfer_fault_workload
+  transfer_model)
  (wrapped false)
- (libraries awskit awskit_test awskit-s3 alcotest ptime fmt uri))
+ (libraries
+  awskit
+  awskit-s3
+  awskit_test_coverage
+  alcotest
+  qcheck-core
+  qcheck-alcotest))
+
+(test
+ (name test_s3_model_contracts)
+ (package awskit-s3)
+ (modules test_s3_model_contracts)
+ (libraries awskit awskit-s3 awskit_s3_workload alcotest))
+
+(rule
+ (alias s3-model-contracts)
+ (package awskit-s3)
+ (deps test_s3_model_contracts.exe)
+ (action
+  (run ./test_s3_model_contracts.exe)))

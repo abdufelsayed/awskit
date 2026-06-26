@@ -15,8 +15,8 @@ let delete_result ?delete_marker ?version_id () =
           (version_headers version_id @ delete_marker_headers delete_marker);
   }
 
-let delete_objects_error key code message =
-  { Object.Delete_many.key; code; message = Some message }
+let delete_objects_error key ?version_id code message =
+  { Object.Delete_many.key; version_id; code; message = Some message }
 
 let delete_objects_conditions_match object_ = function
   | Some (Stored_object obj) ->
@@ -123,7 +123,8 @@ let delete_objects conn ~bucket ~objects ?options:_ () =
                     in
                     if not (delete_objects_conditions_match object_ target) then
                       ( deleted,
-                        delete_objects_error object_.key "PreconditionFailed"
+                        delete_objects_error object_.key
+                          ?version_id:object_.version_id "PreconditionFailed"
                           "delete preconditions did not match"
                         :: errors )
                     else

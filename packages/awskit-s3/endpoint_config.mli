@@ -40,7 +40,8 @@ val aws :
   ?endpoint_variant:endpoint_variant ->
   unit ->
   t
-(** Build the default AWS S3 endpoint policy. AWS endpoints are HTTPS. *)
+(** Build the default AWS S3 endpoint policy. AWS endpoints are HTTPS. Regions
+    in the AWS China partition ([cn-*]) resolve under [amazonaws.com.cn]. *)
 
 val default : t
 (** Default AWS S3 regional HTTPS endpoint policy. *)

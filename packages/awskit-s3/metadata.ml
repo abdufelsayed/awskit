@@ -1,9 +1,15 @@
 let ( let* ) = S3_result.( let* )
 
 type entry = { key : string; value : Header_value.t }
-type t = { entries_rev : entry list; lower_keys : string list }
+
+type t = {
+  entries_rev : entry list;
+  lower_keys : string list;
+  total_bytes : int;
+}
 
 let prefix = "x-amz-meta-"
+let max_user_metadata_bytes = 2048
 
 let invalid ?field fmt =
   Fmt.kstr
@@ -22,20 +28,37 @@ let validate_key seen key =
       invalid ~field:"metadata" "metadata key %S is duplicated" key
     else Ok lower
 
-let empty = { entries_rev = []; lower_keys = [] }
+let validate_total_bytes current_total key value =
+  let total =
+    current_total
+    + String.length key
+    + String.length (Header_value.to_string value)
+  in
+  if total > max_user_metadata_bytes then
+    invalid ~field:"metadata"
+      "metadata keys and values must be at most %d UTF-8 bytes"
+      max_user_metadata_bytes
+  else Ok total
+
+let empty = { entries_rev = []; lower_keys = []; total_bytes = 0 }
 
 let of_list entries =
-  let rec loop seen acc = function
-    | [] -> Ok { entries_rev = acc; lower_keys = seen }
+  let rec loop seen total_bytes acc = function
+    | [] -> Ok { entries_rev = acc; lower_keys = seen; total_bytes }
     | (key, value) :: rest -> (
         match validate_key seen key with
         | Error _ as error -> error
         | Ok lower -> (
             match Header_value.of_string ~field:("metadata " ^ key) value with
             | Error _ as error -> error
-            | Ok value -> loop (lower :: seen) ({ key; value } :: acc) rest))
+            | Ok value -> (
+                match validate_total_bytes total_bytes key value with
+                | Error _ as error -> error
+                | Ok total_bytes ->
+                    loop (lower :: seen) total_bytes ({ key; value } :: acc)
+                      rest)))
   in
-  loop [] [] entries
+  loop [] 0 [] entries
 
 let of_list_exn entries = Awskit.Error.Producer.get_ok_exn (of_list entries)
 
@@ -49,10 +72,12 @@ let entries metadata = List.rev metadata.entries_rev
 let add ~key ~value metadata =
   let* lower = validate_key metadata.lower_keys key in
   let* value = Header_value.of_string ~field:("metadata " ^ key) value in
+  let* total_bytes = validate_total_bytes metadata.total_bytes key value in
   Ok
     {
       entries_rev = { key; value } :: metadata.entries_rev;
       lower_keys = lower :: metadata.lower_keys;
+      total_bytes;
     }
 
 let pp fmt metadata =

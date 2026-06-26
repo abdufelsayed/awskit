@@ -15,6 +15,17 @@ let validate_objects objects =
       Delete_objects.max_objects
   else Ok ()
 
+let encode_carriage_returns value =
+  if not (String.contains value '\r') then value
+  else
+    let buffer = Buffer.create (String.length value) in
+    String.iter
+      (function
+        | '\r' -> Buffer.add_string buffer "&#xD;"
+        | c -> Buffer.add_char buffer c)
+      value;
+    Buffer.contents buffer
+
 let condition_etag_xml_value etag =
   let value = Object.Etag.to_string etag in
   let len = String.length value in
@@ -33,7 +44,9 @@ let body objects =
           (Option.map Object.Version_id.to_string object_.version_id)
       @ optional "ETag" (Option.map condition_etag_xml_value object_.etag))
   in
-  Xml.el "Delete" (List.map object_xml objects) |> Xml.to_string
+  Xml.el "Delete" (List.map object_xml objects)
+  |> Xml.to_string
+  |> encode_carriage_returns
 
 let parse_key ~path name nodes =
   let* key = Xml.required_child_text ~path name nodes in
@@ -81,8 +94,14 @@ let parse_result ~response body =
     Xml.children_result "Error" nodes ~f:(fun index nodes ->
         let path = Fmt.str "DeleteResult.Error[%d]" index in
         let* key = parse_key ~path "Key" nodes in
+        let* version_id = parse_version_id ~path "VersionId" nodes in
         let* code = Xml.required_child_text ~path "Code" nodes in
         Ok
-          { Delete_objects.key; code; message = Xml.child_text "Message" nodes })
+          {
+            Delete_objects.key;
+            version_id;
+            code;
+            message = Xml.child_text "Message" nodes;
+          })
   in
   Ok { Delete_objects.deleted; errors; response }

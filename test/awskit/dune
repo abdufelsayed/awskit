@@ -1,15 +1,14 @@
 (test
- (name test_awskit)
+ (name test_core_contracts)
  (package awskit)
- (libraries awskit awskit_test ptime alcotest qcheck-core qcheck-alcotest))
+ (libraries awskit base ptime alcotest qcheck-core qcheck-alcotest))
 
 (rule
- (alias protocol-pbt)
+ (alias awskit-core-contracts)
  (package awskit)
- (deps test_awskit.exe)
+ (deps
+  test_core_contracts.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED))
  (action
-  (progn
-   (run ./test_awskit.exe test "pbt:signing:uri-encode")
-   (run ./test_awskit.exe test "pbt:signing:canonical-query")
-   (run ./test_awskit.exe test "pbt:signing:sign-request")
-   (run ./test_awskit.exe test "pbt:signing:ptime"))))
+  (run ./test_core_contracts.exe)))

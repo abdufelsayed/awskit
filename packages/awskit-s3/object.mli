@@ -469,6 +469,9 @@ module Delete_many : sig
 
   type item_error = {
     key : Object_key.t;
+    version_id : Version_id.t option;
+        (** Object version id associated with the failed member, when S3 returns
+            one. *)
     code : string;
     message : string option;
   }

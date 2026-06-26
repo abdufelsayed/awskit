@@ -1,9 +1,21 @@
 # Security Threat Model
 
-Awskit treats security-sensitive SDK material as part of the public API
-contract at runtime, diagnostics, and test/documentation boundaries. The
-current scope is the core SDK and supported S3 SDK packages; MinIO is the named
-local S3-compatible contract target where executable contract coverage exists.
+Awskit treats security-sensitive SDK material as part of the public API contract
+at runtime, diagnostics, tests, and documentation boundaries.
+
+Related maintainer docs:
+
+- `docs/testing.md` explains the evidence aliases referenced here.
+- `docs/release-gates.md` requires support/security scope review before
+  production-ready releases.
+- `docs/docs-publishing.md` covers generated public documentation.
+
+## Scope
+
+The current scope is the core SDK and supported S3 SDK packages. MinIO is the
+named local S3-compatible contract target where executable service-backed
+coverage exists. The simulator is an in-process test/runtime boundary and does
+not prove live AWS behavior.
 
 ## Protected Assets
 
@@ -24,38 +36,40 @@ local S3-compatible contract target where executable contract coverage exists.
   object metadata, and presign requests.
 - Runtime packages resolve credentials, provide clocks, perform HTTP transport,
   and own provider refresh/caching behavior.
-- HTTP transport crosses process and network boundaries and must not expose
-  secret diagnostics by default.
+- HTTP transport crosses process and network boundaries and must keep secret
+  diagnostics out of default output.
 - Local metadata services provide temporary credentials through link-local or
   container metadata endpoints.
-- The simulator is an in-process test/runtime boundary and does not prove live
-  AWS behavior.
-- MinIO is the named local S3-compatible contract target covered by contract
-  tests; coverage does not imply provider-wide S3-compatible support.
-- Documentation examples are public artifacts and must avoid printing bearer
+- The simulator is an in-process test/runtime boundary.
+- MinIO is the named local S3-compatible integration target covered by
+  service-backed tests; coverage does not imply provider-wide S3-compatible
+  support.
+- Documentation examples are public artifacts and should avoid printing bearer
   presigned URLs or raw credentials by default.
 - CI is the automated evidence boundary for builds, documentation, and tests.
 
 ## Protections And Evidence
 
-| Protection | Current evidence | Planned evidence |
+| Invariant | Current evidence | Expand when |
 | --- | --- | --- |
-| Public diagnostics redact modeled service bodies and known secret-bearing fields, while raw diagnostics stay behind explicit unsafe APIs. | `test/awskit/test_error_redaction.ml` | Expanded redaction matrix coverage as new diagnostics surfaces are added. |
-| Presign APIs distinguish safe artifacts from bearer URLs and keep signed material out of default diagnostics and examples. | `test/awskit-s3/test_presigned.ml` | Additional presign artifact tests when the artifact surface expands. |
-| Credential chains continue only after unavailable providers and stop on invalid configured credentials or provider failures. | `test/awskit/test_core_contract.ml`; `test/awskit/lwt/unix/test_integration.ml` | Additional credential-chain tests for any newly supported provider family. |
-| Endpoint policy rejects unsafe endpoint components and requires explicit local/plaintext behavior. | `test/awskit-s3/test_endpoint.ml`; runtime integration tests under `test/awskit-s3/{lwt,eio}/test_integration.ml` | Endpoint-policy tests for new endpoint modes or contract targets. |
-| Documentation and generated package docs remain buildable and avoid unsafe examples by default. | `opam exec -- dune build @doc` | Broader docs checks when docs publishing or example validation changes. |
+| Public diagnostics redact modeled service bodies and known secret-bearing fields, while raw diagnostics stay behind explicit unsafe APIs. | `test/awskit/test_core_contracts.ml` through `@awskit-core-contracts`. | New diagnostics surfaces, printers, exceptions, or sexps are added. |
+| Presign APIs distinguish safe artifacts from bearer URLs and keep signed material out of default diagnostics and examples. | `test/awskit-s3/protocol/test_protocol_pbt.ml`, `test/awskit-s3/protocol/test_protocol_fixtures.ml`, and `test/awskit-s3/fixtures/protocol/presign/**` through `@s3-protocol` and `@s3-protocol-fixtures`. | Presigned operations, signed headers, or artifact printers expand. |
+| Credential chains continue after unavailable providers and stop on invalid configured credentials, provider failures, or expired credentials. | `test/awskit/test_core_contracts.ml` and `test/awskit/runtime/test_runtime_contracts.ml` through `@awskit-core-contracts` and `@awskit-runtime-contracts`. | A provider family, refresh path, or runtime credential policy changes. |
+| Endpoint policy rejects unsafe endpoint components and requires explicit local/plaintext behavior. | `test/awskit/test_core_contracts.ml`, `test/awskit-s3/protocol/test_protocol_pbt.ml`, and endpoint fuzz replay fixtures through `@awskit-core-contracts`, `@s3-protocol`, and `@s3-protocol-replay`. | Endpoint modes, TLS policy, addressing behavior, or S3-compatible target policy changes. |
+| Simulator and MinIO support claims stay scoped to their evidence boundary. | `@s3-sim`, `@s3-minio`, `@check-integration`, and support-matrix package docs. | Backend capability claims or S3-compatible provider support changes. |
+| Documentation and generated package docs remain buildable and avoid unsafe examples by default. | `opam exec -- dune build @examples @doc`. | Docs publishing, examples, or public guide snippets change security-sensitive material. |
 
-## Review Rules
+## Review Standards
 
-- New public printers, sexps, exceptions, and logs must be redaction-safe by
-  default.
-- Raw access to credentials or bearer presigned URLs must use deliberate
-  `reveal_*` or `Unsafe_*` naming.
-- Do not place secrets in object keys, user metadata, custom source labels, or
-  application diagnostic strings and expect Awskit's public diagnostics to
-  discover every application-defined secret.
-- Runtime packages may expose advanced SDK APIs directly, but they must preserve
-  the same redaction, credential, endpoint, and presign safety contracts.
-- New provider or endpoint support must add executable evidence before the docs
+- New public printers, sexps, exceptions, and logs are redaction-safe by default.
+- Raw credential secrets stay unexposed. Bearer presigned URLs use deliberate
+  `reveal_*` APIs, and unsafe diagnostics use deliberate `Unsafe_*` naming.
+- Object keys, user metadata, custom source labels, and application diagnostic
+  strings may contain application-defined secrets; Awskit public diagnostics do
+  not promise to discover every caller-defined secret.
+- Runtime packages may expose advanced SDK APIs directly, but they preserve the
+  same redaction, credential, endpoint, and presign safety contracts.
+- New provider or endpoint support adds executable evidence before public docs
   claim support.
+- Documentation examples use dummy credentials or safe artifacts unless the
+  point of the example is an explicit handoff of bearer material.

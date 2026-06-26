@@ -21,6 +21,8 @@ depends: [
   "fmt" {>= "0.11.0"}
   "ptime"
   "alcotest" {with-test}
+  "qcheck-core" {with-test}
+  "qcheck-alcotest" {with-test}
   "odoc" {with-doc}
 ]
 build: [

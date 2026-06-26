@@ -6,7 +6,12 @@
 *)
 
 type addressing_style = Endpoint_config.addressing_style
-(** Requested bucket addressing style. *)
+(** Requested bucket addressing style.
+
+    For object key exactly ["soap"], [`Auto] selects path-style addressing
+    because AWS S3 does not support that key with virtual-hosted-style requests.
+    Explicit [`Virtual_hosted] resolution rejects that key with a validation
+    error instead of generating an invalid request. *)
 
 type endpoint_variant = Endpoint_config.endpoint_variant
 (** AWS S3 endpoint variant. *)
@@ -58,4 +63,8 @@ val resolve_object_request :
   bucket:Bucket_name.t ->
   key:Object_key.t ->
   (Request.t, Awskit.Error.t) result
-(** Resolve endpoint, transport path, and signing path for an object request. *)
+(** Resolve endpoint, transport path, and signing path for an object request.
+
+    Object key exactly ["soap"] is resolved with path-style addressing when the
+    configuration is [`Auto] or [`Path]. It is rejected for explicit
+    [`Virtual_hosted] addressing. *)

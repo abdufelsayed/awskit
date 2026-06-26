@@ -1,11 +1,69 @@
 (test
  (name test_awskit_s3_sim)
  (package awskit-s3-sim)
- (libraries awskit awskit-s3 awskit-s3-sim awskit_s3_test alcotest ptime))
+ (libraries
+  awskit
+  awskit-s3
+  awskit-s3-sim
+  awskit_s3_workload
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  ptime)
+ (deps
+  (source_tree ../fixtures/workload-replay)))
 
 (rule
- (alias simulator-contract)
+ (alias s3-state)
  (package awskit-s3-sim)
- (deps test_awskit_s3_sim.exe)
+ (deps
+  test_awskit_s3_sim.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED)
+  (source_tree ../fixtures/workload-replay))
+ (locks awskit-s3-sim-alcotest)
  (action
-  (run ./test_awskit_s3_sim.exe)))
+  (progn
+   (run ./test_awskit_s3_sim.exe test "replay:awskit-s3-sim:s3-state")
+   (run ./test_awskit_s3_sim.exe test "workload:awskit-s3-sim:s3-state")
+   (run
+    ./test_awskit_s3_sim.exe
+    test
+    "contract:awskit-s3-sim:multipart-validation")
+   (run
+    ./test_awskit_s3_sim.exe
+    test
+    "contract:awskit-s3-sim:list-pagination")
+   (run
+    ./test_awskit_s3_sim.exe
+    test
+    "contract:awskit-s3-sim:response-metadata")
+   (run
+    ./test_awskit_s3_sim.exe
+    test
+    "contract:awskit-s3-sim:body-lifecycle"))))
+
+(rule
+ (alias s3-transfer)
+ (package awskit-s3-sim)
+ (deps
+  test_awskit_s3_sim.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED))
+ (locks awskit-s3-sim-alcotest)
+ (action
+  (run
+   ./test_awskit_s3_sim.exe
+   test
+   "workload:awskit-s3-sim:transfer-faults")))
+
+(rule
+ (alias discovery)
+ (package awskit-s3-sim)
+ (deps
+  test_awskit_s3_sim.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED))
+ (locks awskit-s3-sim-alcotest)
+ (action
+  (run ./test_awskit_s3_sim.exe test "workload:awskit-s3-sim:")))

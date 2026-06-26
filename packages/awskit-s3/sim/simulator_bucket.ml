@@ -134,7 +134,7 @@ module Bucket = struct
           match validate_status status with
           | Error error -> Error error
           | Ok () ->
-              state.versioning <- Some status;
+              set_versioning state status;
               Ok (response 200))
   end
 

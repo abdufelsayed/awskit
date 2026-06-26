@@ -48,12 +48,12 @@ let version_entries_after_marker key_marker version_id_marker entries =
             | value when value < 0 -> drop rest
             | _ -> (
                 match version_id_marker with
-                | None -> drop rest
+                | None -> entry :: rest
                 | Some marker -> (
                     match version_entry_id entry with
                     | Some version_id
                       when Object.Version_id.equal version_id marker ->
-                        rest
+                        entry :: rest
                     | _ -> drop rest)))
       in
       drop entries
@@ -71,11 +71,12 @@ let listing_entries_after_marker key_marker version_id_marker entries =
             | value when value < 0 -> drop rest
             | _ -> (
                 match (entry, version_id_marker) with
+                | _, None -> entry :: rest
                 | Version_entry version_entry, Some marker -> (
                     match version_entry_id version_entry with
                     | Some version_id
                       when Object.Version_id.equal version_id marker ->
-                        rest
+                        entry :: rest
                     | _ -> drop rest)
                 | _ -> drop rest))
       in

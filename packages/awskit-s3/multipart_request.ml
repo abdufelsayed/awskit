@@ -81,6 +81,11 @@ module Make (C : Request_context.S) = struct
       S3_error_context.invalid ~field:"multipart_object_size"
         "multipart object size does not match completed part sizes"
     in
+    let checksumed_parts =
+      List.exists
+        (fun part -> Option.is_some (Multipart.Part.checksum part))
+        parts
+    in
     let rec loop previous total all_sizes_known = function
       | [] -> (
           match multipart_object_size with
@@ -99,6 +104,16 @@ module Make (C : Request_context.S) = struct
           then
             S3_error_context.invalid ~field:"part_number"
               "parts must be sorted by part_number"
+          else if
+            checksumed_parts
+            &&
+            match previous with
+            | None -> part_number <> 1
+            | Some prev -> part_number <> prev + 1
+          then
+            S3_error_context.invalid ~field:"part_number"
+              "parts with checksums must use consecutive part numbers starting \
+               at 1"
           else
             match (rest, Multipart.Part.size part) with
             | _ :: _, Some size

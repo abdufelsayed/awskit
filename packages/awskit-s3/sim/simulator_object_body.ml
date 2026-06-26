@@ -36,6 +36,7 @@ let ranged_body body = function
           let slice_length = Int64.(to_int (add (sub finish start) 1L)) in
           let headers =
             [
+              ("accept-ranges", "bytes");
               ("content-range", Fmt.str "bytes %Ld-%Ld/%d" start finish length);
             ]
           in

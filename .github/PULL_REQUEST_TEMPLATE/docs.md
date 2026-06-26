@@ -1,23 +1,16 @@
-<!-- Update documentation. -->
-
 ## Summary
 
 <!-- Describe the documentation change. -->
 
-## Audience
+## Impact
 
-<!-- Describe who this helps. -->
-
-## Policy Alignment
-
-<!-- State whether SUPPORT.md, SECURITY.md, release gates, package docs,
-examples, Eio caller-owned transport wording, or S3-compatible support claims
-changed. -->
+<!-- Name the affected audience, docs, examples, support/security surfaces, or
+package documentation. -->
 
 ## Validation
 
-<!-- List link checks, doc builds, spelling checks, or review performed. -->
+<!-- List doc builds, link checks, extracted-example checks, or manual review performed. -->
 
 ## Release Notes
 
-<!-- Add the changelog-ready entry when this should appear in a release. -->
+<!-- Add a changelog-ready entry when this should appear in a release, otherwise "None". -->

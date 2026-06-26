@@ -1,44 +1,31 @@
-(test
- (name test_awskit_s3_lwt_unix)
- (package awskit-s3-lwt-unix)
- (modules
-  test_awskit_s3_lwt_unix
-  test_integration
-  test_transfer
-  transfer_under_test)
- (libraries
-  awskit
-  awskit-lwt-unix
-  awskit-unix
-  awskit-s3
-  awskit-s3-lwt-unix
-  lwt
-  lwt.unix
-  fmt
-  alcotest))
-
-(rule
- (target transfer_under_test.ml)
- (deps ../../../../packages/awskit-s3/lwt/unix/transfer.ml)
- (action
-  (copy %{deps} %{target})))
-
 (executable
- (name test_minio_contract)
- (modules test_minio_contract)
+ (name test_s3_minio_workload)
  (libraries
   awskit
   awskit-lwt-unix
   awskit-s3
   awskit-s3-lwt-unix
-  awskit_s3_test
+  awskit_s3_workload
   lwt
   lwt.unix
   ptime.clock.os
-  alcotest))
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  unix))
 
 (rule
- (alias minio-contract)
+ (alias s3-minio)
  (package awskit-s3-lwt-unix)
+ (deps
+  test_s3_minio_workload.exe
+  (env_var AWSKIT_INTEGRATION_PROFILE)
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED)
+  (env_var AWSKIT_S3_MINIO_ACCESS_KEY_ID)
+  (env_var AWSKIT_S3_MINIO_ENDPOINT)
+  (env_var AWSKIT_S3_MINIO_REGION)
+  (env_var AWSKIT_S3_MINIO_SECRET_ACCESS_KEY)
+  (env_var AWSKIT_S3_MINIO_UNSAFE_HTTP))
  (action
-  (run ./test_minio_contract.exe)))
+  (run ./test_s3_minio_workload.exe)))

@@ -1,37 +1,26 @@
 # Agent Instructions
 
-These instructions apply to the whole repository. Read this file before making
-changes, writing descriptions, updating release notes, or opening pull requests.
+These instructions apply to automated contributors. Human maintainer policy
+lives in `docs/maintainer-workflow.md` and the rest of `docs`.
 
 ## Start Here
 
-1. Read `docs/agent-workflow.md`.
+1. Read `docs/maintainer-workflow.md`.
 2. Check the working tree before editing:
 
    ```sh
    git status --short --branch
    ```
 
-3. Read the maintenance document that matches the change:
+3. Read the maintainer document that matches the change. `docs/README.md`
+   lists the available guides.
+4. Inspect the relevant files before editing and keep changes within the
+   requested scope. When scope or ownership is unclear, ask before editing.
 
-   - Codebase architecture and package boundaries:
-     `docs/architecture.md`
-   - OCaml implementation style: `docs/ocaml-development.md`
-   - Tests and validation: `docs/testing.md`
-   - Changelog entries: `docs/changelog.md`
-   - Release work: `docs/release.md`
-   - CI behavior and debugging: `docs/ci.md`
-   - Documentation publishing: `docs/docs-publishing.md`
+## Repository Text
 
-## Source Of Truth
-
-- Public release notes live in `CHANGES.md`.
-- Release PRs preview the changelog, but `CHANGES.md` is the canonical release
-  ledger.
-- Public package documentation lives in `packages/*/doc`.
-- Maintainer workflows live in `docs`.
-- CI and documentation publishing live in `.github/workflows/main.yml`.
-- Release validation lives in `scripts/release-check.sh`.
+Use durable maintainer language in commits, PR bodies, release notes, and docs.
+Do not encode conversation history or agent process in repository artifacts.
 
 ## Required Checks
 

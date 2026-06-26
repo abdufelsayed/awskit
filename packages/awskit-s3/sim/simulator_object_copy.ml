@@ -36,7 +36,11 @@ let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
                 let* () =
                   validate_opt validate_storage_class options.storage_class
                 in
-                validate_opt validate_checksum_algorithm
+                let* () =
+                  validate_opt validate_checksum_algorithm
+                    options.checksum_algorithm
+                in
+                validate_opt validate_supported_algorithm
                   options.checksum_algorithm
               with
               | Error error -> return_error error
@@ -55,51 +59,53 @@ let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
                               options.source_preconditions
                           with
                           | Error error -> source_error error
-                          | Ok () ->
-                              let metadata =
-                                match options.metadata_directive with
-                                | Some (`Replace metadata) -> metadata
-                                | _ -> src.metadata
-                              in
-                              let computed_checksum =
+                          | Ok () -> (
+                              match
                                 checksum_for_algorithm ~body:src.body
                                   options.checksum_algorithm
-                              in
-                              let checksum =
-                                match computed_checksum.values with
-                                | [] -> src.checksum
-                                | _ -> computed_checksum
-                              in
-                              let obj =
-                                {
-                                  body = src.body;
-                                  etag = src.etag;
-                                  version_id = None;
-                                  content_type = src.content_type;
-                                  metadata;
-                                  storage_class =
-                                    (match options.storage_class with
-                                    | Some sc -> Some sc
-                                    | None -> src.storage_class);
-                                  tags = src.tags;
-                                  checksum;
-                                  last_modified = now conn;
-                                }
-                              in
-                              let obj =
-                                store_object conn destination_bucket_state
-                                  destination_key obj
-                              in
-                              Ok
-                                {
-                                  Object.Copy.etag = Some obj.etag;
-                                  last_modified = Some obj.last_modified;
-                                  version_id = obj.version_id;
-                                  copy_source_version_id = src.version_id;
-                                  response =
-                                    response 200
-                                      ~headers:
-                                        (version_headers obj.version_id
-                                        @ copy_source_version_headers
-                                            src.version_id);
-                                }))))))
+                              with
+                              | Error error -> return_error error
+                              | Ok computed_checksum ->
+                                  let metadata =
+                                    match options.metadata_directive with
+                                    | Some (`Replace metadata) -> metadata
+                                    | _ -> src.metadata
+                                  in
+                                  let checksum =
+                                    match computed_checksum.values with
+                                    | [] -> src.checksum
+                                    | _ -> computed_checksum
+                                  in
+                                  let obj =
+                                    {
+                                      body = src.body;
+                                      etag = src.etag;
+                                      version_id = None;
+                                      content_type = src.content_type;
+                                      metadata;
+                                      storage_class =
+                                        (match options.storage_class with
+                                        | Some sc -> Some sc
+                                        | None -> src.storage_class);
+                                      tags = src.tags;
+                                      checksum;
+                                      last_modified = now conn;
+                                    }
+                                  in
+                                  let obj =
+                                    store_object conn destination_bucket_state
+                                      destination_key obj
+                                  in
+                                  Ok
+                                    {
+                                      Object.Copy.etag = Some obj.etag;
+                                      last_modified = Some obj.last_modified;
+                                      version_id = obj.version_id;
+                                      copy_source_version_id = src.version_id;
+                                      response =
+                                        response 200
+                                          ~headers:
+                                            (version_headers obj.version_id
+                                            @ copy_source_version_headers
+                                                src.version_id);
+                                    })))))))

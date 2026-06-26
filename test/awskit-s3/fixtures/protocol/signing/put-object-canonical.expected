@@ -8,3 +8,4 @@ x-amz-meta-trace:replay fixture,second
 signed-headers=host;x-amz-content-sha256;x-amz-date;x-amz-meta-trace
 payload-hash=230d8358dc8e8890b4c58deeb62912ee2f20357ae92a5cc861b98e68fe31acb5
 authorization=AWS4-HMAC-SHA256 Credential=REDACTED, SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-meta-trace, Signature=REDACTED
+signature=0d6b943b9dfac997e1d8bf7583ca4ea269044c0c8648a33e55b7dc95a72b6296

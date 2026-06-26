@@ -86,7 +86,9 @@
    (and
     :with-test
     (>= 6.2.1)))
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-lwt-unix)
@@ -142,7 +144,9 @@
    (and
     :with-test
     (>= 1.3)))
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-s3)
@@ -193,7 +197,9 @@
   (base64
    (>= 3.5.2))
   uri
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-s3-lwt)
@@ -240,7 +246,9 @@
   (fmt
    (>= 0.11.0))
   ptime
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-s3-eio)

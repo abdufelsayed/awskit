@@ -5,7 +5,8 @@ type t
 
 val of_string : string -> (t, Awskit.Error.t) result
 (** Validate a non-empty UTF-8 object key up to S3's 1,024-byte object-key
-    limit. *)
+    limit. Relative [..] path segments are accepted only when they never
+    outnumber preceding non-relative segments while scanning left to right. *)
 
 val of_string_exn : string -> t
 (** Like {!val:of_string}, but raises [Awskit.Error.Awskit_error] carrying the

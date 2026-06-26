@@ -50,37 +50,41 @@ let put conn ~bucket ~key ?options ~body () =
                           | Ok () -> (
                               match request_body_result body with
                               | Error error -> return_error error
-                              | Ok body ->
+                              | Ok body -> (
                                   let etag = etag body in
-                                  let checksum =
-                                    checksum_for_value options.checksum
-                                  in
-                                  let obj =
-                                    {
-                                      body;
-                                      etag;
-                                      version_id = None;
-                                      content_type = options.content_type;
-                                      metadata = options.metadata;
-                                      storage_class = options.storage_class;
-                                      tags = options.tags;
-                                      checksum;
-                                      last_modified = now conn;
-                                    }
-                                  in
-                                  let obj =
-                                    store_object conn bucket_state key obj
-                                  in
-                                  Ok
-                                    {
-                                      Object.Put.etag = Some etag;
-                                      version_id = obj.version_id;
-                                      checksum;
-                                      response =
-                                        response 200
-                                          ~headers:
-                                            (("etag", Object.Etag.to_string etag)
-                                            :: (version_headers obj.version_id
-                                               @ checksum_response_headers
-                                                   checksum));
-                                    })))))))
+                                  match
+                                    checksum_for_value ~body options.checksum
+                                  with
+                                  | Error error -> return_error error
+                                  | Ok checksum ->
+                                      let obj =
+                                        {
+                                          body;
+                                          etag;
+                                          version_id = None;
+                                          content_type = options.content_type;
+                                          metadata = options.metadata;
+                                          storage_class = options.storage_class;
+                                          tags = options.tags;
+                                          checksum;
+                                          last_modified = now conn;
+                                        }
+                                      in
+                                      let obj =
+                                        store_object conn bucket_state key obj
+                                      in
+                                      Ok
+                                        {
+                                          Object.Put.etag = Some etag;
+                                          version_id = obj.version_id;
+                                          checksum;
+                                          response =
+                                            response 200
+                                              ~headers:
+                                                (( "etag",
+                                                   Object.Etag.to_string etag )
+                                                :: (version_headers
+                                                      obj.version_id
+                                                   @ checksum_response_headers
+                                                       checksum));
+                                        }))))))))

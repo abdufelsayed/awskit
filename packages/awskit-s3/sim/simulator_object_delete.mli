@@ -6,6 +6,7 @@ val delete_result :
 
 val delete_objects_error :
   Awskit_s3.Object_key.t ->
+  ?version_id:Awskit_s3.Object.Version_id.t ->
   string ->
   string ->
   Awskit_s3.Object.Delete_many.item_error

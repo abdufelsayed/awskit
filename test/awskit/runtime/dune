@@ -1,0 +1,11 @@
+(test
+ (name test_runtime_contracts)
+ (package awskit)
+ (libraries awskit awskit_runtime_test_support alcotest ptime))
+
+(rule
+ (alias awskit-runtime-contracts)
+ (package awskit)
+ (deps test_runtime_contracts.exe)
+ (action
+  (run ./test_runtime_contracts.exe test "contract:awskit:runtime-core")))

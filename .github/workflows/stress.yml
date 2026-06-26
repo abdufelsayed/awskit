@@ -1,0 +1,65 @@
+name: Stress evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      qcheck_count:
+        description: QCheck count for no-network stress aliases
+        required: false
+        default: "2000"
+        type: string
+      minio_qcheck_count:
+        description: Optional QCheck count for MinIO phases
+        required: false
+        type: string
+  schedule:
+    # Run explicit high-cost discovery weekly, separate from required PR CI.
+    - cron: 0 1 * * MON
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  OCAML_LATEST: "5"
+  EXAMPLE_OPAM_PACKAGES: >-
+    eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
+  AWSKIT_STRESS_QCHECK_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.qcheck_count || '2000' }}
+  AWSKIT_MINIO_QCHECK_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.minio_qcheck_count || '' }}
+
+jobs:
+  stress:
+    name: Stress, docs, and expensive MinIO
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v6
+
+      - name: Set-up OCaml ${{ env.OCAML_LATEST }}
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ env.OCAML_LATEST }}
+          dune-cache: true
+          opam-local-packages: |
+            *.opam
+
+      - name: Install dependencies
+        run: |
+          opam install --with-test --with-doc --with-dev-setup --deps-only .
+          opam install ${{ env.EXAMPLE_OPAM_PACKAGES }}
+
+      - name: Run stress evidence
+        run: scripts/test-report.sh stress --label stress-evidence
+
+      - name: Upload stress report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-evidence-report
+          path: .logs/
+          if-no-files-found: ignore

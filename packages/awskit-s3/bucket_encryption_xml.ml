@@ -32,11 +32,14 @@ let validate_rule (rule : Bucket.Encryption.Rule.t) =
   in
   let validate_bucket_key_usage () =
     match (rule.sse_algorithm, rule.bucket_key_enabled) with
-    | (Some Aws_kms | Some Aws_kms_dsse), Some _ -> Ok ()
+    | Some Aws_kms_dsse, Some _ ->
+        S3_error_context.invalid ~field:"bucket_key_enabled"
+          "bucket_key_enabled is not supported for aws:kms:dsse"
+    | Some Aws_kms, Some _ -> Ok ()
     | _, None -> Ok ()
     | _ ->
         S3_error_context.invalid ~field:"bucket_key_enabled"
-          "bucket_key_enabled requires aws:kms or aws:kms:dsse"
+          "bucket_key_enabled requires aws:kms"
   in
   let rec validate_blocked = function
     | [] -> Ok ()
