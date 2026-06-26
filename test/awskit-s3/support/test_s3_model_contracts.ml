@@ -85,6 +85,56 @@ let test_minio_profile_excludes_versioning_after_current_objects () =
          S3_command.Put_string ("a.txt", "", []);
        ])
 
+let test_replay_round_trips_generated_commands () =
+  let commands =
+    [
+      S3_command.Put_string
+        ( "space key.txt",
+          "line 1\n\000line 2",
+          [ ("path/key", "x@y"); ("empty", "") ] );
+      Put_string_metadata
+        ( "unicode-\206\180.txt",
+          "",
+          [],
+          [ ("trace-id", "sim-1"); ("multi", "line\nvalue") ] );
+      Get_string "space key.txt";
+      Find_string "missing key.txt";
+      Head_object "unicode-\206\180.txt";
+      Exists_object "logs/a.txt";
+      Delete_object "logs/b.txt";
+      List_keys;
+      List_prefix "logs/";
+      List_keys_page { prefix = None; max_keys = 1 };
+      List_keys_page { prefix = Some "photos/"; max_keys = 2 };
+      List_versions_page { max_keys = 3 };
+      Copy_object ("copy/source-object", "copy/destination-object");
+      Copy_object_metadata
+        ("copy/source-object", "copy/destination-object", Copy_source_metadata);
+      Copy_object_metadata
+        ( "copy/source-object",
+          "copy/destination-object",
+          Replace_metadata [ ("author", "awskit"); ("purpose", "stateful-pbt") ]
+        );
+      Put_object_tags ("a.txt", [ ("env", "dev"); ("owner", "sdk") ]);
+      Get_object_tags "a.txt";
+      Delete_object_tags "a.txt";
+      Put_bucket_tags [ ("team", "storage"); ("mode", "pbt") ];
+      Get_bucket_tags;
+      Delete_bucket_tags;
+      Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled;
+      Put_versioning Awskit_s3.Bucket.Versioning.Status.Suspended;
+      Get_versioning;
+    ]
+  in
+  match S3_replay.decode (S3_replay.encode commands) with
+  | Ok decoded -> Alcotest.(check bool) "commands" true (decoded = commands)
+  | Error error -> Alcotest.fail (S3_replay.parse_error_to_string error)
+
+let test_replay_rejects_unknown_versioning_status () =
+  match S3_replay.decode "replay-v1 put-versioning h556e6b6e6f776e" with
+  | Ok _ -> Alcotest.fail "expected replay parser to reject Unknown status"
+  | Error _ -> ()
+
 let suite =
   [
     ( "contract:awskit-s3:model",
@@ -99,6 +149,10 @@ let suite =
         Alcotest.test_case
           "minio profile excludes versioning after current objects" `Quick
           test_minio_profile_excludes_versioning_after_current_objects;
+        Alcotest.test_case "replay round trips generated commands" `Quick
+          test_replay_round_trips_generated_commands;
+        Alcotest.test_case "replay rejects unknown versioning status" `Quick
+          test_replay_rejects_unknown_versioning_status;
       ] );
   ]
 

@@ -657,7 +657,7 @@ let test_protocol_family_coverage () =
   | [] -> ()
   | missing ->
       Alcotest.failf
-        "S3 protocol generator families missing semantic coverage bins:\n\
+        "S3 protocol property families missing registered coverage bins:\n\
          %s\n\n\
          observed:\n\
          %s"
@@ -667,7 +667,7 @@ let test_protocol_family_coverage () =
 let suite =
   [
     ( "workload:awskit-s3:protocol-wire",
-      Alcotest.test_case "generator family semantic coverage" `Quick
+      Alcotest.test_case "property family registration coverage" `Quick
         test_protocol_family_coverage
       :: List.map Protocol_support.to_alcotest
            (List.map snd protocol_family_properties

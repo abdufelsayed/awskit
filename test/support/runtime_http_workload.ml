@@ -219,6 +219,164 @@ let scenario_gen =
 
 let generated_samples count = QCheck.Gen.generate ~n:count scenario_gen
 
+let connection_allowed ~method_ ~status framing connection =
+  let bodiless = Model.is_bodiless_response ~method_ ~status in
+  match framing with
+  | Model.Empty when not bodiless -> Poly.equal connection Model.Close
+  | Model.Content_length { declared; actual }
+    when not (Int.equal declared (String.length actual)) ->
+      Poly.equal connection Model.Close
+  | Duplicate_content_length { first; second; actual }
+    when (not (Int.equal first second))
+         || not (Int.equal first (String.length actual)) ->
+      Poly.equal connection Model.Close
+  | Conflicting_length_and_chunked _ | Early_close _ | Malformed_chunked _
+  | Malformed_header_block _ ->
+      Poly.equal connection Model.Close
+  | Empty | Content_length _ | Duplicate_content_length _ | Chunked _ -> true
+
+let normalize_connection ~method_ ~status framing connection =
+  if connection_allowed ~method_ ~status framing connection then connection
+  else Model.Close
+
+let rebuild_scenario scenario ?name ?method_ ?status ?framing ?connection
+    ?consume () =
+  let name = Option.value name ~default:scenario.Model.name in
+  let method_ = Option.value method_ ~default:scenario.method_ in
+  let status = Option.value status ~default:scenario.status in
+  let framing = Option.value framing ~default:scenario.framing in
+  let connection = Option.value connection ~default:scenario.connection in
+  let connection = normalize_connection ~method_ ~status framing connection in
+  let consume = Option.value consume ~default:scenario.consume in
+  Model.scenario ~name ~method_ ~status ~headers:scenario.headers ~framing
+    ~connection ~consume ()
+
+let shrink_method = function
+  | `GET -> []
+  | `HEAD | `PUT | `POST | `DELETE | `PATCH -> [ `GET ]
+
+let shrink_status status = if Int.equal status 200 then [] else [ 200 ]
+
+let shrink_connection = function
+  | Model.Close -> []
+  | Keep_alive -> [ Model.Close ]
+
+let shrink_consume = function
+  | Model.Read_all -> []
+  | Read_once n ->
+      if n > 1 then [ Model.Read_all; Model.Read_once 1 ] else [ Read_all ]
+  | Drop_without_read | Raise_in_consume -> [ Read_all ]
+
+let exact_content_length actual =
+  Model.Content_length { declared = String.length actual; actual }
+
+let shrink_framing = function
+  | Model.Empty -> []
+  | Content_length { declared; actual } ->
+      [
+        Model.Empty;
+        exact_content_length actual;
+        exact_content_length "";
+        Content_length
+          { declared = Int.min declared (String.length actual); actual };
+      ]
+  | Duplicate_content_length { first; second; actual } ->
+      [
+        Model.Empty;
+        exact_content_length actual;
+        Duplicate_content_length { first; second = first; actual };
+        Duplicate_content_length
+          {
+            first = String.length actual;
+            second = String.length actual;
+            actual;
+          };
+      ]
+  | Conflicting_length_and_chunked { chunks; _ } ->
+      let actual = String.concat chunks in
+      [ Model.Empty; Model.Chunked chunks; exact_content_length actual ]
+  | Early_close actual -> [ Model.Empty; exact_content_length actual ]
+  | Chunked chunks ->
+      [ Model.Empty; exact_content_length (String.concat chunks) ]
+  | Malformed_chunked wire ->
+      [
+        Model.Empty;
+        exact_content_length (Model.decoded_malformed_chunked_prefix wire);
+      ]
+  | Malformed_header_block block ->
+      [
+        Model.Empty;
+        exact_content_length (Model.malformed_header_block_hidden_body block);
+      ]
+
+let shrink_name name =
+  if String.equal name "generated" then [] else [ "generated" ]
+
+let distinct_strict_scenarios original candidates =
+  let original_key = Model.to_string original in
+  let seen = ref [] in
+  List.filter candidates ~f:(fun candidate ->
+      let key = Model.to_string candidate in
+      if String.equal key original_key || List.mem !seen key ~equal:String.equal
+      then false
+      else (
+        seen := key :: !seen;
+        true))
+
+let shrink_scenario scenario =
+  let candidates =
+    [
+      List.map (shrink_name scenario.name) ~f:(fun name ->
+          rebuild_scenario scenario ~name ());
+      List.map (shrink_method scenario.method_) ~f:(fun method_ ->
+          rebuild_scenario scenario ~method_ ());
+      List.map (shrink_status scenario.status) ~f:(fun status ->
+          rebuild_scenario scenario ~status ());
+      List.map (shrink_framing scenario.framing) ~f:(fun framing ->
+          rebuild_scenario scenario ~framing ());
+      List.map (shrink_connection scenario.connection) ~f:(fun connection ->
+          rebuild_scenario scenario ~connection ());
+      List.map (shrink_consume scenario.consume) ~f:(fun consume ->
+          rebuild_scenario scenario ~consume ());
+    ]
+    |> List.concat
+    |> distinct_strict_scenarios scenario
+  in
+  QCheck.Iter.of_list candidates
+
+let iter_to_list iter =
+  let values = ref [] in
+  iter (fun value -> values := value :: !values);
+  List.rev !values
+
+let test_scenario_shrinker_emits_recomputed_candidates () =
+  let scenario =
+    Model.scenario ~name:"generated-head-500" ~method_:`HEAD ~status:500
+      ~framing:(Content_length { declared = 6; actual = "hello" })
+      ~connection:Close ~consume:(Read_once 4) ()
+  in
+  let candidates = iter_to_list (shrink_scenario scenario) in
+  Alcotest.(check bool)
+    "emits shrink candidates" true
+    (not (List.is_empty candidates));
+  Alcotest.(check bool)
+    "excludes original" false
+    (List.exists candidates ~f:(fun candidate ->
+         String.equal (Model.to_string candidate) (Model.to_string scenario)));
+  List.iter candidates ~f:(fun candidate ->
+      Alcotest.(check bool)
+        ("connection is valid for " ^ candidate.name)
+        true
+        (connection_allowed ~method_:candidate.method_ ~status:candidate.status
+           candidate.framing candidate.connection);
+      Alcotest.(check string)
+        ("expected body recomputed for " ^ candidate.name)
+        (Model.expected_body_to_string
+           (Model.expected_body_for ~headers:candidate.headers
+              ~bodiless:(Model.is_bodiless candidate)
+              candidate.framing))
+        (Model.expected_body_to_string candidate.expected_body))
+
 let required_runtime_bins =
   [
     "http.method.get";
@@ -325,7 +483,7 @@ module Make (Target : TARGET) = struct
   let generated_case =
     let count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:250 in
     QCheck.Test.make ~count ~name:"generated scenarios"
-      (QCheck.make ~print:Model.to_string scenario_gen)
+      (QCheck.make ~print:Model.to_string ~shrink:shrink_scenario scenario_gen)
       (check_scenario ~target_name:Target.name Target.run_scenario)
     |> QCheck_alcotest.to_alcotest ~speed_level:`Quick
 
@@ -335,6 +493,8 @@ module Make (Target : TARGET) = struct
         deterministic_cases
         @ replay_cases
         @ [
+            Alcotest.test_case "scenario shrinker" `Quick
+              test_scenario_shrinker_emits_recomputed_candidates;
             Alcotest.test_case "generator semantic coverage" `Quick
               test_generator_coverage;
             generated_case;
