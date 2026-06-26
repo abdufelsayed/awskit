@@ -12,7 +12,9 @@
   ptime
   alcotest
   qcheck-core
-  qcheck-alcotest))
+  qcheck-alcotest)
+ (deps
+  (source_tree ../../fixtures/runtime-http-replay)))
 
 (rule
  (alias runtime-http)

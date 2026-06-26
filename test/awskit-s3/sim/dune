@@ -9,7 +9,9 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  ptime))
+  ptime)
+ (deps
+  (source_tree ../fixtures/workload-replay)))
 
 (rule
  (alias s3-state)

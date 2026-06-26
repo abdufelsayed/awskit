@@ -99,24 +99,35 @@ let response_checksum response =
   }
 
 let response_encryption response =
-  match Awskit.Response.header response "x-amz-server-side-encryption" with
-  | None -> Ok None
-  | Some "AES256" -> Ok (Some `AES256)
-  | Some "aws:kms" ->
-      let* bucket_key_enabled =
-        response_bool_header response
-          "x-amz-server-side-encryption-bucket-key-enabled"
-      in
-      Ok
-        (Some
-           (`Aws_kms
-              {
-                Object.Encryption.key_id =
-                  Awskit.Response.header response
-                    "x-amz-server-side-encryption-aws-kms-key-id";
-                bucket_key_enabled;
-              }))
-  | Some value -> Ok (Some (`Unknown value))
+  let kms () =
+    let* bucket_key_enabled =
+      response_bool_header response
+        "x-amz-server-side-encryption-bucket-key-enabled"
+    in
+    Encryption.Kms.create
+      ?key_id:
+        (Awskit.Response.header response
+           "x-amz-server-side-encryption-aws-kms-key-id")
+      ?bucket_key_enabled ()
+  in
+  match
+    Awskit.Response.header response
+      "x-amz-server-side-encryption-customer-algorithm"
+  with
+  | Some "AES256" -> Ok (Some Encryption.Observed.Sse_c)
+  | Some value -> Ok (Some (Encryption.Observed.Unknown value))
+  | None -> (
+      match Awskit.Response.header response "x-amz-server-side-encryption" with
+      | None -> Ok None
+      | Some "AES256" -> Ok (Some Encryption.Observed.Sse_s3)
+      | Some "aws:kms" ->
+          let* kms = kms () in
+          Ok (Some (Encryption.Observed.Sse_kms kms))
+      | Some "aws:kms:dsse" ->
+          let* kms = kms () in
+          Ok (Some (Encryption.Observed.Dsse_kms kms))
+      | Some "aws:fsx" -> Ok (Some Encryption.Observed.Aws_fsx)
+      | Some value -> Ok (Some (Encryption.Observed.Unknown value)))
 
 let storage_class response =
   match Awskit.Response.header response "x-amz-storage-class" with
@@ -126,7 +137,14 @@ let storage_class response =
         (S3_error_context.decode_with_context
            ~what:"x-amz-storage-class response header"
            "storage class must be non-empty")
-  | Some value -> Ok (Some (Storage_class.of_string value))
+  | Some value -> (
+      match Storage_class.of_string value with
+      | Ok storage_class -> Ok (Some storage_class)
+      | Error error ->
+          Error
+            (S3_error_context.decode_with_context
+               ~what:"x-amz-storage-class response header"
+               (Awskit.Error.to_string_hum error)))
 
 let response_content_type response =
   match Awskit.Response.header response "content-type" with
@@ -172,7 +190,7 @@ let object_info response =
   let* version_id = response_version response in
   let* content_type = response_content_type response in
   let* content_range = response_content_range response in
-  let* server_side_encryption = response_encryption response in
+  let* encryption = response_encryption response in
   let* last_modified = response_time_header response "last-modified" in
   let* metadata =
     Metadata_headers.of_headers (Awskit.Response.headers response)
@@ -188,7 +206,7 @@ let object_info response =
       storage_class;
       version_id;
       checksum = response_checksum response;
-      server_side_encryption;
+      encryption;
       response;
     }
 

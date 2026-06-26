@@ -120,17 +120,6 @@ module Checksum : sig
       metadata. *)
 end
 
-module Encryption : sig
-  type kms = { key_id : string option; bucket_key_enabled : bool option }
-  (** Server-side encryption request and response metadata. *)
-
-  type request = [ `AES256 | `Aws_kms of kms ]
-  (** Encryption settings that can be sent with write/copy/create requests. *)
-
-  type response = [ `AES256 | `Aws_kms of kms | `Unknown of string ]
-  (** Encryption settings reported by S3. Unknown values are preserved. *)
-end
-
 module Owner : sig
   type t = private { id : string option; display_name : string option }
   (** S3 owner metadata returned by listing APIs. [id] is the canonical owner
@@ -225,8 +214,8 @@ module Put : sig
     preconditions : Preconditions.Write.t;  (** Conditional write headers. *)
     checksum : Checksum.value option;
         (** Explicit checksum header for the request body. *)
-    server_side_encryption : Encryption.request option;
-        (** Server-side encryption headers for the new object. *)
+    encryption : Encryption.Destination.t option;
+        (** Encryption headers for the new object. *)
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner], used to guard against bucket-owner
             confusion. *)
@@ -257,7 +246,7 @@ module Put : sig
     ?content_disposition:Header_value.t ->
     ?preconditions:Preconditions.Write.t ->
     ?checksum:Checksum.value ->
-    ?server_side_encryption:Encryption.request ->
+    ?encryption:Encryption.Destination.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
@@ -273,7 +262,7 @@ module Put : sig
     ?content_disposition:Header_value.t ->
     ?preconditions:Preconditions.Write.t ->
     ?checksum:Checksum.value ->
-    ?server_side_encryption:Encryption.request ->
+    ?encryption:Encryption.Destination.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     options
@@ -288,6 +277,8 @@ module Get : sig
         (** Object version to read instead of the current version. *)
     checksum_mode : Checksum.Mode.t option;
         (** Request S3 checksum metadata in the response. *)
+    source_encryption : Encryption.Source.t option;
+        (** SSE-C source-object key headers for reading encrypted objects. *)
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
@@ -309,8 +300,8 @@ module Get : sig
         (** Storage class reported for the object, if present. *)
     version_id : Version_id.t option;  (** Version id of the returned object. *)
     checksum : Checksum.response;  (** Checksum response headers. *)
-    server_side_encryption : Encryption.response option;
-        (** Server-side encryption metadata reported by S3. *)
+    encryption : Encryption.Observed.t option;
+        (** Encryption metadata reported by S3. *)
     response : Awskit.Response.t;  (** Raw response metadata. *)
   }
   (** [GetObject] response metadata. The object body is consumed through the
@@ -333,8 +324,8 @@ module Get : sig
         (** Storage class reported for the object, if present. *)
     version_id : Version_id.t option;  (** Version id of the returned object. *)
     checksum : Checksum.response;  (** Checksum response headers. *)
-    server_side_encryption : Encryption.response option;
-        (** Server-side encryption metadata reported by S3. *)
+    encryption : Encryption.Observed.t option;
+        (** Encryption metadata reported by S3. *)
     response : Awskit.Response.t;  (** Raw response metadata. *)
   }
   (** [GetObject] result containing response metadata and the caller's consumed
@@ -349,6 +340,7 @@ module Get : sig
     ?preconditions:Preconditions.Read.t ->
     ?version_id:Version_id.t ->
     ?checksum_mode:Checksum.Mode.t ->
+    ?source_encryption:Encryption.Source.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
@@ -359,6 +351,7 @@ module Get : sig
     ?preconditions:Preconditions.Read.t ->
     ?version_id:Version_id.t ->
     ?checksum_mode:Checksum.Mode.t ->
+    ?source_encryption:Encryption.Source.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     options
@@ -373,6 +366,8 @@ module Head : sig
         (** Object version to inspect instead of the current version. *)
     checksum_mode : Checksum.Mode.t option;
         (** Request S3 checksum metadata in the response. *)
+    source_encryption : Encryption.Source.t option;
+        (** SSE-C source-object key headers for encrypted objects. *)
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
@@ -388,6 +383,7 @@ module Head : sig
     ?preconditions:Preconditions.Read.t ->
     ?version_id:Version_id.t ->
     ?checksum_mode:Checksum.Mode.t ->
+    ?source_encryption:Encryption.Source.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
@@ -397,6 +393,7 @@ module Head : sig
     ?preconditions:Preconditions.Read.t ->
     ?version_id:Version_id.t ->
     ?checksum_mode:Checksum.Mode.t ->
+    ?source_encryption:Encryption.Source.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     options
@@ -518,8 +515,10 @@ module Copy : sig
         (** Storage class for the destination object. *)
     checksum_algorithm : Checksum.Algorithm.t option;
         (** Checksum algorithm S3 should use for the destination object. *)
-    server_side_encryption : Encryption.request option;
-        (** Server-side encryption for the destination object. *)
+    destination_encryption : Encryption.Destination.t option;
+        (** Encryption for the destination object. *)
+    source_encryption : Encryption.Source.t option;
+        (** SSE-C source-object key headers for the object being copied. *)
     expected_bucket_owner : Account_id.t option;
         (** Expected owner for the destination bucket. *)
     source_expected_bucket_owner : Account_id.t option;
@@ -546,7 +545,8 @@ module Copy : sig
     ?metadata_directive:metadata_directive ->
     ?storage_class:Storage_class.t ->
     ?checksum_algorithm:Checksum.Algorithm.t ->
-    ?server_side_encryption:Encryption.request ->
+    ?destination_encryption:Encryption.Destination.t ->
+    ?source_encryption:Encryption.Source.t ->
     ?expected_bucket_owner:Account_id.t ->
     ?source_expected_bucket_owner:Account_id.t ->
     unit ->
@@ -559,7 +559,8 @@ module Copy : sig
     ?metadata_directive:metadata_directive ->
     ?storage_class:Storage_class.t ->
     ?checksum_algorithm:Checksum.Algorithm.t ->
-    ?server_side_encryption:Encryption.request ->
+    ?destination_encryption:Encryption.Destination.t ->
+    ?source_encryption:Encryption.Source.t ->
     ?expected_bucket_owner:Account_id.t ->
     ?source_expected_bucket_owner:Account_id.t ->
     unit ->

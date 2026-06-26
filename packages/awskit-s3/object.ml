@@ -125,12 +125,6 @@ module Checksum = struct
   let empty_summary = { algorithms = []; checksum_type = None }
 end
 
-module Encryption = struct
-  type kms = { key_id : string option; bucket_key_enabled : bool option }
-  type request = [ `AES256 | `Aws_kms of kms ]
-  type response = [ `AES256 | `Aws_kms of kms | `Unknown of string ]
-end
-
 module Owner = struct
   type t = { id : string option; display_name : string option }
 
@@ -216,7 +210,7 @@ module Put = struct
     content_disposition : Header_value.t option;
     preconditions : Preconditions.Write.t;
     checksum : Checksum.value option;
-    server_side_encryption : Encryption.request option;
+    encryption : Encryption.Destination.t option;
     expected_bucket_owner : Account_id.t option;
   }
 
@@ -238,14 +232,14 @@ module Put = struct
       content_disposition = None;
       preconditions = Preconditions.Write.none;
       checksum = None;
-      server_side_encryption = None;
+      encryption = None;
       expected_bucket_owner = None;
     }
 
   let validate_storage_class = function
-    | Some (Storage_class.Unknown value) ->
-        S3_error_context.invalid ~field:"storage_class"
-          "unknown storage class %S cannot be sent" value
+    | Some storage_class ->
+        S3_validation.validate_header_value ~field:"storage_class"
+          (Storage_class.to_string storage_class)
     | _ -> Ok ()
 
   let validate_checksum_value = function
@@ -259,7 +253,7 @@ module Put = struct
   let options ?content_type ?(metadata = Metadata.empty) ?storage_class
       ?(tags = Tag.Set.empty) ?cache_control ?content_encoding
       ?content_disposition ?(preconditions = Preconditions.Write.none) ?checksum
-      ?server_side_encryption ?expected_bucket_owner () =
+      ?encryption ?expected_bucket_owner () =
     let* () = validate_storage_class storage_class in
     let* () = validate_checksum_value checksum in
     Ok
@@ -273,17 +267,17 @@ module Put = struct
         content_disposition;
         preconditions;
         checksum;
-        server_side_encryption;
+        encryption;
         expected_bucket_owner;
       }
 
   let options_exn ?content_type ?metadata ?storage_class ?tags ?cache_control
       ?content_encoding ?content_disposition ?preconditions ?checksum
-      ?server_side_encryption ?expected_bucket_owner () =
+      ?encryption ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn
       (options ?content_type ?metadata ?storage_class ?tags ?cache_control
          ?content_encoding ?content_disposition ?preconditions ?checksum
-         ?server_side_encryption ?expected_bucket_owner ())
+         ?encryption ?expected_bucket_owner ())
 end
 
 module Get = struct
@@ -292,6 +286,7 @@ module Get = struct
     preconditions : Preconditions.Read.t;
     version_id : Version_id.t option;
     checksum_mode : Checksum.Mode.t option;
+    source_encryption : Encryption.Source.t option;
     expected_bucket_owner : Account_id.t option;
   }
 
@@ -305,7 +300,7 @@ module Get = struct
     storage_class : Storage_class.t option;
     version_id : Version_id.t option;
     checksum : Checksum.response;
-    server_side_encryption : Encryption.response option;
+    encryption : Encryption.Observed.t option;
     response : Awskit.Response.t;
   }
 
@@ -320,7 +315,7 @@ module Get = struct
     storage_class : Storage_class.t option;
     version_id : Version_id.t option;
     checksum : Checksum.response;
-    server_side_encryption : Encryption.response option;
+    encryption : Encryption.Observed.t option;
     response : Awskit.Response.t;
   }
 
@@ -330,19 +325,27 @@ module Get = struct
       preconditions = Preconditions.Read.none;
       version_id = None;
       checksum_mode = None;
+      source_encryption = None;
       expected_bucket_owner = None;
     }
 
   let options ?range ?(preconditions = Preconditions.Read.none) ?version_id
-      ?checksum_mode ?expected_bucket_owner () =
+      ?checksum_mode ?source_encryption ?expected_bucket_owner () =
     Ok
-      { range; preconditions; version_id; checksum_mode; expected_bucket_owner }
+      {
+        range;
+        preconditions;
+        version_id;
+        checksum_mode;
+        source_encryption;
+        expected_bucket_owner;
+      }
 
   let options_exn ?range ?preconditions ?version_id ?checksum_mode
-      ?expected_bucket_owner () =
+      ?source_encryption ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn
       (options ?range ?preconditions ?version_id ?checksum_mode
-         ?expected_bucket_owner ())
+         ?source_encryption ?expected_bucket_owner ())
 end
 
 module Head = struct
@@ -350,6 +353,7 @@ module Head = struct
     preconditions : Preconditions.Read.t;
     version_id : Version_id.t option;
     checksum_mode : Checksum.Mode.t option;
+    source_encryption : Encryption.Source.t option;
     expected_bucket_owner : Account_id.t option;
   }
 
@@ -360,18 +364,26 @@ module Head = struct
       preconditions = Preconditions.Read.none;
       version_id = None;
       checksum_mode = None;
+      source_encryption = None;
       expected_bucket_owner = None;
     }
 
   let options ?(preconditions = Preconditions.Read.none) ?version_id
-      ?checksum_mode ?expected_bucket_owner () =
-    Ok { preconditions; version_id; checksum_mode; expected_bucket_owner }
+      ?checksum_mode ?source_encryption ?expected_bucket_owner () =
+    Ok
+      {
+        preconditions;
+        version_id;
+        checksum_mode;
+        source_encryption;
+        expected_bucket_owner;
+      }
 
-  let options_exn ?preconditions ?version_id ?checksum_mode
+  let options_exn ?preconditions ?version_id ?checksum_mode ?source_encryption
       ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn
       (options ?preconditions ?version_id ?checksum_mode ?expected_bucket_owner
-         ())
+         ?source_encryption ())
 end
 
 module Delete = struct
@@ -451,7 +463,8 @@ module Copy = struct
     metadata_directive : metadata_directive option;
     storage_class : Storage_class.t option;
     checksum_algorithm : Checksum.Algorithm.t option;
-    server_side_encryption : Encryption.request option;
+    destination_encryption : Encryption.Destination.t option;
+    source_encryption : Encryption.Source.t option;
     expected_bucket_owner : Account_id.t option;
     source_expected_bucket_owner : Account_id.t option;
   }
@@ -471,15 +484,16 @@ module Copy = struct
       metadata_directive = None;
       storage_class = None;
       checksum_algorithm = None;
-      server_side_encryption = None;
+      destination_encryption = None;
+      source_encryption = None;
       expected_bucket_owner = None;
       source_expected_bucket_owner = None;
     }
 
   let validate_storage_class = function
-    | Some (Storage_class.Unknown value) ->
-        S3_error_context.invalid ~field:"storage_class"
-          "unknown storage class %S cannot be sent" value
+    | Some storage_class ->
+        S3_validation.validate_header_value ~field:"storage_class"
+          (Storage_class.to_string storage_class)
     | _ -> Ok ()
 
   let validate_checksum_algorithm = function
@@ -491,7 +505,7 @@ module Copy = struct
   let options ?source_version_id
       ?(source_preconditions = Preconditions.Copy_source.none)
       ?metadata_directive ?storage_class ?checksum_algorithm
-      ?server_side_encryption ?expected_bucket_owner
+      ?destination_encryption ?source_encryption ?expected_bucket_owner
       ?source_expected_bucket_owner () =
     let* () = validate_storage_class storage_class in
     let* () = validate_checksum_algorithm checksum_algorithm in
@@ -502,18 +516,21 @@ module Copy = struct
         metadata_directive;
         storage_class;
         checksum_algorithm;
-        server_side_encryption;
+        destination_encryption;
+        source_encryption;
         expected_bucket_owner;
         source_expected_bucket_owner;
       }
 
   let options_exn ?source_version_id ?source_preconditions ?metadata_directive
-      ?storage_class ?checksum_algorithm ?server_side_encryption
-      ?expected_bucket_owner ?source_expected_bucket_owner () =
+      ?storage_class ?checksum_algorithm ?destination_encryption
+      ?source_encryption ?expected_bucket_owner ?source_expected_bucket_owner ()
+      =
     Awskit.Error.Producer.get_ok_exn
       (options ?source_version_id ?source_preconditions ?metadata_directive
-         ?storage_class ?checksum_algorithm ?server_side_encryption
-         ?expected_bucket_owner ?source_expected_bucket_owner ())
+         ?storage_class ?checksum_algorithm ?destination_encryption
+         ?source_encryption ?expected_bucket_owner ?source_expected_bucket_owner
+         ())
 end
 
 module Versions = struct

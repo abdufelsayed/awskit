@@ -1009,6 +1009,7 @@ module Metadata = Metadata
 module Storage_class = Storage_class
 module Tag = Tag
 module Range = Range
+module Encryption = Encryption
 module Endpoint_config = Endpoint_config
 module Endpoint_resolver = Endpoint_resolver
 

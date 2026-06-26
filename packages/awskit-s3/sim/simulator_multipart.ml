@@ -159,6 +159,7 @@ module Multipart = struct
     Multipart_model.Complete.options
       ?expected_bucket_owner:options.expected_bucket_owner
       ?checksum:options.checksum ?checksum_type:options.checksum_type
+      ?customer_key:options.customer_key
       ?multipart_object_size:options.multipart_object_size ()
     |> Result.map ignore
 

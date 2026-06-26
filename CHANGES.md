@@ -57,6 +57,14 @@ release evidence that downstream runtime authors can rely on.
   headers an HTTP client should pass explicitly. `HEAD Object` presigning now
   uses `Presigned.Head_object.options`, and `signed_headers` includes the
   canonical `host` header. (6d09f89, bd6f919)
+- Reworked object encryption options around `Awskit_s3.Encryption`, with typed
+  destination, source, customer-key, and observed encryption domains. Object,
+  multipart, and presigned callers should use `encryption`,
+  `destination_encryption`, `source_encryption`, or `customer_key` fields
+  instead of `server_side_encryption`; SSE-C multipart uploads can now send
+  customer-key headers on create, upload-part, and complete requests, and
+  unknown encryption strings are preserved only in read-side response metadata.
+  (ffaba1a)
 - Removed accidental public implementation surfaces: flat S3 root operation
   aliases, request builders, XML parsers, runtime internals, adapter transfer
   internals, the S3 signature-sharing implementation module, and simulator
@@ -117,8 +125,9 @@ release evidence that downstream runtime authors can rely on.
 - Preserved supported compatibility behavior while tightening validation:
   empty `ListObjectVersions` marker elements are treated as absent, supported
   S3-compatible payload-hash forms remain accepted, future response-only
-  checksum and enum values are preserved when modeled, and unknown outbound
-  checksum/storage-class values are rejected before request construction.
+  checksum and enum values are preserved when modeled, unknown outbound checksum
+  values are rejected before request construction, and unmodeled storage classes
+  can be sent through `Storage_class.Other`.
   (fa14e23, e83d337, ba454b1, a23f2ee, e8d7032)
 - S3 helpers now reuse the same lower request primitives as the primitive
   operations, so `Object.find` shares `Object.get` request construction and

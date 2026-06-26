@@ -14,13 +14,17 @@ type t =
   | Express_onezone
   | Fsx_openzfs
   | Fsx_ontap
-  | Unknown of string
-      (** Unknown storage-class values returned by S3. These values are
-          preserved on reads for forward compatibility, but write operations
-          reject them before sending a request. *)
+  | Other of string
+      (** A storage-class value not modeled by awskit. This covers future AWS
+          values and provider-specific S3-compatible storage classes. *)
 
 val to_string : t -> string
 (** Render the AWS storage-class spelling used in headers and XML. *)
 
-val of_string : string -> t
-(** Parse an AWS storage-class spelling. Unknown values are preserved. *)
+val of_string : string -> (t, Awskit.Error.t) result
+(** Parse a storage-class spelling. Values modeled by awskit use their
+    constructor; other non-empty values are preserved as [Other]. *)
+
+val of_string_exn : string -> t
+(** Like {!val:of_string}, but raises [Awskit.Error.Awskit_error] carrying the
+    structured validation error on validation failure. *)

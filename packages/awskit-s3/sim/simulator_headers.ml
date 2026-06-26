@@ -5,6 +5,7 @@ include
       module Content_type = Awskit_s3.Content_type
       module Tag = Awskit_s3.Tag
       module Storage_class = Awskit_s3.Storage_class
+      module Encryption = Awskit_s3.Encryption
       module Object = Awskit_s3.Object
     end)
     (struct

@@ -5,6 +5,7 @@ include
       module Content_type = Content_type
       module Tag = Tag
       module Storage_class = Storage_class
+      module Encryption = Encryption
       module Object = Object
     end)
     (struct

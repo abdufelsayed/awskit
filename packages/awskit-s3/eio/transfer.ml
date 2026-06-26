@@ -671,6 +671,7 @@ struct
       preconditions = options.preconditions;
       version_id = options.version_id;
       checksum_mode = options.checksum_mode;
+      source_encryption = options.source_encryption;
       expected_bucket_owner = options.expected_bucket_owner;
     }
 
@@ -686,7 +687,7 @@ struct
       storage_class = result.storage_class;
       version_id = result.version_id;
       checksum = result.checksum;
-      server_side_encryption = result.server_side_encryption;
+      encryption = result.encryption;
       response = result.response;
     }
 

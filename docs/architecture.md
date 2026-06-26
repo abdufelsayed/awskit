@@ -116,7 +116,8 @@ existing parser or local helper can express the contract.
 For AWS wire domains, preserve forward compatibility deliberately. Closed
 variants are appropriate for values owned by Awskit. Use `Unknown of string`
 when AWS may add values and callers need to round-trip or inspect the original
-wire value.
+wire value. Use an explicit sendable constructor such as `Other of string` only
+when S3-compatible providers plausibly define their own wire tokens.
 
 ## Streaming And Memory
 

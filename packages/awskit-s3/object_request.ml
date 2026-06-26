@@ -35,7 +35,7 @@ module Make (C : Request_context.S) = struct
       storage_class = info.storage_class;
       version_id = info.version_id;
       checksum = info.checksum;
-      server_side_encryption = info.server_side_encryption;
+      encryption = info.encryption;
       response = info.response;
     }
 
@@ -57,7 +57,7 @@ module Make (C : Request_context.S) = struct
                 | Error _ as error -> error
                 | Ok () -> (
                     match
-                      validate_encryption_request options.server_side_encryption
+                      validate_destination_encryption options.encryption
                     with
                     | Error _ as error -> error
                     | Ok () ->
@@ -85,10 +85,21 @@ module Make (C : Request_context.S) = struct
             | Some (`Replace metadata) -> (
                 match S3_validation.validate_metadata metadata with
                 | Error _ as error -> error
-                | Ok () ->
-                    validate_encryption_request options.server_side_encryption)
-            | Some `Copy | None ->
-                validate_encryption_request options.server_side_encryption))
+                | Ok () -> (
+                    match
+                      validate_destination_encryption
+                        options.destination_encryption
+                    with
+                    | Error _ as error -> error
+                    | Ok () ->
+                        validate_source_encryption options.source_encryption))
+            | Some `Copy | None -> (
+                match
+                  validate_destination_encryption options.destination_encryption
+                with
+                | Error _ as error -> error
+                | Ok () -> validate_source_encryption options.source_encryption)
+            ))
 
   let validate_list_max_keys = function
     | None -> Ok ()
@@ -139,8 +150,7 @@ module Make (C : Request_context.S) = struct
                       @ Metadata_headers.to_headers options.metadata
                       @ write_precondition_headers options.preconditions
                       @ checksum_value_headers options.checksum
-                      @ encryption_request_headers
-                          options.server_side_encryption
+                      @ destination_encryption_headers options.encryption
                       |> add_opt_content_type_header "content-type"
                            options.content_type
                       |> add_opt_header "cache-control"
@@ -193,6 +203,7 @@ module Make (C : Request_context.S) = struct
         let headers =
           read_precondition_headers options.preconditions
           @ checksum_mode_header options.checksum_mode
+          @ source_encryption_headers options.source_encryption
           |> add_opt_header "range" (Option.map Range.to_header options.range)
           |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                options.expected_bucket_owner
@@ -299,6 +310,7 @@ module Make (C : Request_context.S) = struct
         let headers =
           read_precondition_headers options.preconditions
           @ checksum_mode_header options.checksum_mode
+          @ source_encryption_headers options.source_encryption
           |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                options.expected_bucket_owner
         in
@@ -470,7 +482,9 @@ module Make (C : Request_context.S) = struct
                   :: copy_source_precondition_headers
                        options.source_preconditions
                   @ checksum_algorithm_header options.checksum_algorithm
-                  @ encryption_request_headers options.server_side_encryption
+                  @ destination_encryption_headers
+                      options.destination_encryption
+                  @ copy_source_encryption_headers options.source_encryption
                 in
                 let headers =
                   match options.metadata_directive with

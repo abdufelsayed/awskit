@@ -62,13 +62,13 @@ module Make (C : Request_context.S) = struct
                 with
                 | Error error, _ | _, Error error -> Error error
                 | Ok (), Ok () ->
-                    validate_encryption_request options.server_side_encryption))
-        )
+                    validate_destination_encryption options.encryption)))
 
   let validate_complete_options (options : Complete_multipart_upload.options) =
     Complete_multipart_upload.options
       ?expected_bucket_owner:options.expected_bucket_owner
       ?checksum:options.checksum ?checksum_type:options.checksum_type
+      ?customer_key:options.customer_key
       ?multipart_object_size:options.multipart_object_size ()
     |> Result.map ignore
 
@@ -158,7 +158,7 @@ module Make (C : Request_context.S) = struct
               Metadata_headers.to_headers options.metadata
               @ checksum_algorithm_header options.checksum_algorithm
               @ checksum_type_header options.checksum_type
-              @ encryption_request_headers options.server_side_encryption
+              @ destination_encryption_headers options.encryption
               |> add_opt_content_type_header "content-type" options.content_type
               |> add_opt_header "x-amz-storage-class"
                    (Option.map Storage_class.to_string options.storage_class)
@@ -221,6 +221,7 @@ module Make (C : Request_context.S) = struct
       let headers =
         ("content-length", Int64.to_string content_length)
         :: checksum_value_headers options.checksum
+        @ customer_key_headers options.customer_key
         |> add_opt_account_id_header "x-amz-expected-bucket-owner"
              options.expected_bucket_owner
       in
@@ -322,6 +323,7 @@ module Make (C : Request_context.S) = struct
                            ([ ("content-type", "application/xml") ]
                             @ checksum_value_headers options.checksum
                             @ checksum_type_header options.checksum_type
+                            @ customer_key_headers options.customer_key
                             @ multipart_object_size_header
                                 options.multipart_object_size
                            |> add_opt_account_id_header

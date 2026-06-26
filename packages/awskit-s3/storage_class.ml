@@ -12,7 +12,7 @@ type t =
   | Express_onezone
   | Fsx_openzfs
   | Fsx_ontap
-  | Unknown of string
+  | Other of string
 
 let to_string = function
   | Standard -> "STANDARD"
@@ -28,20 +28,26 @@ let to_string = function
   | Express_onezone -> "EXPRESS_ONEZONE"
   | Fsx_openzfs -> "FSX_OPENZFS"
   | Fsx_ontap -> "FSX_ONTAP"
-  | Unknown value -> value
+  | Other value -> value
 
-let of_string = function
-  | "STANDARD" -> Standard
-  | "REDUCED_REDUNDANCY" -> Reduced_redundancy
-  | "STANDARD_IA" -> Standard_ia
-  | "ONEZONE_IA" -> Onezone_ia
-  | "INTELLIGENT_TIERING" -> Intelligent_tiering
-  | "GLACIER" -> Glacier
-  | "GLACIER_IR" -> Glacier_ir
-  | "DEEP_ARCHIVE" -> Deep_archive
-  | "OUTPOSTS" -> Outposts
-  | "SNOW" -> Snow
-  | "EXPRESS_ONEZONE" -> Express_onezone
-  | "FSX_OPENZFS" -> Fsx_openzfs
-  | "FSX_ONTAP" -> Fsx_ontap
-  | value -> Unknown value
+let of_string value =
+  let ( let* ) = S3_result.( let* ) in
+  let* () = S3_validation.validate_header_value ~field:"storage_class" value in
+  Ok
+    (match value with
+    | "STANDARD" -> Standard
+    | "REDUCED_REDUNDANCY" -> Reduced_redundancy
+    | "STANDARD_IA" -> Standard_ia
+    | "ONEZONE_IA" -> Onezone_ia
+    | "INTELLIGENT_TIERING" -> Intelligent_tiering
+    | "GLACIER" -> Glacier
+    | "GLACIER_IR" -> Glacier_ir
+    | "DEEP_ARCHIVE" -> Deep_archive
+    | "OUTPOSTS" -> Outposts
+    | "SNOW" -> Snow
+    | "EXPRESS_ONEZONE" -> Express_onezone
+    | "FSX_OPENZFS" -> Fsx_openzfs
+    | "FSX_ONTAP" -> Fsx_ontap
+    | value -> Other value)
+
+let of_string_exn value = S3_result.result_exn (of_string value)

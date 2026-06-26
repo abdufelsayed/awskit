@@ -13,7 +13,9 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  unix))
+  unix)
+ (deps
+  (source_tree ../../fixtures/runtime-http-replay)))
 
 (rule
  (alias runtime-http)

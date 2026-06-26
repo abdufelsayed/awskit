@@ -809,8 +809,10 @@ let test_multipart_option_boundaries () =
   in
   expect_error_field "checksum_value"
     (Multipart.Part.create ~part_number ~etag ~checksum:bad_checksum ());
-  expect_error_field "storage_class"
-    (Multipart.Create.options ~storage_class:(Storage_class.Unknown "FUTURE") ());
+  ignore
+    (expect_ok "future storage class"
+       (Multipart.Create.options ~storage_class:(Storage_class.Other "FUTURE")
+          ()));
   expect_error_field "checksum_algorithm"
     (Multipart.Create.options
        ~checksum_algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE") ());
