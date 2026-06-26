@@ -21,6 +21,7 @@
   test_s3_minio_workload.exe
   (env_var AWSKIT_INTEGRATION_PROFILE)
   (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED)
   (env_var AWSKIT_S3_MINIO_ACCESS_KEY_ID)
   (env_var AWSKIT_S3_MINIO_ENDPOINT)
   (env_var AWSKIT_S3_MINIO_REGION)

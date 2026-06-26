@@ -53,6 +53,7 @@
 (alias
  (name s3-sim)
  (deps
+  (alias test/awskit-s3/support/s3-model-contracts)
   (alias test/awskit-s3/sim/s3-state)))
 
 (alias

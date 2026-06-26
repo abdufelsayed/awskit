@@ -50,7 +50,8 @@ and `transfer_fault_workload.ml` for runtime-neutral transfer byte-movement,
 progress traces, cancellation, multipart ownership, and cleanup-secondary
 workloads.
 
-Pure S3 model contracts run through the support-owned alias:
+Pure S3 model contracts run through the support-owned alias, which is also part
+of the composed `@s3-sim` gate:
 
 - `@test/awskit-s3/support/s3-model-contracts`
 
@@ -74,8 +75,8 @@ The suite IDs are `workload:awskit-s3-sim:s3-state` and
 
 Reduced S3 workload replays live under
 `test/awskit-s3/fixtures/workload-replay` and run through the simulator
-workload alias. Each replay file is a deterministic command transcript whose
-path is the replay identifier.
+workload alias. Each `*.txt` replay file is discovered automatically as a
+deterministic command transcript whose path is the replay identifier.
 
 S3 protocol wire workloads live in `test/awskit-s3/protocol`. The private
 `awskit_s3_protocol_test_support` library keeps fixture diffing, independent
@@ -133,17 +134,28 @@ The suite IDs are `integration:minio:profile`, `workload:minio:s3-state`,
 empty means `bounded`; invalid non-empty values fail with the allowed values.
 
 - `bounded` is the default local and CI profile.
-- `expensive` raises generated workload cost and explores a broader stable
-  MinIO value profile while staying on the local MinIO test double.
+- `expensive` explores broader values and longer generated histories while
+  keeping the default count modest enough for a local MinIO service.
 
 The generated MinIO profile honors `AWSKIT_QCHECK_COUNT=<positive-int>` as an
 explicit count override. It excludes command families whose behavior is outside
 this local-service profile, such as metadata-specific shared workload commands,
-suspended versioning, version-list pages, and self-copy. It also excludes
-enabling versioning after current objects already exist, because the pinned
-MinIO test double does not report null version ids for those pre-versioning
-objects. This gate is evidence for the configured local MinIO test double only;
-it is not a compatibility claim for other S3-compatible providers.
+suspended versioning, version-list pages, self-copy, and object keys the pinned
+MinIO test double rejects even though the strict shared model still exercises
+them, currently `prefix//double-slash` (`XMinioInvalidObjectName`). It also
+excludes MinIO histories that rely on version ids for accepted key shapes where
+MinIO omits those ids, currently enabled-versioning writes to
+`prefix/trailing/`, and histories that would require delete-marker version ids
+after versioning is enabled. It also excludes enabling versioning after current
+objects already exist, because the pinned MinIO test double does not report null
+version ids for those pre-versioning objects.
+
+Deterministic MinIO state cases keep target-profile laws visible without
+weakening shared oracles. For suffix ranges over empty objects, the MinIO runner
+allows only Awskit's decode rejection of MinIO's malformed `Content-Range`; the
+strict model still expects `InvalidRange`, and a successful read still fails the
+test. This gate is evidence for the configured local MinIO test double only; it
+is not a compatibility claim for other S3-compatible providers.
 
 ## Discovery And Backtesting
 

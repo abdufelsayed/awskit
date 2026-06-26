@@ -4,14 +4,6 @@ set -eu
 
 . "$(dirname "$0")/release-env.sh"
 
-cleanup_minio() {
-  if [ "${MINIO_STARTED:-0}" = "1" ]; then
-    docker compose down -v
-  fi
-}
-
-trap cleanup_minio EXIT INT TERM
-
 IFS=","
 set -- $AWSKIT_RELEASE_PACKAGES
 unset IFS
@@ -83,6 +75,4 @@ if grep -E "Warning|Error|Failed to resolve" "$dist_log"; then
 fi
 rm -rf "$dist_dir" "$dist_log"
 
-docker compose up -d
-MINIO_STARTED=1
-opam exec -- dune build --force @check-integration
+scripts/test-report.sh integration --label release-minio-integration

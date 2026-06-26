@@ -30,6 +30,17 @@ let seed_scenarios =
     scenario ~name:"get-200-malformed-chunked" ~method_:`GET ~status:200
       ~framing:(Malformed_chunked "5\r\nhello\r\nnot-hex\r\n") ~connection:Close
       ();
+    scenario ~name:"get-200-malformed-chunked-truncated-data" ~method_:`GET
+      ~status:200 ~framing:(Malformed_chunked "5\r\nhell") ~connection:Close ();
+    scenario ~name:"head-200-malformed-chunked-bodiless" ~method_:`HEAD
+      ~status:200 ~framing:(Malformed_chunked "5\r\nhello\r\nnot-hex\r\n")
+      ~connection:Close ();
+    scenario ~name:"get-204-malformed-chunked-bodiless" ~method_:`GET
+      ~status:204 ~framing:(Malformed_chunked "5\r\nhello\r\nnot-hex\r\n")
+      ~connection:Close ();
+    scenario ~name:"get-304-malformed-chunked-bodiless" ~method_:`GET
+      ~status:304 ~framing:(Malformed_chunked "5\r\nhello\r\nnot-hex\r\n")
+      ~connection:Close ();
     scenario ~name:"get-200-duplicate-content-length" ~method_:`GET ~status:200
       ~framing:
         (Duplicate_content_length { first = 5; second = 5; actual = "hello" })
@@ -48,6 +59,18 @@ let seed_scenarios =
       ~framing:(Early_close "hello") ~connection:Close ();
     scenario ~name:"get-200-malformed-header-block" ~method_:`GET ~status:200
       ~framing:(Malformed_header_block "Content-Length: nope\r\n")
+      ~connection:Close ();
+    scenario ~name:"get-200-malformed-header-line" ~method_:`GET ~status:200
+      ~framing:(Malformed_header_block "Broken response header\r\n")
+      ~connection:Close ();
+    scenario ~name:"head-200-malformed-header-line" ~method_:`HEAD ~status:200
+      ~framing:(Malformed_header_block "Broken response header\r\n")
+      ~connection:Close ();
+    scenario ~name:"get-204-malformed-header-line" ~method_:`GET ~status:204
+      ~framing:(Malformed_header_block "Broken response header\r\n")
+      ~connection:Close ();
+    scenario ~name:"get-304-malformed-header-line" ~method_:`GET ~status:304
+      ~framing:(Malformed_header_block "Broken response header\r\n")
       ~connection:Close ();
     scenario ~name:"get-200-content-length-plus" ~method_:`GET ~status:200
       ~framing:(Malformed_header_block "Content-Length: +5\r\n")
@@ -77,6 +100,10 @@ let seed_scenarios =
     scenario ~name:"get-200-read-once" ~method_:`GET ~status:200
       ~framing:(Content_length { declared = 5; actual = "hello" })
       ~connection:Keep_alive ~consume:(Read_once 2) ();
+    scenario ~name:"get-200-chunked-read-once-short-read" ~method_:`GET
+      ~status:200
+      ~framing:(Chunked [ "cbb_-"; "b" ])
+      ~connection:Close ~consume:(Read_once 8) ();
     scenario ~name:"get-200-drop-without-read" ~method_:`GET ~status:200
       ~framing:(Chunked [ "he"; "llo" ])
       ~connection:Keep_alive ~consume:Drop_without_read ();
@@ -299,15 +326,13 @@ let shrink_framing = function
   | Chunked chunks ->
       [ Model.Empty; exact_content_length (String.concat chunks) ]
   | Malformed_chunked wire ->
-      [
-        Model.Empty;
-        exact_content_length (Model.decoded_malformed_chunked_prefix wire);
-      ]
+      let minimal = Model.Malformed_chunked "not-hex\r\n" in
+      if String.equal wire "not-hex\r\n" then [ Model.Empty ]
+      else [ minimal; Model.Empty ]
   | Malformed_header_block block ->
-      [
-        Model.Empty;
-        exact_content_length (Model.malformed_header_block_hidden_body block);
-      ]
+      let minimal = Model.Malformed_header_block "Broken response header\r\n" in
+      if String.equal block "Broken response header\r\n" then [ Model.Empty ]
+      else [ minimal; Model.Empty ]
 
 let shrink_name name =
   if String.equal name "generated" then [] else [ "generated" ]
@@ -538,9 +563,31 @@ let fail_observation ~target_name scenario expected observed =
   QCheck.Test.fail_reportf "%s"
     (failure_report ~target_name scenario expected observed)
 
+(* `Body_prefix` carries the maximum bytes a single read may return; streaming
+   runtimes may legally return a shorter non-empty prefix of that bound. *)
 let valid_body_prefix ~max_prefix actual =
   String.is_prefix max_prefix ~prefix:actual
   && (String.is_empty max_prefix || not (String.is_empty actual))
+
+let test_body_prefix_allows_bounded_short_read () =
+  Alcotest.(check bool)
+    "exact max prefix accepted" true
+    (valid_body_prefix ~max_prefix:"cbb_-b" "cbb_-b");
+  Alcotest.(check bool)
+    "short streaming prefix accepted" true
+    (valid_body_prefix ~max_prefix:"cbb_-b" "cbb_-");
+  Alcotest.(check bool)
+    "wrong prefix rejected" false
+    (valid_body_prefix ~max_prefix:"cbb_-b" "cbb_+");
+  Alcotest.(check bool)
+    "too-long prefix rejected" false
+    (valid_body_prefix ~max_prefix:"cbb_-" "cbb_-b");
+  Alcotest.(check bool)
+    "empty read rejected when body available" false
+    (valid_body_prefix ~max_prefix:"cbb_-" "");
+  Alcotest.(check bool)
+    "empty read accepted when modeled prefix is empty" true
+    (valid_body_prefix ~max_prefix:"" "")
 
 let check_scenario ~target_name run_scenario scenario =
   let expected = Model.expected_observation scenario in
@@ -609,6 +656,8 @@ module Make (Target : TARGET) = struct
               test_scenario_shrinker_emits_recomputed_candidates;
             Alcotest.test_case "failure report replay fields" `Quick
               test_failure_report_contains_replay_reduction_fields;
+            Alcotest.test_case "body prefix streaming bounds" `Quick
+              test_body_prefix_allows_bounded_short_read;
             Alcotest.test_case "generator semantic coverage" `Quick
               test_generator_coverage;
             generated_case;

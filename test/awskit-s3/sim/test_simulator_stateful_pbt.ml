@@ -609,15 +609,21 @@ let expected_list_keys_page_is_truncated prefix ~max_keys model =
   | None -> Model.list_keys_page_is_truncated ~max_keys model
   | Some prefix -> Model.list_keys_page_is_truncated ~prefix ~max_keys model
 
+let list_keys_options prefix ~max_keys =
+  match prefix with
+  | None -> Object.List.options_exn ~max_keys ()
+  | Some prefix ->
+      Object.List.options_exn
+        ~prefix:(Object_key.Prefix.of_string_exn prefix)
+        ~max_keys ()
+
+let expected_list_keys_all prefix model =
+  match prefix with
+  | None -> Model.keys_for_page model
+  | Some prefix -> Model.keys_for_page ~prefix model
+
 let assert_list_keys_page command_index command conn prefix max_keys model =
-  let options =
-    match prefix with
-    | None -> Object.List.options_exn ~max_keys ()
-    | Some prefix ->
-        Object.List.options_exn
-          ~prefix:(Object_key.Prefix.of_string_exn prefix)
-          ~max_keys ()
-  in
+  let options = list_keys_options prefix ~max_keys in
   let page =
     expect_ok command_index command "list keys page"
       (Simulator.Object.list conn ~bucket ~options ())
@@ -639,7 +645,18 @@ let assert_list_keys_page command_index command conn prefix max_keys model =
     expected_is_truncated page.is_truncated;
   check_equal command_index command Alcotest.bool "list keys page next token"
     expected_is_truncated
-    (Option.is_some page.next_continuation_token)
+    (Option.is_some page.next_continuation_token);
+  let expected_all = expected_list_keys_all prefix model in
+  let all_keys =
+    expect_ok command_index command "list keys all"
+      (Simulator.Object.List.keys conn ~bucket ~options
+         ~max_pages:(collection_page_bound (List.length expected_all))
+         ())
+    |> List.map Object_key.to_string
+  in
+  check_equal command_index command
+    Alcotest.(list string)
+    "list keys page all keys" expected_all all_keys
 
 let listed_object_version_summaries versions =
   versions
@@ -934,9 +951,13 @@ let parse_replay_file path =
   | Ok commands -> commands
   | Error error -> Alcotest.fail (S3_replay.parse_error_to_string ~path error)
 
+let replay_transcript ~path commands =
+  String.concat "\n"
+    [ Printf.sprintf "replay_fixture: %s" path; Command.transcript commands ]
+
 let run_replay_file path =
   let commands = parse_replay_file path in
-  with_command_transcript (Command.transcript commands) (fun () ->
+  with_command_transcript (replay_transcript ~path commands) (fun () ->
       Target.with_connection (fun conn ->
           Target.check_store 0 Command.List_keys conn Model.empty;
           let (_ : Model.t) =
@@ -950,15 +971,27 @@ let run_replay_file path =
           in
           ()))
 
-let replay_case name =
-  Alcotest.test_case name `Quick (fun () -> run_replay_file (replay_path name))
+let has_suffix ~suffix value =
+  let suffix_len = String.length suffix in
+  let value_len = String.length value in
+  value_len >= suffix_len
+  && String.equal suffix (String.sub value (value_len - suffix_len) suffix_len)
+
+let replay_fixture_names () =
+  Sys.readdir workload_replay_dir
+  |> Array.to_list
+  |> List.filter (has_suffix ~suffix:".txt")
+  |> List.sort String.compare
+
+let run_replay_corpus () =
+  match replay_fixture_names () with
+  | [] -> Alcotest.fail "expected at least one workload replay *.txt fixture"
+  | names -> List.iter (fun name -> run_replay_file (replay_path name)) names
 
 let suite =
   Workload.suite
   @ [
       ( "replay:awskit-s3-sim:s3-state",
-        [
-          replay_case "versioning-after-put.txt";
-          replay_case "range-read-boundaries.txt";
-        ] );
+        [ Alcotest.test_case "workload replay corpus" `Quick run_replay_corpus ]
+      );
     ]

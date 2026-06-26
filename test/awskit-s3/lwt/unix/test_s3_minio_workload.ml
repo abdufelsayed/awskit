@@ -369,7 +369,8 @@ let cleanup_bucket_or_fail conn ~bucket =
   match Lwt_main.run (cleanup_bucket_result conn ~bucket) with
   | Ok () -> ()
   | Error error ->
-      Alcotest.failf "MinIO cleanup failed: %a" Awskit_s3.Error.pp error
+      Alcotest.failf "MinIO cleanup failed in profile %s: %a"
+        selected_integration_profile_name Awskit_s3.Error.pp error
 
 let report_cleanup_after_primary_failure error =
   Format.eprintf
@@ -468,21 +469,25 @@ let is_content_range_decode_error error =
   | _ -> false
 
 (* MinIO returns 206 with Content-Range: bytes 0--1/0 for suffix ranges
-   against empty objects. The S3 client should keep rejecting that malformed
-   header, while the MinIO profile records the test-double quirk explicitly. *)
-let minio_empty_suffix_range_quirk model key range =
+   against empty objects. The MinIO target-profile law accepts only Awskit's
+   decode rejection of that malformed header; the shared model still expects an
+   invalid range and a successful read is still a failure. *)
+let minio_empty_object_suffix_range_law model key range =
   match (Model.find key model, Awskit_s3.Range.view range) with
   | Some (object_ : Model.object_), Suffix _ when String.length object_.body = 0
     ->
       true
   | _ -> false
 
-let expect_invalid_range ?(allow_minio_empty_suffix_decode = false)
-    command_index command label = function
+let minio_empty_object_suffix_range_decode_law model key range error =
+  minio_empty_object_suffix_range_law model key range
+  && is_content_range_decode_error error
+
+let expect_invalid_range command_index command label ~model ~key ~range =
+  function
   | Error error when is_invalid_range_error error -> ()
   | Error error
-    when allow_minio_empty_suffix_decode && is_content_range_decode_error error
-    ->
+    when minio_empty_object_suffix_range_decode_law model key range error ->
       ()
   | Error error -> fail_error command_index command label error
   | Ok _ -> fail command_index command (label ^ " expected InvalidRange")
@@ -595,9 +600,7 @@ let assert_get_range command_index command conn key range model =
            (S3.Object.get_string conn ~bucket ~key:(object_key key) ~options
               ~max_bytes ()))
   | Invalid_range ->
-      expect_invalid_range command_index command "get range"
-        ~allow_minio_empty_suffix_decode:
-          (minio_empty_suffix_range_quirk model key range)
+      expect_invalid_range command_index command "get range" ~model ~key ~range
         (await_result "get range"
            (S3.Object.get_string conn ~bucket ~key:(object_key key) ~options
               ~max_bytes ()))
@@ -1087,6 +1090,81 @@ let run_minio_transcript conn commands =
        (List.mapi (fun index command -> (index + 1, command)) commands)
       : Model.t)
 
+let test_minio_target_profile_boundaries () =
+  let rejected_key_command =
+    Command.Put_string ("prefix//double-slash", "body", [ ("env", "dev") ])
+  in
+  let trailing_key_command = Command.Put_string ("prefix/trailing/", "", []) in
+  let versioned_trailing_key_commands =
+    [
+      Command.Put_versioning Bucket.Versioning.Status.Enabled;
+      trailing_key_command;
+    ]
+  in
+  let unversioned_delete_commands =
+    [
+      Command.Put_string ("a.txt", "delete-me", []);
+      Command.Delete_object "a.txt";
+    ]
+  in
+  let versioned_delete_marker_commands =
+    [
+      Command.Put_versioning Bucket.Versioning.Status.Enabled;
+      Command.Put_string ("a.txt", "delete-me", []);
+      Command.Delete_object "a.txt";
+    ]
+  in
+  Alcotest.(check bool)
+    "strict profile keeps double slash key coverage" true
+    (S3_history.history_supported S3_history.strict_default
+       [ rejected_key_command ]);
+  Alcotest.(check bool)
+    "MinIO broad profile excludes rejected double slash key" false
+    (S3_history.history_supported S3_history.minio_expensive
+       [ rejected_key_command ]);
+  Alcotest.(check bool)
+    "strict profile keeps versioned trailing slash key coverage" true
+    (S3_history.history_supported S3_history.strict_default
+       versioned_trailing_key_commands);
+  Alcotest.(check bool)
+    "MinIO broad profile excludes versioned trailing slash key" false
+    (S3_history.history_supported S3_history.minio_expensive
+       versioned_trailing_key_commands);
+  Alcotest.(check bool)
+    "MinIO broad profile keeps unversioned trailing slash key" true
+    (S3_history.history_supported S3_history.minio_expensive
+       [ trailing_key_command ]);
+  Alcotest.(check bool)
+    "strict profile keeps versioned delete-marker coverage" true
+    (S3_history.history_supported S3_history.strict_default
+       versioned_delete_marker_commands);
+  Alcotest.(check bool)
+    "MinIO broad profile excludes versioned delete markers" false
+    (S3_history.history_supported S3_history.minio_expensive
+       versioned_delete_marker_commands);
+  Alcotest.(check bool)
+    "MinIO broad profile keeps unversioned deletes" true
+    (S3_history.history_supported S3_history.minio_expensive
+       unversioned_delete_commands)
+
+let test_empty_suffix_range_shared_model_law () =
+  let range = Awskit_s3.Range.suffix_exn 1L in
+  let command = Command.Get_range ("empty.txt", range) in
+  let model =
+    Model.apply (Command.Put_string ("empty.txt", "", [])) Model.empty
+  in
+  Alcotest.(check string)
+    "empty object suffix range remains invalid in shared model" "invalid-range"
+    (Model.expected_result command model |> Model.operation_result_kind)
+
+let test_empty_suffix_range_target_profile_law () =
+  with_minio_bucket (fun conn ~bucket:_ ->
+      run_minio_transcript conn
+        [
+          Command.Put_string ("empty.txt", "", []);
+          Command.Get_range ("empty.txt", Awskit_s3.Range.suffix_exn 1L);
+        ])
+
 let test_state_transcript_covers_minio_profile () =
   with_minio_bucket (fun conn ~bucket:_ ->
       run_minio_transcript conn
@@ -1554,6 +1632,8 @@ let transfer_suite =
   [
     ( "integration:minio:s3-state",
       [
+        Alcotest.test_case "empty suffix range target-profile law" `Quick
+          test_empty_suffix_range_target_profile_law;
         Alcotest.test_case "deterministic shared state transcript" `Quick
           test_state_transcript_covers_minio_profile;
       ] );
@@ -1603,6 +1683,10 @@ let profile_suite profile =
               "AWSKIT_INTEGRATION_PROFILE"
               (integration_profile_to_string profile)
               selected_integration_profile_name);
+        Alcotest.test_case "MinIO target-profile laws" `Quick
+          test_minio_target_profile_boundaries;
+        Alcotest.test_case "empty suffix range shared model law" `Quick
+          test_empty_suffix_range_shared_model_law;
       ] );
   ]
 

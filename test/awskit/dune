@@ -6,6 +6,9 @@
 (rule
  (alias awskit-core-contracts)
  (package awskit)
- (deps test_core_contracts.exe)
+ (deps
+  test_core_contracts.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED))
  (action
   (run ./test_core_contracts.exe)))

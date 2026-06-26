@@ -112,6 +112,10 @@ let expected_content_length_body ~declared ~actual =
   else if declared < actual_length then Body (String.prefix actual declared)
   else Body_error
 
+(* Cohttp parses response framing before Awskit sees the body reader. Some raw
+   wire syntax errors are therefore collapsed into observable decoded data
+   instead of surfaced as parser errors. Keep that boundary explicit here; byte
+   parser laws belong in a lower-level protocol parser, not this adapter model. *)
 let decoded_malformed_chunked_prefix wire =
   let line_end_from offset =
     String.substr_index ~pos:offset wire ~pattern:"\r\n"
@@ -126,10 +130,14 @@ let decoded_malformed_chunked_prefix wire =
         | Some 0L -> String.concat (List.rev acc)
         | Some length ->
             let body_start = line_end + 2 in
-            let length = Int64.to_int_exn length in
-            if body_start + length > String.length wire then
-              String.concat (List.rev acc)
+            let available = String.length wire - body_start in
+            if available <= 0 then String.concat (List.rev acc)
+            else if Stdlib.Int64.compare length (Int64.of_int available) > 0
+            then
+              let chunk = String.drop_prefix wire body_start in
+              String.concat (List.rev (chunk :: acc))
             else
+              let length = Int64.to_int_exn length in
               let chunk = String.sub wire ~pos:body_start ~len:length in
               loop (body_start + length + 2) (chunk :: acc))
   in

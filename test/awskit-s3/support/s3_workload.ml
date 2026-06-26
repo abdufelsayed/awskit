@@ -47,7 +47,9 @@ let minio_workload_profile integration_profile =
         name = integration_profile_to_string Expensive;
         target_profile = Minio;
         history_config = S3_history.minio_expensive;
-        default_count = 100;
+        (* Service-backed histories do real IO and full store checks. Keep the
+           default count bounded; no-service stress carries high-count search. *)
+        default_count = 10;
       }
 
 let strict_workload_profile ~count =
