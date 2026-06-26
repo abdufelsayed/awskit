@@ -108,17 +108,16 @@ let report_selected_profile profile =
      provider certification.@]@."
     (integration_profile_to_string profile)
 
-let skip_unconfigured_minio profile label error =
-  Format.eprintf
-    "@[<v>Skipping MinIO integration for profile %s: no AWSKIT_S3_MINIO_* \
-     configuration was supplied and %s failed.@;\
-     Start local MinIO with default credentials or set \
-     AWSKIT_S3_MINIO_ENDPOINT, AWSKIT_S3_MINIO_ACCESS_KEY_ID, and \
-     AWSKIT_S3_MINIO_SECRET_ACCESS_KEY to require this gate.@;\
-     %a@]@."
+let fail_unconfigured_minio profile label error =
+  Alcotest.failf
+    "MinIO integration profile %s requires a reachable local MinIO test \
+     double. No AWSKIT_S3_MINIO_* configuration was supplied and %s failed \
+     against the default endpoint. Start local MinIO with default credentials, \
+     run scripts/test-report.sh integration, or set AWSKIT_S3_MINIO_ENDPOINT, \
+     AWSKIT_S3_MINIO_ACCESS_KEY_ID, AWSKIT_S3_MINIO_SECRET_ACCESS_KEY, and \
+     AWSKIT_S3_MINIO_REGION explicitly. Original error: %a"
     (integration_profile_to_string profile)
-    label Awskit_s3.Error.pp error;
-  Alcotest.skip ()
+    label Awskit_s3.Error.pp error
 
 let endpoint_config () =
   let endpoint =
@@ -1729,7 +1728,7 @@ let missing_config_suite profile label error =
     ( "integration:minio:configuration",
       [
         Alcotest.test_case "missing local MinIO configuration" `Quick (fun () ->
-            skip_unconfigured_minio profile label error);
+            fail_unconfigured_minio profile label error);
       ] );
   ]
 

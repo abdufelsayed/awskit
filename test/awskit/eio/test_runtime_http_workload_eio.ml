@@ -37,7 +37,8 @@ let with_loopback_server env scenario test =
     try
       Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:1
         (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
-    with exn when listener_bind_denied_by_sandbox exn -> Alcotest.skip ()
+    with exn when listener_bind_denied_by_sandbox exn ->
+      Loopback_policy.handle_bind_denied ()
   in
   let port =
     match Eio.Net.listening_addr listening_socket with

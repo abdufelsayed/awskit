@@ -7,6 +7,15 @@ under this directory. Use concise names that describe behavior, such as
 `runtime_http_workload`, `s3_model`, `s3_workload`, `protocol_wire`, and
 `transfer_fault_workload`.
 
+Shared test-helper contracts live under `test/support` and are part of
+`@check-quick` through `@awskit-test-contracts`:
+
+- `@test/support/runtest`
+- `@awskit-test-contracts`
+
+The suite IDs are `contract:awskit-test:workload-coverage` and
+`contract:awskit-test:runtime-http-loopback`.
+
 Core Awskit contracts and recording-runtime support contracts live under
 `test/awskit` and run without network access:
 
@@ -41,6 +50,9 @@ Reduced runtime HTTP replay scenarios live in the path-scoped corpus directory
 
 The suite IDs are `workload:awskit-eio:runtime-http` and
 `workload:awskit-lwt:runtime-http`.
+The package-owned runtime HTTP aliases set
+`AWSKIT_RUNTIME_HTTP_REQUIRE_LOOPBACK=1` so a sandbox-denied local listener is a
+failed evidence gate instead of a successful skip.
 
 S3 workload support lives in `test/awskit-s3/support`. The private
 `awskit_s3_workload` library provides reusable command definitions,
@@ -156,6 +168,11 @@ allows only Awskit's decode rejection of MinIO's malformed `Content-Range`; the
 strict model still expects `InvalidRange`, and a successful read still fails the
 test. This gate is evidence for the configured local MinIO test double only; it
 is not a compatibility claim for other S3-compatible providers.
+
+The MinIO alias fails when the local service is not reachable. Use
+`scripts/test-report.sh integration` for the script-managed Docker lifecycle, or
+start MinIO yourself and pass explicit `AWSKIT_S3_MINIO_*` configuration before
+running `@s3-minio` or `@check-integration` directly.
 
 ## Discovery And Backtesting
 

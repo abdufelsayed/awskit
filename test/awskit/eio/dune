@@ -26,10 +26,13 @@
   (env_var QCHECK_SEED)
   (source_tree ../../fixtures/runtime-http-replay))
  (action
-  (run
-   ./test_runtime_http_workload_eio.exe
-   test
-   "workload:awskit-eio:runtime-http")))
+  (setenv
+   AWSKIT_RUNTIME_HTTP_REQUIRE_LOOPBACK
+   1
+   (run
+    ./test_runtime_http_workload_eio.exe
+    test
+    "workload:awskit-eio:runtime-http"))))
 
 (alias
  (name discovery)

@@ -2,6 +2,7 @@
  (name check-quick)
  (deps
   dune-project
+  (alias awskit-test-contracts)
   (alias awskit-core-contracts)
   (alias awskit-runtime-contracts)
   (alias runtime-http)
@@ -33,6 +34,11 @@
   dune-project
   (alias check-quick)
   (alias_rec discovery)))
+
+(alias
+ (name awskit-test-contracts)
+ (deps
+  (alias test/support/runtest)))
 
 (alias
  (name runtime-http)

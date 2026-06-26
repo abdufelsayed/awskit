@@ -153,7 +153,8 @@ let with_loopback_server scenario f =
                       | Lwt.Canceled -> Lwt.return_unit | exn -> Lwt.fail exn)))))
     (fun exn ->
       Lwt.bind (close_socket socket) (fun () ->
-          if listener_bind_denied_by_sandbox exn then Alcotest.skip ()
+          if listener_bind_denied_by_sandbox exn then
+            Loopback_policy.handle_bind_denied ()
           else Lwt.fail exn))
 
 let request_for_endpoint scenario endpoint =
