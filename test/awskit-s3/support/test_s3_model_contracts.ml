@@ -62,6 +62,29 @@ let test_list_versions_page_respects_limit () =
     (S3_model.list_versions_page ~max_keys:1 model
     |> List.map listed_version_summary)
 
+let test_minio_profile_excludes_versioning_after_current_objects () =
+  Alcotest.(check bool)
+    "strict profile keeps AWS versioning-after-put history" true
+    (S3_history.history_supported S3_history.strict_default
+       [
+         S3_command.Put_string ("a.txt", "", []);
+         S3_command.Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled;
+       ]);
+  Alcotest.(check bool)
+    "minio profile excludes versioning-after-put history" false
+    (S3_history.history_supported S3_history.minio_default
+       [
+         S3_command.Put_string ("a.txt", "", []);
+         S3_command.Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled;
+       ]);
+  Alcotest.(check bool)
+    "minio profile can enable versioning before writes" true
+    (S3_history.history_supported S3_history.minio_default
+       [
+         S3_command.Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled;
+         S3_command.Put_string ("a.txt", "", []);
+       ])
+
 let suite =
   [
     ( "contract:awskit-s3:model",
@@ -73,6 +96,9 @@ let suite =
           test_list_keys_page_respects_prefix_and_limit;
         Alcotest.test_case "list versions page respects limit" `Quick
           test_list_versions_page_respects_limit;
+        Alcotest.test_case
+          "minio profile excludes versioning after current objects" `Quick
+          test_minio_profile_excludes_versioning_after_current_objects;
       ] );
   ]
 

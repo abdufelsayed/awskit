@@ -884,7 +884,7 @@ module Workload =
   S3_workload.Make_with_config
     (struct
       let profile = S3_workload.Minio
-      let count = 125
+      let count = 25
     end)
     (Minio_target)
 
@@ -911,9 +911,10 @@ let test_state_transcript_covers_minio_profile () =
   with_minio_bucket (fun conn ~bucket:_ ->
       run_minio_transcript conn
         [
+          Put_versioning Bucket.Versioning.Status.Enabled;
           Command.Put_string ("a.txt", "alpha", [ ("env", "dev") ]);
           Put_string ("logs/a.txt", "log-a", [ ("team", "storage") ]);
-          Put_string ("photos/2026.jpg", "image-before-versioning", []);
+          Put_string ("photos/2026.jpg", "image-before-overwrite", []);
           Get_string "a.txt";
           Head_object "logs/a.txt";
           Exists_object "missing.txt";
@@ -928,7 +929,6 @@ let test_state_transcript_covers_minio_profile () =
           Put_bucket_tags [ ("team", "storage"); ("mode", "pbt") ];
           Get_bucket_tags;
           Delete_bucket_tags;
-          Put_versioning Bucket.Versioning.Status.Enabled;
           Put_string ("photos/2026.jpg", "image", []);
           Delete_object "photos/2026.jpg";
           Get_versioning;

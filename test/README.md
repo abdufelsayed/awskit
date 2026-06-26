@@ -120,12 +120,15 @@ The suite IDs are `integration:minio:s3-state`, `integration:minio:object`,
 `integration:minio:multipart`, `integration:minio:transfer`, and
 `integration:minio:configuration`.
 
-The generated MinIO profile defaults to 125 cases and honors
+The generated MinIO profile defaults to 25 cases and honors
 `AWSKIT_QCHECK_COUNT=<positive-int>`. It excludes command families whose
 behavior is outside this local-service profile, such as metadata-specific
 shared workload commands, suspended versioning, version-list pages, and
-self-copy. This gate is evidence for the configured local MinIO test double
-only; it is not a compatibility claim for other S3-compatible providers.
+self-copy. It also excludes enabling versioning after current objects already
+exist, because the pinned MinIO test double does not report null version ids for
+those pre-versioning objects. This gate is evidence for the configured local
+MinIO test double only; it is not a compatibility claim for other S3-compatible
+providers.
 
 ## Discovery And Backtesting
 

@@ -40,8 +40,30 @@ let supports_command target_profile command =
 let command_supported config command =
   supports_command config.target_profile command
 
-let history_supported config = List.for_all (command_supported config)
 let existing_keys model = S3_model.keys model
+
+let minio_can_enable_versioning model =
+  (* MinIO does not report null version ids for current objects that predate
+     enabling versioning, so that transition stays outside this profile. *)
+  S3_model.versioning_keeps_history model || existing_keys model = []
+
+let command_supported_in_state config model command =
+  command_supported config command
+  &&
+  match (config.target_profile, command) with
+  | Minio, S3_command.Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled
+    ->
+      minio_can_enable_versioning model
+  | _ -> true
+
+let history_supported config commands =
+  let rec loop model = function
+    | [] -> true
+    | command :: rest ->
+        command_supported_in_state config model command
+        && loop (S3_model.apply command model) rest
+  in
+  loop S3_model.empty commands
 
 let absent_keys config model =
   S3_command.keys_for_profile config.value_profile
@@ -95,16 +117,17 @@ type command_candidate = {
 
 let candidate weight example gen = { weight; example; gen }
 
-let supported_candidates config candidates =
+let supported_candidates config model candidates =
   List.filter
-    (fun candidate -> command_supported config candidate.example)
+    (fun candidate -> command_supported_in_state config model candidate.example)
     candidates
 
-let versioning_command_candidate config =
+let versioning_command_candidate config model =
   let statuses =
     List.filter
       (fun status ->
-        command_supported config (S3_command.Put_versioning status))
+        command_supported_in_state config model
+          (S3_command.Put_versioning status))
       S3_command.versioning_status_domain
   in
   match statuses with
@@ -216,10 +239,10 @@ let command_gen config model =
        candidate 1 S3_command.Get_versioning (return S3_command.Get_versioning);
      ]
     @
-    match versioning_command_candidate config with
+    match versioning_command_candidate config model with
     | None -> []
     | Some candidate -> [ candidate ])
-    |> supported_candidates config
+    |> supported_candidates config model
   in
   match candidates with
   | [] -> return S3_command.List_keys
