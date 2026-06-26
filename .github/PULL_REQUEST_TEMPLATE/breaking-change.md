@@ -1,18 +1,10 @@
-<!-- Introduce a breaking change. -->
-
 ## Summary
 
-<!-- Describe the breaking change. -->
+<!-- Describe the breaking change and why it is needed. -->
 
-## Breaking Change
+## Impact
 
-<!-- Describe the removed or changed public contract. -->
-
-## API Role And Review
-
-<!-- Name the affected role: application SDK, advanced application API, runtime
-API, simulator API, or package boundary. Include the public `.mli`, docs, and
-examples that changed. -->
+<!-- Name the removed or changed public contract, affected API role, docs/examples, and callers. -->
 
 ## Migration
 
@@ -20,7 +12,7 @@ examples that changed. -->
 
 ## Validation
 
-<!-- List the commands, CI runs, or manual checks that prove the new contract. -->
+<!-- List commands, CI checks, or manual review that prove the new contract. -->
 
 ## Release Notes
 

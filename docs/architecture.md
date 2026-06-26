@@ -10,8 +10,8 @@ users naturally look for them, such as `Object`, `Bucket`, `Multipart`,
 `Presigned`, `Transfer`, or the adapter entrypoint modules.
 
 Keep implementation modules private unless callers need a stable public
-contract. Follow `docs/ocaml-development.md` for `.mli` shape and
-OCaml API style.
+contract. Follow `docs/development.md` for `.mli` shape and Awskit API
+development style.
 
 When a change touches public APIs, update examples, package documentation,
 tests, and `CHANGES.md` together after the implementation commit exists and the

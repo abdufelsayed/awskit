@@ -1,21 +1,16 @@
-<!-- Describe the change and why it matters. -->
-
 ## Summary
 
-<!-- Describe the main user-facing or maintainer-facing change. -->
+<!-- What changed? Include the user-facing or maintainer-facing result. -->
+
+## Impact
+
+<!-- Name affected APIs, packages, workflows, docs, or support surfaces. Use
+"None" when there is no external impact. -->
 
 ## Validation
 
-<!-- List the commands, CI runs, or manual checks that prove the change. -->
+<!-- List the commands, CI checks, or manual review that prove the change. -->
 
-## Public API And Support Impact
+## Release Notes
 
-<!-- State the touched API role: application SDK, advanced application API,
-runtime API, simulator API, private implementation, or none. -->
-
-<!-- State whether SUPPORT.md, SECURITY.md, package docs, examples, or release
-notes need updates. -->
-
-## Notes For Reviewers
-
-<!-- Call out anything that needs careful review. -->
+<!-- Add a changelog-ready entry when this should appear in a release, otherwise "None". -->

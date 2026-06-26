@@ -1,21 +1,16 @@
-<!-- Fix the bug or regression described here. -->
-
 ## Summary
 
-<!-- Describe the fixed behavior. -->
+<!-- Describe the incorrect behavior and the fixed behavior. -->
 
-## Root Cause
+## Impact
 
-<!-- Explain the underlying bug. -->
-
-## Regression Coverage
-
-<!-- Describe the test that protects the supported behavior. -->
+<!-- Name affected users, APIs, packages, or workflows. State whether the bug
+shipped in a public release. -->
 
 ## Validation
 
-<!-- List the commands, CI runs, or manual checks that prove the fix. -->
+<!-- List regression tests, commands, CI checks, or manual review that prove the fix. -->
 
 ## Release Notes
 
-<!-- Add the changelog-ready entry when this should appear in a release. -->
+<!-- Add a changelog-ready entry when this should appear in a release, otherwise "None". -->

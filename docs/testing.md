@@ -1,14 +1,40 @@
 # Testing And Validation
 
-This document defines how Awskit changes should be tested and validated. The
-test system is a correctness machine: it generates behavior, executes it
-against real targets, checks it with explicit oracles, and preserves useful
-failures as replayable evidence.
+Awskit tests are one evidence system, not a set of independent test layers.
+Each check should support a concrete behavior claim by choosing the target that
+exercises it, the technique that explores it, the oracle that judges it, and
+the cost gate that should carry it.
 
-## Evidence Axes
+Unit tests, property tests, generated workloads, fixtures, replay corpora,
+simulator runs, MinIO runs, docs builds, CI jobs, and release gates are
+techniques used together. The usual path is to run the narrowest command that
+proves the claim, then add broader gates when the change affects shared
+behavior, package metadata, public APIs, wire formats, CI, documentation, or
+releases.
 
-Do not treat unit, integration, protocol, simulator, and fuzz tests as isolated
-layers. A strong test names four axes and combines them deliberately:
+Related maintainer docs:
+
+- `docs/ci.md` maps local evidence to GitHub Actions jobs.
+- `docs/release-gates.md` defines release-ready evidence.
+- `docs/changelog.md` explains when validation should be reflected in
+  `CHANGES.md`.
+- `docs/security-threat-model.md` names security-sensitive contracts that need
+  executable evidence before support claims expand.
+
+## Choose Evidence
+
+Use this sequence when deciding what to run:
+
+1. Name the touched surface: package, runtime adapter, protocol surface,
+   simulator backend, local MinIO integration, example, documentation, package
+   metadata, or release artifact.
+2. Pick the focused alias for that surface.
+3. Add the composed gate that matches the cost of the change.
+4. Preserve reduced failures as deterministic tests or replay fixtures before
+   treating a regression as fixed.
+5. State any broader gate that was intentionally not run.
+
+A strong check combines four evidence axes:
 
 - Target: the package, runtime adapter, protocol surface, simulator backend,
   local MinIO test double, example, or release artifact being exercised.
@@ -19,49 +45,35 @@ layers. A strong test names four axes and combines them deliberately:
   S3 state model, wire-format law, fixture bytes, local S3-compatible behavior,
   or reduced regression.
 - Cost: the gate where the evidence belongs, such as fast local, no-network
-  correctness, local service integration, opt-in discovery, or optional
-  live-service validation.
+  correctness, local service integration, opt-in discovery, or release
+  validation.
 
-Use the narrowest check that proves the behavior, then broaden when a change
-affects public APIs, wire formats, runtime behavior, package metadata, docs, or
-releases. Do not promote a proposed alias, workload, or support claim before
-the underlying tracked runner exists.
+## Evidence Types
 
 | Evidence type | Use for | Focused proof |
 | --- | --- | --- |
 | Deterministic examples | Named regressions, common workflows, and resource/lifecycle stories whose expected behavior is clearest as a short scenario. | `opam exec -- dune runtest <dir>` |
 | Unit tests | Pure validation, option builders, error classification, request construction, and focused parser failures. | Package or directory `runtest` |
-| Property tests and generated workloads | Parsers, formatters, validators, endpoint policy, canonical query/header normalization, pagination, retry jitter bounds, transfer planning, runtime scenarios, and stateful S3 workflows. Explore fresh generated cases by default and replay failures with `QCHECK_SEED`. | The focused tracked alias for the target |
+| Property tests and generated workloads | Parsers, formatters, validators, endpoint policy, canonical query/header normalization, pagination, retry jitter bounds, transfer planning, runtime scenarios, and stateful S3 workflows. | The focused tracked alias for the target |
 | Golden fixtures | Exact protocol artifacts that reviewers should inspect: presigned artifacts, endpoint resolution, XML decode/encode bodies, pagination, multipart XML, service errors, and normalized wire summaries. | The tracked fixture alias or owning package `runtest` |
-| Fuzz replay | Minimized failures found by manual or mutation fuzzing. Commit the reduced input and replay it as an ordinary deterministic test before treating the bug as fixed. | The tracked replay alias or owning package `runtest` |
+| Fuzz replay | Minimized failures found by manual or mutation fuzzing. Commit the reduced input and replay it as an ordinary deterministic test. | The tracked replay alias or owning package `runtest` |
 | Test support contracts | Test-only helper behavior that other evidence relies on, such as semantic coverage diagnostics and gate policy helpers. | `opam exec -- dune build @awskit-test-contracts` |
 | Simulator contracts | No-network S3 behavior, shared S3 model contracts, stateful model-oracle workloads, fault injection, and docs/test backend behavior. The simulator is not an AWS wire authority. | `opam exec -- dune build @s3-sim` |
 | Transfer fault workloads | Generated byte-movement, progress, and cleanup workloads for S3 transfers under read, write, and multipart fault schedules. | `opam exec -- dune build @s3-transfer` |
 | Core contracts | No-network core API invariants for validation, error redaction, response metadata, credentials, retry policy, and the recording runtime support contract. | `opam exec -- dune build @awskit-core-contracts @awskit-runtime-contracts` |
 | Runtime HTTP workloads | Package-owned runtime HTTP adapter workloads against loopback servers, including bodiless responses, framing, body-reader, and error-path behavior. | `opam exec -- dune build @runtime-http` |
-| MinIO workload | Local adapter interoperability for the shared S3 state workload through a service-backed S3-compatible test double. Requires a local MinIO service and cleanup, and remains outside no-network gates. Use `AWSKIT_INTEGRATION_PROFILE=expensive` for deeper local exploration. | `opam exec -- dune build --force @s3-minio` |
-| Examples/docs | Extracted examples, odoc pages, and future MDX/docs checks. Examples should compile, and simulator-backed examples should execute when practical. | `opam exec -- dune build @examples @doc` |
-| Release gates | The composed local evidence plus opam/install/archive/docs checks and external-service lifecycle. | `scripts/release-check.sh` |
+| MinIO workload | Local adapter interoperability for the shared S3 state workload through a service-backed S3-compatible test double. | `opam exec -- dune build --force @s3-minio` |
+| Examples/docs | Extracted examples, odoc pages, and future docs checks. Examples should compile, and simulator-backed examples should execute when practical. | `opam exec -- dune build @examples @doc` |
+| Release gates | Composed local evidence plus opam, install, archive, documentation, and service lifecycle checks. | `scripts/release-check.sh` |
 
 For protocol behavior, prefer structured assertions or fixture comparisons over
-one-off string containment. String containment is acceptable only when the
-contract is truly the presence of a fragment, such as a human diagnostic
-mentioning a field name.
+string containment. String containment is appropriate when the contract is the
+presence of a fragment, such as a human diagnostic mentioning a field name.
 
-## Test Entry Points
+## Gate Map
 
-Use the alias name to identify the kind of evidence being requested:
-
-- `check-*` aliases are composed gates.
-- `runtime-*` aliases are focused runtime evidence.
-- `s3-*` aliases are focused S3 evidence.
-- `@test/...` aliases are exact package-owned rerun targets.
-
-Use Dune aliases for precise test selection. Use `scripts/test-report.sh` for
-human workflows that need durable reports, Docker lifecycle management, and
-MinIO logs.
-
-### Gates
+Use Dune aliases for precise test selection. Use `scripts/test-report.sh` when a
+workflow should leave a durable local transcript, manage MinIO, or capture logs.
 
 | Alias | When to run | Includes | External service |
 | --- | --- | --- | --- |
@@ -70,7 +82,7 @@ MinIO logs.
 | `@check-full` | Broad confidence when service prerequisites are available. | `@check-quick`, examples, docs, and `@check-integration`. | Local MinIO |
 | `@check-stress` | Higher-pressure generated workload discovery. | `@check-quick` plus directory-owned `discovery` aliases. Use `AWSKIT_QCHECK_COUNT` to raise counts. | No |
 
-### Focused Evidence
+## Focused Aliases
 
 | Surface | Alias | Target | Evidence mode |
 | --- | --- | --- | --- |
@@ -86,11 +98,9 @@ MinIO logs.
 | S3 protocol replay | `@s3-protocol-replay` | Pure protocol surface | Reduced replay corpus |
 | S3 MinIO | `@s3-minio` | Local MinIO test service | Service-backed integration |
 
-### Exact Targets
+Exact package-owned aliases are useful when rerunning one failing surface:
 
-Use exact package-owned aliases when rerunning a failing surface:
-
-| Alias | Root alias |
+| Exact alias | Root alias |
 | --- | --- |
 | `@test/awskit/awskit-core-contracts` | `@awskit-core-contracts` |
 | `@test/awskit/runtime/awskit-runtime-contracts` | `@awskit-runtime-contracts` |
@@ -106,24 +116,17 @@ Use exact package-owned aliases when rerunning a failing surface:
 | `@test/awskit-s3/protocol/replay` | `@s3-protocol-replay` |
 | `@test/awskit-s3/lwt/unix/s3-minio` | `@s3-minio` |
 
-Long-running mutation fuzzing, live AWS account tests, and broader provider
-compatibility tests are opt-in unless a support policy explicitly promotes them
-to release gates. `@s3-minio` is the named local MinIO test-service gate for
-the shared S3 workload and transfer cases. It is part of `@check-integration`
-and `@check-full`, not `@check-quick` or the no-service stress aliases, and a
-passing run is not a claim about arbitrary S3-compatible providers. S3 domain,
-protocol, fixture, and replay aliases are no-network evidence and participate
-in `@check-quick`.
+Tracked aliases are evidence claims. Add or document a new support claim only
+after the runnable alias, script workflow, or release gate exists.
 
-The package-owned runtime HTTP aliases set
-`AWSKIT_RUNTIME_HTTP_REQUIRE_LOOPBACK=1`. If a sandbox denies local loopback
-listeners with `EPERM`, these aliases fail instead of reporting skipped runtime
-evidence. Plain package `@runtest` executions may still skip this case to remain
-usable in opam-repository sandbox checks; use `@runtime-http` or `@check-quick`
-when runtime HTTP evidence is required.
+## External Services
 
-`AWSKIT_INTEGRATION_PROFILE` selects the local service-backed cost profile for
-the MinIO runner:
+`@s3-minio` is the named local MinIO test-service gate for the shared S3
+workload and transfer cases. It is part of `@check-integration` and
+`@check-full`, not `@check-quick` or no-service stress evidence. A passing
+MinIO run is not a claim about arbitrary S3-compatible providers.
+
+`AWSKIT_INTEGRATION_PROFILE` selects the MinIO cost profile:
 
 | Profile | Use | Claim |
 | --- | --- | --- |
@@ -131,20 +134,46 @@ the MinIO runner:
 | `expensive` | Manual deeper local exploration before risky changes or release work. | Broader and longer generated shared S3 workload against the same local MinIO target profile, with a service-realistic default count. |
 
 Unset or empty `AWSKIT_INTEGRATION_PROFILE` means `bounded`. Invalid non-empty
-values must fail instead of silently falling back, so an intended expensive run
-cannot degrade into the bounded gate.
+values fail so an intended expensive run cannot silently fall back.
 
-MinIO aliases fail when no reachable local MinIO service is available. Use
-`scripts/test-report.sh integration` for the script-managed Docker lifecycle,
-or start the service yourself and pass explicit `AWSKIT_S3_MINIO_*`
-configuration before running the Dune alias directly.
+MinIO aliases fail when no reachable local MinIO service is available. For the
+script-managed Docker lifecycle, run:
 
-Future live-service validation must use a separate opt-in policy before a
-runnable alias exists. That policy must require explicit credentials, region,
-destructive-resource prefix, cost/cleanup expectations, and a clear statement
-of what AWS behavior is being validated. Live-service validation must never be
-part of `@check-quick`, `@check-integration`, `@check-full`, or the MinIO
-aliases.
+```sh
+scripts/test-report.sh integration --label s3-integration
+```
+
+For a direct Dune rerun after starting the local service yourself, pass the
+MinIO configuration explicitly:
+
+```sh
+docker compose up -d
+AWSKIT_S3_MINIO_ENDPOINT=http://127.0.0.1:9000 \
+  AWSKIT_S3_MINIO_ACCESS_KEY_ID=minioadmin \
+  AWSKIT_S3_MINIO_SECRET_ACCESS_KEY=minioadmin \
+  AWSKIT_S3_MINIO_REGION=us-east-1 \
+  opam exec -- dune build --force @check-integration
+AWSKIT_S3_MINIO_ENDPOINT=http://127.0.0.1:9000 \
+  AWSKIT_S3_MINIO_ACCESS_KEY_ID=minioadmin \
+  AWSKIT_S3_MINIO_SECRET_ACCESS_KEY=minioadmin \
+  AWSKIT_S3_MINIO_REGION=us-east-1 \
+  AWSKIT_INTEGRATION_PROFILE=expensive \
+  opam exec -- dune build --force @s3-minio
+docker compose down -v
+```
+
+The package-owned runtime HTTP aliases set
+`AWSKIT_RUNTIME_HTTP_REQUIRE_LOOPBACK=1`. If a sandbox denies local loopback
+listeners with `EPERM`, these aliases fail rather than reporting skipped
+runtime evidence. Plain package `@runtest` executions may still skip this case
+to remain usable in opam-repository sandbox checks; use `@runtime-http` or
+`@check-quick` when runtime HTTP evidence is required.
+
+Live AWS validation is opt-in policy work. Before adding a runnable live-service
+alias, define explicit credentials, region, destructive-resource prefix,
+cost/cleanup expectations, and the AWS behavior being validated. Live AWS is
+outside `@check-quick`, `@check-integration`, `@check-full`, and MinIO aliases
+unless `SUPPORT.md` and the release gates say otherwise.
 
 ## Discovery And Backtesting
 
@@ -157,28 +186,27 @@ protocol replay. It does not run local MinIO; use `@s3-minio`,
 evidence.
 
 Generated workloads honor `AWSKIT_QCHECK_COUNT=<positive-int>` as an override
-for their default QCheck counts. Unset, empty, invalid, or non-positive values
-fall back to the workload default. Set a larger value when stress runs should
-explore more generated cases; smaller positive values are useful for quick
-validation. Deterministic Alcotest examples, replay corpora, and fixture
+for default QCheck counts. Unset, empty, invalid, or non-positive values use the
+workload default. Deterministic Alcotest examples, replay corpora, and fixture
 comparisons should not be inflated by this setting.
 
-Property tests should keep fresh seeds by default. Let `QCheck_alcotest` choose
-and print a `qcheck random seed`; use `QCHECK_SEED=<seed>` with the focused
-alias that found the failure when reproducing a case.
+Property tests use fresh seeds by default. Let `QCheck_alcotest` choose and
+print a `qcheck random seed`; reproduce a case with the same focused alias:
 
-Backtesting is opt-in discovery work used to prove a workload catches the bug
-class it claims to cover. Temporarily mutate production or target test code, run
-the focused alias, confirm the workload fails, then restore the mutation. The
-committed artifact is the workload improvement or a reduced replay case, not the
-temporary mutation.
+```sh
+QCHECK_SEED=<seed> opam exec -- dune build @s3-sim
+```
 
 The focused generated workload aliases track `AWSKIT_QCHECK_COUNT` and
-`QCHECK_SEED` as Dune dependencies. Use those variables to raise exploration
-cost or reproduce a mutation audit without accidentally reusing cached alias
-results.
+`QCHECK_SEED` as Dune dependencies, so count and seed changes do not
+accidentally reuse cached alias results.
 
-Useful backtesting examples:
+Backtesting proves that a workload catches the bug class it claims to cover.
+Temporarily mutate production or target test code, run the focused alias,
+confirm the workload fails, then restore the mutation. The committed artifact is
+the workload improvement or reduced replay case.
+
+Useful mutation audits:
 
 | Bug class | Temporary mutation | Focused proof | Expected failure signal |
 | --- | --- | --- | --- |
@@ -187,35 +215,32 @@ Useful backtesting examples:
 | Protocol malformed XML | Allow an empty S3 tag key or another invalid XML boundary. | `opam exec -- dune build @s3-protocol-replay` | Protocol replay fixture path reports that malformed XML unexpectedly decoded. |
 | Transfer progress monotonicity | Report a smaller progress byte count after a larger one. | `opam exec -- dune build @s3-transfer` | Transfer fault workload reports the decreased progress trace. |
 
-Backtesting also records negative findings. A focused alias that does not fail
-for the intended mutation is a coverage gap, not permission to weaken the
-claim. Current follow-up targets include non-replayable S3 operation retry
-coverage and no-network transfer checks for local-file download publication and
-caller-owned resumable upload cleanup.
+A focused alias that does not fail for the intended mutation identifies a
+coverage gap. Current follow-up targets include non-replayable S3 operation
+retry coverage, no-network transfer checks for local-file download publication,
+and caller-owned resumable upload cleanup.
 
-When backtesting or high-count discovery finds a real product bug, reduce the
-failing input and commit it as a replay artifact under the target fixture
-directory before the production fix.
+When discovery finds a product bug, reduce the failing input and commit it as a
+replay artifact under the target fixture directory before the production fix.
 
-`@docs-mdx` does not exist yet. Do not add a placeholder alias. Add it only
-when README or package-guide snippets are normalized into real MDX or extracted
-checks that compile meaningful code.
+`@docs-mdx` does not exist. Add it only when README or package-guide snippets
+are normalized into real MDX or extracted checks that compile meaningful code.
 
-Shared S3 contract suites should name backend capability differences explicitly
-instead of weakening assertions globally. The simulator workload is the
-no-network stateful model-oracle runner for the shared S3 workload core.
+Shared S3 contract suites should name backend capability differences explicitly.
+The simulator workload is the no-network stateful model-oracle runner for the
+shared S3 workload core.
 
 ## Saved Test Reports
 
-Use `scripts/test-report.sh` when a run should leave a durable local transcript.
-Reports are written under `.logs/` by default and are not committed. The script
-records repository metadata, command start and exit lines, test output, QCheck
-seeds, shrunk failure transcripts, bounded tails of capped failure-marked
-Alcotest `.output` artifacts from failed Dune test runs, and MinIO service logs
-when a MinIO workflow fails. Full captured `.output` files are saved beside the
-report under the matching artifact directory. It returns nonzero if any command
-in the selected workflow fails, but it keeps running later commands so the
-report shows the full evidence picture.
+Use `scripts/test-report.sh` when a run should leave a durable local
+transcript. Reports are written under `.logs/` by default and are not committed.
+The script records repository metadata, command start and exit lines, test
+output, QCheck seeds, shrunk failure transcripts, bounded tails of
+failure-marked Alcotest `.output` artifacts, and MinIO service logs when a MinIO
+workflow fails. Full captured `.output` files are saved beside the report under
+the matching artifact directory. The script returns nonzero if any command in
+the selected workflow fails and continues later commands so the report shows
+the full evidence picture.
 
 The report filename is
 `.logs/awskit-test-<label-or-workflow>-<utc-timestamp>.log`; the matching
@@ -228,10 +253,10 @@ The report filename is
 | `scripts/test-report.sh full` | Broad confidence: quick workflow, docs/examples, and bounded MinIO. |
 | `scripts/test-report.sh stress` | Bug-finding pressure: high-count generated workloads plus bounded and expensive MinIO. The two MinIO profiles use separate Docker lifecycles. |
 
-`stress` runs the no-service `@check-stress` alias with
-`AWSKIT_QCHECK_COUNT` from the caller or `AWSKIT_STRESS_QCHECK_COUNT` when that
-is unset. The default stress count is `2000`. This high-count default is scoped
-to `@check-stress` and is not exported into the MinIO phases:
+`stress` runs the no-service `@check-stress` alias with `AWSKIT_QCHECK_COUNT`
+from the caller or `AWSKIT_STRESS_QCHECK_COUNT` when that is unset. The default
+stress count is `2000`. This high-count default is scoped to `@check-stress` and
+is not exported into the MinIO phases:
 
 ```sh
 AWSKIT_STRESS_QCHECK_COUNT=10000 scripts/test-report.sh stress --label overnight
@@ -255,26 +280,25 @@ CI jobs that use this script should upload `.logs/` as an artifact with
 
 When the script starts Docker for a MinIO workflow, it supplies the default
 local endpoint, credentials, and region as explicit `AWSKIT_S3_MINIO_*`
-configuration. A setup or preflight error in that script-owned service lifecycle
-is therefore a failed gate, not an unconfigured local skip. If matching Docker
-Compose resources already exist for the checkout, the script fails instead of
-sharing or tearing down a lifecycle it did not start.
+configuration. A setup or preflight error in that lifecycle is a failed gate.
+If matching Docker Compose resources already exist for the checkout, the script
+fails instead of sharing or tearing down a lifecycle it did not start.
 
 ## Test Identity
 
-Keep test identifiers scoped and stable so maintainers and agents can select
-the same behavior without guessing local naming conventions.
+Keep test identifiers scoped and stable so maintainers can select the same
+behavior without guessing local naming conventions.
 
 Test identities have three layers:
 
-- Dune aliases are command-facing test selectors. Keep them kebab-case and
-  name the surface being exercised, such as `@s3-sim`, `@runtime-http`, or
+- Dune aliases are command-facing test selectors. Keep them kebab-case and name
+  the surface being exercised, such as `@s3-sim`, `@runtime-http`, or
   `@test/awskit-s3/sim/s3-state`.
 - Alcotest executable names identify the runnable package or evidence binary.
   Keep them close to the package or evidence name, such as `awskit-s3-sim` or
   `awskit-s3-minio-workload`.
 - Alcotest suite IDs are selector-facing test IDs. New or modified suite IDs
-  must use colon scopes:
+  use colon scopes:
 
   ```text
   <evidence>:<subject>:<area>[:<detail>]
@@ -282,9 +306,9 @@ Test identities have three layers:
 
 Use lowercase ASCII and kebab-case inside each segment. Supported suite-kind
 segments are `unit`, `integration`, `contract`, `workload`, `pbt`, `fixture`,
-and `replay`.
-The subject should be the package, runtime adapter, or backend under test, such
-as `awskit`, `awskit-eio`, `awskit-s3`, `awskit-s3-sim`, or `minio`.
+and `replay`. The subject should be the package, runtime adapter, or backend
+under test, such as `awskit`, `awskit-eio`, `awskit-s3`, `awskit-s3-sim`, or
+`minio`.
 
 Examples:
 
@@ -302,9 +326,7 @@ scoping under `test/*/fixtures/**`; do not duplicate the full suite ID in every
 fixture filename.
 
 Property tests should not hard-code `Random.State` seeds in ordinary Dune
-aliases. Let `QCheck_alcotest` choose and print a fresh `qcheck random seed` on
-each run so repeated CI and local runs explore different examples. To reproduce
-a failure, re-run the same alias with the printed seed:
+aliases. To reproduce a failure, re-run the same alias with the printed seed:
 
 ```sh
 QCHECK_SEED=<seed> opam exec -- dune build @s3-sim
@@ -317,37 +339,12 @@ update any Dune rule that selects it. Do not use a Dune alias name as an
 Alcotest suite ID unless it already follows the colon-scoped suite format. See
 `test/README.md` for the local registry and examples.
 
-## Test Current Behavior
-
-Tests should protect the current supported contract. When removing old
-behavior, do not add tests that only prove the old symbol, option, or module is
-gone.
-
-Use these replacements instead:
-
-- Test the new API that replaces the old one.
-- Test the migration-sensitive behavior users rely on now.
-- Test the regression symptom that motivated the change.
-- Test public boundaries through exposed modules.
-- Let `dune build` prove removed symbols are no longer available.
-
-Good:
-
-```ocaml
-let test_object_get_uses_scoped_reader () =
-  (* Verify the supported reader workflow. *)
-  ()
-```
-
-Bad:
-
-```ocaml
-let test_removed_legacy_object_api_no_longer_exists () =
-  (* Tombstone tests for removed symbols do not belong in the suite. *)
-  ()
-```
-
 ## Regression Fixes
+
+Tests protect the current supported contract. When removing old behavior, test
+the replacement API, migration-sensitive behavior, regression symptom, or
+public boundary that users rely on now. Let `dune build` prove removed symbols
+are no longer available.
 
 For real bugs:
 
@@ -376,10 +373,7 @@ through a public API without making the public API worse.
 - Use examples or trace-style tests for workflows whose behavior is easier to
   understand from a short execution story.
 
-## Check Selection
-
-Use the narrowest check that proves the change, then run broader checks when
-the change affects shared behavior, packaging, CI, or releases.
+## Command Recipes
 
 Common commands:
 
@@ -394,44 +388,14 @@ opam exec -- dune build @opam
 git diff --check
 ```
 
-For S3 integration work:
-
-```sh
-scripts/test-report.sh integration --label s3-integration
-```
-
-For a focused direct Dune rerun after starting the local service yourself, pass
-the MinIO configuration explicitly:
-
-```sh
-docker compose up -d
-AWSKIT_S3_MINIO_ENDPOINT=http://127.0.0.1:9000 \
-  AWSKIT_S3_MINIO_ACCESS_KEY_ID=minioadmin \
-  AWSKIT_S3_MINIO_SECRET_ACCESS_KEY=minioadmin \
-  AWSKIT_S3_MINIO_REGION=us-east-1 \
-  opam exec -- dune build --force @check-integration
-AWSKIT_S3_MINIO_ENDPOINT=http://127.0.0.1:9000 \
-  AWSKIT_S3_MINIO_ACCESS_KEY_ID=minioadmin \
-  AWSKIT_S3_MINIO_SECRET_ACCESS_KEY=minioadmin \
-  AWSKIT_S3_MINIO_REGION=us-east-1 \
-  AWSKIT_INTEGRATION_PROFILE=expensive \
-  opam exec -- dune build --force @s3-minio
-docker compose down -v
-```
-
-For runtime HTTP work:
+Focused surface commands:
 
 ```sh
 opam exec -- dune build @runtime-http
-```
-
-For S3 transfer fault work:
-
-```sh
 opam exec -- dune build @s3-transfer
 ```
 
-For releases:
+Release validation:
 
 ```sh
 scripts/release-check.sh

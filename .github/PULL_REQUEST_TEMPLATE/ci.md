@@ -1,22 +1,15 @@
-<!-- Update CI, release infrastructure, or repository automation. -->
-
 ## Summary
 
 <!-- Describe the workflow or automation change. -->
 
-## Workflow Impact
+## Impact
 
-<!-- Describe which events, jobs, permissions, artifacts, or releases are affected. -->
-
-## Gate Impact
-
-<!-- State whether this changes @check-quick, @check-full, @check-stress, MinIO integration,
-release-check, or docs publishing. -->
+<!-- Name affected events, jobs, permissions, artifacts, gates, or releases. -->
 
 ## Validation
 
-<!-- List local workflow checks, CI reruns, or command equivalents. -->
+<!-- List local checks, CI reruns, or command equivalents that prove the automation. -->
 
 ## Release Notes
 
-<!-- Add the changelog-ready entry when this should appear in a release. -->
+<!-- Add a changelog-ready entry when this should appear in a release, otherwise "None". -->
