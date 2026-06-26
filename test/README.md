@@ -81,12 +81,16 @@ wire-model helpers, protocol generators, fixed credentials/time helpers, and
 the recording runtime local to those tests.
 
 The golden protocol fixture corpus lives in
-`test/awskit-s3/fixtures/protocol`. The deterministic replay corpus lives under
+`test/awskit-s3/fixtures/protocol` and covers inspectable request artifacts,
+including endpoint style, presign, copy-source/checksum headers,
+object-tagging XML, multipart XML, pagination XML, and service errors. The
+deterministic replay corpus lives under
 `test/awskit-s3/fixtures/protocol/fuzz-replay`.
 
-Protocol wire properties cover canonical query ordering, endpoint URL-part
-rejection, endpoint path selection, percent-encoded object-key spellings,
-tagging XML validation boundaries, request header validation, presigned URL
+Protocol wire properties cover canonical query ordering, duplicate and absent
+query values, encoded query sort order, endpoint URL-part rejection, endpoint
+path selection, percent-encoded object-key spellings, tagging XML validation
+boundaries, request header validation and canonicalization, presigned URL
 safety, transfer planning laws, and multipart request prevalidation. Mutation
 properties exercise hostile endpoint bytes and tagging XML fragments; minimized
 failures belong in the replay corpus as public error-category checks.

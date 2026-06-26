@@ -1,0 +1,7 @@
+method=PUT
+path=/file.txt
+query=tagging=
+content-md5=7U3kSZ9Q+BXptAVK/RjDUQ==
+content-type=application/xml
+expected-owner=123456789012
+body=<Tagging><TagSet><Tag><Key>env</Key><Value>test</Value></Tag><Tag><Key>owner</Key><Value>sdk</Value></Tag></TagSet></Tagging>

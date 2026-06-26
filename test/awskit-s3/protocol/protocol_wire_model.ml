@@ -32,6 +32,68 @@ let canonical_query params =
   |> List.map (fun (key, value) -> key ^ "=" ^ value)
   |> String.concat "&"
 
+let raw_sorted_query_pairs params =
+  expand_query params
+  |> List.sort (fun (left_key, left_value) (right_key, right_value) ->
+      match String.compare left_key right_key with
+      | 0 -> String.compare left_value right_value
+      | order -> order)
+
+let encoded_sorted_query_pairs params =
+  expand_query params
+  |> List.sort (fun (left_key, left_value) (right_key, right_value) ->
+      match String.compare (uri_encode left_key) (uri_encode right_key) with
+      | 0 -> String.compare (uri_encode left_value) (uri_encode right_value)
+      | order -> order)
+
+let query_sort_changes_after_encoding params =
+  raw_sorted_query_pairs params <> encoded_sorted_query_pairs params
+
+let normalize_header_value value =
+  let pieces = ref [] in
+  let current = Buffer.create (String.length value) in
+  let flush_piece () =
+    if Buffer.length current > 0 then (
+      pieces := Buffer.contents current :: !pieces;
+      Buffer.clear current)
+  in
+  String.iter
+    (function
+      | ' ' | '\t' | '\r' | '\n' -> flush_piece ()
+      | char -> Buffer.add_char current char)
+    value;
+  flush_piece ();
+  String.concat " " (List.rev !pieces)
+
+let add_header_group groups name value =
+  let rec loop = function
+    | [] -> [ (name, [ value ]) ]
+    | (key, values) :: rest when String.equal key name ->
+        (key, values @ [ value ]) :: rest
+    | group :: rest -> group :: loop rest
+  in
+  loop groups
+
+let canonical_headers headers =
+  headers
+  |> List.fold_left
+       (fun groups (name, value) ->
+         add_header_group groups
+           (String.lowercase_ascii name)
+           (normalize_header_value value))
+       []
+  |> List.sort (fun (left_name, _) (right_name, _) ->
+      String.compare left_name right_name)
+  |> List.map (fun (name, values) -> (name, String.concat "," values))
+
+let signed_header_names headers =
+  canonical_headers headers |> List.map fst |> String.concat ";"
+
+let canonical_headers_block headers =
+  canonical_headers headers
+  |> List.map (fun (name, value) -> name ^ ":" ^ value ^ "\n")
+  |> String.concat ""
+
 let xml_escape value =
   let buffer = Buffer.create (String.length value) in
   String.iter

@@ -1,8 +1,14 @@
 type family =
   | Query
   | Duplicate_query
+  | Duplicate_empty_query
+  | Empty_absent_query
+  | Percent_encoded_query
+  | Encoded_sort_query
   | Endpoint_malformed
   | Endpoint_mutation
+  | Header_canonical
+  | Header_invalid_boundary
   | Header_newline
   | Invalid_content_range
   | Invalid_tag_field
@@ -13,8 +19,14 @@ type family =
 let family_bin = function
   | Query -> "protocol.family.query"
   | Duplicate_query -> "protocol.family.duplicate-query"
+  | Duplicate_empty_query -> "protocol.family.duplicate-empty-query"
+  | Empty_absent_query -> "protocol.family.empty-absent-query"
+  | Percent_encoded_query -> "protocol.family.percent-encoded-query"
+  | Encoded_sort_query -> "protocol.family.encoded-sort-query"
   | Endpoint_malformed -> "protocol.family.endpoint-malformed"
   | Endpoint_mutation -> "protocol.family.endpoint-mutation"
+  | Header_canonical -> "protocol.family.header-canonical"
+  | Header_invalid_boundary -> "protocol.family.header-invalid-boundary"
   | Header_newline -> "protocol.family.header-newline"
   | Invalid_content_range -> "protocol.family.invalid-content-range"
   | Invalid_tag_field -> "protocol.family.invalid-tag-field"
@@ -106,6 +118,81 @@ let duplicate_query_params =
     list_size (int_range 0 4) (pair key_gen (list_size (int_range 0 2) value))
   in
   return (prefix @ [ (key, first_values); (key, second_values) ] @ suffix)
+
+let duplicate_empty_query_params =
+  let open QCheck.Gen in
+  let key_gen = gen_string ~min:1 ~max:12 ~chars:query_chars in
+  let value = gen_string ~min:0 ~max:12 ~chars:query_chars in
+  let* key = key_gen in
+  let* prefix =
+    list_size (int_range 0 3) (pair key_gen (list_size (int_range 0 2) value))
+  in
+  let* suffix =
+    list_size (int_range 0 3) (pair key_gen (list_size (int_range 0 2) value))
+  in
+  return (prefix @ [ (key, []); (key, []) ] @ suffix)
+
+let empty_absent_query_case =
+  let open QCheck.Gen in
+  let key_gen = gen_string ~min:1 ~max:12 ~chars:query_chars in
+  let value = gen_string ~min:0 ~max:12 ~chars:query_chars in
+  let* key = key_gen in
+  let* prefix =
+    list_size (int_range 0 3) (pair key_gen (list_size (int_range 0 2) value))
+  in
+  let* suffix =
+    list_size (int_range 0 3) (pair key_gen (list_size (int_range 0 2) value))
+  in
+  return (prefix, key, suffix)
+
+let percent_triplet =
+  QCheck.Gen.oneof_list
+    [
+      "%00";
+      "%2B";
+      "%2b";
+      "%2F";
+      "%2f";
+      "%7E";
+      "%7e";
+      "%C3%A9";
+      "%c3%a9";
+      "%FF";
+      "%ff";
+    ]
+
+let percent_encoded_component =
+  let open QCheck.Gen in
+  let plain = gen_string ~min:0 ~max:6 ~chars:query_chars in
+  let* prefix = plain in
+  let* encoded = percent_triplet in
+  let* suffix = plain in
+  return (prefix ^ encoded ^ suffix)
+
+let percent_encoded_query_params =
+  let open QCheck.Gen in
+  let* first_key = percent_encoded_component in
+  let* first_value = percent_encoded_component in
+  let* second_key = percent_encoded_component in
+  let* second_value = percent_encoded_component in
+  return [ (first_key, [ first_value ]); (second_key, [ second_value ]) ]
+
+let encoded_sort_query_params =
+  let open QCheck.Gen in
+  let prefix = gen_string ~min:0 ~max:6 ~chars:"abcdefghijklmnopqrstuvwxyz" in
+  let value = gen_string ~min:0 ~max:6 ~chars:"ABCDEFGHIJKLMNOPQRSTUVWXYZ" in
+  let* key_prefix = prefix in
+  let* value_prefix = value in
+  let key_dot = key_prefix ^ "." in
+  let key_slash = key_prefix ^ "/" in
+  let value_dot = value_prefix ^ "." in
+  let value_slash = value_prefix ^ "/" in
+  return
+    [
+      (key_dot, [ "key-order" ]);
+      (key_slash, [ "key-order" ]);
+      ("value-order", [ value_dot; value_slash ]);
+    ]
 
 let valid_content_range =
   let open QCheck.Gen in
@@ -206,6 +293,87 @@ let newline_header_value =
       ~chars:"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
   in
   map2 (fun left right -> left ^ "\n" ^ right) piece piece
+
+let header_name_chars =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
+
+let header_value_chars =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/-"
+
+let safe_header_name =
+  QCheck.Gen.map
+    (fun suffix -> "x-amz-meta-" ^ suffix)
+    (gen_string ~min:1 ~max:12 ~chars:"abcdefghijklmnopqrstuvwxyz0123456789")
+
+let header_value_token = gen_string ~min:1 ~max:12 ~chars:header_value_chars
+
+let whitespace =
+  QCheck.Gen.oneof_list [ ""; " "; "  "; "\t"; "\t "; " \t"; " \t " ]
+
+let canonical_header_value =
+  let open QCheck.Gen in
+  let* leading = whitespace in
+  let* first = header_value_token in
+  let* middle = oneof_list [ " "; "  "; "\t"; " \t "; "\t  " ] in
+  let* second = header_value_token in
+  let* trailing = whitespace in
+  return (leading ^ first ^ middle ^ second ^ trailing)
+
+let canonical_header_list =
+  let open QCheck.Gen in
+  let* repeated_name = safe_header_name in
+  let* other_name = safe_header_name in
+  let other_name =
+    if String.equal repeated_name other_name then other_name ^ "-other"
+    else other_name
+  in
+  let* first = canonical_header_value in
+  let* second = canonical_header_value in
+  let* other = canonical_header_value in
+  return
+    [
+      (String.uppercase_ascii repeated_name, first);
+      (other_name, other);
+      (repeated_name, second);
+      ("Host", " s3.us-east-1.amazonaws.com ");
+    ]
+
+type invalid_header_boundary =
+  | Empty_header_name of string
+  | Header_name_colon of string * string
+  | Header_name_control of string * char * string
+  | Header_value_newline of string * string * char * string
+
+let invalid_header_boundary_headers = function
+  | Empty_header_name value -> [ ("", value) ]
+  | Header_name_colon (left, right) -> [ (left ^ ":" ^ right, "value") ]
+  | Header_name_control (left, char, right) ->
+      [ (left ^ String.make 1 char ^ right, "value") ]
+  | Header_value_newline (name, left, char, right) ->
+      [ (name, left ^ String.make 1 char ^ right) ]
+
+let invalid_header_boundary =
+  let open QCheck.Gen in
+  let name_piece = gen_string ~min:1 ~max:8 ~chars:header_name_chars in
+  let value_piece = gen_string ~min:0 ~max:12 ~chars:header_value_chars in
+  oneof
+    [
+      map (fun value -> Empty_header_name value) value_piece;
+      map2
+        (fun left right -> Header_name_colon (left, right))
+        name_piece name_piece;
+      map3
+        (fun left char right -> Header_name_control (left, char, right))
+        name_piece
+        (oneof_list [ '\000'; '\001'; '\t'; '\n'; '\r'; '\127' ])
+        name_piece;
+      map4
+        (fun name left char right ->
+          Header_value_newline (name, left, char, right))
+        safe_header_name value_piece
+        (oneof_list [ '\n'; '\r' ])
+        value_piece;
+    ]
 
 let safe_tag_suffix =
   gen_string ~min:1 ~max:20 ~chars:"abcdefghijklmnopqrstuvwxyz0123456789"

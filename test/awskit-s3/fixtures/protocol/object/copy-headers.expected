@@ -1,0 +1,10 @@
+method=PUT
+path=/archive/copy.txt
+query=
+x-amz-copy-source=/source-bucket/photos/cat%20space%2Bplus.txt?versionId=version%201%2F2
+x-amz-checksum-algorithm=SHA256
+x-amz-metadata-directive=REPLACE
+x-amz-meta-origin=copy fixture
+x-amz-expected-bucket-owner=123456789012
+x-amz-source-expected-bucket-owner=210987654321
+body=

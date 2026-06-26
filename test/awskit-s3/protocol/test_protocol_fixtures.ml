@@ -168,6 +168,47 @@ let test_endpoint_resolution_fixture () =
     [ "endpoint"; "default-object.txt" ]
     ~actual
 
+let describe_resolved_endpoint label (resolved : Endpoint_resolver.Request.t) =
+  let style =
+    match resolved.style with
+    | `Path -> "path"
+    | `Virtual_hosted -> "virtual-hosted"
+  in
+  Fmt.str
+    "[%s]\nendpoint=%s\npath=%s\nsigning_path=%s\nsigning_region=%s\nstyle=%s"
+    label
+    (Awskit.Endpoint.to_url_prefix resolved.endpoint)
+    resolved.path resolved.signing_path
+    (Region.to_string resolved.signing_region)
+    style
+
+let resolve_object_or_fail label config ~bucket ~key =
+  Endpoint_resolver.resolve_object_request config
+    ~region:(Region.of_string_exn "us-east-1")
+    ~bucket:(Protocol_support.bucket_name bucket)
+    ~key:(Protocol_support.object_key key)
+  |> Protocol_support.ok_or_fail label
+
+let test_endpoint_style_matrix_fixture () =
+  let virtual_hosted =
+    resolve_object_or_fail "virtual-hosted endpoint fixture"
+      Endpoint_config.default ~bucket:"bucket" ~key:"photos/cat space.jpg"
+  in
+  let path_style =
+    resolve_object_or_fail "path-style endpoint fixture" Endpoint_config.default
+      ~bucket:"bucket.example" ~key:"photos/cat space.jpg"
+  in
+  let actual =
+    String.concat "\n\n"
+      [
+        describe_resolved_endpoint "virtual-hosted" virtual_hosted;
+        describe_resolved_endpoint "path-style" path_style;
+      ]
+  in
+  check_fixture "endpoint style matrix"
+    [ "endpoint"; "style-matrix.txt" ]
+    ~actual
+
 let test_put_object_metadata_tags_fixture () =
   let options =
     Object.Put.options_exn
@@ -218,6 +259,109 @@ let test_put_object_metadata_tags_fixture () =
   in
   check_fixture "put object metadata and tags"
     [ "object"; "put-metadata-tags.expected" ]
+    ~actual
+
+let test_copy_object_headers_fixture () =
+  let options =
+    Object.Copy.options_exn
+      ~source_version_id:(Object.Version_id.of_string_exn "version 1/2")
+      ~metadata_directive:
+        (`Replace (Metadata.of_list_exn [ ("origin", "copy fixture") ]))
+      ~checksum_algorithm:Object.Checksum.Algorithm.Sha256
+      ~expected_bucket_owner:(Protocol_support.account_id "123456789012")
+      ~source_expected_bucket_owner:(Protocol_support.account_id "210987654321")
+      ()
+  in
+  let conn =
+    Protocol_recording_runtime.connect
+      [
+        Protocol_recording_runtime.response 200
+          {|<CopyObjectResult><ETag>"copied"</ETag></CopyObjectResult>|};
+      ]
+  in
+  ignore
+    (Protocol_recording_runtime.S3.Object.copy conn
+       ~source_bucket:(Protocol_support.bucket_name "source-bucket")
+       ~source_key:(Protocol_support.object_key "photos/cat space+plus.txt")
+       ~destination_bucket:(Protocol_support.bucket_name "dest-bucket")
+       ~destination_key:(Protocol_support.object_key "archive/copy.txt")
+       ~options ()
+    |> Protocol_support.ok_or_fail "copy object fixture");
+  let call = Protocol_recording_runtime.last_call conn in
+  let request = call.request in
+  let target = request.Awskit.Request.target in
+  let actual =
+    Fmt.str
+      "method=%s\n\
+       path=%s\n\
+       query=%s\n\
+       x-amz-copy-source=%s\n\
+       x-amz-checksum-algorithm=%s\n\
+       x-amz-metadata-directive=%s\n\
+       x-amz-meta-origin=%s\n\
+       x-amz-expected-bucket-owner=%s\n\
+       x-amz-source-expected-bucket-owner=%s\n\
+       body=%s"
+      (Awskit.Request.Method.to_string request.method_)
+      target.path
+      (query_to_string target.query)
+      (header_or_empty "x-amz-copy-source" request.headers)
+      (header_or_empty "x-amz-checksum-algorithm" request.headers)
+      (header_or_empty "x-amz-metadata-directive" request.headers)
+      (header_or_empty "x-amz-meta-origin" request.headers)
+      (header_or_empty "x-amz-expected-bucket-owner" request.headers)
+      (header_or_empty "x-amz-source-expected-bucket-owner" request.headers)
+      call.body
+  in
+  check_fixture "copy object headers"
+    [ "object"; "copy-headers.expected" ]
+    ~actual
+
+let test_object_tagging_xml_fixture () =
+  let options =
+    Object.Tagging.options_exn
+      ~expected_bucket_owner:(Protocol_support.account_id "123456789012")
+      ()
+  in
+  let conn =
+    Protocol_recording_runtime.connect
+      [ Protocol_recording_runtime.response 200 "" ]
+  in
+  ignore
+    (Protocol_recording_runtime.S3.Object.Tagging.put conn
+       ~bucket:(Protocol_support.bucket_name "bucket")
+       ~key:(Protocol_support.object_key "file.txt")
+       ~options
+       ~tags:
+         (Protocol_support.tag_set
+            [
+              Protocol_support.tag "env" "test";
+              Protocol_support.tag "owner" "sdk";
+            ])
+       ()
+    |> Protocol_support.ok_or_fail "object tagging fixture");
+  let call = Protocol_recording_runtime.last_call conn in
+  let request = call.request in
+  let target = request.Awskit.Request.target in
+  let actual =
+    Fmt.str
+      "method=%s\n\
+       path=%s\n\
+       query=%s\n\
+       content-md5=%s\n\
+       content-type=%s\n\
+       expected-owner=%s\n\
+       body=%s"
+      (Awskit.Request.Method.to_string request.method_)
+      target.path
+      (query_to_string target.query)
+      (header_or_empty "content-md5" request.headers)
+      (header_or_empty "content-type" request.headers)
+      (header_or_empty "x-amz-expected-bucket-owner" request.headers)
+      call.body
+  in
+  check_fixture "object tagging XML"
+    [ "object"; "tagging-put.expected" ]
     ~actual
 
 let content_range_field label field = function
@@ -474,8 +618,14 @@ let suite =
         Alcotest.test_case "presigned GET" `Quick test_presigned_get_fixture;
         Alcotest.test_case "endpoint resolution" `Quick
           test_endpoint_resolution_fixture;
+        Alcotest.test_case "endpoint style matrix" `Quick
+          test_endpoint_style_matrix_fixture;
         Alcotest.test_case "PUT metadata/tags" `Quick
           test_put_object_metadata_tags_fixture;
+        Alcotest.test_case "CopyObject headers" `Quick
+          test_copy_object_headers_fixture;
+        Alcotest.test_case "Object tagging XML" `Quick
+          test_object_tagging_xml_fixture;
         Alcotest.test_case "range GET response" `Quick test_range_get_fixture;
         Alcotest.test_case "signing canonical artifact" `Quick
           test_signing_artifact_fixture;

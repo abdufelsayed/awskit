@@ -13,7 +13,7 @@ let boundary_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:300
 let default_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:200
 let tagging_field_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:250
 let oversized_tag_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:100
-let generator_sample_count = 1_000
+let generator_sample_count = 1_600
 let generator_sample_minimum = 40
 
 let split_ampersand value =
@@ -31,6 +31,20 @@ let print_query params =
   |> List.map (fun (key, values) ->
       Fmt.str "%s=[%s]" key (String.concat "," values))
   |> String.concat ";"
+
+let print_empty_absent_query_case (prefix, key, suffix) =
+  Fmt.str "prefix={%s};key=%S;suffix={%s}" (print_query prefix) key
+    (print_query suffix)
+
+let print_headers headers =
+  headers
+  |> List.map (fun (name, value) -> Fmt.str "%S=%S" name value)
+  |> String.concat ";"
+
+let print_invalid_header_boundary boundary =
+  boundary
+  |> Protocol_generators.invalid_header_boundary_headers
+  |> print_headers
 
 let print_bucket_key (bucket, key) = Fmt.str "%s/%s" bucket key
 
@@ -79,6 +93,70 @@ let prop_canonical_query_duplicate_keys =
       let pairs = split_ampersand canonical in
       List.length pairs = expanded_count params
       && String.equal canonical (Protocol_wire_model.canonical_query params))
+
+let prop_canonical_query_duplicate_empty_values =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"canonical query params preserve duplicate keys with absent values"
+    (QCheck.make ~print:print_query
+       Protocol_generators.duplicate_empty_query_params) (fun params ->
+      let canonical = Awskit.Signing.canonical_query_params params in
+      let pairs = split_ampersand canonical in
+      let empty_pairs =
+        Protocol_wire_model.expand_query params
+        |> List.filter (fun (_key, value) -> String.equal value "")
+        |> List.length
+      in
+      List.length pairs = expanded_count params
+      && empty_pairs >= 2
+      && String.equal canonical (Protocol_wire_model.canonical_query params))
+
+let prop_canonical_query_empty_and_absent_values_match =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"canonical query params equate empty values and absent value lists"
+    (QCheck.make ~print:print_empty_absent_query_case
+       Protocol_generators.empty_absent_query_case)
+    (fun (prefix, key, suffix) ->
+      let absent_query = prefix @ [ (key, []) ] @ suffix in
+      let empty_query = prefix @ [ (key, [ "" ]) ] @ suffix in
+      let absent_canonical =
+        Awskit.Signing.canonical_query_params absent_query
+      in
+      let empty_canonical = Awskit.Signing.canonical_query_params empty_query in
+      String.equal absent_canonical
+        (Protocol_wire_model.canonical_query absent_query)
+      && String.equal empty_canonical
+           (Protocol_wire_model.canonical_query empty_query)
+      && String.equal absent_canonical empty_canonical)
+
+let prop_canonical_query_percent_triplets_are_literal_bytes =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"canonical query params encode percent triplets as literal bytes"
+    (QCheck.make ~print:print_query
+       Protocol_generators.percent_encoded_query_params) (fun params ->
+      let components_match =
+        Protocol_wire_model.expand_query params
+        |> List.for_all (fun (key, value) ->
+            String.equal
+              (Awskit.Signing.uri_encode key)
+              (Protocol_wire_model.uri_encode key)
+            && String.equal
+                 (Awskit.Signing.uri_encode value)
+                 (Protocol_wire_model.uri_encode value))
+      in
+      components_match
+      && String.equal
+           (Awskit.Signing.canonical_query_params params)
+           (Protocol_wire_model.canonical_query params))
+
+let prop_canonical_query_sorts_encoded_pairs_not_raw_pairs =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"canonical query params sort by encoded key and value"
+    (QCheck.make ~print:print_query
+       Protocol_generators.encoded_sort_query_params) (fun params ->
+      Protocol_wire_model.query_sort_changes_after_encoding params
+      && String.equal
+           (Awskit.Signing.canonical_query_params params)
+           (Protocol_wire_model.canonical_query params))
 
 let content_range_equal (left : Range.Content_range.t)
     (right : Range.Content_range.t) =
@@ -243,6 +321,33 @@ let prop_header_values_reject_newline =
        Protocol_generators.newline_header_value)
     (fun value ->
       Result.is_error (Awskit.Request.validate_headers [ ("x-test", value) ]))
+
+let prop_canonical_headers_normalize_repeated_case_variants =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"canonical headers normalize repeated case variants and whitespace"
+    (QCheck.make ~print:print_headers Protocol_generators.canonical_header_list)
+    (fun headers ->
+      let expected_headers = Protocol_wire_model.canonical_headers headers in
+      let actual_headers = Awskit.Signing.canonical_headers headers in
+      actual_headers = expected_headers
+      && String.equal
+           (Awskit.Signing.canonical_headers_block actual_headers)
+           (Protocol_wire_model.canonical_headers_block headers)
+      && String.equal
+           (Awskit.Signing.signed_header_names actual_headers)
+           (Protocol_wire_model.signed_header_names headers))
+
+let prop_request_headers_reject_newline_and_name_controls =
+  QCheck.Test.make ~count:boundary_count
+    ~name:"request headers reject newline and name control boundaries"
+    (QCheck.make ~print:print_invalid_header_boundary
+       Protocol_generators.invalid_header_boundary) (fun boundary ->
+      match
+        Protocol_generators.invalid_header_boundary_headers boundary
+        |> Awskit.Request.validate_headers
+      with
+      | Error error -> Awskit.Error.validation_field error = Some "header"
+      | Ok () -> false)
 
 let prop_metadata_rejects_case_insensitive_duplicate_keys =
   let key_gen =
@@ -596,8 +701,16 @@ let prop_complete_upload_rejects_small_nonfinal_parts =
 type protocol_generator_sample =
   | Sample_query of (string * string list) list
   | Sample_duplicate_query of (string * string list) list
+  | Sample_duplicate_empty_query of (string * string list) list
+  | Sample_empty_absent_query of
+      (string * string list) list * string * (string * string list) list
+  | Sample_percent_encoded_query of (string * string list) list
+  | Sample_encoded_sort_query of (string * string list) list
   | Sample_endpoint_malformed of string
   | Sample_endpoint_mutation of string
+  | Sample_header_canonical of (string * string) list
+  | Sample_header_invalid_boundary of
+      Protocol_generators.invalid_header_boundary
   | Sample_header_newline of string
   | Sample_invalid_content_range of string
   | Sample_invalid_tag_field of [ `Key of string | `Value of string ]
@@ -614,11 +727,30 @@ let protocol_generator_sample_gen =
         (fun value -> Sample_duplicate_query value)
         Protocol_generators.duplicate_query_params;
       map
+        (fun value -> Sample_duplicate_empty_query value)
+        Protocol_generators.duplicate_empty_query_params;
+      map
+        (fun (prefix, key, suffix) ->
+          Sample_empty_absent_query (prefix, key, suffix))
+        Protocol_generators.empty_absent_query_case;
+      map
+        (fun value -> Sample_percent_encoded_query value)
+        Protocol_generators.percent_encoded_query_params;
+      map
+        (fun value -> Sample_encoded_sort_query value)
+        Protocol_generators.encoded_sort_query_params;
+      map
         (fun value -> Sample_endpoint_malformed value)
         Protocol_generators.malformed_endpoint_authority;
       map
         (fun value -> Sample_endpoint_mutation value)
         Protocol_mutation.mutated_endpoint;
+      map
+        (fun value -> Sample_header_canonical value)
+        Protocol_generators.canonical_header_list;
+      map
+        (fun value -> Sample_header_invalid_boundary value)
+        Protocol_generators.invalid_header_boundary;
       map
         (fun value -> Sample_header_newline value)
         Protocol_generators.newline_header_value;
@@ -642,8 +774,15 @@ let protocol_generator_sample_gen =
 let protocol_generator_sample_family = function
   | Sample_query _ -> Protocol_generators.Query
   | Sample_duplicate_query _ -> Protocol_generators.Duplicate_query
+  | Sample_duplicate_empty_query _ -> Protocol_generators.Duplicate_empty_query
+  | Sample_empty_absent_query _ -> Protocol_generators.Empty_absent_query
+  | Sample_percent_encoded_query _ -> Protocol_generators.Percent_encoded_query
+  | Sample_encoded_sort_query _ -> Protocol_generators.Encoded_sort_query
   | Sample_endpoint_malformed _ -> Protocol_generators.Endpoint_malformed
   | Sample_endpoint_mutation _ -> Protocol_generators.Endpoint_mutation
+  | Sample_header_canonical _ -> Protocol_generators.Header_canonical
+  | Sample_header_invalid_boundary _ ->
+      Protocol_generators.Header_invalid_boundary
   | Sample_header_newline _ -> Protocol_generators.Header_newline
   | Sample_invalid_content_range _ -> Protocol_generators.Invalid_content_range
   | Sample_invalid_tag_field _ -> Protocol_generators.Invalid_tag_field
@@ -658,15 +797,37 @@ let protocol_generator_sample_bin sample =
 let protocol_generator_sample_bins sample =
   [ protocol_generator_sample_bin sample ]
 
-let protocol_generator_samples () =
-  QCheck.Gen.generate ~n:generator_sample_count protocol_generator_sample_gen
+let qcheck_seed_from_env () =
+  match Sys.getenv_opt "QCHECK_SEED" with
+  | Some value -> int_of_string_opt value
+  | None -> None
+
+let fresh_sample_seed () =
+  Random.self_init ();
+  Random.int 1_000_000_000
+
+let protocol_generator_sample_seed () =
+  match qcheck_seed_from_env () with
+  | Some seed -> seed
+  | None -> fresh_sample_seed ()
+
+let protocol_generator_samples ~seed =
+  let rand = Random.State.make [| seed |] in
+  QCheck.Gen.generate ~rand ~n:generator_sample_count
+    protocol_generator_sample_gen
 
 let stable_protocol_generator_sample_bins =
   [
     "protocol.family.query";
     "protocol.family.duplicate-query";
+    "protocol.family.duplicate-empty-query";
+    "protocol.family.empty-absent-query";
+    "protocol.family.percent-encoded-query";
+    "protocol.family.encoded-sort-query";
     "protocol.family.endpoint-malformed";
     "protocol.family.endpoint-mutation";
+    "protocol.family.header-canonical";
+    "protocol.family.header-invalid-boundary";
     "protocol.family.header-newline";
     "protocol.family.invalid-content-range";
     "protocol.family.invalid-tag-field";
@@ -693,7 +854,8 @@ let test_protocol_generator_sample_observability () =
   (* This is aggregate sample observability for stable families only. It is not
      reduced replay readiness; most protocol families still have broad printers
      rather than family-specific shrinkers. *)
-  let samples = protocol_generator_samples () in
+  let seed = protocol_generator_sample_seed () in
+  let samples = protocol_generator_samples ~seed in
   let coverage = protocol_generator_sample_coverage samples in
   let missing =
     Workload_coverage.missing stable_protocol_generator_sample_bins coverage
@@ -707,13 +869,15 @@ let test_protocol_generator_sample_observability () =
   | _ ->
       Alcotest.failf
         "S3 protocol generator sample observability failed across %d samples:\n\
+         sample seed: %d\n\
+         reproduce: QCHECK_SEED=%d opam exec -- dune build @s3-protocol-wire\n\n\
          missing stable families:\n\
          %s\n\n\
          weak stable families:\n\
          %s\n\n\
          observed sample bins:\n\
          %s"
-        (List.length samples)
+        (List.length samples) seed seed
         (if List.is_empty missing then "(none)" else String.concat "\n" missing)
         (match Workload_coverage.threshold_failure_lines weak with
         | [] -> "(none)"
@@ -724,11 +888,23 @@ let protocol_family_properties =
   [
     (Protocol_generators.Query, prop_canonical_query_params_sorted);
     (Protocol_generators.Duplicate_query, prop_canonical_query_duplicate_keys);
+    ( Protocol_generators.Duplicate_empty_query,
+      prop_canonical_query_duplicate_empty_values );
+    ( Protocol_generators.Empty_absent_query,
+      prop_canonical_query_empty_and_absent_values_match );
+    ( Protocol_generators.Percent_encoded_query,
+      prop_canonical_query_percent_triplets_are_literal_bytes );
+    ( Protocol_generators.Encoded_sort_query,
+      prop_canonical_query_sorts_encoded_pairs_not_raw_pairs );
     ( Protocol_generators.Invalid_content_range,
       prop_content_range_invalid_headers_decode_error );
     (Protocol_generators.Endpoint_malformed, prop_endpoint_rejects_url_parts);
     ( Protocol_generators.Endpoint_mutation,
       prop_mutated_endpoint_values_are_rejected_or_canonical );
+    ( Protocol_generators.Header_canonical,
+      prop_canonical_headers_normalize_repeated_case_variants );
+    ( Protocol_generators.Header_invalid_boundary,
+      prop_request_headers_reject_newline_and_name_controls );
     (Protocol_generators.Header_newline, prop_header_values_reject_newline);
     ( Protocol_generators.Invalid_tag_field,
       prop_tagging_xml_rejects_invalid_tag_fields );
@@ -762,8 +938,14 @@ let required_protocol_property_registration_bins =
   [
     "protocol.family.query";
     "protocol.family.duplicate-query";
+    "protocol.family.duplicate-empty-query";
+    "protocol.family.empty-absent-query";
+    "protocol.family.percent-encoded-query";
+    "protocol.family.encoded-sort-query";
     "protocol.family.endpoint-malformed";
     "protocol.family.endpoint-mutation";
+    "protocol.family.header-canonical";
+    "protocol.family.header-invalid-boundary";
     "protocol.family.header-newline";
     "protocol.family.invalid-content-range";
     "protocol.family.invalid-tag-field";
