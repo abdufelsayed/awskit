@@ -29,6 +29,7 @@ let supports_command target_profile command =
   | Minio, S3_command.Put_string_metadata _ -> false
   | Minio, List_versions_page _ -> false
   | Minio, Copy_object_metadata _ -> false
+  | Minio, Get_range _ -> true
   | Minio, Put_versioning status -> (
       match status with
       | Awskit_s3.Bucket.Versioning.Status.Enabled -> true
@@ -232,6 +233,17 @@ let command_gen config model =
          (map (fun key -> S3_command.Get_string key) existing);
        candidate 2 (S3_command.Get_string "missing/generated.txt")
          (map (fun key -> S3_command.Get_string key) absent);
+       candidate 3
+         (S3_command.Get_range ("a.txt", Awskit_s3.Range.from_exn 0L))
+         (map2
+            (fun key range -> S3_command.Get_range (key, range))
+            existing S3_command.gen_range);
+       candidate 1
+         (S3_command.Get_range
+            ("missing/generated.txt", Awskit_s3.Range.from_exn 0L))
+         (map2
+            (fun key range -> S3_command.Get_range (key, range))
+            absent S3_command.gen_range);
        candidate 2 (S3_command.Find_string "a.txt")
          (map (fun key -> S3_command.Find_string key) existing);
        candidate 1 (S3_command.Find_string "missing/generated.txt")

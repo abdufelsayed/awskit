@@ -2,6 +2,40 @@ let object_body = function
   | None -> None
   | Some (object_ : S3_model.object_) -> Some object_.body
 
+let range_bytes start finish = Awskit_s3.Range.bytes_exn ~start ~finish
+let range_from start = Awskit_s3.Range.from_exn start
+let range_suffix length = Awskit_s3.Range.suffix_exn length
+
+let content_range_summary_to_string
+    (summary : S3_model.content_range_summary option) =
+  match summary with
+  | None -> None
+  | Some { start; finish; complete_length } ->
+      let complete_length =
+        match complete_length with
+        | None -> "*"
+        | Some length -> Int64.to_string length
+      in
+      Some (Printf.sprintf "bytes %Ld-%Ld/%s" start finish complete_length)
+
+let expect_get_summary ~label ~body ~content_range result =
+  match result with
+  | S3_model.Get_ok summary ->
+      Alcotest.(check string) (label ^ " body") body summary.read_body;
+      Alcotest.(check (option int64))
+        (label ^ " content length")
+        (Some (Int64.of_int (String.length body)))
+        summary.read_content_length;
+      Alcotest.(check (option string))
+        (label ^ " content range") content_range
+        (content_range_summary_to_string summary.read_content_range)
+  | result ->
+      Alcotest.failf "%s expected get-ok, got %s" label
+        (S3_model.operation_result_kind result)
+
+let expect_result_kind ~label expected result =
+  Alcotest.(check string) label expected (S3_model.operation_result_kind result)
+
 let test_put_get_delete () =
   let model = S3_model.put "a.txt" "alpha" [] S3_model.empty in
   Alcotest.(check (option string))
@@ -62,6 +96,81 @@ let test_list_versions_page_respects_limit () =
     (S3_model.list_versions_page ~max_keys:1 model
     |> List.map listed_version_summary)
 
+let test_expected_result_describes_core_operations () =
+  let model =
+    S3_model.empty
+    |> S3_model.put "a.txt" "alpha" [ ("env", "dev") ]
+    |> S3_model.put_bucket_tags [ ("team", "storage") ]
+  in
+  expect_result_kind ~label:"put result" "put-ok"
+    (S3_model.expected_result
+       (S3_command.Put_string ("b.txt", "bravo", []))
+       model);
+  expect_result_kind ~label:"get result" "get-ok"
+    (S3_model.expected_result (S3_command.Get_string "a.txt") model);
+  expect_result_kind ~label:"find result" "find-ok"
+    (S3_model.expected_result (S3_command.Find_string "missing.txt") model);
+  expect_result_kind ~label:"head result" "head-ok"
+    (S3_model.expected_result (S3_command.Head_object "a.txt") model);
+  expect_result_kind ~label:"exists result" "exists-ok"
+    (S3_model.expected_result (S3_command.Exists_object "missing.txt") model);
+  expect_result_kind ~label:"list result" "list-keys-ok"
+    (S3_model.expected_result S3_command.List_keys model);
+  expect_result_kind ~label:"object tags result" "object-tags-ok"
+    (S3_model.expected_result (S3_command.Get_object_tags "a.txt") model);
+  expect_result_kind ~label:"bucket tags result" "bucket-tags-ok"
+    (S3_model.expected_result S3_command.Get_bucket_tags model);
+  expect_result_kind ~label:"versioning result" "versioning-ok"
+    (S3_model.expected_result S3_command.Get_versioning model)
+
+let test_range_get_expected_result_boundaries () =
+  let model =
+    S3_model.empty
+    |> S3_model.put "a.txt" "abcdef" []
+    |> S3_model.put "empty.txt" "" []
+  in
+  expect_get_summary ~label:"bytes interior" ~body:"cde"
+    ~content_range:(Some "bytes 2-4/6")
+    (S3_model.expected_result
+       (S3_command.Get_range ("a.txt", range_bytes 2L 4L))
+       model);
+  expect_get_summary ~label:"bytes clipped finish" ~body:"ef"
+    ~content_range:(Some "bytes 4-5/6")
+    (S3_model.expected_result
+       (S3_command.Get_range ("a.txt", range_bytes 4L 99L))
+       model);
+  expect_get_summary ~label:"from offset" ~body:"def"
+    ~content_range:(Some "bytes 3-5/6")
+    (S3_model.expected_result
+       (S3_command.Get_range ("a.txt", range_from 3L))
+       model);
+  expect_get_summary ~label:"suffix subset" ~body:"ef"
+    ~content_range:(Some "bytes 4-5/6")
+    (S3_model.expected_result
+       (S3_command.Get_range ("a.txt", range_suffix 2L))
+       model);
+  expect_get_summary ~label:"suffix whole object" ~body:"abcdef"
+    ~content_range:(Some "bytes 0-5/6")
+    (S3_model.expected_result
+       (S3_command.Get_range ("a.txt", range_suffix 99L))
+       model);
+  expect_result_kind ~label:"from eof is invalid" "invalid-range"
+    (S3_model.expected_result
+       (S3_command.Get_range ("a.txt", range_from 6L))
+       model);
+  expect_result_kind ~label:"bytes past eof is invalid" "invalid-range"
+    (S3_model.expected_result
+       (S3_command.Get_range ("a.txt", range_bytes 6L 9L))
+       model);
+  expect_result_kind ~label:"suffix on empty object is invalid" "invalid-range"
+    (S3_model.expected_result
+       (S3_command.Get_range ("empty.txt", range_suffix 1L))
+       model);
+  expect_result_kind ~label:"missing object is not found" "not-found"
+    (S3_model.expected_result
+       (S3_command.Get_range ("missing.txt", range_suffix 1L))
+       model)
+
 let test_minio_profile_excludes_versioning_after_current_objects () =
   Alcotest.(check bool)
     "strict profile keeps AWS versioning-after-put history" true
@@ -83,6 +192,13 @@ let test_minio_profile_excludes_versioning_after_current_objects () =
        [
          S3_command.Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled;
          S3_command.Put_string ("a.txt", "", []);
+       ]);
+  Alcotest.(check bool)
+    "minio profile keeps ranged reads supported" true
+    (S3_history.history_supported S3_history.minio_default
+       [
+         S3_command.Put_string ("a.txt", "abcdef", []);
+         Get_range ("a.txt", range_bytes 1L 3L);
        ])
 
 let require_bins ~label ~required observed =
@@ -102,6 +218,7 @@ let test_history_transition_bins_name_common_s3_flows () =
       Put_string ("b.txt", "bravo", []);
       Delete_object "b.txt";
       Put_string ("logs/a.txt", "log-a", []);
+      Get_range ("logs/a.txt", range_bytes 0L 2L);
       Put_string ("logs/b.txt", "log-b", []);
       Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled;
       Delete_object "logs/a.txt";
@@ -115,7 +232,9 @@ let test_history_transition_bins_name_common_s3_flows () =
   require_bins ~label:"history transition coverage"
     ~required:
       [
+        "s3.command.get-range";
         "s3.history.put-read";
+        "s3.history.put-range-read";
         "s3.history.put-delete";
         "s3.history.versioning-enabled-after-existing-object";
         "s3.history.versioning-enabled-delete";
@@ -163,6 +282,9 @@ let test_replay_round_trips_generated_commands () =
           [],
           [ ("trace-id", "sim-1"); ("multi", "line\nvalue") ] );
       Get_string "space key.txt";
+      Get_range ("space key.txt", range_bytes 2L 5L);
+      Get_range ("unicode-\206\180.txt", range_from 0L);
+      Get_range ("logs/a.txt", range_suffix 3L);
       Find_string "missing key.txt";
       Head_object "unicode-\206\180.txt";
       Exists_object "logs/a.txt";
@@ -211,6 +333,10 @@ let suite =
           test_list_keys_page_respects_prefix_and_limit;
         Alcotest.test_case "list versions page respects limit" `Quick
           test_list_versions_page_respects_limit;
+        Alcotest.test_case "expected result describes core operations" `Quick
+          test_expected_result_describes_core_operations;
+        Alcotest.test_case "range get expected result boundaries" `Quick
+          test_range_get_expected_result_boundaries;
         Alcotest.test_case
           "minio profile excludes versioning after current objects" `Quick
           test_minio_profile_excludes_versioning_after_current_objects;

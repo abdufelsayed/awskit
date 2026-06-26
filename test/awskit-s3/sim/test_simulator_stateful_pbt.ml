@@ -62,6 +62,18 @@ let expect_no_such_key command_index command label = function
   | Error error -> fail_error command_index command label error
   | Ok _ -> fail command_index command (label ^ " expected NoSuchKey")
 
+let is_invalid_range_error error =
+  match
+    (Awskit.Error.service_status error, Awskit.Error.service_code error)
+  with
+  | Some 416, Some "InvalidRange" | _, Some "InvalidRange" -> true
+  | _ -> false
+
+let expect_invalid_range command_index command label = function
+  | Error error when is_invalid_range_error error -> ()
+  | Error error -> fail_error command_index command label error
+  | Ok _ -> fail command_index command (label ^ " expected InvalidRange")
+
 let expect_ok command_index command label = function
   | Ok value -> value
   | Error error -> fail_error command_index command label error
@@ -91,6 +103,20 @@ let max_bytes_for_expected = function
   | Some object_ -> Int64.of_int (String.length object_.body)
   | None -> 64L
 
+let model_content_range_to_string = function
+  | None -> None
+  | Some (summary : Model.content_range_summary) ->
+      let complete_length =
+        match summary.complete_length with
+        | None -> "*"
+        | Some length -> Int64.to_string length
+      in
+      Some
+        (Printf.sprintf "bytes %Ld-%Ld/%s" summary.start summary.finish
+           complete_length)
+
+let actual_content_range_to_string = Option.map Range.Content_range.to_header
+
 let assert_get command_index command conn key expected =
   let max_bytes = max_bytes_for_expected expected in
   match expected with
@@ -110,6 +136,44 @@ let assert_get command_index command conn key expected =
       expect_no_such_key command_index command "get_string"
         (Simulator.Object.get_string conn ~bucket ~key:(key_to_object_key key)
            ~max_bytes ())
+
+let assert_get_range command_index command conn key range model =
+  let max_bytes = max_bytes_for_expected (Model.find key model) in
+  let options = Object.Get.options_exn ~range () in
+  match Model.expected_result command model with
+  | Get_ok summary ->
+      let result =
+        expect_ok command_index command "get range"
+          (Simulator.Object.get_string conn ~bucket ~key:(key_to_object_key key)
+             ~options ~max_bytes ())
+      in
+      check_equal command_index command Alcotest.string "get range body"
+        summary.read_body result.value;
+      check_equal command_index command
+        Alcotest.(option int64)
+        "get range content length" summary.read_content_length
+        result.content_length;
+      check_equal command_index command
+        Alcotest.(option string)
+        "get range content range"
+        (model_content_range_to_string summary.read_content_range)
+        (actual_content_range_to_string result.content_range);
+      check_metadata command_index command "get range metadata"
+        summary.read_metadata result.metadata;
+      check_version_id_presence command_index command "get range version id"
+        summary.read_has_version_id result.version_id
+  | Not_found ->
+      expect_no_such_key command_index command "get range"
+        (Simulator.Object.get_string conn ~bucket ~key:(key_to_object_key key)
+           ~options ~max_bytes ())
+  | Invalid_range ->
+      expect_invalid_range command_index command "get range"
+        (Simulator.Object.get_string conn ~bucket ~key:(key_to_object_key key)
+           ~options ~max_bytes ())
+  | result ->
+      fail command_index command
+        (Printf.sprintf "unexpected model result %s for range get"
+           (Model.operation_result_kind result))
 
 let assert_find command_index command conn key expected =
   let max_bytes = max_bytes_for_expected expected in
@@ -523,6 +587,9 @@ let apply_simulator_command command_index conn model command =
     | Get_string key ->
         assert_get command_index command conn key (Model.find key model);
         model
+    | Get_range (key, range) ->
+        assert_get_range command_index command conn key range model;
+        model
     | Find_string key ->
         assert_find command_index command conn key (Model.find key model);
         model
@@ -694,5 +761,8 @@ let suite =
   Workload.suite
   @ [
       ( "replay:awskit-s3-sim:s3-state",
-        [ replay_case "versioning-after-put.txt" ] );
+        [
+          replay_case "versioning-after-put.txt";
+          replay_case "range-read-boundaries.txt";
+        ] );
     ]

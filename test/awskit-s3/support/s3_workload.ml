@@ -37,6 +37,7 @@ let required_strict_bins =
     "s3.command.put";
     "s3.command.put-metadata";
     "s3.command.get";
+    "s3.command.get-range";
     "s3.command.find";
     "s3.command.head";
     "s3.command.exists";
@@ -57,6 +58,7 @@ let required_strict_bins =
     "s3.command.versioning.suspended";
     "s3.command.get-versioning";
     "s3.history.put-read";
+    "s3.history.put-range-read";
     "s3.history.put-delete";
     "s3.history.versioning-after-put";
     "s3.history.delete-after-versioning";

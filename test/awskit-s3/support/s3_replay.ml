@@ -76,6 +76,12 @@ let decode_int ~line ~source token =
   | Some value when value >= 0 -> Ok value
   | Some _ | None -> parse_error ~line ~source "expected non-negative integer"
 
+let decode_int64 ~line ~source token =
+  match Int64.of_string_opt token with
+  | Some value when Int64.compare value 0L >= 0 -> Ok value
+  | Some _ | None ->
+      parse_error ~line ~source "expected non-negative int64 integer"
+
 let decode_versioning_status ~line ~source = function
   | "Enabled" -> Ok Awskit_s3.Bucket.Versioning.Status.Enabled
   | "Suspended" -> Ok Suspended
@@ -126,6 +132,13 @@ let encode_copy_metadata = function
   | S3_command.Copy_source_metadata -> [ "copy-source-metadata" ]
   | Replace_metadata metadata -> "replace-metadata" :: encode_pairs metadata
 
+let encode_range range =
+  match Awskit_s3.Range.view range with
+  | Awskit_s3.Range.Bytes (start, finish) ->
+      [ "bytes"; Int64.to_string start; Int64.to_string finish ]
+  | Awskit_s3.Range.From start -> [ "from"; Int64.to_string start ]
+  | Awskit_s3.Range.Suffix length -> [ "suffix"; Int64.to_string length ]
+
 let encode_command command =
   let command, args =
     match command with
@@ -138,6 +151,8 @@ let encode_command command =
           @ encode_pairs tags
           @ encode_pairs metadata )
     | Get_string key -> ("get-string", [ encode_string key ])
+    | Get_range (key, range) ->
+        ("get-range", encode_string key :: encode_range range)
     | Find_string key -> ("find-string", [ encode_string key ])
     | Head_object key -> ("head-object", [ encode_string key ])
     | Exists_object key -> ("exists-object", [ encode_string key ])
@@ -209,6 +224,44 @@ let decode_put_string_metadata ~line ~source tokens =
   | [] | [ _ ] ->
       parse_error ~line ~source "expected put-string-metadata arguments"
 
+let decode_range ~line ~source tokens =
+  match tokens with
+  | "bytes" :: start :: finish :: rest ->
+      let* start = decode_int64 ~line ~source start in
+      let* finish = decode_int64 ~line ~source finish in
+      let* range =
+        match Awskit_s3.Range.bytes ~start ~finish with
+        | Ok range -> Ok range
+        | Error _ -> parse_error ~line ~source "invalid bytes range"
+      in
+      Ok (range, rest)
+  | "from" :: start :: rest ->
+      let* start = decode_int64 ~line ~source start in
+      let* range =
+        match Awskit_s3.Range.from start with
+        | Ok range -> Ok range
+        | Error _ -> parse_error ~line ~source "invalid from range"
+      in
+      Ok (range, rest)
+  | "suffix" :: length :: rest ->
+      let* length = decode_int64 ~line ~source length in
+      let* range =
+        match Awskit_s3.Range.suffix length with
+        | Ok range -> Ok range
+        | Error _ -> parse_error ~line ~source "invalid suffix range"
+      in
+      Ok (range, rest)
+  | [] | _ :: _ -> parse_error ~line ~source "expected range directive"
+
+let decode_get_range ~line ~source tokens =
+  match tokens with
+  | key :: rest ->
+      let* key = decode_string ~line ~source key in
+      let* range, rest = decode_range ~line ~source rest in
+      expect_no_args ~line ~source "get-range" rest
+        (S3_command.Get_range (key, range))
+  | [] -> parse_error ~line ~source "expected get-range arguments"
+
 let decode_list_keys_page ~line ~source tokens =
   let* prefix, rest = decode_optional_string ~line ~source tokens in
   match rest with
@@ -259,6 +312,7 @@ let decode_new_command ~line ~source command tokens =
   | "get-string" ->
       decode_one_string ~line ~source tokens (fun key ->
           S3_command.Get_string key)
+  | "get-range" -> decode_get_range ~line ~source tokens
   | "find-string" ->
       decode_one_string ~line ~source tokens (fun key ->
           S3_command.Find_string key)

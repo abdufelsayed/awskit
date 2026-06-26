@@ -7,6 +7,7 @@ type t =
   | Put_string of string * string * tag_model
   | Put_string_metadata of string * string * tag_model * metadata_model
   | Get_string of string
+  | Get_range of string * Awskit_s3.Range.t
   | Find_string of string
   | Head_object of string
   | Exists_object of string
@@ -86,6 +87,8 @@ let metadata_to_string metadata =
   |> String.concat ";"
   |> Printf.sprintf "[%s]"
 
+let range_to_string range = Awskit_s3.Range.to_header range
+
 let copy_metadata_to_string = function
   | Copy_source_metadata -> "copy-source-metadata"
   | Replace_metadata metadata ->
@@ -103,6 +106,8 @@ let to_string = function
         key body (tags_to_string tags)
         (metadata_to_string metadata)
   | Get_string key -> Printf.sprintf "get-string key=%S" key
+  | Get_range (key, range) ->
+      Printf.sprintf "get-range key=%S range=%S" key (range_to_string range)
   | Find_string key -> Printf.sprintf "find-string key=%S" key
   | Head_object key -> Printf.sprintf "head-object key=%S" key
   | Exists_object key -> Printf.sprintf "exists-object key=%S" key
@@ -139,6 +144,7 @@ let command_bin = function
   | Put_string _ -> "s3.command.put"
   | Put_string_metadata _ -> "s3.command.put-metadata"
   | Get_string _ -> "s3.command.get"
+  | Get_range _ -> "s3.command.get-range"
   | Find_string _ -> "s3.command.find"
   | Head_object _ -> "s3.command.head"
   | Exists_object _ -> "s3.command.exists"
@@ -165,10 +171,15 @@ let put_key = function
   | _ -> None
 
 let read_key = function
-  | Get_string key | Find_string key | Head_object key | Exists_object key ->
+  | Get_string key
+  | Get_range (key, _)
+  | Find_string key
+  | Head_object key
+  | Exists_object key ->
       Some key
   | _ -> None
 
+let range_read_key = function Get_range (key, _) -> Some key | _ -> None
 let delete_key = function Delete_object key -> Some key | _ -> None
 
 let object_tag_mutation_key = function
@@ -188,28 +199,34 @@ let same_key left right =
   | Some left, Some right -> String.equal left right
   | None, _ | _, None -> false
 
-let adjacent_transition_bin left right =
-  match (left, right) with
-  | _, _ when same_key (put_key left) (read_key right) ->
-      Some "s3.history.put-read"
-  | _, _ when same_key (put_key left) (delete_key right) ->
-      Some "s3.history.put-delete"
-  | Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled, Delete_object _
-    ->
-      Some "s3.history.versioning-enabled-delete"
-  | _, _
-    when same_key (object_tag_mutation_key left) (object_tag_read_key right) ->
-      Some "s3.history.object-tag-mutation-read"
-  | _, _ when same_key (copy_destination_key left) (read_key right) ->
-      Some "s3.history.copy-destination-read"
-  | _, _ -> None
+let adjacent_transition_bins_for_pair left right =
+  let add_if condition bin acc = if condition then bin :: acc else acc in
+  []
+  |> add_if (same_key (put_key left) (read_key right)) "s3.history.put-read"
+  |> add_if
+       (same_key (put_key left) (range_read_key right))
+       "s3.history.put-range-read"
+  |> add_if (same_key (put_key left) (delete_key right)) "s3.history.put-delete"
+  |> add_if
+       (match (left, right) with
+       | ( Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled,
+           Delete_object _ ) ->
+           true
+       | _ -> false)
+       "s3.history.versioning-enabled-delete"
+  |> add_if
+       (same_key (object_tag_mutation_key left) (object_tag_read_key right))
+       "s3.history.object-tag-mutation-read"
+  |> add_if
+       (same_key (copy_destination_key left) (read_key right))
+       "s3.history.copy-destination-read"
 
 let adjacent_transition_bins commands =
   let rec loop acc = function
-    | left :: right :: rest -> (
-        match adjacent_transition_bin left right with
-        | None -> loop acc (right :: rest)
-        | Some bin -> loop (bin :: acc) (right :: rest))
+    | left :: right :: rest ->
+        loop
+          (List.rev_append (adjacent_transition_bins_for_pair left right) acc)
+          (right :: rest)
     | [] | [ _ ] -> List.rev acc
   in
   loop [] commands
@@ -255,6 +272,42 @@ let gen_tags = QCheck.Gen.oneof_list tag_sets_domain
 let gen_metadata = QCheck.Gen.oneof_list metadata_sets_domain
 let gen_versioning_status = QCheck.Gen.oneof_list versioning_status_domain
 
+let range_domain =
+  [
+    Awskit_s3.Range.bytes_exn ~start:0L ~finish:0L;
+    Awskit_s3.Range.bytes_exn ~start:0L ~finish:3L;
+    Awskit_s3.Range.bytes_exn ~start:2L ~finish:5L;
+    Awskit_s3.Range.bytes_exn ~start:64L ~finish:128L;
+    Awskit_s3.Range.from_exn 0L;
+    Awskit_s3.Range.from_exn 3L;
+    Awskit_s3.Range.from_exn 64L;
+    Awskit_s3.Range.suffix_exn 1L;
+    Awskit_s3.Range.suffix_exn 4L;
+    Awskit_s3.Range.suffix_exn 64L;
+  ]
+
+let gen_range =
+  QCheck.Gen.(
+    oneof_weighted
+      [
+        (4, oneof_list range_domain);
+        ( 3,
+          map2
+            (fun start span ->
+              let start = Int64.of_int start in
+              let finish = Int64.add start (Int64.of_int span) in
+              Awskit_s3.Range.bytes_exn ~start ~finish)
+            (int_range 0 128) (int_range 0 128) );
+        ( 2,
+          map
+            (fun start -> Awskit_s3.Range.from_exn (Int64.of_int start))
+            (int_range 0 128) );
+        ( 2,
+          map
+            (fun length -> Awskit_s3.Range.suffix_exn (Int64.of_int length))
+            (int_range 1 128) );
+      ])
+
 let gen_copy_metadata =
   QCheck.Gen.(
     oneof
@@ -297,6 +350,7 @@ let generator_with ~gen_key ~gen_body =
               Put_string_metadata (key, body, tags, metadata))
             gen_key gen_body gen_tags gen_metadata );
         (2, map (fun key -> Get_string key) gen_key);
+        (2, map2 (fun key range -> Get_range (key, range)) gen_key gen_range);
         (2, map (fun key -> Find_string key) gen_key);
         (2, map (fun key -> Head_object key) gen_key);
         (2, map (fun key -> Exists_object key) gen_key);
@@ -354,6 +408,28 @@ let shrink_max_keys max_keys =
 let shrink_body body =
   QCheck.Shrink.string ~shrink:QCheck.Shrink.char_printable body
 
+let shrink_range range =
+  match Awskit_s3.Range.view range with
+  | Awskit_s3.Range.Bytes (0L, 0L) -> QCheck.Iter.empty
+  | Awskit_s3.Range.Bytes _ ->
+      QCheck.Iter.of_list
+        [
+          Awskit_s3.Range.bytes_exn ~start:0L ~finish:0L;
+          Awskit_s3.Range.from_exn 0L;
+          Awskit_s3.Range.suffix_exn 1L;
+        ]
+  | Awskit_s3.Range.From 0L -> QCheck.Iter.empty
+  | Awskit_s3.Range.From _ ->
+      QCheck.Iter.of_list
+        [
+          Awskit_s3.Range.from_exn 0L;
+          Awskit_s3.Range.bytes_exn ~start:0L ~finish:0L;
+        ]
+  | Awskit_s3.Range.Suffix 1L -> QCheck.Iter.empty
+  | Awskit_s3.Range.Suffix _ ->
+      QCheck.Iter.of_list
+        [ Awskit_s3.Range.suffix_exn 1L; Awskit_s3.Range.from_exn 0L ]
+
 let shrink_tags = function
   | [] -> QCheck.Iter.empty
   | _ :: _ -> QCheck.Iter.return []
@@ -410,6 +486,12 @@ let shrinker = function
       |> QCheck.Iter.flatten
   | Get_string key ->
       QCheck.Iter.map (fun key -> Get_string key) (shrink_key key)
+  | Get_range (key, range) ->
+      QCheck.Iter.append
+        (QCheck.Iter.map (fun key -> Get_range (key, range)) (shrink_key key))
+        (QCheck.Iter.map
+           (fun range -> Get_range (key, range))
+           (shrink_range range))
   | Find_string key ->
       QCheck.Iter.map (fun key -> Find_string key) (shrink_key key)
   | Head_object key ->
