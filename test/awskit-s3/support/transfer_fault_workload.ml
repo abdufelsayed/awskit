@@ -417,8 +417,22 @@ let transfer_boundary_thresholds =
     (fun bin -> Workload_coverage.threshold ~bin ~minimum:10)
     required_transfer_boundary_bins
 
-let generated_coverage sample_count =
-  let rand = Random.State.make_self_init () in
+let qcheck_seed_from_env () =
+  match Sys.getenv_opt "QCHECK_SEED" with
+  | Some value -> int_of_string_opt value
+  | None -> None
+
+let fresh_sample_seed () =
+  Random.self_init ();
+  Random.int 1_000_000_000
+
+let coverage_sample_seed () =
+  match qcheck_seed_from_env () with
+  | Some seed -> seed
+  | None -> fresh_sample_seed ()
+
+let generated_coverage ~seed sample_count =
+  let rand = Random.State.make [| seed |] in
   let rec loop remaining coverage =
     if remaining = 0 then coverage
     else
@@ -430,12 +444,19 @@ let generated_coverage sample_count =
 
 let test_generator_coverage () =
   let sample_count = 1_000 in
-  let coverage = generated_coverage sample_count in
-  Workload_coverage.require_all ~label:"S3 transfer fault generator"
+  let seed = coverage_sample_seed () in
+  let coverage = generated_coverage ~seed sample_count in
+  let label =
+    Printf.sprintf
+      "S3 transfer fault generator (seed=%d; reproduce with QCHECK_SEED=%d \
+       opam exec -- dune build @s3-transfer-faults)"
+      seed seed
+  in
+  Workload_coverage.require_all ~label
     ~required:(required_transfer_bins @ required_transfer_boundary_bins)
     coverage;
-  Workload_coverage.require_thresholds ~label:"S3 transfer fault generator"
-    ~sample_count ~thresholds:transfer_boundary_thresholds coverage
+  Workload_coverage.require_thresholds ~label ~sample_count
+    ~thresholds:transfer_boundary_thresholds coverage
 
 module Make (Target : TARGET) = struct
   let property =

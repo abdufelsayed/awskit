@@ -18,6 +18,9 @@ Core Awskit contracts and recording-runtime support contracts live under
 The suite IDs are `unit:awskit:error-redaction`,
 `unit:awskit:core-contracts`, `pbt:awskit:retry`, `unit:awskit:retry`,
 and `contract:awskit:runtime-core`.
+The retry PBT suite covers jitter bounds plus generated retry schedules across
+attempt limits, retryable and non-retryable errors, throttling classification,
+timeout classification, and caller cancellation classification.
 
 Runtime HTTP adapter work runs through package-owned aliases:
 
@@ -45,7 +48,7 @@ S3 workload support lives in `test/awskit-s3/support`. The private
 model-aware history synthesis, pure model state, replay text helpers, and a
 target functor for package-owned runners. It also provides `transfer_model.ml`
 and `transfer_fault_workload.ml` for runtime-neutral transfer byte-movement,
-progress callback, cancellation, multipart ownership, and cleanup-secondary
+progress traces, cancellation, multipart ownership, and cleanup-secondary
 workloads.
 
 Pure S3 model contracts run through the support-owned alias:

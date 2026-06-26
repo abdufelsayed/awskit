@@ -22,6 +22,7 @@ type counters = {
   mutable read_bytes : int;
   mutable written_bytes : int;
   mutable progress_bytes : int;
+  mutable progress_events : int list;
   mutable created_upload : Multipart.Upload.created Multipart.Upload.t option;
 }
 
@@ -30,6 +31,7 @@ let counters () =
     read_bytes = 0;
     written_bytes = 0;
     progress_bytes = 0;
+    progress_events = [];
     created_upload = None;
   }
 
@@ -121,10 +123,18 @@ let progress_callback_reached case transferred =
   | Some (Model.Progress_callback_raises_after limit) -> transferred > limit
   | _ -> false
 
+let record_progress counts transferred =
+  counts.progress_events <- transferred :: counts.progress_events
+
 let notify_progress case counts transferred =
+  record_progress counts transferred;
   if progress_callback_reached case transferred then
     raise Progress_callback_failed
   else counts.progress_bytes <- transferred
+
+let complete_progress counts transferred =
+  record_progress counts transferred;
+  counts.progress_bytes <- transferred
 
 let write_chunk _case counts writer chunk =
   match Simulator.Body.Writer.write_string writer chunk with
@@ -248,7 +258,7 @@ let upload_single case counts conn =
   match Simulator.Object.put conn ~bucket ~key ~body () with
   | Error _ as error -> error
   | Ok _ ->
-      counts.progress_bytes <- length;
+      complete_progress counts length;
       Ok ()
 
 let inject_fault_for_create conn = function
@@ -420,15 +430,66 @@ let is_progress_callback_failure = function
   | Progress_callback_failed -> true
   | _ -> false
 
+let progress_trace counts = List.rev counts.progress_events
+
+let progress_trace_to_string trace =
+  trace |> List.map string_of_int |> String.concat "; "
+
+let last_progress_event trace =
+  List.fold_left (fun _ transferred -> Some transferred) None trace
+
+let check_progress_never_decreases case counts =
+  let trace = progress_trace counts in
+  let rec loop = function
+    | [] | [ _ ] -> ()
+    | earlier :: later :: rest ->
+        if earlier <= later then loop (later :: rest)
+        else
+          failf case "progress trace decreased from %d to %d in [%s]" earlier
+            later
+            (progress_trace_to_string trace)
+  in
+  loop trace
+
+let check_success_progress_trace case counts ~progress_final =
+  check_progress_never_decreases case counts;
+  match last_progress_event (progress_trace counts) with
+  | Some transferred ->
+      check_int case "final progress event" progress_final transferred
+  | None ->
+      failf case "progress trace did not report final byte count %d"
+        progress_final
+
+let check_failure_progress_trace case counts ~progress_report_max
+    ~callback_exception_preserved =
+  let trace = progress_trace counts in
+  check_progress_never_decreases case counts;
+  List.iter
+    (fun transferred ->
+      if transferred < 0 || transferred > progress_report_max then
+        failf case
+          "progress event %d outside model-allowed failure range 0..%d in [%s]"
+          transferred progress_report_max
+          (progress_trace_to_string trace))
+    trace;
+  if callback_exception_preserved then
+    match last_progress_event trace with
+    | Some transferred ->
+        check_int case "callback failure progress event" progress_report_max
+          transferred
+    | None -> fail case "callback exception raised without progress event"
+
 let verify_success case store counts ~remote_body ~progress_final =
   check_string case "remote body" remote_body
     (Option.value ~default:"<absent>" (stored_body case store));
   check_int case "read bytes" progress_final counts.read_bytes;
   check_int case "written bytes" progress_final counts.written_bytes;
-  check_int case "progress final" progress_final counts.progress_bytes
+  check_int case "progress final" progress_final counts.progress_bytes;
+  check_success_progress_trace case counts ~progress_final
 
 let verify_failure case store conn counts ~remote_absent ~owned_upload_aborted
-    ~read_bytes ~written_bytes ~progress_bytes ~cleanup_error_secondary =
+    ~read_bytes ~written_bytes ~progress_bytes ~progress_report_max
+    ~callback_exception_preserved ~cleanup_error_secondary =
   if remote_absent then
     check_bool case "remote object absent" true
       (Option.is_none (stored_body case store));
@@ -437,6 +498,8 @@ let verify_failure case store conn counts ~remote_absent ~owned_upload_aborted
     counts.written_bytes;
   check_int case "progress bytes after failure" progress_bytes
     counts.progress_bytes;
+  check_failure_progress_trace case counts ~progress_report_max
+    ~callback_exception_preserved;
   let history = Simulator.history store in
   check_fault_history case store;
   if owned_upload_aborted then (
@@ -482,6 +545,7 @@ module Target = struct
           read_bytes;
           written_bytes;
           progress_bytes;
+          progress_report_max;
           callback_exception_preserved;
           cleanup_error_secondary;
           cancelled;
@@ -506,6 +570,7 @@ module Target = struct
             check_error_shape case error ~cleanup_error_secondary ~cancelled);
         verify_failure case store conn counts ~remote_absent
           ~owned_upload_aborted ~read_bytes ~written_bytes ~progress_bytes
+          ~progress_report_max ~callback_exception_preserved
           ~cleanup_error_secondary;
         true
 end

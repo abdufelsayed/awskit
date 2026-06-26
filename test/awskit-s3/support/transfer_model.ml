@@ -22,6 +22,7 @@ type expected_upload =
       read_bytes : int;
       written_bytes : int;
       progress_bytes : int;
+      progress_report_max : int;
       callback_exception_preserved : bool;
       cleanup_error_secondary : bool;
       cancelled : bool;
@@ -152,6 +153,17 @@ let failure_counts case = function
       let bytes = String.length case.local_body in
       (bytes, bytes, bytes)
 
+let failure_progress_report_max case = function
+  | Progress_callback_raises_after offset ->
+      completed_part_bytes_after_offset case offset
+  | ( Read_fails_after _ | Write_fails_after _ | Cancellation_after_bytes _
+    | Multipart_create_fails | Multipart_part_fails _ | Multipart_complete_fails
+    | Cleanup_delete_fails ) as fault ->
+      let _read_bytes, _written_bytes, progress_bytes =
+        failure_counts case fault
+      in
+      progress_bytes
+
 let callback_exception_preserved = function
   | Progress_callback_raises_after _ -> true
   | Read_fails_after _ | Write_fails_after _ | Cancellation_after_bytes _
@@ -186,6 +198,7 @@ let expected_upload case =
           read_bytes;
           written_bytes;
           progress_bytes;
+          progress_report_max = failure_progress_report_max case fault;
           callback_exception_preserved = callback_exception_preserved fault;
           cleanup_error_secondary = cleanup_error_secondary fault;
           cancelled = cancelled fault;

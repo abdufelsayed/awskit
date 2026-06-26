@@ -84,6 +84,160 @@ let prop_retry_jitter_stays_within_policy_bounds =
           let seconds = Ptime.Span.to_float_s delay in
           seconds >= 0.0 && seconds <= 4.0)
 
+type retry_schedule_error =
+  | Retryable_transport
+  | Throttled_status
+  | Throttled_code
+  | Fatal_transport
+  | Timeout_error
+  | Cancelled_error
+
+let retry_schedule_error_to_string = function
+  | Retryable_transport -> "retryable-transport"
+  | Throttled_status -> "throttled-status"
+  | Throttled_code -> "throttled-code"
+  | Fatal_transport -> "fatal-transport"
+  | Timeout_error -> "timeout"
+  | Cancelled_error -> "cancelled"
+
+let retry_schedule_error = function
+  | Retryable_transport ->
+      Awskit.Error.Producer.transport ~retryable:true "temporary"
+  | Throttled_status -> Awskit.Error.Producer.service ~status:429 ~headers:[] ()
+  | Throttled_code ->
+      Awskit.Error.Producer.service ~status:400 ~code:"SlowDown" ~headers:[] ()
+  | Fatal_transport -> Awskit.Error.Producer.transport ~retryable:false "fatal"
+  | Timeout_error -> Awskit.Error.Producer.timeout "attempt timed out"
+  | Cancelled_error -> Awskit.Error.Producer.cancelled ~reason:"caller" ()
+
+let retry_schedule_retries = function
+  | Retryable_transport | Throttled_status | Throttled_code | Timeout_error ->
+      true
+  | Fatal_transport | Cancelled_error -> false
+
+type retry_schedule_case = {
+  max_attempts : int;
+  attempt : int;
+  jitter_per_mille : int;
+  sample_per_mille : int;
+  error_case : retry_schedule_error;
+}
+
+let retry_schedule_case_to_string case =
+  Printf.sprintf "max_attempts=%d attempt=%d jitter=%d sample=%d error=%s"
+    case.max_attempts case.attempt case.jitter_per_mille case.sample_per_mille
+    (retry_schedule_error_to_string case.error_case)
+
+let shrink_retry_schedule_error = function
+  | Retryable_transport -> QCheck.Iter.empty
+  | Throttled_status | Throttled_code | Timeout_error ->
+      QCheck.Iter.return Retryable_transport
+  | Fatal_transport -> QCheck.Iter.empty
+  | Cancelled_error -> QCheck.Iter.return Fatal_transport
+
+let shrink_retry_schedule_case case =
+  let candidates =
+    [
+      { case with max_attempts = 1 };
+      { case with attempt = 0 };
+      { case with attempt = 1 };
+      { case with jitter_per_mille = 0 };
+      { case with jitter_per_mille = 1000 };
+      { case with sample_per_mille = 0 };
+      { case with sample_per_mille = 1000 };
+    ]
+  in
+  let scalar_shrinks =
+    candidates
+    |> List.filter (fun candidate -> not (candidate = case))
+    |> QCheck.Iter.of_list
+  in
+  QCheck.Iter.append scalar_shrinks
+    (QCheck.Iter.map
+       (fun error_case -> { case with error_case })
+       (shrink_retry_schedule_error case.error_case))
+
+let clamp_float ~lower ~upper value = Float.max lower (Float.min upper value)
+
+let retry_schedule_expected_seconds ~max_attempts ~attempt ~jitter
+    ~sample_per_mille error_case =
+  if
+    attempt < 1
+    || attempt >= max_attempts
+    || not (retry_schedule_retries error_case)
+  then None
+  else
+    let base_seconds = 0.25 in
+    let max_seconds = 4.0 in
+    let exponent = max 0 (attempt - 1) in
+    let capped =
+      Float.min max_seconds (base_seconds *. (2. ** float_of_int exponent))
+    in
+    let sampled =
+      capped *. (float_of_int sample_per_mille /. 1000.0)
+      |> clamp_float ~lower:0.0 ~upper:capped
+    in
+    Some ((capped *. (1.0 -. jitter)) +. (jitter *. sampled))
+
+let prop_retry_schedule_obeys_attempt_error_and_jitter =
+  let base_delay = span 0.25 in
+  let max_delay = span 4.0 in
+  let error_case_gen =
+    QCheck.Gen.oneof_list
+      [
+        Retryable_transport;
+        Throttled_status;
+        Throttled_code;
+        Fatal_transport;
+        Timeout_error;
+        Cancelled_error;
+      ]
+  in
+  let gen =
+    let open QCheck.Gen in
+    map
+      (fun ( (max_attempts, attempt, jitter_per_mille, sample_per_mille),
+             error_case ) ->
+        {
+          max_attempts;
+          attempt;
+          jitter_per_mille;
+          sample_per_mille;
+          error_case;
+        })
+      (pair
+         (quad (int_range 1 8) (int_range 0 10) (int_range 0 1000)
+            (int_range (-500) 1500))
+         error_case_gen)
+  in
+  QCheck.Test.make ~count:(count_from_env ~default:300)
+    ~name:"retry schedules obey attempt limits, error class, and jitter"
+    (QCheck.make ~print:retry_schedule_case_to_string
+       ~shrink:shrink_retry_schedule_case gen) (fun case ->
+      let jitter = float_of_int case.jitter_per_mille /. 1000.0 in
+      let policy =
+        Awskit.Retry.create_exn ~max_attempts:case.max_attempts ~base_delay
+          ~max_delay ~jitter ()
+      in
+      let random_float ~upper_bound =
+        upper_bound *. (float_of_int case.sample_per_mille /. 1000.0)
+      in
+      let expected =
+        retry_schedule_expected_seconds ~max_attempts:case.max_attempts
+          ~attempt:case.attempt ~jitter ~sample_per_mille:case.sample_per_mille
+          case.error_case
+      in
+      let actual =
+        Awskit.Retry.delay policy ~attempt:case.attempt
+          ~error:(retry_schedule_error case.error_case)
+          ~random_float
+      in
+      match (expected, actual) with
+      | None, None -> true
+      | Some expected, Some actual ->
+          abs_float (Ptime.Span.to_float_s actual -. expected) <= 0.000_001
+      | None, Some _ | Some _, None -> false)
+
 let raw_headers =
   [
     ( "Authorization",
@@ -735,6 +889,8 @@ let suite =
       [
         QCheck_alcotest.to_alcotest ~speed_level:`Quick
           prop_retry_jitter_stays_within_policy_bounds;
+        QCheck_alcotest.to_alcotest ~speed_level:`Quick
+          prop_retry_schedule_obeys_attempt_error_and_jitter;
       ] );
     ( "unit:awskit:retry",
       [
