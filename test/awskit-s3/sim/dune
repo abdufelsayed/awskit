@@ -16,6 +16,8 @@
  (package awskit-s3-sim)
  (deps
   test_awskit_s3_sim.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED)
   (source_tree ../fixtures/workload-replay))
  (locks awskit-s3-sim-alcotest)
  (action
@@ -38,7 +40,10 @@
 (rule
  (alias s3-transfer-faults)
  (package awskit-s3-sim)
- (deps test_awskit_s3_sim.exe)
+ (deps
+  test_awskit_s3_sim.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED))
  (locks awskit-s3-sim-alcotest)
  (action
   (run
@@ -49,7 +54,10 @@
 (rule
  (alias discovery)
  (package awskit-s3-sim)
- (deps test_awskit_s3_sim.exe)
+ (deps
+  test_awskit_s3_sim.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED))
  (locks awskit-s3-sim-alcotest)
  (action
   (run ./test_awskit_s3_sim.exe test "workload:awskit-s3-sim:")))

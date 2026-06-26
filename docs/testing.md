@@ -148,15 +148,25 @@ the focused alias, confirm the workload fails, then restore the mutation. The
 committed artifact is the workload improvement or a reduced replay case, not the
 temporary mutation.
 
+The focused generated workload aliases track `AWSKIT_QCHECK_COUNT` and
+`QCHECK_SEED` as Dune dependencies. Use those variables to raise exploration
+cost or reproduce a mutation audit without accidentally reusing cached alias
+results.
+
 Useful backtesting examples:
 
-- Remove bodiless response handling and run
-  `opam exec -- dune build @runtime-http-workload`.
-- Permit malformed XML and run `opam exec -- dune build @s3-protocol-wire`.
-- Drop simulator object-tag mutation and run
-  `opam exec -- dune build @s3-sim-workload`.
-- Skip multipart cleanup and run
-  `opam exec -- dune build @s3-transfer-faults`.
+| Bug class | Temporary mutation | Focused proof | Expected failure signal |
+| --- | --- | --- | --- |
+| Runtime bodiless responses | Treat `HEAD`, `204`, or `304` responses as body-bearing in the Eio or Lwt runtime. | `opam exec -- dune build @runtime-http-workload` | Runtime HTTP workload reports an observation mismatch and prints a copyable replay fixture. |
+| Simulator object tag mutation | Make simulator `PutObjectTagging` acknowledge success without storing tags. | `opam exec -- dune build @s3-sim-workload` | S3 state workload shrinks to `put-object-tags` and reports expected vs observed tags. |
+| Protocol malformed XML | Allow an empty S3 tag key or another invalid XML boundary. | `opam exec -- dune build @s3-protocol-replay` | Protocol replay fixture path reports that malformed XML unexpectedly decoded. |
+| Transfer progress monotonicity | Report a smaller progress byte count after a larger one. | `opam exec -- dune build @s3-transfer-faults` | Transfer fault workload reports the decreased progress trace. |
+
+Backtesting also records negative findings. A focused alias that does not fail
+for the intended mutation is a coverage gap, not permission to weaken the
+claim. Current follow-up targets include non-replayable S3 operation retry
+coverage and no-network transfer checks for local-file download publication and
+caller-owned resumable upload cleanup.
 
 When backtesting or high-count discovery finds a real product bug, reduce the
 failing input and commit it as a replay artifact under the target fixture

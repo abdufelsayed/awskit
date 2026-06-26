@@ -20,6 +20,8 @@
  (package awskit-eio)
  (deps
   test_runtime_http_workload_eio.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED)
   (source_tree ../../fixtures/runtime-http-replay))
  (action
   (run

@@ -50,7 +50,11 @@
 (rule
  (alias s3-protocol-wire)
  (package awskit-s3)
- (deps test_protocol_pbt.exe test_domain_pbt.exe)
+ (deps
+  test_protocol_pbt.exe
+  test_domain_pbt.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED))
  (action
   (progn
    (run ./test_protocol_pbt.exe test "workload:awskit-s3:protocol-wire")

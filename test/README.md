@@ -160,6 +160,27 @@ Backtesting uses temporary mutations to verify a workload catches a bug class.
 Restore the mutation before committing. Commit workload improvements or reduced
 replay cases, not the mutation itself.
 
+Backtesting selectors should stay focused:
+
+- Runtime bodiless response mutants should fail under
+  `@test/awskit/eio/runtime-http-workload` or
+  `@test/awskit/lwt/runtime-http-workload` with replay-ready output.
+- Simulator object-tag mutants should fail under `@s3-sim-workload` with a
+  shrunk `put-object-tags` transcript.
+- Protocol XML mutants should fail under `@s3-protocol-replay` with the
+  fixture path as the identifier.
+- Transfer progress mutants can be checked with the deterministic
+  `workload:awskit-s3-sim:transfer-faults` case that reports progress trace
+  monotonicity.
+
+The generated workload Dune rules track `AWSKIT_QCHECK_COUNT` and
+`QCHECK_SEED`; changing those variables reruns the owning focused aliases
+instead of relying on cached evidence. The current no-network transfer fault
+target covers simulated transfer byte movement, progress, callback, and owned
+multipart cleanup behavior. Local-file download publication and caller-owned
+resumable upload cleanup need separate no-network target coverage before they
+can be claimed by `@s3-transfer-faults`.
+
 When generated or fuzz workloads expose a product bug, reduce the failure into
 the smallest replay artifact that preserves the behavior. Use the fixture path
 as the durable identifier; do not add a central manifest, central registry, or
