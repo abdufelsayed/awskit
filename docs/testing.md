@@ -180,6 +180,41 @@ Shared S3 contract suites should name backend capability differences explicitly
 instead of weakening assertions globally. The simulator workload is the
 no-network stateful model-oracle runner for the shared S3 workload core.
 
+## Saved Test Reports
+
+Use `scripts/test-report.sh` when a run should leave a durable local transcript.
+Reports are written under `.logs/` by default and are not committed. The script
+records repository metadata, command start and exit lines, test output, QCheck
+seeds, shrunk failure transcripts, and MinIO service logs when a MinIO workflow
+fails. It returns nonzero if any command in the selected workflow fails, but it
+keeps running later commands so the report shows the full evidence picture.
+
+The report filename is
+`.logs/awskit-test-<label-or-workflow>-<utc-timestamp>.log`; the matching
+`latest` symlink points at the newest report for that label.
+
+| Command | Use |
+| --- | --- |
+| `scripts/test-report.sh quick` | Format, whitespace, and `@check-local`. |
+| `scripts/test-report.sh local` | No-network correctness plus discovery. |
+| `scripts/test-report.sh integration` | Bounded MinIO integration with Docker lifecycle. |
+| `scripts/test-report.sh full` | Broad local workflow including `@check-fast`, no-network gates, docs/examples, bounded MinIO, and expensive MinIO. The two MinIO profiles use separate Docker lifecycles. |
+| `scripts/test-report.sh deep` | `full` with a higher generated workload count. |
+
+`deep` sets `AWSKIT_QCHECK_COUNT` to `AWSKIT_DEEP_QCHECK_COUNT` when
+`AWSKIT_QCHECK_COUNT` is unset. The default deep count is `2000`. Override it
+explicitly for longer exploration:
+
+```sh
+AWSKIT_DEEP_QCHECK_COUNT=10000 scripts/test-report.sh deep --label overnight
+```
+
+Use `--log-dir DIR` to put reports somewhere other than `.logs/`, and
+`--label LABEL` to make the filename describe the investigation.
+
+CI jobs that use this script should upload `.logs/` as an artifact with
+`if: always()` so failed runs keep their generated evidence.
+
 ## Test Identity
 
 Keep test identifiers scoped and stable so maintainers and agents can select

@@ -161,7 +161,15 @@ jobs:
         run: opam install --with-test --with-doc --deps-only .
 
       - name: Build no-network correctness evidence
-        run: opam exec -- dune build @check-local
+        run: scripts/test-report.sh local --label no-network-correctness
+
+      - name: Upload no-network correctness report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: no-network-correctness-report
+          path: .logs/
+          if-no-files-found: ignore
 
   s3-minio-integration:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
@@ -183,19 +191,16 @@ jobs:
       - name: Install dependencies
         run: opam install --with-test --deps-only ${{ env.MINIO_OPAM_PACKAGES }}
 
-      - name: Start MinIO
-        run: docker compose up -d
-
       - name: Run MinIO integration checks
-        run: opam exec -- dune build --force @check-integration
+        run: scripts/test-report.sh integration --label s3-minio-integration
 
-      - name: Dump MinIO logs on failure
-        if: failure()
-        run: docker compose logs
-
-      - name: Stop MinIO
+      - name: Upload MinIO integration report
         if: always()
-        run: docker compose down -v
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-minio-integration-report
+          path: .logs/
+          if-no-files-found: ignore
 
   publish-docs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

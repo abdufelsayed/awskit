@@ -44,18 +44,20 @@ as release branch pushes, scheduled runs, and manual dispatches.
 - Runs on Ubuntu with the latest OCaml 5 compiler.
 - Installs test and documentation dependencies for all packages.
 - Builds no-network correctness evidence with
-  `opam exec -- dune build @check-local`.
+  `scripts/test-report.sh local --label no-network-correctness`.
 - Does not start local services; MinIO adapter evidence stays in the separate
   `s3-minio-integration` job.
+- Uploads `.logs/` as a workflow artifact even when the evidence fails.
 
 `s3-minio-integration`
 
 - Runs on Ubuntu.
 - Starts MinIO with Docker Compose as a local S3-compatible test double.
-- Runs `opam exec -- dune build --force @check-integration`.
+- Runs `scripts/test-report.sh integration --label s3-minio-integration`.
 - Provides local adapter integration evidence, separate from no-network
   correctness evidence.
-- Dumps MinIO logs on failure.
+- Dumps MinIO logs into the saved report on failure.
+- Uploads `.logs/` as a workflow artifact even when the evidence fails.
 
 `publish-docs`
 
@@ -88,9 +90,7 @@ gh run watch <run-id> --interval 10 --exit-status
 Reproduce locally with the closest command. For MinIO failures:
 
 ```sh
-docker compose up -d
-opam exec -- dune build --force @check-integration
-docker compose down -v
+scripts/test-report.sh integration --label minio-debug
 ```
 
 Fix the underlying contract mismatch. Do not paper over CI with looser checks,

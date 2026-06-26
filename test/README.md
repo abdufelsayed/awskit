@@ -195,6 +195,24 @@ Promotion flow:
 5. Fix production behavior in a separate pass, then keep the replay as
    regression evidence.
 
+## Saved Reports
+
+Use `scripts/test-report.sh` from the repository root when a workflow should
+leave a durable transcript. Reports default to `.logs/` and are intentionally
+outside version control.
+
+- `scripts/test-report.sh local` runs no-network correctness plus discovery.
+- `scripts/test-report.sh integration` starts MinIO, runs bounded integration,
+  logs service output on failure, and cleans the service up.
+- `scripts/test-report.sh full` adds `@check-fast`, docs/examples, bounded
+  MinIO, and expensive MinIO. The two MinIO profiles use separate Docker
+  lifecycles so one failing profile does not pollute the other.
+- `scripts/test-report.sh deep` runs the full workflow with
+  `AWSKIT_QCHECK_COUNT` defaulted to `AWSKIT_DEEP_QCHECK_COUNT` or `2000`.
+
+Use `--label <name>` to make a report easy to identify, and replay a failure
+with the printed `QCHECK_SEED` on the focused alias that produced it.
+
 ## Semantic Coverage
 
 Generated workloads include lightweight semantic coverage checks. These checks
