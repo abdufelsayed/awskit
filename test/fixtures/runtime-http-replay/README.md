@@ -1,7 +1,7 @@
 # Runtime HTTP Replay Corpus
 
 This directory is reserved for reduced runtime HTTP workload failures. Replay
-paths identify evidence; do not add a central manifest or separate known-ID
+paths identify evidence; do not add a central manifest or separate central
 registry.
 
 Runtime HTTP replays are currently typed scenarios in

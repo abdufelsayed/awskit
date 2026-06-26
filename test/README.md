@@ -1,11 +1,11 @@
 # Tests
 
-This tree is being rebuilt around workload-based correctness checks.
+This tree is organized around workload-based correctness checks.
 
-Implementation passes should add focused private test libraries, workload
-models, and package-owned runners under this directory. Use concise names that
-describe behavior, such as `runtime_http_workload`, `s3_model`,
-`s3_workload`, `protocol_wire`, and `transfer_fault_workload`.
+Add focused private test libraries, workload models, and package-owned runners
+under this directory. Use concise names that describe behavior, such as
+`runtime_http_workload`, `s3_model`, `s3_workload`, `protocol_wire`, and
+`transfer_fault_workload`.
 
 Core Awskit contracts and recording-runtime support contracts live under
 `test/awskit` and run without network access:
@@ -28,7 +28,9 @@ Runtime HTTP adapter work runs through package-owned aliases:
 The shared runtime HTTP workload covers generated response framing, bodiless
 responses, adversarial framing conflicts, early closes, malformed header/body
 wire cases, response-body reader consumption modes, and callback exception
-preservation.
+preservation. It distinguishes errors Awskit can observe after the Cohttp
+transport boundary from raw HTTP syntax that Cohttp has already collapsed into
+decoded response data.
 
 Reduced runtime HTTP replay scenarios live in
 `test/support/runtime_http_replay.ml`. The path-scoped corpus directory
@@ -144,16 +146,8 @@ replay cases, not the mutation itself.
 
 When generated or fuzz workloads expose a product bug, reduce the failure into
 the smallest replay artifact that preserves the behavior. Use the fixture path
-as the durable identifier; do not add a central manifest, known-ID registry, or
-compatibility shim around old replay spellings.
-
-During the migration, the previous test tree may exist locally as `test.o/`.
-That directory is historical reference material only. Do not stage it, do not
-add ignore rules for it, and do not use it as replacement evidence for tracked
-tests.
-
-Test-construction passes may expose product bugs. Record the focused failing
-alias and reduced input, but keep production fixes in separate fix passes.
+as the durable identifier; do not add a central manifest, central registry, or
+alias layer around old replay spellings.
 
 ## Semantic Coverage
 

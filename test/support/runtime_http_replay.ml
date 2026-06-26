@@ -8,8 +8,8 @@ let corpus_path name =
     (Stdlib.Filename.concat "fixtures"
        (Stdlib.Filename.concat "runtime-http-replay" name))
 
-let malformed_chunked_body_error =
-  let path = corpus_path "malformed-chunked-body-error" in
+let malformed_chunked_decoded_prefix =
+  let path = corpus_path "malformed-chunked-decoded-prefix" in
   {
     path;
     scenario =
@@ -18,4 +18,4 @@ let malformed_chunked_body_error =
         ~connection:Close ();
   }
 
-let all = [ malformed_chunked_body_error ]
+let all = [ malformed_chunked_decoded_prefix ]

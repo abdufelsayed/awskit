@@ -41,20 +41,30 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         Awskit.Body.Request.descriptor
         * (request_body_writer -> (unit, Awskit.Error.t) Result.t Lwt.t)
 
+  type response_body_framing =
+    | Response_unknown
+    | Response_content_length of int64
+    | Response_chunked
+
   type response_body = {
     body : Cohttp_lwt.Body.t;
     sleep : Ptime.Span.t -> unit Lwt.t;
     timeout_policy : Awskit.Timeout.policy;
     max_response_drain_bytes : int;
+    framing : response_body_framing;
+    bodiless : bool;
   }
 
   type response_body_reader = {
     stream : string Lwt_stream.t;
     sleep : Ptime.Span.t -> unit Lwt.t;
     timeout_policy : Awskit.Timeout.policy;
+    bodiless : bool;
     mutable active : bool;
     mutable chunk : string;
     mutable offset : int;
+    mutable eof : bool;
+    mutable remaining : int64 option;
   }
 
   let validate_create_args ?endpoint ~max_response_drain_bytes () =
@@ -216,6 +226,81 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     | Stream (descriptor, _) -> descriptor
 
   let body_error message = Awskit.Error.Producer.body message
+  let int64_equal left right = Stdlib.Int64.compare left right = 0
+
+  let split_header_values values =
+    values
+    |> List.concat_map ~f:(fun value -> String.split value ~on:',')
+    |> List.map ~f:String.strip
+    |> List.filter ~f:(fun value -> not (String.is_empty value))
+
+  let split_content_length_values values =
+    values
+    |> List.concat_map ~f:(fun value -> String.split value ~on:',')
+    |> List.map ~f:String.strip
+
+  let ascii_digits value =
+    (not (String.is_empty value))
+    && String.for_all value ~f:(function '0' .. '9' -> true | _ -> false)
+
+  let parse_content_length_value value =
+    if ascii_digits value then
+      match Stdlib.Int64.of_string_opt value with
+      | Some length -> Ok length
+      | None -> Error (body_error "invalid response Content-Length header")
+    else Error (body_error "invalid response Content-Length header")
+
+  let rec parse_content_lengths = function
+    | [] -> Ok []
+    | value :: values -> (
+        match parse_content_length_value value with
+        | Error _ as error -> error
+        | Ok length ->
+            Result.map (parse_content_lengths values) ~f:(fun lengths ->
+                length :: lengths))
+
+  let content_length_from_headers values =
+    match values with
+    | [] -> Ok None
+    | _ -> (
+        match split_content_length_values values with
+        | [] -> Ok None
+        | values -> (
+            match parse_content_lengths values with
+            | Error _ as error -> error
+            | Ok [] -> Ok None
+            | Ok (length :: lengths) ->
+                if List.for_all lengths ~f:(int64_equal length) then
+                  Ok (Some length)
+                else
+                  Error
+                    (body_error
+                       "conflicting response Content-Length header values")))
+
+  let has_chunked_transfer_encoding values =
+    split_header_values values
+    |> List.exists ~f:(fun value ->
+        String.equal (String.lowercase value) "chunked")
+
+  let response_body_framing headers =
+    let transfer_encoding_values =
+      split_header_values (Cohttp.Header.get_multi headers "transfer-encoding")
+    in
+    let has_transfer_encoding = not (List.is_empty transfer_encoding_values) in
+    let transfer_encoding_chunked =
+      has_chunked_transfer_encoding transfer_encoding_values
+    in
+    match
+      content_length_from_headers
+        (Cohttp.Header.get_multi headers "content-length")
+    with
+    | Error _ as error -> error
+    | Ok (Some _) when has_transfer_encoding ->
+        Error
+          (body_error "response has both Transfer-Encoding and Content-Length")
+    | Ok (Some content_length) -> Ok (Response_content_length content_length)
+    | Ok None when transfer_encoding_chunked -> Ok Response_chunked
+    | Ok None -> Ok Response_unknown
 
   let timeout_phase_name = function
     | `Connect -> "connect"
@@ -273,7 +358,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       write_error = None;
     }
 
-  let check_write_length writer length =
+  let check_write_length (writer : request_body_writer) length =
     match !(writer.remaining) with
     | None -> Ok ()
     | Some remaining ->
@@ -287,7 +372,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
   let invalid_write_bounds bytes ~off ~len =
     off < 0 || len < 0 || len > Bytes.length bytes - off
 
-  let check_finished_length writer =
+  let check_finished_length (writer : request_body_writer) =
     match writer.write_error with
     | Some error -> Error error
     | None -> (
@@ -471,13 +556,24 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     in
     let meth = to_cohttp_meth request.method_ in
     let successful_status status = status >= 200 && status < 300 in
-    let make_response_body body =
-      {
-        body;
-        sleep = conn.sleep;
-        timeout_policy = conn.timeout_policy;
-        max_response_drain_bytes = conn.max_response_drain_bytes;
-      }
+    let is_head = match request.method_ with `HEAD -> true | _ -> false in
+    let response_is_bodiless status =
+      is_head || status = 204 || status = 304 || (status >= 100 && status < 200)
+    in
+    let make_response_body ~status response body =
+      let bodiless = response_is_bodiless status in
+      match response_body_framing (Cohttp.Response.headers response) with
+      | Error _ as error -> error
+      | Ok framing ->
+          Ok
+            {
+              body;
+              sleep = conn.sleep;
+              timeout_policy = conn.timeout_policy;
+              max_response_drain_bytes = conn.max_response_drain_bytes;
+              framing = (if bodiless then Response_unknown else framing);
+              bodiless;
+            }
     in
     let exception Callback_raised of exn in
     let ready_request_body_result () =
@@ -525,20 +621,22 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                     Cohttp.Response.status response
                     |> Cohttp.Code.code_of_status
                   in
-                  let response = to_aws_response response in
-                  let response_body = make_response_body response_body in
+                  let aws_response = to_aws_response response in
+                  let make_and_call () =
+                    match make_response_body ~status response response_body with
+                    | Error error -> Lwt.return_error error
+                    | Ok response_body -> call_f aws_response response_body
+                  in
                   if successful_status status then
                     Lwt.bind bridge.finished (function
                       | Error error -> Lwt.return_error error
-                      | Ok () -> call_f response response_body)
+                      | Ok () -> make_and_call ())
                   else
                     match ready_request_body_result () with
                     | Some (Error error) -> Lwt.return_error error
-                    | Some (Ok ()) -> call_f response response_body
+                    | Some (Ok ()) -> make_and_call ()
                     | None ->
-                        Lwt.finalize
-                          (fun () -> call_f response response_body)
-                          (fun () ->
+                        Lwt.finalize make_and_call (fun () ->
                             bridge.cancel ();
                             Lwt.return_unit))))
         (function
@@ -614,6 +712,26 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           ~len:(Bytes.length bytes)
     end
 
+    let initial_response_body_remaining = function
+      | Response_content_length content_length -> Some content_length
+      | Response_unknown | Response_chunked -> None
+
+    let record_response_body_read reader length =
+      match reader.remaining with
+      | None -> ()
+      | Some remaining ->
+          let length = Int64.of_int length in
+          reader.remaining <- Some (Stdlib.Int64.sub remaining length)
+
+    let response_body_eof reader =
+      match reader.remaining with
+      | Some remaining when Stdlib.Int64.compare remaining 0L > 0 ->
+          Lwt.return_error
+            (body_error "response body ended before declared Content-Length")
+      | None | Some _ ->
+          reader.eof <- true;
+          Lwt.return_ok 0
+
     let rec read_from_current reader bytes ~off ~len =
       if len = 0 then Lwt.return_ok 0
       else if reader.offset < String.length reader.chunk then begin
@@ -621,11 +739,13 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         let copied = min available len in
         Stdlib.String.blit reader.chunk reader.offset bytes off copied;
         reader.offset <- reader.offset + copied;
+        record_response_body_read reader copied;
         Lwt.return_ok copied
       end
+      else if reader.eof then Lwt.return_ok 0
       else
         Lwt.bind (Lwt_stream.get reader.stream) (function
-          | None -> Lwt.return_ok 0
+          | None -> response_body_eof reader
           | Some chunk ->
               reader.chunk <- chunk;
               reader.offset <- 0;
@@ -643,6 +763,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       if not reader.active then Lwt.return_error inactive_reader_error
       else if invalid_read_bounds bytes ~off ~len then
         Lwt.return_error (Awskit.Error.Producer.body "invalid read bounds")
+      else if reader.bodiless then Lwt.return_ok 0
       else
         let read = read_from_current reader bytes ~off ~len in
         let result =
@@ -725,9 +846,12 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           stream = Cohttp_lwt.Body.to_stream body.body;
           sleep = body.sleep;
           timeout_policy = body.timeout_policy;
+          bodiless = body.bodiless;
           active = true;
           chunk = "";
           offset = 0;
+          eof = false;
+          remaining = initial_response_body_remaining body.framing;
         }
       in
       Lwt.catch
@@ -754,9 +878,12 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           stream = Cohttp_lwt.Body.to_stream body.body;
           sleep = body.sleep;
           timeout_policy = body.timeout_policy;
+          bodiless = body.bodiless;
           active = true;
           chunk = "";
           offset = 0;
+          eof = false;
+          remaining = initial_response_body_remaining body.framing;
         }
       in
       drain_response_body_reader reader body

@@ -152,13 +152,6 @@ Shared S3 contract suites should name backend capability differences explicitly
 instead of weakening assertions globally. The simulator workload is the
 no-network stateful model-oracle runner for the shared S3 workload core.
 
-During the testing foundation rebuild, the tracked `test/` tree is reset around
-focused package-owned workloads and support libraries. A local `test.o/`
-directory may exist as historical reference material only; do not stage it, do
-not treat it as evidence, and do not use it as a replacement for tracked tests.
-Local planning notes are not part of the committed test surface and should not
-be cited as validation evidence.
-
 ## Test Identity
 
 Keep test identifiers scoped and stable so maintainers and agents can select

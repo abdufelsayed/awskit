@@ -258,10 +258,15 @@ let actual_delete_marker_to_model (marker : Object.Versions.delete_marker) :
     size = None;
   }
 
+let collection_page_bound item_count = Int.max 1 (item_count + 1)
+
 let assert_version_listing command_index command conn model =
+  let max_pages =
+    collection_page_bound (List.length (Model.listed_versions model))
+  in
   let pages =
     expect_ok command_index command "list object versions"
-      (Simulator.Object.Versions.pages conn ~bucket ~max_pages:128 ())
+      (Simulator.Object.Versions.pages conn ~bucket ~max_pages ())
   in
   let actual =
     List.concat_map
@@ -313,29 +318,33 @@ let assert_delete command_index command conn key ~keeps_history =
     (Option.value ~default:false result.delete_marker)
 
 let assert_list_keys command_index command conn model =
+  let expected = Model.keys model in
   let keys =
     expect_ok command_index command "list keys"
-      (Simulator.Object.List.keys conn ~bucket ~max_pages:8 ())
+      (Simulator.Object.List.keys conn ~bucket
+         ~max_pages:(collection_page_bound (List.length expected))
+         ())
     |> List.map Object_key.to_string
   in
   check_equal command_index command
     Alcotest.(list string)
-    "list keys" (Model.keys model) keys
+    "list keys" expected keys
 
 let assert_list_prefix command_index command conn prefix model =
   let options =
     Object.List.options_exn ~prefix:(Object_key.Prefix.of_string_exn prefix) ()
   in
+  let expected = Model.keys_with_prefix prefix model in
   let keys =
     expect_ok command_index command "list prefix"
-      (Simulator.Object.List.keys conn ~bucket ~options ~max_pages:8 ())
+      (Simulator.Object.List.keys conn ~bucket ~options
+         ~max_pages:(collection_page_bound (List.length expected))
+         ())
     |> List.map Object_key.to_string
   in
   check_equal command_index command
     Alcotest.(list string)
-    "list prefix keys"
-    (Model.keys_with_prefix prefix model)
-    keys
+    "list prefix keys" expected keys
 
 let expected_list_keys_page prefix ~max_keys model =
   match prefix with

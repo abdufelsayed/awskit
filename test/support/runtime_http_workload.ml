@@ -49,6 +49,18 @@ let seed_scenarios =
     scenario ~name:"get-200-malformed-header-block" ~method_:`GET ~status:200
       ~framing:(Malformed_header_block "Content-Length: nope\r\n")
       ~connection:Close ();
+    scenario ~name:"get-200-content-length-plus" ~method_:`GET ~status:200
+      ~framing:(Malformed_header_block "Content-Length: +5\r\n")
+      ~connection:Close ();
+    scenario ~name:"get-200-content-length-empty" ~method_:`GET ~status:200
+      ~framing:(Malformed_header_block "Content-Length:\r\n") ~connection:Close
+      ();
+    scenario ~name:"get-200-transfer-encoding-with-content-length" ~method_:`GET
+      ~status:200
+      ~framing:
+        (Malformed_header_block
+           "Transfer-Encoding: gzip\r\nContent-Length: 5\r\n") ~connection:Close
+      ();
     scenario ~name:"get-200-duplicate-content-length-mismatch-raise"
       ~method_:`GET ~status:200
       ~framing:
@@ -243,8 +255,7 @@ let test_generator_coverage () =
 let expected_observation_to_string scenario = function
   | `Body body -> Printf.sprintf "body:%S" body
   | `Body_prefix body -> Printf.sprintf "body-prefix:%S" body
-  | `Body_error when Model.rejects_before_body_consumer scenario.Model.framing
-    ->
+  | `Body_error when Model.rejects_before_body_consumer scenario ->
       "body-error(pre-consumer)"
   | `Body_error -> "body-error"
   | `Exception_preserved -> "exception-preserved"
@@ -256,6 +267,10 @@ let fail_observation ~target_name scenario expected observed =
     (expected_observation_to_string scenario expected)
     (Model.observed_to_string observed)
     (Model.to_string scenario)
+
+let valid_body_prefix ~max_prefix actual =
+  String.is_prefix max_prefix ~prefix:actual
+  && (String.is_empty max_prefix || not (String.is_empty actual))
 
 let check_scenario ~target_name run_scenario scenario =
   let expected = Model.expected_observation scenario in
@@ -269,7 +284,7 @@ let check_scenario ~target_name run_scenario scenario =
   | `Body _, Model.Observed_exception ->
       fail_observation ~target_name scenario expected observed
   | `Body_prefix expected, Model.Observed_body actual
-    when String.equal expected actual ->
+    when valid_body_prefix ~max_prefix:expected actual ->
       true
   | `Body_prefix _, Model.Observed_body _
   | `Body_prefix _, Model.Observed_error _

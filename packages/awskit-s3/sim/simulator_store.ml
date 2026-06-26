@@ -33,6 +33,10 @@ let versioning_suspended (bucket : bucket_state) =
 let versioning_keeps_history bucket =
   versioning_enabled bucket || versioning_suspended bucket
 
+let status_keeps_history = function
+  | Bucket.Versioning.Status.Enabled | Suspended -> true
+  | Unknown _ -> false
+
 let next_version_id t = allocate_version_id t
 let null_version_id = Object.Version_id.of_string_exn "null"
 
@@ -62,6 +66,23 @@ let replace_null_version bucket key version =
           versions
   in
   Hashtbl.replace bucket.versions key (version :: versions)
+
+let promote_current_object_to_null_version bucket key = function
+  | Stored_object obj ->
+      obj.version_id <- Some null_version_id;
+      replace_null_version bucket key (Stored_object obj)
+  | Stored_delete_marker _ -> ()
+
+let promote_current_objects_to_null_versions bucket =
+  Simulator_state.objects bucket
+  |> List.iter (fun (key, version) ->
+      promote_current_object_to_null_version bucket key version)
+
+let set_versioning bucket status =
+  let was_unversioned = not (versioning_keeps_history bucket) in
+  bucket.versioning <- Some status;
+  if was_unversioned && status_keeps_history status then
+    promote_current_objects_to_null_versions bucket
 
 let store_object t bucket key (obj : stored_object) =
   let obj =

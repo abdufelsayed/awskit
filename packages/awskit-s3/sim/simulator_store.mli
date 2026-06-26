@@ -21,6 +21,9 @@ val versioning_enabled : Simulator_state.bucket_state -> bool
 val versioning_suspended : Simulator_state.bucket_state -> bool
 val versioning_keeps_history : Simulator_state.bucket_state -> bool
 
+val set_versioning :
+  Simulator_state.bucket_state -> Awskit_s3.Bucket.Versioning.Status.t -> unit
+
 val store_object :
   Simulator_state.t ->
   Simulator_state.bucket_state ->

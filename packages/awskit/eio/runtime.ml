@@ -73,11 +73,17 @@ type request_body =
       Awskit.Body.Request.descriptor
       * (request_body_writer -> (unit, Awskit.Error.t) Result.t)
 
+type response_body_framing =
+  | Response_unknown
+  | Response_content_length of int64
+  | Response_chunked
+
 type response_body = {
   body : Cohttp_eio.Body.t;
   time_clock : time_clock;
   timeout_policy : Awskit.Timeout.policy;
   max_response_drain_bytes : int;
+  framing : response_body_framing;
   bodiless : bool;
       (* True when the response carries no message body per RFC 7230 §3.3.3
          (a response to HEAD, or status 1xx/204/304). The framing headers may
@@ -94,6 +100,7 @@ type response_body_reader = {
   mutable chunk : string;
   mutable offset : int;
   mutable eof : bool;
+  mutable remaining : int64 option;
 }
 
 type request_body_bridge = {
@@ -218,6 +225,80 @@ let request_body_descriptor = function
   | Stream (descriptor, _) -> descriptor
 
 let body_error message = Awskit.Error.Producer.body message
+let int64_equal left right = Stdlib.Int64.compare left right = 0
+
+let split_header_values values =
+  values
+  |> List.concat_map ~f:(fun value -> String.split value ~on:',')
+  |> List.map ~f:String.strip
+  |> List.filter ~f:(fun value -> not (String.is_empty value))
+
+let split_content_length_values values =
+  values
+  |> List.concat_map ~f:(fun value -> String.split value ~on:',')
+  |> List.map ~f:String.strip
+
+let ascii_digits value =
+  (not (String.is_empty value))
+  && String.for_all value ~f:(function '0' .. '9' -> true | _ -> false)
+
+let parse_content_length_value value =
+  if ascii_digits value then
+    match Stdlib.Int64.of_string_opt value with
+    | Some length -> Ok length
+    | None -> Error (body_error "invalid response Content-Length header")
+  else Error (body_error "invalid response Content-Length header")
+
+let rec parse_content_lengths = function
+  | [] -> Ok []
+  | value :: values -> (
+      match parse_content_length_value value with
+      | Error _ as error -> error
+      | Ok length ->
+          Result.map (parse_content_lengths values) ~f:(fun lengths ->
+              length :: lengths))
+
+let content_length_from_headers values =
+  match values with
+  | [] -> Ok None
+  | _ -> (
+      match split_content_length_values values with
+      | [] -> Ok None
+      | values -> (
+          match parse_content_lengths values with
+          | Error _ as error -> error
+          | Ok [] -> Ok None
+          | Ok (length :: lengths) ->
+              if List.for_all lengths ~f:(int64_equal length) then
+                Ok (Some length)
+              else
+                Error
+                  (body_error
+                     "conflicting response Content-Length header values")))
+
+let has_chunked_transfer_encoding values =
+  split_header_values values
+  |> List.exists ~f:(fun value ->
+      String.equal (String.lowercase value) "chunked")
+
+let response_body_framing headers =
+  let transfer_encoding_values =
+    split_header_values (Http.Header.get_multi headers "transfer-encoding")
+  in
+  let has_transfer_encoding = not (List.is_empty transfer_encoding_values) in
+  let transfer_encoding_chunked =
+    has_chunked_transfer_encoding transfer_encoding_values
+  in
+  match
+    content_length_from_headers (Http.Header.get_multi headers "content-length")
+  with
+  | Error _ as error -> error
+  | Ok (Some _) when has_transfer_encoding ->
+      Error
+        (body_error "response has both Transfer-Encoding and Content-Length")
+  | Ok (Some content_length) -> Ok (Response_content_length content_length)
+  | Ok None when transfer_encoding_chunked -> Ok Response_chunked
+  | Ok None -> Ok Response_unknown
 
 let timeout_phase_name = function
   | `Connect -> "connect"
@@ -251,7 +332,7 @@ let writer_for descriptor stream =
     write_error = None;
   }
 
-let check_write_length writer length =
+let check_write_length (writer : request_body_writer) length =
   match !(writer.remaining) with
   | None -> Ok ()
   | Some remaining ->
@@ -265,7 +346,7 @@ let check_write_length writer length =
 let invalid_write_bounds bytes ~off ~len =
   off < 0 || len < 0 || len > Bytes.length bytes - off
 
-let check_finished_length writer =
+let check_finished_length (writer : request_body_writer) =
   match writer.write_error with
   | Some error -> Error error
   | None -> (
@@ -389,14 +470,20 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
         || status = 304
         || (status >= 100 && status < 200)
       in
-      let make_response_body ~status body =
-        {
-          body;
-          time_clock = conn.time_clock;
-          timeout_policy = conn.timeout_policy;
-          max_response_drain_bytes = conn.max_response_drain_bytes;
-          bodiless = response_is_bodiless status;
-        }
+      let make_response_body ~status response body =
+        let bodiless = response_is_bodiless status in
+        match response_body_framing (Http.Response.headers response) with
+        | Error _ as error -> error
+        | Ok framing ->
+            Ok
+              {
+                body;
+                time_clock = conn.time_clock;
+                timeout_policy = conn.timeout_policy;
+                max_response_drain_bytes = conn.max_response_drain_bytes;
+                framing = (if bodiless then Response_unknown else framing);
+                bodiless;
+              }
       in
       let successful_status status = status >= 200 && status < 300 in
       let early_result = ref None in
@@ -404,10 +491,15 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
       let request_body_escaped_exn = ref None in
       let exception Early_response in
       let exception Callback_raised of exn in
-      let call_f response body =
-        match f response body with
+      let call_f response response_body =
+        match f response response_body with
         | result -> result
         | exception exn -> raise (Callback_raised exn)
+      in
+      let call_response ~status response body =
+        match make_response_body ~status response body with
+        | Error _ as error -> error
+        | Ok response_body -> call_f (to_aws_response response) response_body
       in
       let run_call ~call_sw =
         let bridge =
@@ -441,9 +533,7 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
                       | Some result -> result
                       | None ->
                           early_result :=
-                            Some
-                              (call_f (to_aws_response response)
-                                 (make_response_body ~status body));
+                            Some (call_response ~status response body);
                           raise Early_response
                   in
                   match !request_body_escaped_exn with
@@ -453,8 +543,7 @@ let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
                       | Error _ as error -> error
                       | Ok () ->
                           Log.debug (fun m -> m "HTTP %d" status);
-                          call_f (to_aws_response response)
-                            (make_response_body ~status body))))
+                          call_response ~status response body)))
         with
         | Early_response as exn -> raise exn
         | Callback_raised exn -> raise exn
@@ -505,6 +594,26 @@ let inactive_reader_error =
 
 let close_response_body_reader reader = reader.active <- false
 
+let initial_response_body_remaining = function
+  | Response_content_length content_length -> Some content_length
+  | Response_unknown | Response_chunked -> None
+
+let record_response_body_read reader length =
+  match reader.remaining with
+  | None -> ()
+  | Some remaining ->
+      let length = Int64.of_int length in
+      let remaining = Stdlib.Int64.sub remaining length in
+      reader.remaining <- Some remaining
+
+let response_body_eof reader =
+  match reader.remaining with
+  | Some remaining when Stdlib.Int64.compare remaining 0L > 0 ->
+      Error (body_error "response body ended before declared Content-Length")
+  | None | Some _ ->
+      reader.eof <- true;
+      Ok 0
+
 let rec read_from_current reader bytes ~off ~len =
   if len = 0 then Ok 0
   else if reader.offset < String.length reader.chunk then begin
@@ -512,6 +621,7 @@ let rec read_from_current reader bytes ~off ~len =
     let copied = min available len in
     Stdlib.String.blit reader.chunk reader.offset bytes off copied;
     reader.offset <- reader.offset + copied;
+    record_response_body_read reader copied;
     Ok copied
   end
   else if reader.eof then Ok 0
@@ -532,9 +642,7 @@ let read_response_body reader bytes ~off ~len =
       with_timeout_result reader.time_clock reader.timeout_policy `Response_body
         (fun () ->
           try read_from_current reader bytes ~off ~len with
-          | End_of_file ->
-              reader.eof <- true;
-              Ok 0
+          | End_of_file -> response_body_eof reader
           | Eio.Cancel.Cancelled _ as exn ->
               close_response_body_reader reader;
               raise exn
@@ -601,6 +709,7 @@ let with_response_body (body : response_body) ~consume =
       chunk = "";
       offset = 0;
       eof = false;
+      remaining = initial_response_body_remaining body.framing;
     }
   in
   match consume reader with
@@ -630,6 +739,7 @@ let discard_response_body (body : response_body) =
       chunk = "";
       offset = 0;
       eof = false;
+      remaining = initial_response_body_remaining body.framing;
     }
     body
 

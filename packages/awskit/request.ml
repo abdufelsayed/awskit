@@ -58,8 +58,6 @@ let validate_query query =
   in
   loop query
 
-let validate_header_name = Aws_validation.Header.validate_name
-let validate_header_value = Aws_validation.Header.validate_value
 let validate_headers = Aws_validation.Header.validate_list
 
 module Target = struct
@@ -118,10 +116,4 @@ let with_headers t headers =
   | Error _ as error -> error
   | Ok () -> Ok { t with headers }
 
-let add_header t ~name ~value =
-  match validate_header_name name with
-  | Error _ as error -> error
-  | Ok () -> (
-      match validate_header_value name value with
-      | Error _ as error -> error
-      | Ok () -> Ok { t with headers = (name, value) :: t.headers })
+let add_header t ~name ~value = with_headers t (t.headers @ [ (name, value) ])

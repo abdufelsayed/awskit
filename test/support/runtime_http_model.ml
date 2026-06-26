@@ -112,32 +112,139 @@ let expected_content_length_body ~declared ~actual =
   else if declared < actual_length then Body (String.prefix actual declared)
   else Body_error
 
-let rejects_before_body_consumer = function
-  | Malformed_header_block _ -> true
-  | Duplicate_content_length { first; second; _ } ->
-      not (Int.equal first second)
-  | Conflicting_length_and_chunked _ -> true
-  | Empty | Content_length _ | Early_close _ | Chunked _ | Malformed_chunked _
-    ->
-      false
+let decoded_malformed_chunked_prefix wire =
+  let line_end_from offset =
+    String.substr_index ~pos:offset wire ~pattern:"\r\n"
+  in
+  let rec loop offset acc =
+    match line_end_from offset with
+    | None -> String.concat (List.rev acc)
+    | Some line_end -> (
+        let line = String.sub wire ~pos:offset ~len:(line_end - offset) in
+        match Int64.of_string_opt ("0x" ^ line) with
+        | None -> String.concat (List.rev acc)
+        | Some 0L -> String.concat (List.rev acc)
+        | Some length ->
+            let body_start = line_end + 2 in
+            let length = Int64.to_int_exn length in
+            if body_start + length > String.length wire then
+              String.concat (List.rev acc)
+            else
+              let chunk = String.sub wire ~pos:body_start ~len:length in
+              loop (body_start + length + 2) (chunk :: acc))
+  in
+  loop 0 []
 
-let expected_body_for ~bodiless framing =
+let visible_header_lines_and_hidden_body block =
+  let block = raw_header_block block in
+  let rec loop offset headers =
+    match String.substr_index ~pos:offset block ~pattern:"\r\n" with
+    | None -> (List.rev headers, "")
+    | Some line_end -> (
+        let line = String.sub block ~pos:offset ~len:(line_end - offset) in
+        let next = line_end + 2 in
+        if String.is_empty line then
+          (List.rev headers, String.drop_prefix block next)
+        else
+          match String.lsplit2 line ~on:':' with
+          | Some (name, value) ->
+              loop next ((String.strip name, String.strip value) :: headers)
+          | None -> (List.rev headers, String.drop_prefix block next ^ "\r\n"))
+  in
+  loop 0 []
+
+let header_values name headers =
+  List.filter_map headers ~f:(fun (candidate, value) ->
+      if String.Caseless.equal candidate name then Some value else None)
+
+let comma_separated_header_values ?(drop_empty = true) values =
+  values
+  |> List.concat_map ~f:(fun value -> String.split value ~on:',')
+  |> List.map ~f:String.strip
+  |> List.filter ~f:(fun value ->
+      (not drop_empty) || not (String.is_empty value))
+
+let ascii_digits value =
+  (not (String.is_empty value))
+  && String.for_all value ~f:(function '0' .. '9' -> true | _ -> false)
+
+let visible_content_length_error headers =
+  match
+    header_values "Content-Length" headers
+    |> comma_separated_header_values ~drop_empty:false
+  with
+  | [] -> false
+  | value :: values -> (
+      if not (ascii_digits value) then true
+      else
+        match Stdlib.Int64.of_string_opt value with
+        | None -> true
+        | Some first ->
+            List.exists values ~f:(fun value ->
+                (not (ascii_digits value))
+                ||
+                match Stdlib.Int64.of_string_opt value with
+                | None -> true
+                | Some length -> not (Int64.equal first length)))
+
+let visible_content_length_present headers =
+  not (List.is_empty (header_values "Content-Length" headers))
+
+let visible_transfer_encoding_values headers =
+  comma_separated_header_values (header_values "Transfer-Encoding" headers)
+
+let visible_transfer_encoding_present headers =
+  not (List.is_empty (visible_transfer_encoding_values headers))
+
+let visible_header_rejects_before_body_consumer headers =
+  visible_content_length_error headers
+  || visible_content_length_present headers
+     && visible_transfer_encoding_present headers
+
+let visible_header_pairs_for_framing = function
+  | Malformed_header_block block ->
+      fst (visible_header_lines_and_hidden_body block)
+  | framing -> headers_for_framing framing
+
+let visible_headers_reject_before_body_consumer ~headers framing =
+  visible_header_rejects_before_body_consumer
+    (headers @ visible_header_pairs_for_framing framing)
+
+let malformed_header_block_rejects_before_body_consumer block =
+  let headers, _hidden_body = visible_header_lines_and_hidden_body block in
+  visible_header_rejects_before_body_consumer headers
+
+let malformed_header_block_hidden_body block =
+  let _headers, hidden_body = visible_header_lines_and_hidden_body block in
+  hidden_body
+
+let rejects_before_body_consumer scenario =
+  visible_headers_reject_before_body_consumer ~headers:scenario.headers
+    scenario.framing
+
+let expected_body_for ~headers ~bodiless framing =
   match framing with
-  | Malformed_header_block _ -> Body_error
+  | Malformed_header_block block
+    when malformed_header_block_rejects_before_body_consumer block ->
+      Body_error
   | Duplicate_content_length { first; second; _ }
     when not (Int.equal first second) ->
       Body_error
   | Conflicting_length_and_chunked _ -> Body_error
+  | _ when visible_headers_reject_before_body_consumer ~headers framing ->
+      Body_error
   | Duplicate_content_length { first; actual; _ } ->
       if bodiless then No_body
       else expected_content_length_body ~declared:first ~actual
   | _ when bodiless -> No_body
+  | Malformed_header_block block ->
+      Body (malformed_header_block_hidden_body block)
   | Early_close _ -> Body_error
   | Empty -> Body ""
   | Content_length { declared; actual } ->
       expected_content_length_body ~declared ~actual
   | Chunked chunks -> Body (String.concat chunks)
-  | Malformed_chunked _ -> Body_error
+  | Malformed_chunked wire -> Body (decoded_malformed_chunked_prefix wire)
 
 let method_bin scenario =
   "http.method." ^ String.lowercase (method_to_string scenario.method_)
@@ -202,7 +309,8 @@ let scenario ~name ~method_ ~status ?(headers = []) ~framing ~connection
   in
   {
     partial with
-    expected_body = expected_body_for ~bodiless:(is_bodiless partial) framing;
+    expected_body =
+      expected_body_for ~headers ~bodiless:(is_bodiless partial) framing;
   }
 
 let framing_to_string = function
@@ -255,7 +363,7 @@ let observed_to_string = function
 
 let expected_observation scenario =
   match
-    ( rejects_before_body_consumer scenario.framing,
+    ( rejects_before_body_consumer scenario,
       scenario.consume,
       scenario.expected_body )
   with
