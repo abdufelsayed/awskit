@@ -124,6 +124,8 @@ release evidence that downstream runtime authors can rely on.
   be sent through `Storage_class.Other`, and bodiless HTTP responses do not
   consume response bodies even when framing headers are present.
   (fa14e23, e83d337, ba454b1, a23f2ee, e8d7032, c86e4de, 15a57ec)
+- Runtime transport warning logs now use the same redacted SDK diagnostic as
+  public transport errors instead of raw exception text. (2740863)
 - S3 helpers now reuse the same lower request primitives as the primitive
   operations, so `Object.find` shares `Object.get` request construction and
   context behavior, presigned helpers share endpoint-config signing paths, and
