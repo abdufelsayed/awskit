@@ -1,2 +1,7 @@
+fixture-path=xml/missing-tag-value.xml
+operation=s3-bucket-tagging-get
+input-kind=bytes-hex
+input=3c54616767696e673e3c5461675365743e3c5461673e3c4b65793e656e763c2f4b65793e3c2f5461673e3c2f5461675365743e3c2f54616767696e673e0a
+expected-error:
 kind=decode
 retry-class=fatal

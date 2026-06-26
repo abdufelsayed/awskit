@@ -1,3 +1,8 @@
+fixture-path=endpoint/query.txt
+operation=endpoint-of-string
+input-kind=normalized-text
+input=https://example.com?bucket=name
+expected-error:
 kind=validation
 field=endpoint
 retry-class=fatal

@@ -48,19 +48,186 @@ let error_shape error =
     | Not_supported _ -> "not-supported"
     | Multiple _ -> "multiple"
 
-let fail command_index command message =
-  QCheck.Test.fail_reportf "command #%d %s: %s" command_index
-    (Command.to_string command)
-    message
+let target_profile = "strict"
+
+let digest_summary body =
+  Printf.sprintf "len=%d digest=%s" (String.length body)
+    (Digest.to_hex (Digest.string body))
+
+let list_to_string pp values =
+  values |> List.map pp |> String.concat "; " |> Printf.sprintf "[%s]"
+
+let option_to_string pp = function None -> "none" | Some value -> pp value
+let versioning_to_string = option_to_string Bucket.Versioning.Status.to_string
+let tags_to_string = Command.tags_to_string
+let metadata_to_string = Command.metadata_to_string
+
+let model_listed_version_to_string (version : Model.listed_version) =
+  Printf.sprintf "%s:%s:version_id=%b:latest=%b:size=%s" version.key
+    (match version.kind with `Object -> "object" | `Delete_marker -> "marker")
+    version.has_version_id version.is_latest
+    (Option.fold ~none:"-" ~some:Int64.to_string version.size)
+
+let model_summary (model : Model.t) =
+  let object_summary =
+    Model.objects_as_strings model
+    |> list_to_string (fun (key, body) ->
+        Printf.sprintf "%S:%s" key (digest_summary body))
+  in
+  let version_summary =
+    Model.listed_versions model |> list_to_string model_listed_version_to_string
+  in
+  Printf.sprintf "objects=%s bucket_tags=%s versioning=%s versions=%s"
+    object_summary
+    (tags_to_string model.bucket_tags)
+    (versioning_to_string model.versioning)
+    version_summary
+
+let content_range_summary_to_string
+    (summary : Model.content_range_summary option) =
+  match summary with
+  | None -> "none"
+  | Some summary ->
+      let complete_length =
+        match summary.complete_length with
+        | None -> "*"
+        | Some length -> Int64.to_string length
+      in
+      Printf.sprintf "bytes %Ld-%Ld/%s" summary.start summary.finish
+        complete_length
+
+let object_read_summary_to_string (summary : Model.object_read_summary) =
+  Printf.sprintf
+    "{body=%s; metadata=%s; content_length=%s; content_range=%s; \
+     has_version_id=%b}"
+    (digest_summary summary.read_body)
+    (metadata_to_string summary.read_metadata)
+    (option_to_string Int64.to_string summary.read_content_length)
+    (content_range_summary_to_string summary.read_content_range)
+    summary.read_has_version_id
+
+let object_metadata_summary_to_string (summary : Model.object_metadata_summary)
+    =
+  Printf.sprintf "{content_length=%s; metadata=%s; has_version_id=%b}"
+    (option_to_string Int64.to_string summary.metadata_content_length)
+    (metadata_to_string summary.metadata_entries)
+    summary.metadata_has_version_id
+
+let object_write_summary_to_string (summary : Model.object_write_summary) =
+  Printf.sprintf "{has_version_id=%b}" summary.write_has_version_id
+
+let object_delete_summary_to_string (summary : Model.object_delete_summary) =
+  Printf.sprintf "{delete_marker=%b; has_version_id=%b}" summary.delete_marker
+    summary.delete_has_version_id
+
+let object_copy_summary_to_string (summary : Model.object_copy_summary) =
+  Printf.sprintf "{source_has_version_id=%b; destination_has_version_id=%b}"
+    summary.copy_source_has_version_id summary.copy_destination_has_version_id
+
+let operation_result_to_string = function
+  | Model.Response_ok -> "response-ok"
+  | Put_ok summary -> "put-ok " ^ object_write_summary_to_string summary
+  | Get_ok summary -> "get-ok " ^ object_read_summary_to_string summary
+  | Find_ok summary ->
+      "find-ok " ^ option_to_string object_read_summary_to_string summary
+  | Head_ok summary -> "head-ok " ^ object_metadata_summary_to_string summary
+  | Exists_ok exists -> Printf.sprintf "exists-ok %b" exists
+  | Delete_ok summary -> "delete-ok " ^ object_delete_summary_to_string summary
+  | List_keys_ok keys ->
+      "list-keys-ok " ^ list_to_string (Printf.sprintf "%S") keys
+  | List_versions_ok versions ->
+      "list-versions-ok "
+      ^ list_to_string model_listed_version_to_string versions
+  | Copy_ok summary -> "copy-ok " ^ object_copy_summary_to_string summary
+  | Object_tags_ok tags -> "object-tags-ok " ^ tags_to_string tags
+  | Bucket_tags_ok tags -> "bucket-tags-ok " ^ tags_to_string tags
+  | Versioning_ok status -> "versioning-ok " ^ versioning_to_string status
+  | Not_found -> "not-found"
+  | Invalid_range -> "invalid-range"
+
+type command_context = {
+  command_index : int;
+  command : Command.t;
+  transcript : string option;
+  expected_result : string;
+  model_before : string;
+  model_after : string;
+}
+
+let current_command_context = ref None
+let current_command_transcript = ref None
+
+let with_command_transcript transcript f =
+  let previous = !current_command_transcript in
+  current_command_transcript := Some transcript;
+  Fun.protect ~finally:(fun () -> current_command_transcript := previous) f
+
+let with_command_context context f =
+  let previous = !current_command_context in
+  current_command_context := Some context;
+  Fun.protect ~finally:(fun () -> current_command_context := previous) f
+
+let command_context ~command_index ~model_before command =
+  let model_after = Model.apply command model_before in
+  {
+    command_index;
+    command;
+    transcript = !current_command_transcript;
+    expected_result =
+      operation_result_to_string (Model.expected_result command model_before);
+    model_before = model_summary model_before;
+    model_after = model_summary model_after;
+  }
+
+let failure_report ?expected ?observed command_index command message =
+  let context_lines =
+    match !current_command_context with
+    | Some context when Int.equal context.command_index command_index ->
+        [
+          Printf.sprintf "target_profile: %s" target_profile;
+          Printf.sprintf "command_index: %d" context.command_index;
+          Printf.sprintf "command: %s" (Command.to_string context.command);
+          (match context.transcript with
+          | None -> "full_command_transcript: <see QCheck counterexample>"
+          | Some transcript -> "full_command_transcript:\n" ^ transcript);
+          Printf.sprintf "expected_result: %s"
+            (Option.value ~default:context.expected_result expected);
+          Printf.sprintf "observed_result: %s"
+            (Option.value ~default:message observed);
+          Printf.sprintf "model_before: %s" context.model_before;
+          Printf.sprintf "model_after: %s" context.model_after;
+        ]
+    | None | Some _ ->
+        [
+          Printf.sprintf "target_profile: %s" target_profile;
+          Printf.sprintf "command_index: %d" command_index;
+          Printf.sprintf "command: %s" (Command.to_string command);
+          "full_command_transcript: <see QCheck counterexample>";
+          "expected_result: <not available outside command context>";
+          Printf.sprintf "observed_result: %s"
+            (Option.value ~default:message observed);
+          "model_before: <not available outside command context>";
+          "model_after: <not available outside command context>";
+        ]
+  in
+  String.concat "\n" (message :: context_lines)
+
+let fail ?expected ?observed command_index command message =
+  QCheck.Test.fail_report
+    (failure_report ?expected ?observed command_index command message)
 
 let fail_error command_index command label error =
   fail command_index command
+    ~observed:(Printf.sprintf "Error %s" (error_shape error))
     (Printf.sprintf "%s unexpected error shape %s" label (error_shape error))
 
 let expect_no_such_key command_index command label = function
   | Error error when Error.is_no_such_key error -> ()
   | Error error -> fail_error command_index command label error
-  | Ok _ -> fail command_index command (label ^ " expected NoSuchKey")
+  | Ok _ ->
+      fail command_index command
+        (label ^ " expected NoSuchKey")
+        ~expected:"Error service:NoSuchKey" ~observed:"Ok"
 
 let is_invalid_range_error error =
   match
@@ -72,18 +239,24 @@ let is_invalid_range_error error =
 let expect_invalid_range command_index command label = function
   | Error error when is_invalid_range_error error -> ()
   | Error error -> fail_error command_index command label error
-  | Ok _ -> fail command_index command (label ^ " expected InvalidRange")
+  | Ok _ ->
+      fail command_index command
+        (label ^ " expected InvalidRange")
+        ~expected:"Error service:InvalidRange" ~observed:"Ok"
 
 let expect_ok command_index command label = function
   | Ok value -> value
   | Error error -> fail_error command_index command label error
 
+let testable_to_string testable value =
+  Format.asprintf "%a" (Alcotest.pp testable) value
+
 let check_equal command_index command testable label expected actual =
-  Alcotest.check testable
-    (Printf.sprintf "command #%d %s: %s" command_index
-       (Command.to_string command)
-       label)
-    expected actual
+  if Alcotest.equal testable expected actual then ()
+  else
+    fail command_index command label
+      ~expected:(testable_to_string testable expected)
+      ~observed:(testable_to_string testable actual)
 
 let check_version_id_presence command_index command label expected version_id =
   check_equal command_index command Alcotest.bool label expected
@@ -350,7 +523,7 @@ let assert_version_listing command_index command conn model =
     Alcotest.(list string)
     "list object versions" expected actual
 
-let check_store command_index command conn model =
+let check_store_state command_index command conn model =
   let store = Simulator.store conn in
   check_equal command_index command
     Alcotest.(list (pair string string))
@@ -364,6 +537,22 @@ let check_store command_index command conn model =
   assert_bucket_tags command_index command conn model.bucket_tags;
   assert_get_versioning command_index command conn model.versioning;
   assert_version_listing command_index command conn model
+
+let store_check_context ~command_index ~model command =
+  {
+    command_index;
+    command;
+    transcript = !current_command_transcript;
+    expected_result =
+      (if command_index = 0 then "initial store matches empty model"
+       else "store matches expected model after command");
+    model_before = model_summary model;
+    model_after = model_summary model;
+  }
+
+let check_store command_index command conn model =
+  with_command_context (store_check_context ~command_index ~model command)
+    (fun () -> check_store_state command_index command conn model)
 
 let assert_put_versioning command_index command conn status =
   ignore
@@ -545,159 +734,166 @@ let assert_copy command_index command conn ~source_key ~destination_key ?options
            ())
 
 let apply_simulator_command command_index conn model command =
-  let next_model =
-    match command with
-    | Command.Put_string (key, body, tags) ->
-        let options =
-          match tags with
-          | [] -> None
-          | _ -> Some (Object.Put.options_exn ~tags:(tags_to_set tags) ())
-        in
-        let result =
-          expect_ok command_index command "put_string"
-            (Simulator.Object.put_string conn ~bucket
-               ~key:(key_to_object_key key) ?options ~contents:body ())
-        in
-        check_version_id_presence command_index command "put version id"
-          (Model.versioning_keeps_history model)
-          result.version_id;
-        let next_model = Model.apply command model in
-        assert_object_tags command_index command conn key
-          (Model.find key next_model);
-        next_model
-    | Put_string_metadata (key, body, tags, metadata) ->
-        let options =
-          Object.Put.options_exn
-            ~metadata:(metadata_to_store metadata)
-            ~tags:(tags_to_set tags) ()
-        in
-        let result =
-          expect_ok command_index command "put_string metadata"
-            (Simulator.Object.put_string conn ~bucket
-               ~key:(key_to_object_key key) ~options ~contents:body ())
-        in
-        check_version_id_presence command_index command "put version id"
-          (Model.versioning_keeps_history model)
-          result.version_id;
-        let next_model = Model.apply command model in
-        assert_get command_index command conn key (Model.find key next_model);
-        assert_object_tags command_index command conn key
-          (Model.find key next_model);
-        next_model
-    | Get_string key ->
-        assert_get command_index command conn key (Model.find key model);
-        model
-    | Get_range (key, range) ->
-        assert_get_range command_index command conn key range model;
-        model
-    | Find_string key ->
-        assert_find command_index command conn key (Model.find key model);
-        model
-    | Head_object key ->
-        assert_head command_index command conn key (Model.find key model);
-        model
-    | Exists_object key ->
-        assert_exists command_index command conn key (Model.find key model);
-        model
-    | Delete_object key ->
-        assert_delete command_index command conn key
-          ~keeps_history:(Model.versioning_keeps_history model);
-        Model.apply command model
-    | List_keys ->
-        assert_list_keys command_index command conn model;
-        model
-    | List_prefix prefix ->
-        assert_list_prefix command_index command conn prefix model;
-        model
-    | List_keys_page { prefix; max_keys } ->
-        assert_list_keys_page command_index command conn prefix max_keys model;
-        model
-    | List_versions_page { max_keys } ->
-        assert_list_versions_page command_index command conn max_keys model;
-        model
-    | Copy_object (source_key, destination_key) ->
-        let source = Model.find source_key model in
-        assert_copy command_index command conn ~source_key ~destination_key
-          ~destination_has_version_id:(Model.versioning_keeps_history model)
-          source;
-        let next_model = Model.apply command model in
-        (match source with
-        | None -> ()
-        | Some _ ->
-            assert_object_tags command_index command conn destination_key
-              (Model.find destination_key next_model));
-        next_model
-    | Copy_object_metadata (source_key, destination_key, metadata) ->
-        let source = Model.find source_key model in
-        let options =
-          match metadata with
-          | Command.Copy_source_metadata -> None
-          | Replace_metadata metadata ->
-              Some
-                (Object.Copy.options_exn
-                   ~metadata_directive:(`Replace (metadata_to_store metadata))
-                   ())
-        in
-        assert_copy command_index command conn ~source_key ~destination_key
-          ?options
-          ~destination_has_version_id:(Model.versioning_keeps_history model)
-          source;
-        let next_model = Model.apply command model in
-        (match source with
-        | None -> ()
-        | Some _ ->
-            assert_get command_index command conn destination_key
-              (Model.find destination_key next_model);
-            assert_object_tags command_index command conn destination_key
-              (Model.find destination_key next_model));
-        next_model
-    | Put_object_tags (key, tags) ->
-        let expected = Model.find key model in
-        assert_put_object_tags command_index command conn key tags expected;
-        let next_model = Model.apply command model in
-        (match expected with
-        | None -> ()
-        | Some _ ->
+  let context = command_context ~command_index ~model_before:model command in
+  with_command_context context (fun () ->
+      let next_model =
+        match command with
+        | Command.Put_string (key, body, tags) ->
+            let options =
+              match tags with
+              | [] -> None
+              | _ -> Some (Object.Put.options_exn ~tags:(tags_to_set tags) ())
+            in
+            let result =
+              expect_ok command_index command "put_string"
+                (Simulator.Object.put_string conn ~bucket
+                   ~key:(key_to_object_key key) ?options ~contents:body ())
+            in
+            check_version_id_presence command_index command "put version id"
+              (Model.versioning_keeps_history model)
+              result.version_id;
+            let next_model = Model.apply command model in
             assert_object_tags command_index command conn key
-              (Model.find key next_model));
-        next_model
-    | Get_object_tags key ->
-        assert_object_tags command_index command conn key (Model.find key model);
-        model
-    | Delete_object_tags key ->
-        let expected = Model.find key model in
-        assert_delete_object_tags command_index command conn key expected;
-        let next_model = Model.apply command model in
-        (match expected with
-        | None -> ()
-        | Some _ ->
+              (Model.find key next_model);
+            next_model
+        | Put_string_metadata (key, body, tags, metadata) ->
+            let options =
+              Object.Put.options_exn
+                ~metadata:(metadata_to_store metadata)
+                ~tags:(tags_to_set tags) ()
+            in
+            let result =
+              expect_ok command_index command "put_string metadata"
+                (Simulator.Object.put_string conn ~bucket
+                   ~key:(key_to_object_key key) ~options ~contents:body ())
+            in
+            check_version_id_presence command_index command "put version id"
+              (Model.versioning_keeps_history model)
+              result.version_id;
+            let next_model = Model.apply command model in
+            assert_get command_index command conn key
+              (Model.find key next_model);
             assert_object_tags command_index command conn key
-              (Model.find key next_model));
-        next_model
-    | Put_bucket_tags tags ->
-        assert_put_bucket_tags command_index command conn tags;
-        let next_model = Model.apply command model in
-        assert_bucket_tags command_index command conn next_model.bucket_tags;
-        next_model
-    | Get_bucket_tags ->
-        assert_bucket_tags command_index command conn model.bucket_tags;
-        model
-    | Delete_bucket_tags ->
-        assert_delete_bucket_tags command_index command conn;
-        let next_model = Model.apply command model in
-        assert_bucket_tags command_index command conn next_model.bucket_tags;
-        next_model
-    | Put_versioning status ->
-        assert_put_versioning command_index command conn status;
-        let next_model = Model.apply command model in
-        assert_get_versioning command_index command conn next_model.versioning;
-        next_model
-    | Get_versioning ->
-        assert_get_versioning command_index command conn model.versioning;
-        model
-  in
-  check_store command_index command conn next_model;
-  next_model
+              (Model.find key next_model);
+            next_model
+        | Get_string key ->
+            assert_get command_index command conn key (Model.find key model);
+            model
+        | Get_range (key, range) ->
+            assert_get_range command_index command conn key range model;
+            model
+        | Find_string key ->
+            assert_find command_index command conn key (Model.find key model);
+            model
+        | Head_object key ->
+            assert_head command_index command conn key (Model.find key model);
+            model
+        | Exists_object key ->
+            assert_exists command_index command conn key (Model.find key model);
+            model
+        | Delete_object key ->
+            assert_delete command_index command conn key
+              ~keeps_history:(Model.versioning_keeps_history model);
+            Model.apply command model
+        | List_keys ->
+            assert_list_keys command_index command conn model;
+            model
+        | List_prefix prefix ->
+            assert_list_prefix command_index command conn prefix model;
+            model
+        | List_keys_page { prefix; max_keys } ->
+            assert_list_keys_page command_index command conn prefix max_keys
+              model;
+            model
+        | List_versions_page { max_keys } ->
+            assert_list_versions_page command_index command conn max_keys model;
+            model
+        | Copy_object (source_key, destination_key) ->
+            let source = Model.find source_key model in
+            assert_copy command_index command conn ~source_key ~destination_key
+              ~destination_has_version_id:(Model.versioning_keeps_history model)
+              source;
+            let next_model = Model.apply command model in
+            (match source with
+            | None -> ()
+            | Some _ ->
+                assert_object_tags command_index command conn destination_key
+                  (Model.find destination_key next_model));
+            next_model
+        | Copy_object_metadata (source_key, destination_key, metadata) ->
+            let source = Model.find source_key model in
+            let options =
+              match metadata with
+              | Command.Copy_source_metadata -> None
+              | Replace_metadata metadata ->
+                  Some
+                    (Object.Copy.options_exn
+                       ~metadata_directive:
+                         (`Replace (metadata_to_store metadata))
+                       ())
+            in
+            assert_copy command_index command conn ~source_key ~destination_key
+              ?options
+              ~destination_has_version_id:(Model.versioning_keeps_history model)
+              source;
+            let next_model = Model.apply command model in
+            (match source with
+            | None -> ()
+            | Some _ ->
+                assert_get command_index command conn destination_key
+                  (Model.find destination_key next_model);
+                assert_object_tags command_index command conn destination_key
+                  (Model.find destination_key next_model));
+            next_model
+        | Put_object_tags (key, tags) ->
+            let expected = Model.find key model in
+            assert_put_object_tags command_index command conn key tags expected;
+            let next_model = Model.apply command model in
+            (match expected with
+            | None -> ()
+            | Some _ ->
+                assert_object_tags command_index command conn key
+                  (Model.find key next_model));
+            next_model
+        | Get_object_tags key ->
+            assert_object_tags command_index command conn key
+              (Model.find key model);
+            model
+        | Delete_object_tags key ->
+            let expected = Model.find key model in
+            assert_delete_object_tags command_index command conn key expected;
+            let next_model = Model.apply command model in
+            (match expected with
+            | None -> ()
+            | Some _ ->
+                assert_object_tags command_index command conn key
+                  (Model.find key next_model));
+            next_model
+        | Put_bucket_tags tags ->
+            assert_put_bucket_tags command_index command conn tags;
+            let next_model = Model.apply command model in
+            assert_bucket_tags command_index command conn next_model.bucket_tags;
+            next_model
+        | Get_bucket_tags ->
+            assert_bucket_tags command_index command conn model.bucket_tags;
+            model
+        | Delete_bucket_tags ->
+            assert_delete_bucket_tags command_index command conn;
+            let next_model = Model.apply command model in
+            assert_bucket_tags command_index command conn next_model.bucket_tags;
+            next_model
+        | Put_versioning status ->
+            assert_put_versioning command_index command conn status;
+            let next_model = Model.apply command model in
+            assert_get_versioning command_index command conn
+              next_model.versioning;
+            next_model
+        | Get_versioning ->
+            assert_get_versioning command_index command conn model.versioning;
+            model
+      in
+      check_store_state command_index command conn next_model;
+      next_model)
 
 module Target : S3_workload.TARGET = struct
   let name = "awskit-s3-sim"
@@ -736,23 +932,23 @@ let read_file path =
 let parse_replay_file path =
   match S3_replay.decode (read_file path) with
   | Ok commands -> commands
-  | Error error ->
-      Alcotest.failf "%s: %s" path (S3_replay.parse_error_to_string error)
+  | Error error -> Alcotest.fail (S3_replay.parse_error_to_string ~path error)
 
 let run_replay_file path =
   let commands = parse_replay_file path in
-  Target.with_connection (fun conn ->
-      Target.check_store 0 Command.List_keys conn Model.empty;
-      let (_ : Model.t) =
-        List.fold_left
-          (fun model (index, command) ->
-            let next_model = Target.run_command index conn model command in
-            Target.check_store index command conn next_model;
-            next_model)
-          Model.empty
-          (List.mapi (fun index command -> (index + 1, command)) commands)
-      in
-      ())
+  with_command_transcript (Command.transcript commands) (fun () ->
+      Target.with_connection (fun conn ->
+          Target.check_store 0 Command.List_keys conn Model.empty;
+          let (_ : Model.t) =
+            List.fold_left
+              (fun model (index, command) ->
+                let next_model = Target.run_command index conn model command in
+                Target.check_store index command conn next_model;
+                next_model)
+              Model.empty
+              (List.mapi (fun index command -> (index + 1, command)) commands)
+          in
+          ()))
 
 let replay_case name =
   Alcotest.test_case name `Quick (fun () -> run_replay_file (replay_path name))

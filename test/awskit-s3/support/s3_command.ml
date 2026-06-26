@@ -265,6 +265,7 @@ let transcript commands =
   |> List.mapi (fun index command ->
       Printf.sprintf "%02d. %s" (index + 1) (to_string command))
   |> String.concat "\n"
+  |> Printf.sprintf "command transcript:\n%s"
 
 let gen_key = QCheck.Gen.oneof_list key_domain
 let gen_prefix = QCheck.Gen.oneof_list prefix_domain

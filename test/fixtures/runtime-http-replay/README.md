@@ -1,10 +1,21 @@
 # Runtime HTTP Replay Corpus
 
 This directory is reserved for reduced runtime HTTP workload failures. Replay
-paths identify evidence; do not add a central manifest or separate central
-registry.
+fixture paths are the replay identifiers. Do not add a central manifest,
+central registry, evidence-id catalog, compatibility alias, or old-name layer.
 
-Runtime HTTP replays are currently typed scenarios in
-`test/support/runtime_http_replay.ml` because the shared workload model already
-owns the response framing language. Add path-scoped fixture files here only
-when a reduced case needs opaque bytes that should be reviewed outside OCaml.
+Each replay file uses a small line-oriented format owned by
+`test/support/runtime_http_replay.ml`. String payloads are encoded as `h`
+followed by lowercase hex bytes so reduced malformed wire data can be reviewed
+without escaping ambiguity.
+
+```text
+runtime-http-replay-v1
+name=<case-name>
+method=<GET|HEAD|PUT|POST|DELETE|PATCH>
+status=<http-status>
+headers=<count> <hex-name> <hex-value> ...
+framing=<framing-directive>
+connection=<close|keep-alive>
+consume=<read-all|read-once:n|drop-without-read|raise-in-consume>
+```

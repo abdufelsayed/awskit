@@ -10,3 +10,8 @@ here, make the replay test fail, then fix the parser or validator.
 Each replay input has an expected sidecar describing the asserted error
 category and retry class. Keep those sidecars in sync with the public error
 classification, not with incidental printer wording.
+
+Fixture paths are the replay identifiers; there is no central registry or
+manifest. Each sidecar repeats the fixture path, parser operation, replay input
+representation, and expected public error category so a reduced case can be
+understood and moved without consulting another catalog.

@@ -1,3 +1,8 @@
+fixture-path=endpoint/userinfo.txt
+operation=endpoint-of-string
+input-kind=normalized-text
+input=https://user@example.com
+expected-error:
 kind=validation
 field=endpoint
 retry-class=fatal

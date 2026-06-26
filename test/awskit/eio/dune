@@ -18,7 +18,9 @@
 (rule
  (alias runtime-http-workload)
  (package awskit-eio)
- (deps test_runtime_http_workload_eio.exe)
+ (deps
+  test_runtime_http_workload_eio.exe
+  (source_tree ../../fixtures/runtime-http-replay))
  (action
   (run
    ./test_runtime_http_workload_eio.exe

@@ -35,10 +35,9 @@ preservation. It distinguishes errors Awskit can observe after the Cohttp
 transport boundary from raw HTTP syntax that Cohttp has already collapsed into
 decoded response data.
 
-Reduced runtime HTTP replay scenarios live in
-`test/support/runtime_http_replay.ml`. The path-scoped corpus directory
-`test/fixtures/runtime-http-replay` is reserved for opaque replay bytes when a
-case needs fixture data outside OCaml.
+Reduced runtime HTTP replay scenarios live in the path-scoped corpus directory
+`test/fixtures/runtime-http-replay` and are parsed by
+`test/support/runtime_http_replay.ml`.
 
 The suite IDs are `workload:awskit-eio:runtime-http` and
 `workload:awskit-lwt:runtime-http`.
@@ -158,6 +157,15 @@ When generated or fuzz workloads expose a product bug, reduce the failure into
 the smallest replay artifact that preserves the behavior. Use the fixture path
 as the durable identifier; do not add a central manifest, central registry, or
 alias layer around old replay spellings.
+
+Promotion flow:
+
+1. Reproduce with the focused alias and the printed seed or replay path.
+2. Reduce with the QCheck shrinker or by manually trimming the fixture.
+3. Add a path-scoped replay artifact owned by the failing surface.
+4. Verify the replay fails before the product fix when practical.
+5. Fix production behavior in a separate pass, then keep the replay as
+   regression evidence.
 
 ## Semantic Coverage
 

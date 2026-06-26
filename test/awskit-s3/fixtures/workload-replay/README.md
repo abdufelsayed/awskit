@@ -1,8 +1,8 @@
 # S3 Workload Replay Corpus
 
 This directory stores reduced S3 workload failures as deterministic replay
-inputs. File paths are the replay identifiers; do not add a separate manifest
-or central evidence registry.
+inputs. Fixture paths are the replay identifiers. Do not add a separate
+manifest, central evidence registry, compatibility alias, or old-name layer.
 
 Each replay file uses one command per line. Blank lines and lines starting with
 `# ` are ignored. Keep files minimal enough for reviewers to understand why the

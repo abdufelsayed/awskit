@@ -378,9 +378,50 @@ let shrink_case case =
   in
   QCheck.Iter.append shrink_faults shrink_body
 
+let expected_upload_to_string = function
+  | Model.Upload_succeeds { remote_body; progress_final } ->
+      Printf.sprintf
+        "expected_result=success expected_byte_movement={read=%d; written=%d; \
+         progress_final=%d} remote_body={length=%d; digest=%s} \
+         cleanup_ownership={owned_upload_aborted=false; \
+         cleanup_error_secondary=false}"
+        progress_final progress_final progress_final
+        (String.length remote_body)
+        (Digest.to_hex (Digest.string remote_body))
+  | Upload_fails
+      {
+        remote_absent;
+        owned_upload_aborted;
+        read_bytes;
+        written_bytes;
+        progress_bytes;
+        progress_report_max;
+        callback_exception_preserved;
+        cleanup_error_secondary;
+        cancelled;
+      } ->
+      Printf.sprintf
+        "expected_result=failure expected_byte_movement={read=%d; written=%d; \
+         progress=%d; progress_report_max=%d} \
+         cleanup_ownership={remote_absent=%b; owned_upload_aborted=%b; \
+         cleanup_error_secondary=%b} callback_exception_preserved=%b \
+         cancelled=%b"
+        read_bytes written_bytes progress_bytes progress_report_max
+        remote_absent owned_upload_aborted cleanup_error_secondary
+        callback_exception_preserved cancelled
+
+let upload_case_to_string case =
+  let length = String.length case.Model.local_body in
+  Printf.sprintf
+    "length=%d part_size=%d part_count=%d fault_schedule=%s body_digest=%s %s \
+     observed_result=<reported by target failure>"
+    length case.part_size (Model.part_count case)
+    (fault_option_to_string case.fault)
+    (Digest.to_hex (Digest.string case.local_body))
+    (expected_upload_to_string (Model.expected_upload case))
+
 let arbitrary =
-  QCheck.make ~print:Model.upload_case_to_string ~shrink:shrink_case
-    upload_case_gen
+  QCheck.make ~print:upload_case_to_string ~shrink:shrink_case upload_case_gen
 
 let required_transfer_bins =
   [

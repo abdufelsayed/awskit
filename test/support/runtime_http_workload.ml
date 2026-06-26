@@ -483,12 +483,60 @@ let expected_observation_to_string scenario = function
   | `Exception_preserved -> "exception-preserved"
   | `No_body_required -> "no-body-required"
 
+let failure_report ~target_name scenario expected observed =
+  String.concat ~sep:"\n"
+    [
+      Printf.sprintf "%s observation mismatch" target_name;
+      "runtime-http-replay:";
+      Printf.sprintf "scenario: %s" scenario.Model.name;
+      Printf.sprintf "method: %s" (Model.method_to_string scenario.method_);
+      Printf.sprintf "status: %d" scenario.status;
+      Printf.sprintf "framing: %s" (Model.framing_to_string scenario.framing);
+      Printf.sprintf "connection-behavior: %s"
+        (Model.connection_to_string scenario.connection);
+      Printf.sprintf "consumption-mode: %s"
+        (Model.consume_to_string scenario.consume);
+      Printf.sprintf "expected-observation: %s"
+        (expected_observation_to_string scenario expected);
+      Printf.sprintf "observed-target-result: %s"
+        (Model.observed_to_string observed);
+      "copyable-replay-fixture:";
+      Runtime_http_replay.scenario_to_replay_fixture scenario;
+      Printf.sprintf "scenario-summary: %s" (Model.to_string scenario);
+    ]
+
+let assert_contains ~label ~substring text =
+  Alcotest.(check bool) label true (String.is_substring text ~substring)
+
+let test_failure_report_contains_replay_reduction_fields () =
+  let scenario =
+    Model.scenario ~name:"generated-get-500" ~method_:`GET ~status:500
+      ~framing:(Content_length { declared = 5; actual = "hello" })
+      ~connection:Close ~consume:(Read_once 2) ()
+  in
+  let report =
+    failure_report ~target_name:"awskit-test" scenario
+      (Model.expected_observation scenario)
+      (Model.Observed_body "he")
+  in
+  List.iter
+    [
+      ("scenario name", "scenario: generated-get-500");
+      ("method", "method: GET");
+      ("status", "status: 500");
+      ("framing", "framing: content-length declared=5 actual=5");
+      ("connection behavior", "connection-behavior: close");
+      ("consumption mode", "consumption-mode: read-once(2)");
+      ("expected observation", "expected-observation: body-prefix:\"he\"");
+      ("observed target result", "observed-target-result: body(2):\"he\"");
+      ("copyable replay", "copyable-replay-fixture:");
+      ("copyable framing payload", "framing=content-length 5 h68656c6c6f");
+    ]
+    ~f:(fun (label, substring) -> assert_contains ~label ~substring report)
+
 let fail_observation ~target_name scenario expected observed =
-  QCheck.Test.fail_reportf "%s observation mismatch: expected %s, got %s\n%s"
-    target_name
-    (expected_observation_to_string scenario expected)
-    (Model.observed_to_string observed)
-    (Model.to_string scenario)
+  QCheck.Test.fail_reportf "%s"
+    (failure_report ~target_name scenario expected observed)
 
 let valid_body_prefix ~max_prefix actual =
   String.is_prefix max_prefix ~prefix:actual
@@ -537,7 +585,7 @@ module Make (Target : TARGET) = struct
                 : bool)))
 
   let replay_cases =
-    List.map Runtime_http_replay.all ~f:(fun replay ->
+    List.map (Runtime_http_replay.all ()) ~f:(fun replay ->
         Alcotest.test_case replay.path `Quick (fun () ->
             ignore
               (check_scenario ~target_name:Target.name Target.run_scenario
@@ -559,6 +607,8 @@ module Make (Target : TARGET) = struct
         @ [
             Alcotest.test_case "scenario shrinker" `Quick
               test_scenario_shrinker_emits_recomputed_candidates;
+            Alcotest.test_case "failure report replay fields" `Quick
+              test_failure_report_contains_replay_reduction_fields;
             Alcotest.test_case "generator semantic coverage" `Quick
               test_generator_coverage;
             generated_case;

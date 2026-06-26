@@ -17,7 +17,9 @@
 (rule
  (alias runtime-http-workload)
  (package awskit-lwt)
- (deps test_runtime_http_workload_lwt.exe)
+ (deps
+  test_runtime_http_workload_lwt.exe
+  (source_tree ../../fixtures/runtime-http-replay))
  (action
   (run
    ./test_runtime_http_workload_lwt.exe

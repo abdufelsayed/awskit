@@ -3,8 +3,13 @@ type parse_error = { line : int; source : string; message : string }
 
 let ( let* ) = Result.bind
 
-let parse_error_to_string error =
-  Printf.sprintf "line %d: %s: %S" error.line error.message error.source
+let parse_error_to_string ?path error =
+  let location =
+    match path with
+    | None -> Printf.sprintf "line %d" error.line
+    | Some path -> Printf.sprintf "%s:%d" path error.line
+  in
+  Printf.sprintf "%s: %s: %S" location error.message error.source
 
 let parse_error ~line ~source message = Error { line; source; message }
 
