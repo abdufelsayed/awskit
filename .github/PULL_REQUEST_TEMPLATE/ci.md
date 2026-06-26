@@ -10,7 +10,7 @@
 
 ## Gate Impact
 
-<!-- State whether this changes @check-fast, @check-local, MinIO integration,
+<!-- State whether this changes @check-quick, @check-full, @check-stress, MinIO integration,
 release-check, or docs publishing. -->
 
 ## Validation

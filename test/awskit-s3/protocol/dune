@@ -48,17 +48,24 @@
   fmt))
 
 (rule
- (alias s3-protocol-wire)
+ (alias wire)
  (package awskit-s3)
  (deps
   test_protocol_pbt.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED))
+ (action
+  (run ./test_protocol_pbt.exe test "workload:awskit-s3:protocol-wire")))
+
+(rule
+ (alias domain)
+ (package awskit-s3)
+ (deps
   test_domain_pbt.exe
   (env_var AWSKIT_QCHECK_COUNT)
   (env_var QCHECK_SEED))
  (action
-  (progn
-   (run ./test_protocol_pbt.exe test "workload:awskit-s3:protocol-wire")
-   (run ./test_domain_pbt.exe))))
+  (run ./test_domain_pbt.exe)))
 
 (test
  (name test_protocol_fixtures)
@@ -76,7 +83,7 @@
   uri))
 
 (rule
- (alias s3-protocol-fixtures)
+ (alias fixtures)
  (package awskit-s3)
  (deps
   test_protocol_fixtures.exe
@@ -99,7 +106,7 @@
   fmt))
 
 (rule
- (alias s3-protocol-replay)
+ (alias replay)
  (package awskit-s3)
  (deps
   test_fuzz_replay.exe
@@ -111,5 +118,5 @@
  (name discovery)
  (package awskit-s3)
  (deps
-  (alias s3-protocol-wire)
-  (alias s3-protocol-replay)))
+  (alias wire)
+  (alias replay)))

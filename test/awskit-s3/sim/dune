@@ -12,7 +12,7 @@
   ptime))
 
 (rule
- (alias s3-sim-workload)
+ (alias s3-state)
  (package awskit-s3-sim)
  (deps
   test_awskit_s3_sim.exe
@@ -38,7 +38,7 @@
     "contract:awskit-s3-sim:body-lifecycle"))))
 
 (rule
- (alias s3-transfer-faults)
+ (alias s3-transfer)
  (package awskit-s3-sim)
  (deps
   test_awskit_s3_sim.exe

@@ -15,7 +15,7 @@
   unix))
 
 (rule
- (alias s3-minio-workload)
+ (alias s3-minio)
  (package awskit-s3-lwt-unix)
  (deps
   test_s3_minio_workload.exe

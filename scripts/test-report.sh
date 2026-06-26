@@ -8,10 +8,9 @@ Usage: scripts/test-report.sh [workflow] [--log-dir DIR] [--label LABEL]
 
 Workflows:
   quick        Format, whitespace, and no-network correctness.
-  local        Main no-network correctness plus discovery.
   integration  Bounded MinIO integration with service lifecycle.
-  full         Broad local workflow plus bounded and expensive MinIO.
-  deep         Full workflow with a higher generated workload count.
+  full         Broad workflow plus bounded MinIO integration.
+  stress       Full workflow with higher generated workload pressure.
 
 Options:
   --log-dir DIR  Write reports under DIR instead of .logs.
@@ -20,19 +19,20 @@ Options:
 
 Environment:
   AWSKIT_QCHECK_COUNT       Overrides generated workload counts.
-  AWSKIT_DEEP_QCHECK_COUNT  Default count used by the deep workflow when
+  AWSKIT_STRESS_QCHECK_COUNT
+                            Default count used by the stress workflow when
                             AWSKIT_QCHECK_COUNT is unset. Defaults to 2000.
   QCHECK_SEED              Replays a printed QCheck seed.
 USAGE
 }
 
-workflow=local
+workflow=quick
 log_dir=.logs
 label=
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    quick | local | integration | full | deep)
+    quick | integration | full | stress)
       workflow=$1
       shift
       ;;
@@ -72,9 +72,9 @@ fi
 cd "$root"
 
 case "$workflow" in
-  deep)
+  stress)
     if [ -z "${AWSKIT_QCHECK_COUNT:-}" ]; then
-      AWSKIT_QCHECK_COUNT=${AWSKIT_DEEP_QCHECK_COUNT:-2000}
+      AWSKIT_QCHECK_COUNT=${AWSKIT_STRESS_QCHECK_COUNT:-2000}
       export AWSKIT_QCHECK_COUNT
     fi
     ;;
@@ -170,7 +170,7 @@ run_metadata() {
     echo "head=$(git rev-parse --short HEAD 2>/dev/null || true)"
     echo "log_path=$(display_path "$report")"
     echo "AWSKIT_QCHECK_COUNT=${AWSKIT_QCHECK_COUNT:-}"
-    echo "AWSKIT_DEEP_QCHECK_COUNT=${AWSKIT_DEEP_QCHECK_COUNT:-}"
+    echo "AWSKIT_STRESS_QCHECK_COUNT=${AWSKIT_STRESS_QCHECK_COUNT:-}"
     echo "QCHECK_SEED=${QCHECK_SEED:-}"
     echo "AWSKIT_INTEGRATION_PROFILE=${AWSKIT_INTEGRATION_PROFILE:-}"
   } | tee -a "$report"
@@ -187,20 +187,11 @@ run_format_and_diff() {
 
 run_quick() {
   run_format_and_diff
-  dune_build_force "opam exec -- dune build --force @check-local" @check-local
-}
-
-run_local() {
-  dune_build_force "opam exec -- dune build --force @check-local" @check-local
-  dune_build_force "opam exec -- dune build --force @check-discovery" @check-discovery
+  dune_build_force "opam exec -- dune build --force @check-quick" @check-quick
 }
 
 run_docs_examples() {
   dune_build "opam exec -- dune build @examples @doc" @examples @doc
-}
-
-run_check_fast() {
-  dune_build_force "opam exec -- dune build --force @check-fast" @check-fast
 }
 
 dump_minio_logs_if_needed() {
@@ -256,9 +247,9 @@ run_minio_expensive() {
   fi
 
   if ! run_cmd \
-    "AWSKIT_INTEGRATION_PROFILE=expensive opam exec -- dune build --force @s3-minio-workload" \
+    "AWSKIT_INTEGRATION_PROFILE=expensive opam exec -- dune build --force @s3-minio" \
     env AWSKIT_INTEGRATION_PROFILE=expensive opam exec -- dune build --root "$root" \
-      --force @s3-minio-workload
+      --force @s3-minio
   then
     minio_failed=1
   fi
@@ -287,9 +278,14 @@ trap 'cleanup; exit 143' TERM
 
 run_full_workflow() {
   run_format_and_diff
-  run_check_fast
-  dune_build_force "opam exec -- dune build --force @check-local" @check-local
-  dune_build_force "opam exec -- dune build --force @check-discovery" @check-discovery
+  dune_build_force "opam exec -- dune build --force @check-quick" @check-quick
+  run_docs_examples
+  run_minio no
+}
+
+run_stress_workflow() {
+  run_format_and_diff
+  dune_build_force "opam exec -- dune build --force @check-stress" @check-stress
   run_docs_examples
   run_minio yes
 }
@@ -300,17 +296,14 @@ case "$workflow" in
   quick)
     run_quick
     ;;
-  local)
-    run_local
-    ;;
   integration)
     run_minio no
     ;;
   full)
     run_full_workflow
     ;;
-  deep)
-    run_full_workflow
+  stress)
+    run_stress_workflow
     ;;
 esac
 

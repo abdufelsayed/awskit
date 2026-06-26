@@ -161,7 +161,7 @@ jobs:
         run: opam install --with-test --with-doc --deps-only .
 
       - name: Build no-network correctness evidence
-        run: scripts/test-report.sh local --label no-network-correctness
+        run: scripts/test-report.sh quick --label no-network-correctness
 
       - name: Upload no-network correctness report
         if: always()

@@ -411,7 +411,7 @@ Optional MinIO integration tests:
 
 ```sh
 docker compose up -d
-opam exec -- dune build --force @s3-minio-workload
+opam exec -- dune build --force @s3-minio
 docker compose down -v
 ```
 

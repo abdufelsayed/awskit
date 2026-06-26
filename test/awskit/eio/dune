@@ -16,7 +16,7 @@
   unix))
 
 (rule
- (alias runtime-http-workload)
+ (alias runtime-http)
  (package awskit-eio)
  (deps
   test_runtime_http_workload_eio.exe
@@ -33,4 +33,4 @@
  (name discovery)
  (package awskit-eio)
  (deps
-  (alias runtime-http-workload)))
+  (alias runtime-http)))

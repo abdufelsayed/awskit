@@ -15,7 +15,7 @@
   qcheck-alcotest))
 
 (rule
- (alias runtime-http-workload)
+ (alias runtime-http)
  (package awskit-lwt)
  (deps
   test_runtime_http_workload_lwt.exe
@@ -32,4 +32,4 @@
  (name discovery)
  (package awskit-lwt)
  (deps
-  (alias runtime-http-workload)))
+  (alias runtime-http)))

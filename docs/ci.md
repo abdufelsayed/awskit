@@ -44,7 +44,7 @@ as release branch pushes, scheduled runs, and manual dispatches.
 - Runs on Ubuntu with the latest OCaml 5 compiler.
 - Installs test and documentation dependencies for all packages.
 - Builds no-network correctness evidence with
-  `scripts/test-report.sh local --label no-network-correctness`.
+  `scripts/test-report.sh quick --label no-network-correctness`.
 - Does not start local services; MinIO adapter evidence stays in the separate
   `s3-minio-integration` job.
 - Uploads `.logs/` as a workflow artifact even when the evidence fails.

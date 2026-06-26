@@ -57,13 +57,13 @@ documentation:
 | --- | --- | --- |
 | Object put/get/head/delete/copy, buffered helpers, streaming readers, ListObjectsV2, version-aware object APIs, object tagging, metadata, ranges, modeled preconditions/checksums/storage class/encryption, bucket basics, selected bucket configuration subresources, presigned artifacts, multipart upload, and adapter-owned file transfer helpers | supported or supported, scoped | See the package S3 support matrix for package/runtime coverage, simulator evidence, MinIO capability-profile notes, and operation boundaries. |
 | Simulator | supported, scoped | Deterministic in-memory application-level evidence for tests and documentation workflows. It is not live AWS coverage or a wire-protocol authority. |
-| MinIO integration target | supported, scoped | MinIO is the named local S3-compatible integration target only where `@s3-minio-workload` covers the behavior. Known capability-profile differences are documented in the package S3 support matrix. |
+| MinIO integration target | supported, scoped | MinIO is the named local S3-compatible integration target only where `@s3-minio` covers the behavior. Known capability-profile differences are documented in the package S3 support matrix. |
 | Access points, Object Lambda, S3 on Outposts, directory buckets, Object Lock/legal hold/retention/governance bypass, MFA delete, inventory, analytics, replication, lifecycle, metrics, notifications, logging, website hosting, requester-pays configuration, broad ACL/IAM/policy semantics, unmodeled SSE/checksum variants, arbitrary S3-compatible providers, and live AWS release-gate coverage | unsupported | No support claim for this release. Live AWS account checks remain optional/manual unless this policy is updated to promise them as a release gate. |
 
 ## S3-Compatible Storage
 
 Awskit targets AWS S3 semantics. MinIO is the named local S3-compatible
-integration target where `@s3-minio-workload` states coverage. That coverage does not
+integration target where `@s3-minio` states coverage. That coverage does not
 imply that arbitrary S3-like providers behave like AWS or are supported by
 Awskit.
 
@@ -87,7 +87,7 @@ The supported scope is backed by a layered test model:
 Run the usual local evidence with:
 
 ```sh
-opam exec -- dune build @check-fast @check-local @doc
+opam exec -- dune build @check-quick @doc
 ```
 
 Run MinIO integration explicitly when Docker is available:

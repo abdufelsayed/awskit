@@ -19,7 +19,7 @@ Rows are intentionally conservative:
 
 The simulator is deterministic application-level evidence. It is not live AWS
 coverage and is not a wire-protocol authority. MinIO evidence is the opt-in
-local S3-compatible test-double profile run by [@s3-minio-workload]; it does
+local S3-compatible test-double profile run by [@s3-minio]; it does
 not imply support for arbitrary S3-compatible providers.
 
 {1 Object Operations}
@@ -337,7 +337,7 @@ not imply support for arbitrary S3-compatible providers.
     provider compatibility promise.}
   {li {b Simulator coverage}: no, simulator evidence is local model evidence.}
   {li {b MinIO/evidence coverage}: MinIO is the named local S3-compatible test
-    double where [@s3-minio-workload] states coverage.}
+    double where [@s3-minio] states coverage.}
   {li {b Notes and boundaries}: arbitrary S3-compatible providers, provider
     extensions, and provider-specific behavior are unsupported. Live AWS account
     compatibility is optional/manual and is not a release gate for this support

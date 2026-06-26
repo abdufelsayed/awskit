@@ -38,7 +38,7 @@ done
 opam install --yes --working-dir --with-test --with-doc --with-dev-setup "$@"
 opam exec -- dune fmt
 opam exec -- dune runtest --force
-opam exec -- dune build @check-local
+opam exec -- dune build @check-quick
 if [ -n "$AWSKIT_EXAMPLE_OPAM_PACKAGES" ]; then
   opam install --yes $AWSKIT_EXAMPLE_OPAM_PACKAGES
 fi
