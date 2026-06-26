@@ -56,14 +56,29 @@ let required_strict_bins =
     "s3.command.versioning.enabled";
     "s3.command.versioning.suspended";
     "s3.command.get-versioning";
+    "s3.history.put-read";
+    "s3.history.put-delete";
     "s3.history.versioning-after-put";
     "s3.history.delete-after-versioning";
+    "s3.history.versioning-enabled-after-existing-object";
+    "s3.history.versioning-enabled-delete";
+    "s3.history.object-tag-mutation-read";
+    "s3.history.copy-destination-read";
+    "s3.history.list-page-after-multiple-visible-keys";
+    "s3.state.empty";
+    "s3.state.one-object";
+    "s3.state.multiple-objects";
+    "s3.state.versioning-enabled";
+    "s3.state.versioning-suspended";
+    "s3.state.delete-marker-present";
+    "s3.state.bucket-tags-present";
+    "s3.state.object-tags-present";
   ]
 
 let test_generator_coverage generator () =
   let histories = QCheck.Gen.generate ~n:500 generator in
   let coverage =
-    Workload_coverage.of_lists histories ~bins:S3_command.history_bins
+    Workload_coverage.of_lists histories ~bins:S3_history.coverage_bins
   in
   Workload_coverage.require_all ~label:"S3 workload generator"
     ~required:required_strict_bins coverage

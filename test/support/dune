@@ -4,6 +4,11 @@
  (wrapped false)
  (libraries alcotest))
 
+(test
+ (name test_workload_coverage)
+ (modules test_workload_coverage)
+ (libraries awskit_test_coverage alcotest))
+
 (library
  (name awskit_runtime_http_workload)
  (modules runtime_http_model runtime_http_replay runtime_http_workload)

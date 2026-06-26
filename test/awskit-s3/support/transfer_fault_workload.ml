@@ -46,14 +46,28 @@ let part_size_gen =
   QCheck.Gen.int_range Model.min_part_size
     (Model.min_part_size + max_extra_part_bytes)
 
+let boundary_lengths part_size =
+  [
+    0;
+    1;
+    Model.chunk_size - 1;
+    Model.chunk_size;
+    Model.chunk_size + 1;
+    part_size - 1;
+    part_size;
+    part_size + 1;
+    2 * part_size;
+  ]
+  |> List.filter (fun length -> length >= 0)
+  |> List.sort_uniq Int.compare
+
 let length_gen part_size =
   let open QCheck.Gen in
   oneof_weighted
     [
-      (1, return 0);
-      (2, int_range 1 4096);
+      (9, oneof_list (boundary_lengths part_size));
+      (2, int_range 2 4096);
       (2, int_range 4097 (128 * 1024));
-      (2, return part_size);
       (3, int_range part_size ((2 * part_size) + 257));
       (1, int_range ((2 * part_size) + 1) ((3 * part_size) + 257));
     ]
@@ -132,7 +146,29 @@ let fault_bin = function
   | Some Model.Multipart_complete_fails -> "transfer.fault.multipart-complete"
   | Some Model.Cleanup_delete_fails -> "transfer.fault.cleanup-delete"
 
-let coverage_bins case = [ size_bin case; fault_bin case.Model.fault ]
+let boundary_bins case =
+  let length = String.length case.Model.local_body in
+  let boundary =
+    if length = 0 then [ "transfer.boundary.zero" ]
+    else if length = 1 then [ "transfer.boundary.one-byte" ]
+    else if length = Model.chunk_size - 1 then
+      [ "transfer.boundary.chunk-minus-one" ]
+    else if length = Model.chunk_size then [ "transfer.boundary.chunk-exact" ]
+    else if length = Model.chunk_size + 1 then
+      [ "transfer.boundary.chunk-plus-one" ]
+    else if length = case.part_size - 1 then
+      [ "transfer.boundary.part-minus-one" ]
+    else if length = case.part_size then [ "transfer.boundary.part-exact" ]
+    else if length = case.part_size + 1 then
+      [ "transfer.boundary.part-plus-one" ]
+    else []
+  in
+  if Model.uses_multipart case && Model.part_count case >= 2 then
+    "transfer.boundary.multipart-two-or-more-parts" :: boundary
+  else boundary
+
+let coverage_bins case =
+  size_bin case :: fault_bin case.Model.fault :: boundary_bins case
 
 let normalize_fault ~part_size ~length = function
   | None -> None
@@ -320,7 +356,8 @@ let shrink_lengths case =
       ]
     else []
   in
-  unique_lengths (common @ multipart) length |> QCheck.Iter.of_list
+  unique_lengths (boundary_lengths case.part_size @ common @ multipart) length
+  |> QCheck.Iter.of_list
 
 let shrink_case case =
   let shrink_faults =
@@ -362,11 +399,43 @@ let required_transfer_bins =
     "transfer.fault.cleanup-delete";
   ]
 
+let required_transfer_boundary_bins =
+  [
+    "transfer.boundary.zero";
+    "transfer.boundary.one-byte";
+    "transfer.boundary.chunk-minus-one";
+    "transfer.boundary.chunk-exact";
+    "transfer.boundary.chunk-plus-one";
+    "transfer.boundary.part-minus-one";
+    "transfer.boundary.part-exact";
+    "transfer.boundary.part-plus-one";
+    "transfer.boundary.multipart-two-or-more-parts";
+  ]
+
+let transfer_boundary_thresholds =
+  List.map
+    (fun bin -> Workload_coverage.threshold ~bin ~minimum:10)
+    required_transfer_boundary_bins
+
+let generated_coverage sample_count =
+  let rand = Random.State.make_self_init () in
+  let rec loop remaining coverage =
+    if remaining = 0 then coverage
+    else
+      let case = QCheck.Gen.generate1 ~rand upload_case_gen in
+      loop (remaining - 1)
+        (Workload_coverage.add_many (coverage_bins case) coverage)
+  in
+  loop sample_count Workload_coverage.empty
+
 let test_generator_coverage () =
-  let cases = QCheck.Gen.generate ~n:1_000 upload_case_gen in
-  let coverage = Workload_coverage.of_lists cases ~bins:coverage_bins in
+  let sample_count = 1_000 in
+  let coverage = generated_coverage sample_count in
   Workload_coverage.require_all ~label:"S3 transfer fault generator"
-    ~required:required_transfer_bins coverage
+    ~required:(required_transfer_bins @ required_transfer_boundary_bins)
+    coverage;
+  Workload_coverage.require_thresholds ~label:"S3 transfer fault generator"
+    ~sample_count ~thresholds:transfer_boundary_thresholds coverage
 
 module Make (Target : TARGET) = struct
   let property =

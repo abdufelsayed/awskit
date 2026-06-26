@@ -402,13 +402,77 @@ let required_runtime_bins =
     "http.expected.body-error";
   ]
 
+let framing_pair_segment = function
+  | Model.Empty -> "empty"
+  | Content_length { declared; actual } ->
+      if Int.equal declared (String.length actual) then "content-length-exact"
+      else if declared > String.length actual then "content-length-underflow"
+      else "content-length-overflow"
+  | Duplicate_content_length { first; second; _ } ->
+      if Int.equal first second then "duplicate-content-length-equal"
+      else "duplicate-content-length-mismatch"
+  | Conflicting_length_and_chunked _ -> "conflicting-length-and-chunked"
+  | Early_close _ -> "early-close"
+  | Chunked _ -> "chunked"
+  | Malformed_chunked _ -> "malformed-chunked"
+  | Malformed_header_block _ -> "malformed-header-block"
+
+let consume_pair_segment = function
+  | Model.Read_all -> "read-all"
+  | Read_once _ -> "read-once"
+  | Drop_without_read -> "drop-without-read"
+  | Raise_in_consume -> "raise-in-consume"
+
+let framing_consume_pair_bin scenario =
+  Printf.sprintf "http.pair.%s/%s"
+    (framing_pair_segment scenario.Model.framing)
+    (consume_pair_segment scenario.consume)
+
+let runtime_coverage_bins scenario =
+  Model.coverage_bins scenario @ [ framing_consume_pair_bin scenario ]
+
+let scaled_thresholds ~sample_count specs =
+  List.filter_map specs ~f:(fun (bin, minimum_per_1_000) ->
+      let minimum = sample_count * minimum_per_1_000 / 1_000 in
+      if minimum <= 0 then None
+      else Some (Workload_coverage.threshold ~bin ~minimum))
+
+let runtime_distribution_thresholds ~sample_count =
+  scaled_thresholds ~sample_count
+    [
+      ("http.method.get", 100);
+      ("http.method.head", 100);
+      ("http.framing.content-length.exact", 40);
+      ("http.framing.content-length.underflow", 20);
+      ("http.framing.chunked", 40);
+      ("http.consume.read-all", 100);
+      ("http.consume.read-once", 20);
+    ]
+
+let runtime_pair_thresholds ~sample_count =
+  scaled_thresholds ~sample_count
+    [
+      ("http.pair.content-length-underflow/read-all", 10);
+      ("http.pair.chunked/read-all", 20);
+      ("http.pair.content-length-exact/read-once", 2);
+    ]
+
 let test_generator_coverage () =
+  let sample_count = 1_000 in
   let coverage =
-    Workload_coverage.of_lists (generated_samples 1_000)
-      ~bins:Runtime_http_model.coverage_bins
+    Workload_coverage.of_lists
+      (generated_samples sample_count)
+      ~bins:runtime_coverage_bins
   in
-  Workload_coverage.require_all ~label:"runtime HTTP generator"
-    ~required:required_runtime_bins coverage
+  let label =
+    Printf.sprintf "runtime HTTP generator (%d samples)" sample_count
+  in
+  Workload_coverage.require_all ~label ~required:required_runtime_bins coverage;
+  Workload_coverage.require_thresholds ~label ~sample_count
+    ~thresholds:
+      (runtime_distribution_thresholds ~sample_count
+      @ runtime_pair_thresholds ~sample_count)
+    coverage
 
 let expected_observation_to_string scenario = function
   | `Body body -> Printf.sprintf "body:%S" body

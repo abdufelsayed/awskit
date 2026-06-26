@@ -160,6 +160,60 @@ let command_bin = function
   | Put_versioning (Unknown _) -> "s3.command.versioning.unknown"
   | Get_versioning -> "s3.command.get-versioning"
 
+let put_key = function
+  | Put_string (key, _, _) | Put_string_metadata (key, _, _, _) -> Some key
+  | _ -> None
+
+let read_key = function
+  | Get_string key | Find_string key | Head_object key | Exists_object key ->
+      Some key
+  | _ -> None
+
+let delete_key = function Delete_object key -> Some key | _ -> None
+
+let object_tag_mutation_key = function
+  | Put_object_tags (key, _) | Delete_object_tags key -> Some key
+  | _ -> None
+
+let object_tag_read_key = function Get_object_tags key -> Some key | _ -> None
+
+let copy_destination_key = function
+  | Copy_object (_, destination_key)
+  | Copy_object_metadata (_, destination_key, _) ->
+      Some destination_key
+  | _ -> None
+
+let same_key left right =
+  match (left, right) with
+  | Some left, Some right -> String.equal left right
+  | None, _ | _, None -> false
+
+let adjacent_transition_bin left right =
+  match (left, right) with
+  | _, _ when same_key (put_key left) (read_key right) ->
+      Some "s3.history.put-read"
+  | _, _ when same_key (put_key left) (delete_key right) ->
+      Some "s3.history.put-delete"
+  | Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled, Delete_object _
+    ->
+      Some "s3.history.versioning-enabled-delete"
+  | _, _
+    when same_key (object_tag_mutation_key left) (object_tag_read_key right) ->
+      Some "s3.history.object-tag-mutation-read"
+  | _, _ when same_key (copy_destination_key left) (read_key right) ->
+      Some "s3.history.copy-destination-read"
+  | _, _ -> None
+
+let adjacent_transition_bins commands =
+  let rec loop acc = function
+    | left :: right :: rest -> (
+        match adjacent_transition_bin left right with
+        | None -> loop acc (right :: rest)
+        | Some bin -> loop (bin :: acc) (right :: rest))
+    | [] | [ _ ] -> List.rev acc
+  in
+  loop [] commands
+
 let history_bins commands =
   let command_bins = List.map command_bin commands in
   let saw_put = ref false in
@@ -184,7 +238,10 @@ let history_bins commands =
       [ "s3.history.delete-after-versioning" ]
     else []
   in
-  command_bins @ enabled_after_put_bins @ delete_after_versioning_bins
+  command_bins
+  @ adjacent_transition_bins commands
+  @ enabled_after_put_bins
+  @ delete_after_versioning_bins
 
 let transcript commands =
   commands

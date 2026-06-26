@@ -85,6 +85,71 @@ let test_minio_profile_excludes_versioning_after_current_objects () =
          S3_command.Put_string ("a.txt", "", []);
        ])
 
+let require_bins ~label ~required observed =
+  let missing = List.filter (fun bin -> not (List.mem bin observed)) required in
+  match missing with
+  | [] -> ()
+  | _ :: _ ->
+      Alcotest.failf "%s missing bins:\n%s\n\nobserved:\n%s" label
+        (String.concat "\n" missing)
+        (String.concat "\n" observed)
+
+let test_history_transition_bins_name_common_s3_flows () =
+  let commands =
+    [
+      S3_command.Put_string ("a.txt", "alpha", []);
+      Get_string "a.txt";
+      Put_string ("b.txt", "bravo", []);
+      Delete_object "b.txt";
+      Put_string ("logs/a.txt", "log-a", []);
+      Put_string ("logs/b.txt", "log-b", []);
+      Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled;
+      Delete_object "logs/a.txt";
+      Put_object_tags ("a.txt", [ ("env", "dev") ]);
+      Get_object_tags "a.txt";
+      Copy_object ("a.txt", "photos/2026.jpg");
+      Head_object "photos/2026.jpg";
+      List_keys_page { prefix = None; max_keys = 1 };
+    ]
+  in
+  require_bins ~label:"history transition coverage"
+    ~required:
+      [
+        "s3.history.put-read";
+        "s3.history.put-delete";
+        "s3.history.versioning-enabled-after-existing-object";
+        "s3.history.versioning-enabled-delete";
+        "s3.history.object-tag-mutation-read";
+        "s3.history.copy-destination-read";
+        "s3.history.list-page-after-multiple-visible-keys";
+      ]
+    (S3_history.coverage_bins commands)
+
+let test_model_state_bins_name_generated_history_states () =
+  let commands =
+    [
+      S3_command.Put_string ("a.txt", "alpha", [ ("env", "dev") ]);
+      Put_string ("b.txt", "bravo", []);
+      Put_bucket_tags [ ("team", "storage") ];
+      Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled;
+      Delete_object "a.txt";
+      Put_versioning Awskit_s3.Bucket.Versioning.Status.Suspended;
+    ]
+  in
+  require_bins ~label:"model state coverage"
+    ~required:
+      [
+        "s3.state.empty";
+        "s3.state.one-object";
+        "s3.state.multiple-objects";
+        "s3.state.versioning-enabled";
+        "s3.state.versioning-suspended";
+        "s3.state.delete-marker-present";
+        "s3.state.bucket-tags-present";
+        "s3.state.object-tags-present";
+      ]
+    (S3_history.coverage_bins commands)
+
 let test_replay_round_trips_generated_commands () =
   let commands =
     [
@@ -149,6 +214,10 @@ let suite =
         Alcotest.test_case
           "minio profile excludes versioning after current objects" `Quick
           test_minio_profile_excludes_versioning_after_current_objects;
+        Alcotest.test_case "history transition bins name common S3 flows" `Quick
+          test_history_transition_bins_name_common_s3_flows;
+        Alcotest.test_case "model state bins name generated history states"
+          `Quick test_model_state_bins_name_generated_history_states;
         Alcotest.test_case "replay round trips generated commands" `Quick
           test_replay_round_trips_generated_commands;
         Alcotest.test_case "replay rejects unknown versioning status" `Quick

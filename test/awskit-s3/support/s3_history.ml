@@ -65,6 +65,75 @@ let history_supported config commands =
   in
   loop S3_model.empty commands
 
+let list_page_after_multiple_visible_keys model = function
+  | S3_command.List_keys_page { prefix; max_keys = _ } ->
+      List.length (S3_model.keys_for_page ?prefix model) > 1
+  | _ -> false
+
+let stateful_transition_bins model command =
+  let versioning_after_existing_object =
+    match command with
+    | S3_command.Put_versioning Awskit_s3.Bucket.Versioning.Status.Enabled
+      when S3_model.keys model <> [] ->
+        [ "s3.history.versioning-enabled-after-existing-object" ]
+    | _ -> []
+  in
+  let list_page_bins =
+    if list_page_after_multiple_visible_keys model command then
+      [ "s3.history.list-page-after-multiple-visible-keys" ]
+    else []
+  in
+  versioning_after_existing_object @ list_page_bins
+
+let state_bins (model : S3_model.t) =
+  let object_count = List.length (S3_model.keys model) in
+  let object_count_bin =
+    if object_count = 0 then "s3.state.empty"
+    else if object_count = 1 then "s3.state.one-object"
+    else "s3.state.multiple-objects"
+  in
+  let versioning_bins =
+    match model.versioning with
+    | Some Awskit_s3.Bucket.Versioning.Status.Enabled ->
+        [ "s3.state.versioning-enabled" ]
+    | Some Suspended -> [ "s3.state.versioning-suspended" ]
+    | Some (Unknown _) | None -> []
+  in
+  let delete_marker_bins =
+    if List.is_empty (S3_model.delete_markers model) then []
+    else [ "s3.state.delete-marker-present" ]
+  in
+  let bucket_tag_bins =
+    if List.is_empty model.bucket_tags then []
+    else [ "s3.state.bucket-tags-present" ]
+  in
+  let object_tag_bins =
+    if
+      S3_model.String_map.exists
+        (fun _key (object_ : S3_model.object_) ->
+          not (List.is_empty object_.tags))
+        model.objects
+    then [ "s3.state.object-tags-present" ]
+    else []
+  in
+  (object_count_bin :: versioning_bins)
+  @ delete_marker_bins
+  @ bucket_tag_bins
+  @ object_tag_bins
+
+let coverage_bins commands =
+  let rec loop model state_acc transition_bins = function
+    | [] -> state_acc @ transition_bins
+    | command :: rest ->
+        let transition_bins =
+          stateful_transition_bins model command @ transition_bins
+        in
+        let next_model = S3_model.apply command model in
+        loop next_model (state_bins next_model @ state_acc) transition_bins rest
+  in
+  S3_command.history_bins commands
+  @ loop S3_model.empty (state_bins S3_model.empty) [] commands
+
 let absent_keys config model =
   S3_command.keys_for_profile config.value_profile
   |> List.filter (fun key -> not (List.mem key (existing_keys model)))

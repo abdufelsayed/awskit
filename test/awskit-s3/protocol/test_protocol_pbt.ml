@@ -13,6 +13,8 @@ let boundary_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:300
 let default_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:200
 let tagging_field_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:250
 let oversized_tag_count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:100
+let generator_sample_count = 1_000
+let generator_sample_minimum = 40
 
 let split_ampersand value =
   if String.equal value "" then [] else String.split_on_char '&' value
@@ -591,6 +593,133 @@ let prop_complete_upload_rejects_small_nonfinal_parts =
           && conn.Protocol_recording_runtime.Runtime.calls = []
       | Ok _ -> false)
 
+type protocol_generator_sample =
+  | Sample_query of (string * string list) list
+  | Sample_duplicate_query of (string * string list) list
+  | Sample_endpoint_malformed of string
+  | Sample_endpoint_mutation of string
+  | Sample_header_newline of string
+  | Sample_invalid_content_range of string
+  | Sample_invalid_tag_field of [ `Key of string | `Value of string ]
+  | Sample_oversized_tag_set of (string * string) list
+  | Sample_percent_encoded_object_key of string
+  | Sample_tagging_xml_mutation of string
+
+let protocol_generator_sample_gen =
+  let open QCheck.Gen in
+  oneof
+    [
+      map (fun value -> Sample_query value) Protocol_generators.query_params;
+      map
+        (fun value -> Sample_duplicate_query value)
+        Protocol_generators.duplicate_query_params;
+      map
+        (fun value -> Sample_endpoint_malformed value)
+        Protocol_generators.malformed_endpoint_authority;
+      map
+        (fun value -> Sample_endpoint_mutation value)
+        Protocol_mutation.mutated_endpoint;
+      map
+        (fun value -> Sample_header_newline value)
+        Protocol_generators.newline_header_value;
+      map
+        (fun value -> Sample_invalid_content_range value)
+        Protocol_generators.invalid_content_range;
+      map
+        (fun value -> Sample_invalid_tag_field value)
+        Protocol_generators.invalid_tag_field;
+      map
+        (fun value -> Sample_oversized_tag_set value)
+        Protocol_generators.oversized_tag_set;
+      map
+        (fun value -> Sample_percent_encoded_object_key value)
+        Protocol_generators.percent_encoded_object_key;
+      map
+        (fun value -> Sample_tagging_xml_mutation value)
+        Protocol_mutation.mutated_tagging_xml;
+    ]
+
+let protocol_generator_sample_family = function
+  | Sample_query _ -> Protocol_generators.Query
+  | Sample_duplicate_query _ -> Protocol_generators.Duplicate_query
+  | Sample_endpoint_malformed _ -> Protocol_generators.Endpoint_malformed
+  | Sample_endpoint_mutation _ -> Protocol_generators.Endpoint_mutation
+  | Sample_header_newline _ -> Protocol_generators.Header_newline
+  | Sample_invalid_content_range _ -> Protocol_generators.Invalid_content_range
+  | Sample_invalid_tag_field _ -> Protocol_generators.Invalid_tag_field
+  | Sample_oversized_tag_set _ -> Protocol_generators.Oversized_tag_set
+  | Sample_percent_encoded_object_key _ ->
+      Protocol_generators.Percent_encoded_object_key
+  | Sample_tagging_xml_mutation _ -> Protocol_generators.Tagging_xml_mutation
+
+let protocol_generator_sample_bin sample =
+  Protocol_generators.family_bin (protocol_generator_sample_family sample)
+
+let protocol_generator_sample_bins sample =
+  [ protocol_generator_sample_bin sample ]
+
+let protocol_generator_samples () =
+  QCheck.Gen.generate ~n:generator_sample_count protocol_generator_sample_gen
+
+let stable_protocol_generator_sample_bins =
+  [
+    "protocol.family.query";
+    "protocol.family.duplicate-query";
+    "protocol.family.endpoint-malformed";
+    "protocol.family.endpoint-mutation";
+    "protocol.family.header-newline";
+    "protocol.family.invalid-content-range";
+    "protocol.family.invalid-tag-field";
+    "protocol.family.oversized-tag-set";
+    "protocol.family.percent-encoded-object-key";
+    "protocol.family.tagging-xml-mutation";
+  ]
+
+let stable_protocol_generator_sample_thresholds =
+  List.map
+    (fun bin ->
+      Workload_coverage.threshold ~bin ~minimum:generator_sample_minimum)
+    stable_protocol_generator_sample_bins
+
+let protocol_generator_sample_coverage samples =
+  let coverage =
+    Workload_coverage.of_lists samples ~bins:protocol_generator_sample_bins
+  in
+  Workload_coverage.add_many
+    (Workload_coverage.adjacent_pairs ~bin:protocol_generator_sample_bin samples)
+    coverage
+
+let test_protocol_generator_sample_observability () =
+  (* This is aggregate sample observability for stable families only. It is not
+     reduced replay readiness; most protocol families still have broad printers
+     rather than family-specific shrinkers. *)
+  let samples = protocol_generator_samples () in
+  let coverage = protocol_generator_sample_coverage samples in
+  let missing =
+    Workload_coverage.missing stable_protocol_generator_sample_bins coverage
+  in
+  let weak =
+    Workload_coverage.threshold_failures coverage
+      ~thresholds:stable_protocol_generator_sample_thresholds
+  in
+  match (missing, weak) with
+  | [], [] -> ()
+  | _ ->
+      Alcotest.failf
+        "S3 protocol generator sample observability failed across %d samples:\n\
+         missing stable families:\n\
+         %s\n\n\
+         weak stable families:\n\
+         %s\n\n\
+         observed sample bins:\n\
+         %s"
+        (List.length samples)
+        (if List.is_empty missing then "(none)" else String.concat "\n" missing)
+        (match Workload_coverage.threshold_failure_lines weak with
+        | [] -> "(none)"
+        | lines -> String.concat "\n" lines)
+        (Workload_coverage.pp coverage)
+
 let protocol_family_properties =
   [
     (Protocol_generators.Query, prop_canonical_query_params_sorted);
@@ -629,7 +758,7 @@ let remaining_protocol_properties =
     prop_complete_upload_rejects_small_nonfinal_parts;
   ]
 
-let required_protocol_family_bins =
+let required_protocol_property_registration_bins =
   [
     "protocol.family.query";
     "protocol.family.duplicate-query";
@@ -643,7 +772,7 @@ let required_protocol_family_bins =
     "protocol.family.tagging-xml-mutation";
   ]
 
-let test_protocol_family_coverage () =
+let test_protocol_property_family_registration () =
   let observed =
     protocol_family_properties
     |> List.map (fun (family, _) -> Protocol_generators.family_bin family)
@@ -652,7 +781,7 @@ let test_protocol_family_coverage () =
   match
     List.filter
       (fun bin -> not (has_observed bin))
-      required_protocol_family_bins
+      required_protocol_property_registration_bins
   with
   | [] -> ()
   | missing ->
@@ -667,8 +796,10 @@ let test_protocol_family_coverage () =
 let suite =
   [
     ( "workload:awskit-s3:protocol-wire",
-      Alcotest.test_case "property family registration coverage" `Quick
-        test_protocol_family_coverage
+      Alcotest.test_case "generator sample observability (not replay coverage)"
+        `Quick test_protocol_generator_sample_observability
+      :: Alcotest.test_case "property family registration coverage" `Quick
+           test_protocol_property_family_registration
       :: List.map Protocol_support.to_alcotest
            (List.map snd protocol_family_properties
            @ remaining_protocol_properties) );

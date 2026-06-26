@@ -158,5 +158,22 @@ Generated workloads include lightweight semantic coverage checks. These checks
 do not prove product correctness by themselves; they prove that a generator is
 reaching important behavior classes before the target oracle runs.
 
+Coverage bins should describe semantic behavior, not implementation trivia:
+runtime framing and consume-mode combinations, S3 model states and transitions,
+transfer length boundaries and fault families, protocol generator families, and
+similar evidence that a generated workload is exploring the contract space.
+
+Use presence checks for rare but required behavior classes. Use conservative
+thresholds when a generator should hit a behavior class regularly across a
+fixed diagnostic sample. Keep those diagnostic sample sizes independent from
+`AWSKIT_QCHECK_COUNT`; that environment variable changes property-run counts
+for discovery or quick reruns and should not make coverage diagnostics brittle.
+
+Semantic coverage is not a replacement for oracles, shrinkers, or replay
+artifacts. When a coverage check names a behavior class, the workload still
+needs an independent oracle that can fail if the target mishandles that class.
+When discovery finds a real bug, reduce it into the replay corpus instead of
+turning the coverage bin into a hard-coded case list.
+
 If a semantic coverage check fails, fix the generator or split rare behavior
 into a directed generator. Do not pin a random seed to make the check pass.

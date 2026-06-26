@@ -27,6 +27,7 @@
   awskit
   awskit-s3
   awskit_s3_protocol_test_support
+  awskit_test_coverage
   alcotest
   qcheck-core
   qcheck-alcotest
