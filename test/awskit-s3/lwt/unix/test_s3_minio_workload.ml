@@ -451,8 +451,39 @@ let is_invalid_range_error error =
   | Some 416, Some "InvalidRange" | _, Some "InvalidRange" -> true
   | _ -> false
 
-let expect_invalid_range command_index command label = function
+let contains text substring =
+  let text_length = String.length text in
+  let substring_length = String.length substring in
+  let rec loop index =
+    if index + substring_length > text_length then false
+    else if String.equal (String.sub text index substring_length) substring then
+      true
+    else loop (index + 1)
+  in
+  substring_length = 0 || loop 0
+
+let is_content_range_decode_error error =
+  match Awskit.Error.kind error with
+  | Decode { message } -> contains message "Content-Range"
+  | _ -> false
+
+(* MinIO returns 206 with Content-Range: bytes 0--1/0 for suffix ranges
+   against empty objects. The S3 client should keep rejecting that malformed
+   header, while the MinIO profile records the test-double quirk explicitly. *)
+let minio_empty_suffix_range_quirk model key range =
+  match (Model.find key model, Awskit_s3.Range.view range) with
+  | Some (object_ : Model.object_), Suffix _ when String.length object_.body = 0
+    ->
+      true
+  | _ -> false
+
+let expect_invalid_range ?(allow_minio_empty_suffix_decode = false)
+    command_index command label = function
   | Error error when is_invalid_range_error error -> ()
+  | Error error
+    when allow_minio_empty_suffix_decode && is_content_range_decode_error error
+    ->
+      ()
   | Error error -> fail_error command_index command label error
   | Ok _ -> fail command_index command (label ^ " expected InvalidRange")
 
@@ -565,6 +596,8 @@ let assert_get_range command_index command conn key range model =
               ~max_bytes ()))
   | Invalid_range ->
       expect_invalid_range command_index command "get range"
+        ~allow_minio_empty_suffix_decode:
+          (minio_empty_suffix_range_quirk model key range)
         (await_result "get range"
            (S3.Object.get_string conn ~bucket ~key:(object_key key) ~options
               ~max_bytes ()))
