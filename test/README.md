@@ -38,7 +38,8 @@ S3 workload support lives in `test/awskit-s3/support`. The private
 model-aware history synthesis, pure model state, replay text helpers, and a
 target functor for package-owned runners. It also provides `transfer_model.ml`
 and `transfer_fault_workload.ml` for runtime-neutral transfer byte-movement,
-progress, and cleanup workloads.
+progress callback, cancellation, multipart ownership, and cleanup-secondary
+workloads.
 
 Pure S3 model contracts run through the support-owned alias:
 

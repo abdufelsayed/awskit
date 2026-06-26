@@ -170,6 +170,21 @@ let observe_lwt promise =
     (fun () -> Lwt.map (fun result -> `Returned result) promise)
     (fun exn -> Lwt.return (`Raised exn))
 
+let expect_raised_exception label matches = function
+  | `Raised exn when matches exn -> ()
+  | `Raised exn ->
+      Alcotest.failf "%s raised unexpected exception: %s" label
+        (Printexc.to_string exn)
+  | `Returned (Error error) ->
+      Alcotest.failf "%s returned error instead of raising: %a" label
+        Awskit_s3.Error.pp error
+  | `Returned (Ok _) -> Alcotest.failf "%s unexpectedly succeeded" label
+
+let check_object_absent label conn ~bucket ~key =
+  Alcotest.(check bool)
+    label false
+    (await_ok (label ^ " exists") (S3.Object.exists conn ~bucket ~key ()))
+
 let delete_object_version key version_id =
   match version_id with
   | Some version_id -> Object.Delete_many.object_ ~key ~version_id ()
@@ -1206,7 +1221,7 @@ let test_transfer_ranged_download_bytes () =
             ~direction:Transfer.Download ~phase:Transfer.Ranged_get ~total
             !progress))
 
-let test_transfer_owned_multipart_failure_cleans_up () =
+let test_transfer_progress_callback_exception_aborts_owned_multipart_upload () =
   with_minio_bucket (fun conn ~bucket ->
       let exception Progress_failed in
       let path = Filename.temp_file "awskit-minio-upload-failing" ".bin" in
@@ -1226,30 +1241,96 @@ let test_transfer_owned_multipart_failure_cleans_up () =
             Lwt_main.run
               (observe_lwt
                  (S3.Object.Transfer.multipart_upload_file conn ~bucket
-                    ~key:(object_key "failed-multipart-transfer.bin")
+                    ~key:(object_key "progress-failed-multipart-transfer.bin")
                     ~options ~path
                     ~on_progress:(fun _event ->
                       progress_seen := true;
                       raise Progress_failed)
                     ()))
           in
-          (match observed with
-          | `Raised exn ->
-              Alcotest.(check bool)
-                "raised progress exception" true (exn == Progress_failed)
-          | `Returned (Error error) ->
-              Alcotest.failf "progress exception returned as error: %a"
-                Awskit_s3.Error.pp error
-          | `Returned (Ok _) ->
-              Alcotest.fail
-                "multipart transfer succeeded despite progress exception");
+          expect_raised_exception "multipart progress callback"
+            (function Progress_failed -> true | _ -> false)
+            observed;
           Alcotest.(check bool) "progress observed" true !progress_seen;
+          check_object_absent "failed transfer object absent" conn ~bucket
+            ~key:(object_key "progress-failed-multipart-transfer.bin")))
+
+let test_transfer_ranged_download_callback_exception_leaves_no_success () =
+  with_minio_bucket (fun conn ~bucket ->
+      let exception Download_progress_failed in
+      let download_path =
+        Filename.temp_file "awskit-minio-download-ranged-failing" ".bin"
+      in
+      let part_size = Transfer.min_part_size in
+      let body = transfer_body (part_size + 2048) in
+      let progress_seen = ref false in
+      remove_file download_path;
+      Fun.protect
+        ~finally:(fun () -> remove_file download_path)
+        (fun () ->
+          ignore
+            (await_ok "put failing ranged transfer object"
+               (S3.Object.put_string conn ~bucket
+                  ~key:(object_key "ranged-callback-failed-transfer.bin")
+                  ~contents:body ())
+              : Object.Put.result);
+          let options =
+            Transfer.download_options_exn
+              ~multipart_threshold:(Int64.of_int part_size) ~part_size
+              ~concurrency:1 ()
+          in
+          let observed =
+            Lwt_main.run
+              (observe_lwt
+                 (S3.Object.Transfer.download_file conn ~bucket
+                    ~key:(object_key "ranged-callback-failed-transfer.bin")
+                    ~options ~path:download_path
+                    ~on_progress:(fun _event ->
+                      progress_seen := true;
+                      raise Download_progress_failed)
+                    ()))
+          in
+          expect_raised_exception "ranged download progress callback"
+            (function Download_progress_failed -> true | _ -> false)
+            observed;
+          Alcotest.(check bool) "download progress observed" true !progress_seen;
           Alcotest.(check bool)
-            "failed transfer object absent" false
-            (await_ok "failed transfer exists"
-               (S3.Object.exists conn ~bucket
-                  ~key:(object_key "failed-multipart-transfer.bin")
-                  ()))))
+            "download target absent after callback failure" false
+            (Sys.file_exists download_path)))
+
+let test_transfer_multipart_upload_cancellation_leaves_no_completed_object () =
+  with_minio_bucket (fun conn ~bucket ->
+      let path = Filename.temp_file "awskit-minio-upload-cancelled" ".bin" in
+      let part_size = Transfer.min_part_size in
+      let body = transfer_body (part_size + 1024) in
+      let progress_seen = ref false in
+      let key = object_key "cancelled-multipart-transfer.bin" in
+      write_file path body;
+      Fun.protect
+        ~finally:(fun () -> remove_file path)
+        (fun () ->
+          let options =
+            Transfer.upload_options_exn
+              ~multipart_threshold:(Int64.of_int part_size) ~part_size
+              ~concurrency:1 ()
+          in
+          let observed =
+            Lwt_main.run
+              (observe_lwt
+                 (S3.Object.Transfer.multipart_upload_file conn ~bucket ~key
+                    ~options ~path
+                    ~on_progress:(fun _event ->
+                      progress_seen := true;
+                      raise Lwt.Canceled)
+                    ()))
+          in
+          expect_raised_exception "multipart upload cancellation"
+            (function Lwt.Canceled -> true | _ -> false)
+            observed;
+          Alcotest.(check bool)
+            "cancellation progress observed" true !progress_seen;
+          check_object_absent "cancelled transfer object absent" conn ~bucket
+            ~key))
 
 let transfer_suite =
   [
@@ -1278,8 +1359,15 @@ let transfer_suite =
           test_transfer_multipart_upload_bytes;
         Alcotest.test_case "ranged download byte comparison" `Quick
           test_transfer_ranged_download_bytes;
-        Alcotest.test_case "owned multipart failure cleanup" `Quick
-          test_transfer_owned_multipart_failure_cleans_up;
+        Alcotest.test_case
+          "progress callback exception aborts owned multipart upload" `Quick
+          test_transfer_progress_callback_exception_aborts_owned_multipart_upload;
+        Alcotest.test_case
+          "ranged download callback interruption has no success" `Quick
+          test_transfer_ranged_download_callback_exception_leaves_no_success;
+        Alcotest.test_case
+          "multipart upload cancellation leaves no completed object" `Quick
+          test_transfer_multipart_upload_cancellation_leaves_no_completed_object;
       ] );
   ]
 

@@ -1,9 +1,12 @@
 type fault =
   | Read_fails_after of int
   | Write_fails_after of int
+  | Progress_callback_raises_after of int
+  | Cancellation_after_bytes of int
   | Multipart_create_fails
   | Multipart_part_fails of int
   | Multipart_complete_fails
+  | Cleanup_delete_fails
 
 type upload_case = {
   local_body : string;
@@ -19,6 +22,9 @@ type expected_upload =
       read_bytes : int;
       written_bytes : int;
       progress_bytes : int;
+      callback_exception_preserved : bool;
+      cleanup_error_secondary : bool;
+      cancelled : bool;
     }
 
 let min_part_size = 5 * 1024 * 1024
@@ -39,15 +45,21 @@ let uses_multipart case =
 let byte_fault_reaches length offset = offset >= 0 && offset < length
 
 let fault_reaches case = function
-  | Read_fails_after offset | Write_fails_after offset ->
+  | Read_fails_after offset
+  | Write_fails_after offset
+  | Progress_callback_raises_after offset
+  | Cancellation_after_bytes offset ->
       byte_fault_reaches (String.length case.local_body) offset
   | Multipart_create_fails | Multipart_complete_fails -> uses_multipart case
   | Multipart_part_fails part_number ->
       uses_multipart case && part_number >= 1 && part_number <= part_count case
+  | Cleanup_delete_fails -> uses_multipart case
 
 let owned_upload_aborted case = function
   | Multipart_create_fails -> false
-  | Read_fails_after _ | Write_fails_after _ | Multipart_part_fails _
+  | Cleanup_delete_fails -> false
+  | Read_fails_after _ | Write_fails_after _ | Progress_callback_raises_after _
+  | Cancellation_after_bytes _ | Multipart_part_fails _
   | Multipart_complete_fails ->
       uses_multipart case
 
@@ -73,6 +85,20 @@ let completed_part_bytes_before_offset case offset =
 let bytes_before_part case part_number =
   if part_number <= 1 then 0
   else min (String.length case.local_body) ((part_number - 1) * case.part_size)
+
+let completed_part_bytes_after_offset case offset =
+  if not (uses_multipart case) then
+    min
+      (String.length case.local_body)
+      (((offset / chunk_size) + 1) * chunk_size)
+  else
+    min
+      (String.length case.local_body)
+      (((offset / case.part_size) + 1) * case.part_size)
+
+let completed_progress_bytes_before_offset case offset =
+  if uses_multipart case then completed_part_bytes_before_offset case offset
+  else min (String.length case.local_body) (offset / chunk_size * chunk_size)
 
 let write_fault_counts case limit =
   let rec chunks read_bytes written_bytes progress_bytes part_remaining =
@@ -110,14 +136,42 @@ let failure_counts case = function
   | Read_fails_after offset ->
       let progress_bytes = completed_part_bytes_before_offset case offset in
       (offset, offset, progress_bytes)
+  | Cancellation_after_bytes offset ->
+      let progress_bytes = completed_part_bytes_before_offset case offset in
+      (offset, offset, progress_bytes)
   | Write_fails_after offset -> write_fault_counts case offset
+  | Progress_callback_raises_after offset ->
+      let bytes = completed_part_bytes_after_offset case offset in
+      let progress_bytes = completed_progress_bytes_before_offset case offset in
+      (bytes, bytes, progress_bytes)
   | Multipart_create_fails -> (0, 0, 0)
   | Multipart_part_fails part_number ->
       let bytes = bytes_before_part case part_number in
       (bytes, bytes, bytes)
-  | Multipart_complete_fails ->
+  | Multipart_complete_fails | Cleanup_delete_fails ->
       let bytes = String.length case.local_body in
       (bytes, bytes, bytes)
+
+let callback_exception_preserved = function
+  | Progress_callback_raises_after _ -> true
+  | Read_fails_after _ | Write_fails_after _ | Cancellation_after_bytes _
+  | Multipart_create_fails | Multipart_part_fails _ | Multipart_complete_fails
+  | Cleanup_delete_fails ->
+      false
+
+let cleanup_error_secondary = function
+  | Cleanup_delete_fails -> true
+  | Read_fails_after _ | Write_fails_after _ | Progress_callback_raises_after _
+  | Cancellation_after_bytes _ | Multipart_create_fails | Multipart_part_fails _
+  | Multipart_complete_fails ->
+      false
+
+let cancelled = function
+  | Cancellation_after_bytes _ -> true
+  | Read_fails_after _ | Write_fails_after _ | Progress_callback_raises_after _
+  | Multipart_create_fails | Multipart_part_fails _ | Multipart_complete_fails
+  | Cleanup_delete_fails ->
+      false
 
 let expected_upload case =
   match case.fault with
@@ -132,6 +186,9 @@ let expected_upload case =
           read_bytes;
           written_bytes;
           progress_bytes;
+          callback_exception_preserved = callback_exception_preserved fault;
+          cleanup_error_secondary = cleanup_error_secondary fault;
+          cancelled = cancelled fault;
         }
   | None | Some _ ->
       Upload_succeeds
@@ -143,9 +200,13 @@ let expected_upload case =
 let fault_to_string = function
   | Read_fails_after n -> Printf.sprintf "read-fails-after:%d" n
   | Write_fails_after n -> Printf.sprintf "write-fails-after:%d" n
+  | Progress_callback_raises_after n ->
+      Printf.sprintf "progress-callback-raises-after:%d" n
+  | Cancellation_after_bytes n -> Printf.sprintf "cancellation-after-bytes:%d" n
   | Multipart_create_fails -> "multipart-create-fails"
   | Multipart_part_fails n -> Printf.sprintf "multipart-part-fails:%d" n
   | Multipart_complete_fails -> "multipart-complete-fails"
+  | Cleanup_delete_fails -> "cleanup-delete-fails"
 
 let upload_case_to_string case =
   let body_len = String.length case.local_body in

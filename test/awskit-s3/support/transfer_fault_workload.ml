@@ -80,6 +80,15 @@ let fault_gen ~length ~part_size =
           map
             (fun n -> Some (Model.Write_fails_after n))
             (fault_offset_gen ~length ~part_size) );
+        ( 2,
+          map
+            (fun n -> Some (Model.Progress_callback_raises_after n))
+            (fault_offset_gen ~length ~part_size) );
+        ( 2,
+          map
+            (fun n -> Some (Model.Cancellation_after_bytes n))
+            (fault_offset_gen ~length ~part_size) );
+        (1, return (Some Model.Cleanup_delete_fails));
       ]
   in
   let multipart_faults =
@@ -115,9 +124,13 @@ let fault_bin = function
   | None -> "transfer.fault.none"
   | Some (Model.Read_fails_after _) -> "transfer.fault.read"
   | Some (Model.Write_fails_after _) -> "transfer.fault.write"
+  | Some (Model.Progress_callback_raises_after _) ->
+      "transfer.fault.progress-callback"
+  | Some (Model.Cancellation_after_bytes _) -> "transfer.fault.cancellation"
   | Some Model.Multipart_create_fails -> "transfer.fault.multipart-create"
   | Some (Model.Multipart_part_fails _) -> "transfer.fault.multipart-part"
   | Some Model.Multipart_complete_fails -> "transfer.fault.multipart-complete"
+  | Some Model.Cleanup_delete_fails -> "transfer.fault.cleanup-delete"
 
 let coverage_bins case = [ size_bin case; fault_bin case.Model.fault ]
 
@@ -127,6 +140,10 @@ let normalize_fault ~part_size ~length = function
       Some (Model.Read_fails_after (min offset (length - 1)))
   | Some (Model.Write_fails_after offset) when length > 0 ->
       Some (Model.Write_fails_after (min offset (length - 1)))
+  | Some (Model.Progress_callback_raises_after offset) when length > 0 ->
+      Some (Model.Progress_callback_raises_after (min offset (length - 1)))
+  | Some (Model.Cancellation_after_bytes offset) when length > 0 ->
+      Some (Model.Cancellation_after_bytes (min offset (length - 1)))
   | Some Model.Multipart_create_fails when length >= part_size ->
       Some Model.Multipart_create_fails
   | Some Model.Multipart_complete_fails when length >= part_size ->
@@ -134,6 +151,8 @@ let normalize_fault ~part_size ~length = function
   | Some (Model.Multipart_part_fails part_number) when length >= part_size ->
       let part_count = part_count_for_length ~length ~part_size in
       Some (Model.Multipart_part_fails (min part_number part_count))
+  | Some Model.Cleanup_delete_fails when length >= part_size ->
+      Some Model.Cleanup_delete_fails
   | Some _ -> None
 
 let fault_equal left right =
@@ -142,10 +161,16 @@ let fault_equal left right =
       Int.equal left right
   | Model.Write_fails_after left, Model.Write_fails_after right ->
       Int.equal left right
+  | ( Model.Progress_callback_raises_after left,
+      Model.Progress_callback_raises_after right ) ->
+      Int.equal left right
+  | Model.Cancellation_after_bytes left, Model.Cancellation_after_bytes right ->
+      Int.equal left right
   | Model.Multipart_create_fails, Model.Multipart_create_fails -> true
   | Model.Multipart_part_fails left, Model.Multipart_part_fails right ->
       Int.equal left right
   | Model.Multipart_complete_fails, Model.Multipart_complete_fails -> true
+  | Model.Cleanup_delete_fails, Model.Cleanup_delete_fails -> true
   | _ -> false
 
 let fault_option_equal left right =
@@ -182,13 +207,27 @@ let shrink_fault fault =
           Some (Model.Write_fails_after 0);
           Some (Model.Write_fails_after (offset / 2));
         ]
+    | Some (Model.Progress_callback_raises_after offset) ->
+        [
+          None;
+          Some (Model.Progress_callback_raises_after 0);
+          Some (Model.Progress_callback_raises_after (offset / 2));
+        ]
+    | Some (Model.Cancellation_after_bytes offset) ->
+        [
+          None;
+          Some (Model.Cancellation_after_bytes 0);
+          Some (Model.Cancellation_after_bytes (offset / 2));
+        ]
     | Some (Model.Multipart_part_fails part_number) ->
         [
           None;
           Some (Model.Multipart_part_fails 1);
           Some (Model.Multipart_part_fails (max 1 (part_number / 2)));
         ]
-    | Some Model.Multipart_create_fails | Some Model.Multipart_complete_fails ->
+    | Some Model.Multipart_create_fails
+    | Some Model.Multipart_complete_fails
+    | Some Model.Cleanup_delete_fails ->
         [ None ]
   in
   QCheck.Iter.of_list (distinct_strict_fault_shrinks fault candidates)
@@ -210,10 +249,15 @@ let test_shrink_fault_excludes_original () =
       Some (Model.Read_fails_after 1);
       Some (Model.Write_fails_after 0);
       Some (Model.Write_fails_after 1);
+      Some (Model.Progress_callback_raises_after 0);
+      Some (Model.Progress_callback_raises_after 1);
+      Some (Model.Cancellation_after_bytes 0);
+      Some (Model.Cancellation_after_bytes 1);
       Some Model.Multipart_create_fails;
       Some (Model.Multipart_part_fails 1);
       Some (Model.Multipart_part_fails 2);
       Some Model.Multipart_complete_fails;
+      Some Model.Cleanup_delete_fails;
     ]
   in
   List.iter
@@ -248,6 +292,15 @@ let deterministic_cases =
     ( "multipart complete fault reports all bytes before cleanup",
       case ~length:multipart_length ~part_size:Model.min_part_size
         ~fault:Model.Multipart_complete_fails () );
+    ( "progress callback exception is preserved",
+      case ~length:4096 ~part_size:Model.min_part_size
+        ~fault:(Model.Progress_callback_raises_after 17) () );
+    ( "cancellation leaves no completed object",
+      case ~length:4096 ~part_size:Model.min_part_size
+        ~fault:(Model.Cancellation_after_bytes 17) () );
+    ( "cleanup failure is reported without hiding primary failure",
+      case ~length:multipart_length ~part_size:Model.min_part_size
+        ~fault:Model.Cleanup_delete_fails () );
   ]
 
 let unique_lengths lengths current =
@@ -301,9 +354,12 @@ let required_transfer_bins =
     "transfer.fault.none";
     "transfer.fault.read";
     "transfer.fault.write";
+    "transfer.fault.progress-callback";
+    "transfer.fault.cancellation";
     "transfer.fault.multipart-create";
     "transfer.fault.multipart-part";
     "transfer.fault.multipart-complete";
+    "transfer.fault.cleanup-delete";
   ]
 
 let test_generator_coverage () =
