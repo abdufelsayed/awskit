@@ -17,6 +17,36 @@ let getenv_default name default =
   | Some value when value <> "" -> value
   | _ -> default
 
+type integration_profile = S3_workload.integration_profile =
+  | Bounded
+  | Expensive
+
+let integration_profile_allowed =
+  String.concat ", " S3_workload.integration_profile_allowed_values
+
+let integration_profile_to_string = S3_workload.integration_profile_to_string
+
+let parse_integration_profile () =
+  match Sys.getenv_opt "AWSKIT_INTEGRATION_PROFILE" with
+  | None | Some "" -> Ok Bounded
+  | Some value -> (
+      match S3_workload.integration_profile_of_string value with
+      | Ok profile -> Ok profile
+      | Error (S3_workload.Unknown_integration_profile value) -> Error value)
+
+let selected_integration_profile_result = parse_integration_profile ()
+
+let selected_integration_profile =
+  match selected_integration_profile_result with
+  | Ok profile -> profile
+  | Error _ -> Bounded
+
+let selected_integration_profile_name =
+  integration_profile_to_string selected_integration_profile
+
+let selected_workload_profile =
+  S3_workload.minio_workload_profile selected_integration_profile
+
 let endpoint = getenv_default "AWSKIT_S3_MINIO_ENDPOINT" "http://127.0.0.1:9000"
 let unsafe_http = getenv_default "AWSKIT_S3_MINIO_UNSAFE_HTTP" ""
 let access_key = getenv_default "AWSKIT_S3_MINIO_ACCESS_KEY_ID" "minioadmin"
@@ -71,14 +101,22 @@ let tags_of_set tags =
 let metadata_to_set metadata = Metadata.to_list metadata |> normalize_metadata
 let metadata_of_model metadata = Metadata.of_list_exn metadata
 
-let skip_unconfigured_minio label error =
+let report_selected_profile profile =
   Format.eprintf
-    "@[<v>Skipping MinIO integration: no AWSKIT_S3_MINIO_* configuration was \
-     supplied and %s failed.@;\
+    "@[<v>MinIO integration profile: %s@;\
+     Evidence target: local S3-compatible MinIO test double; this is not AWS \
+     provider certification.@]@."
+    (integration_profile_to_string profile)
+
+let skip_unconfigured_minio profile label error =
+  Format.eprintf
+    "@[<v>Skipping MinIO integration for profile %s: no AWSKIT_S3_MINIO_* \
+     configuration was supplied and %s failed.@;\
      Start local MinIO with default credentials or set \
      AWSKIT_S3_MINIO_ENDPOINT, AWSKIT_S3_MINIO_ACCESS_KEY_ID, and \
      AWSKIT_S3_MINIO_SECRET_ACCESS_KEY to require this gate.@;\
      %a@]@."
+    (integration_profile_to_string profile)
     label Awskit_s3.Error.pp error;
   Alcotest.skip ()
 
@@ -190,36 +228,73 @@ let delete_object_version key version_id =
   | Some version_id -> Object.Delete_many.object_ ~key ~version_id ()
   | None -> delete_object_key key
 
+let bucket_to_string bucket = Bucket_name.to_string bucket
+let key_to_string key = Object_key.to_string key
+
+let version_id_to_string = function
+  | None -> "current"
+  | Some version_id -> Object.Version_id.to_string version_id
+
+let upload_to_string upload =
+  Printf.sprintf "bucket=%s key=%s upload_id=%s"
+    (Multipart.Upload.bucket upload |> bucket_to_string)
+    (Multipart.Upload.key upload |> key_to_string)
+    (Multipart.Upload.upload_id upload |> Multipart.Upload_id.to_string)
+
+let cleanup_object_to_string (object_ : Object.Delete_many.object_) =
+  Printf.sprintf "key=%s version=%s"
+    (key_to_string object_.key)
+    (version_id_to_string object_.version_id)
+
+let preview_list ~to_string values =
+  let max_items = 8 in
+  let rec loop remaining count acc = function
+    | [] -> (List.rev acc, count, 0)
+    | rest when remaining = 0 -> (List.rev acc, count, List.length rest)
+    | value :: rest ->
+        loop (remaining - 1) (count + 1) (to_string value :: acc) rest
+  in
+  let preview, shown, omitted = loop max_items 0 [] values in
+  let suffix =
+    if omitted = 0 then "" else Printf.sprintf "; ... %d more" omitted
+  in
+  Printf.sprintf "count=%d shown=%d [%s%s]" (List.length values) shown
+    (String.concat "; " preview)
+    suffix
+
 let cleanup_context bucket error =
   Awskit.Error.Producer.with_context
-    (Printf.sprintf "cleaning MinIO bucket %s" (Bucket_name.to_string bucket))
+    (Printf.sprintf "cleaning MinIO bucket %s" (bucket_to_string bucket))
     error
 
-let delete_item_cleanup_error (error : Object.Delete_many.item_error) =
+let cleanup_delete_objects_context ~bucket objects =
+  Printf.sprintf "deleting MinIO cleanup objects bucket=%s %s"
+    (bucket_to_string bucket)
+    (preview_list ~to_string:cleanup_object_to_string objects)
+
+let delete_item_cleanup_error ~bucket (error : Object.Delete_many.item_error) =
   Awskit.Error.Producer.service ~status:200 ~code:error.code
     ?message:error.message ~headers:[] ()
   |> Awskit.Error.Producer.with_context
-       (Printf.sprintf "delete_objects item failed for key %s"
-          (Object_key.to_string error.key))
+       (Printf.sprintf "delete_objects item failed bucket=%s key=%s"
+          (bucket_to_string bucket) (key_to_string error.key))
 
 let cleanup_delete_objects conn ~bucket objects =
   let open Lwt.Syntax in
   match objects with
   | [] -> Lwt.return_ok ()
   | _ -> (
+      let context = cleanup_delete_objects_context ~bucket objects in
       let* result = S3.Object.delete_objects conn ~bucket ~objects () in
       match result with
       | Error error ->
-          Lwt.return_error
-            (Awskit.Error.Producer.with_context "deleting MinIO cleanup objects"
-               error)
+          Lwt.return_error (Awskit.Error.Producer.with_context context error)
       | Ok ({ errors = []; _ } : Object.Delete_many.result) -> Lwt.return_ok ()
       | Ok result ->
           Lwt.return_error
-            (List.map delete_item_cleanup_error result.errors
+            (List.map (delete_item_cleanup_error ~bucket) result.errors
             |> Awskit.Error.Producer.multiple
-            |> Awskit.Error.Producer.with_context
-                 "deleting MinIO cleanup objects"))
+            |> Awskit.Error.Producer.with_context context))
 
 let cleanup_objects conn ~bucket =
   let open Lwt.Syntax in
@@ -260,7 +335,8 @@ let cleanup_objects conn ~bucket =
           Lwt.return_error
             (Awskit.Error.Producer.multiple [ versions_error; keys_error ]
             |> Awskit.Error.Producer.with_context
-                 "listing MinIO cleanup objects"))
+                 (Printf.sprintf "listing MinIO cleanup objects bucket=%s"
+                    (bucket_to_string bucket))))
 
 let cleanup_bucket_result conn ~bucket =
   let open Lwt.Syntax in
@@ -297,10 +373,10 @@ let cleanup_bucket_or_fail conn ~bucket =
 
 let report_cleanup_after_primary_failure error =
   Format.eprintf
-    "@[<v>MinIO cleanup failed after the primary workload failure; preserving \
-     the primary failure.@;\
+    "@[<v>MinIO cleanup failed after the primary workload failure in profile \
+     %s; preserving the primary failure.@;\
      %a@]@."
-    Awskit_s3.Error.pp error
+    selected_integration_profile_name Awskit_s3.Error.pp error
 
 let protect_with_bucket_cleanup conn ~bucket f =
   match f () with
@@ -354,7 +430,8 @@ let is_absent_object_error error =
   | _ -> false
 
 let fail command_index command message =
-  QCheck.Test.fail_reportf "command #%d %s: %s" command_index
+  QCheck.Test.fail_reportf "integration_profile=%s command #%d %s: %s"
+    selected_integration_profile_name command_index
     (Command.to_string command)
     message
 
@@ -952,10 +1029,9 @@ module Minio_target : S3_workload.TARGET = struct
 end
 
 module Workload =
-  S3_workload.Make_with_config
+  S3_workload.Make_with_profile
     (struct
-      let profile = S3_workload.Minio
-      let count = 25
+      let workload_profile = selected_workload_profile
     end)
     (Minio_target)
 
@@ -1098,6 +1174,10 @@ let test_list_pagination_is_service_backed () =
 let test_manual_multipart_lifecycle () =
   with_minio_bucket (fun conn ~bucket ->
       let key = object_key "manual-multipart.bin" in
+      let key_context =
+        Printf.sprintf "bucket=%s key=%s" (bucket_to_string bucket)
+          (key_to_string key)
+      in
       let metadata = Metadata.of_list_exn [ ("transfer", "manual") ] in
       let create_options =
         Multipart.Create.options_exn ~metadata
@@ -1105,16 +1185,19 @@ let test_manual_multipart_lifecycle () =
           ()
       in
       let create =
-        await_ok "create manual multipart upload"
+        await_ok
+          (Printf.sprintf "create manual multipart upload %s" key_context)
           (S3.Multipart.create_upload conn ~bucket ~key ~options:create_options
              ())
       in
+      let upload_context = upload_to_string create.upload in
       let part_size = Transfer.min_part_size in
       let first_body = transfer_body part_size in
       let second_body = transfer_body 113 in
       let upload_part part_number contents =
         await_ok
-          (Printf.sprintf "upload manual multipart part %d" part_number)
+          (Printf.sprintf "upload manual multipart part %d %s" part_number
+             upload_context)
           (S3.Multipart.upload_part conn ~upload:create.upload
              ~part_number:(Multipart.Part_number.of_int_exn part_number)
              ~body:(S3.Body.of_string contents)
@@ -1123,7 +1206,8 @@ let test_manual_multipart_lifecycle () =
       let first = upload_part 1 first_body in
       let second = upload_part 2 second_body in
       let listed_parts =
-        await_ok "list manual multipart parts"
+        await_ok
+          (Printf.sprintf "list manual multipart parts %s" upload_context)
           (S3.Multipart.List_parts.parts conn ~upload:create.upload ~max_pages:2
              ())
       in
@@ -1140,7 +1224,8 @@ let test_manual_multipart_lifecycle () =
            (fun (part : Multipart.List_parts.part_info) -> part.size)
            listed_parts);
       ignore
-        (await_ok "complete manual multipart upload"
+        (await_ok
+           (Printf.sprintf "complete manual multipart upload %s" upload_context)
            (S3.Multipart.complete_upload conn ~upload:create.upload
               ~parts:[ first.part; second.part ]
               ())
@@ -1471,6 +1556,23 @@ let transfer_suite =
       ] );
   ]
 
+let profile_suite profile =
+  [
+    ( "integration:minio:profile",
+      [
+        Alcotest.test_case
+          (Printf.sprintf "selected integration profile: %s"
+             (integration_profile_to_string profile))
+          `Quick
+          (fun () ->
+            report_selected_profile profile;
+            Alcotest.(check string)
+              "AWSKIT_INTEGRATION_PROFILE"
+              (integration_profile_to_string profile)
+              selected_integration_profile_name);
+      ] );
+  ]
+
 type minio_gate =
   | Available
   | Missing_config of string * Awskit_s3.Error.t
@@ -1494,28 +1596,46 @@ let preflight_minio () =
           | Error error ->
               Setup_failed ("clean MinIO bucket after preflight", error)))
 
-let missing_config_suite label error =
+let invalid_profile_suite value =
+  [
+    ( "integration:minio:profile",
+      [
+        Alcotest.test_case "invalid integration profile" `Quick (fun () ->
+            Alcotest.failf
+              "invalid AWSKIT_INTEGRATION_PROFILE=%S; allowed values: %s" value
+              integration_profile_allowed);
+      ] );
+  ]
+
+let missing_config_suite profile label error =
   [
     ( "integration:minio:configuration",
       [
         Alcotest.test_case "missing local MinIO configuration" `Quick (fun () ->
-            skip_unconfigured_minio label error);
+            skip_unconfigured_minio profile label error);
       ] );
   ]
 
-let setup_failed_suite label error =
+let setup_failed_suite profile label error =
   [
     ( "integration:minio:configuration",
       [
         Alcotest.test_case "configured MinIO setup fails" `Quick (fun () ->
-            Alcotest.failf "%s: %a" label Awskit_s3.Error.pp error);
+            Alcotest.failf "%s (integration profile %s): %a" label
+              (integration_profile_to_string profile)
+              Awskit_s3.Error.pp error);
       ] );
   ]
 
 let suite =
-  match preflight_minio () with
-  | Available -> Workload.suite @ transfer_suite
-  | Missing_config (label, error) -> missing_config_suite label error
-  | Setup_failed (label, error) -> setup_failed_suite label error
+  match selected_integration_profile_result with
+  | Error value -> invalid_profile_suite value
+  | Ok profile -> (
+      match preflight_minio () with
+      | Available -> profile_suite profile @ Workload.suite @ transfer_suite
+      | Missing_config (label, error) ->
+          profile_suite profile @ missing_config_suite profile label error
+      | Setup_failed (label, error) ->
+          profile_suite profile @ setup_failed_suite profile label error)
 
 let () = Alcotest.run "awskit-s3-minio-workload" suite

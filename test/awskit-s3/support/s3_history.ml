@@ -1,11 +1,17 @@
 type target_profile = Strict | Minio
 
+let target_profile_to_string = function Strict -> "strict" | Minio -> "minio"
+
 type config = {
   target_profile : target_profile;
   value_profile : S3_command.value_profile;
   min_length : int;
   max_length : int;
 }
+
+let value_profile_to_string = function
+  | S3_command.Small -> "small"
+  | Broad -> "broad"
 
 let strict_default =
   {
@@ -21,6 +27,14 @@ let minio_default =
     value_profile = Small;
     min_length = 1;
     max_length = 25;
+  }
+
+let minio_expensive =
+  {
+    target_profile = Minio;
+    value_profile = Broad;
+    min_length = 3;
+    max_length = 60;
   }
 
 let supports_command target_profile command =
@@ -44,8 +58,9 @@ let command_supported config command =
 let existing_keys model = S3_model.keys model
 
 let minio_can_enable_versioning model =
-  (* MinIO does not report null version ids for current objects that predate
-     enabling versioning, so that transition stays outside this profile. *)
+  (* The local MinIO test double does not report null version ids for current
+     objects that predate enabling versioning. Keep that observable transition
+     out of the MinIO profile instead of weakening the shared model oracle. *)
   S3_model.versioning_keeps_history model || existing_keys model = []
 
 let command_supported_in_state config model command =
@@ -351,6 +366,24 @@ let shrink config commands =
   | Strict -> shrink
   | Minio -> QCheck.Iter.filter (history_supported config) shrink
 
-let arbitrary config =
-  QCheck.make ~print:S3_command.transcript ~shrink:(shrink config)
+let transcript ?label config commands =
+  let profile_lines =
+    match label with
+    | None -> []
+    | Some label -> [ Printf.sprintf "workload_profile: %s" label ]
+  in
+  String.concat "\n"
+    (profile_lines
+    @ [
+        Printf.sprintf "target_profile: %s"
+          (target_profile_to_string config.target_profile);
+        Printf.sprintf "value_profile: %s"
+          (value_profile_to_string config.value_profile);
+        Printf.sprintf "history_length: %d..%d" config.min_length
+          config.max_length;
+        S3_command.transcript commands;
+      ])
+
+let arbitrary ?label config =
+  QCheck.make ~print:(transcript ?label config) ~shrink:(shrink config)
     (generator config)

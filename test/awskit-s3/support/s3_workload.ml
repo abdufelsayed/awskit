@@ -2,8 +2,61 @@ module Command = S3_command
 module Model = S3_model
 
 type profile = S3_history.target_profile = Strict | Minio
+type integration_profile = Bounded | Expensive
+
+type workload_profile = {
+  name : string;
+  target_profile : profile;
+  history_config : S3_history.config;
+  default_count : int;
+}
 
 let supports_command = S3_history.supports_command
+
+let integration_profile_to_string = function
+  | Bounded -> "bounded"
+  | Expensive -> "expensive"
+
+let integration_profile_allowed_values =
+  [
+    integration_profile_to_string Bounded;
+    integration_profile_to_string Expensive;
+  ]
+
+type integration_profile_parse_error = Unknown_integration_profile of string
+
+let integration_profile_of_string = function
+  | "bounded" -> Ok Bounded
+  | "expensive" -> Ok Expensive
+  | value -> Error (Unknown_integration_profile value)
+
+let minio_workload_profile integration_profile =
+  (* Both integration profiles target the local MinIO test double. Expensive
+     raises cost and generated value/history breadth; it is not a broader
+     S3-compatible provider support claim. *)
+  match integration_profile with
+  | Bounded ->
+      {
+        name = integration_profile_to_string Bounded;
+        target_profile = Minio;
+        history_config = S3_history.minio_default;
+        default_count = 25;
+      }
+  | Expensive ->
+      {
+        name = integration_profile_to_string Expensive;
+        target_profile = Minio;
+        history_config = S3_history.minio_expensive;
+        default_count = 100;
+      }
+
+let strict_workload_profile ~count =
+  {
+    name = S3_history.target_profile_to_string Strict;
+    target_profile = Strict;
+    history_config = S3_history.strict_default;
+    default_count = count;
+  }
 
 let count_from_env ~var ~default =
   match Sys.getenv_opt var with
@@ -27,10 +80,8 @@ module type TARGET = sig
   val run_command : int -> connection -> Model.t -> Command.t -> Model.t
 end
 
-let arbitrary_for_profile profile =
-  match profile with
-  | Strict -> S3_history.arbitrary S3_history.strict_default
-  | Minio -> S3_history.arbitrary S3_history.minio_default
+let arbitrary_for_workload_profile profile =
+  S3_history.arbitrary ~label:profile.name profile.history_config
 
 let required_strict_bins =
   [
@@ -85,10 +136,9 @@ let test_generator_coverage generator () =
   Workload_coverage.require_all ~label:"S3 workload generator"
     ~required:required_strict_bins coverage
 
-module Make_with_config
+module Make_with_profile
     (Config : sig
-      val profile : profile
-      val count : int
+      val workload_profile : workload_profile
     end)
     (Target : TARGET) =
 struct
@@ -106,21 +156,25 @@ struct
         in
         true)
 
-  let count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:Config.count
+  let count =
+    count_from_env ~var:"AWSKIT_QCHECK_COUNT"
+      ~default:Config.workload_profile.default_count
 
   let property =
     QCheck.Test.make ~count
-      ~name:(Printf.sprintf "%s S3 workload follows model" Target.name)
-      (arbitrary_for_profile Config.profile)
+      ~name:
+        (Printf.sprintf "%s S3 workload follows model (%s profile)" Target.name
+           Config.workload_profile.name)
+      (arbitrary_for_workload_profile Config.workload_profile)
       run
 
   let coverage_cases =
-    match Config.profile with
+    match Config.workload_profile.target_profile with
     | Strict ->
         [
           Alcotest.test_case "generator semantic coverage" `Quick
             (test_generator_coverage
-               (S3_history.generator S3_history.strict_default));
+               (S3_history.generator Config.workload_profile.history_config));
         ]
     | Minio -> []
 
@@ -133,9 +187,8 @@ struct
 end
 
 module Make (Target : TARGET) =
-  Make_with_config
+  Make_with_profile
     (struct
-      let profile = Strict
-      let count = 150
+      let workload_profile = strict_workload_profile ~count:150
     end)
     (Target)

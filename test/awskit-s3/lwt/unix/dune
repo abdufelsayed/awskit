@@ -17,6 +17,14 @@
 (rule
  (alias s3-minio-workload)
  (package awskit-s3-lwt-unix)
- (deps test_s3_minio_workload.exe)
+ (deps
+  test_s3_minio_workload.exe
+  (env_var AWSKIT_INTEGRATION_PROFILE)
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var AWSKIT_S3_MINIO_ACCESS_KEY_ID)
+  (env_var AWSKIT_S3_MINIO_ENDPOINT)
+  (env_var AWSKIT_S3_MINIO_REGION)
+  (env_var AWSKIT_S3_MINIO_SECRET_ACCESS_KEY)
+  (env_var AWSKIT_S3_MINIO_UNSAFE_HTTP))
  (action
   (run ./test_s3_minio_workload.exe)))

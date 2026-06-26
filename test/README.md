@@ -115,26 +115,33 @@ The suite IDs are `workload:awskit-s3:protocol-wire`,
 `unit:awskit-s3:domain:regression`, `fixture:awskit-s3:protocol-wire`,
 and `replay:awskit-s3:protocol-wire`.
 
-The MinIO runner lives in `test/awskit-s3/lwt/unix` and runs a bounded
-generated profile of the same shared S3 state workload plus deterministic
-transfer cases against a local MinIO service:
+The MinIO runner lives in `test/awskit-s3/lwt/unix` and runs a local-service
+profile of the same shared S3 state workload plus deterministic transfer cases
+against a local MinIO service:
 
 - `@test/awskit-s3/lwt/unix/s3-minio-workload`
 - `@s3-minio-workload`
 
-The suite IDs are `integration:minio:s3-state`, `integration:minio:object`,
+The suite IDs are `integration:minio:profile`, `workload:minio:s3-state`,
+`integration:minio:s3-state`, `integration:minio:object`,
 `integration:minio:multipart`, `integration:minio:transfer`, and
 `integration:minio:configuration`.
 
-The generated MinIO profile defaults to 25 cases and honors
-`AWSKIT_QCHECK_COUNT=<positive-int>`. It excludes command families whose
-behavior is outside this local-service profile, such as metadata-specific
-shared workload commands, suspended versioning, version-list pages, and
-self-copy. It also excludes enabling versioning after current objects already
-exist, because the pinned MinIO test double does not report null version ids for
-those pre-versioning objects. This gate is evidence for the configured local
-MinIO test double only; it is not a compatibility claim for other S3-compatible
-providers.
+`AWSKIT_INTEGRATION_PROFILE` selects the MinIO workload cost profile. Unset or
+empty means `bounded`; invalid non-empty values fail with the allowed values.
+
+- `bounded` is the default local and CI profile.
+- `expensive` raises generated workload cost and explores a broader stable
+  MinIO value profile while staying on the local MinIO test double.
+
+The generated MinIO profile honors `AWSKIT_QCHECK_COUNT=<positive-int>` as an
+explicit count override. It excludes command families whose behavior is outside
+this local-service profile, such as metadata-specific shared workload commands,
+suspended versioning, version-list pages, and self-copy. It also excludes
+enabling versioning after current objects already exist, because the pinned
+MinIO test double does not report null version ids for those pre-versioning
+objects. This gate is evidence for the configured local MinIO test double only;
+it is not a compatibility claim for other S3-compatible providers.
 
 ## Discovery And Backtesting
 
