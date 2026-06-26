@@ -878,7 +878,7 @@ let test_protocol_generator_sample_observability () =
          observed sample bins:\n\
          %s"
         (List.length samples) seed seed
-        (if List.is_empty missing then "(none)" else String.concat "\n" missing)
+        (if missing = [] then "(none)" else String.concat "\n" missing)
         (match Workload_coverage.threshold_failure_lines weak with
         | [] -> "(none)"
         | lines -> String.concat "\n" lines)

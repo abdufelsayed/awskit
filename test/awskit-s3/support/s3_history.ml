@@ -187,18 +187,16 @@ let state_bins (model : S3_model.t) =
     | Some (Unknown _) | None -> []
   in
   let delete_marker_bins =
-    if List.is_empty (S3_model.delete_markers model) then []
+    if S3_model.delete_markers model = [] then []
     else [ "s3.state.delete-marker-present" ]
   in
   let bucket_tag_bins =
-    if List.is_empty model.bucket_tags then []
-    else [ "s3.state.bucket-tags-present" ]
+    if model.bucket_tags = [] then [] else [ "s3.state.bucket-tags-present" ]
   in
   let object_tag_bins =
     if
       S3_model.String_map.exists
-        (fun _key (object_ : S3_model.object_) ->
-          not (List.is_empty object_.tags))
+        (fun _key (object_ : S3_model.object_) -> object_.tags <> [])
         model.objects
     then [ "s3.state.object-tags-present" ]
     else []

@@ -158,7 +158,7 @@ jobs:
             *.opam
 
       - name: Install dependencies
-        run: opam install --with-test --with-doc --deps-only .
+        run: opam install --with-test --with-doc --with-dev-setup --deps-only .
 
       - name: Build no-network correctness evidence
         run: scripts/test-report.sh quick --label no-network-correctness
