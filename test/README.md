@@ -96,9 +96,9 @@ The suite IDs are `workload:awskit-s3:protocol-wire`,
 `unit:awskit-s3:domain:regression`, `fixture:awskit-s3:protocol-wire`,
 and `replay:awskit-s3:protocol-wire`.
 
-The MinIO runner lives in `test/awskit-s3/lwt/unix` and runs a bounded profile
-of the same shared S3 state workload plus deterministic transfer cases against
-local MinIO:
+The MinIO runner lives in `test/awskit-s3/lwt/unix` and runs a bounded
+generated profile of the same shared S3 state workload plus deterministic
+transfer cases against a local MinIO service:
 
 - `@test/awskit-s3/lwt/unix/s3-minio-workload`
 - `@s3-minio-workload`
@@ -106,6 +106,13 @@ local MinIO:
 The suite IDs are `integration:minio:s3-state`, `integration:minio:object`,
 `integration:minio:multipart`, `integration:minio:transfer`, and
 `integration:minio:configuration`.
+
+The generated MinIO profile defaults to 125 cases and honors
+`AWSKIT_QCHECK_COUNT=<positive-int>`. It excludes command families whose
+behavior is outside this local-service profile, such as metadata-specific
+shared workload commands, suspended versioning, version-list pages, and
+self-copy. This gate is evidence for the configured local MinIO test double
+only; it is not a compatibility claim for other S3-compatible providers.
 
 ## Discovery And Backtesting
 

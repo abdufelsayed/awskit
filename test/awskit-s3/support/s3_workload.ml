@@ -1,7 +1,9 @@
 module Command = S3_command
 module Model = S3_model
 
-type profile = Strict | Minio
+type profile = S3_history.target_profile = Strict | Minio
+
+let supports_command = S3_history.supports_command
 
 let count_from_env ~var ~default =
   match Sys.getenv_opt var with

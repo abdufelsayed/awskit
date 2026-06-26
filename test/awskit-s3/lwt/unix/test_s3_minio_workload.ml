@@ -398,6 +398,9 @@ let max_bytes_for_expected = function
   | Some object_ -> Int64.of_int (String.length object_.body)
   | None -> 64L
 
+let content_length_of_model object_ =
+  Some (Int64.of_int (String.length object_.body))
+
 let assert_get command_index command conn key expected =
   let max_bytes = max_bytes_for_expected expected in
   match expected with
@@ -410,6 +413,11 @@ let assert_get command_index command conn key expected =
       in
       check_equal command_index command Alcotest.string "get body" object_.body
         result.value;
+      check_equal command_index command
+        Alcotest.(option int64)
+        "get content length"
+        (content_length_of_model object_)
+        result.content_length;
       check_metadata command_index command "get metadata" object_.metadata
         result.metadata;
       check_version_id_presence command_index command "get version id"
@@ -453,7 +461,7 @@ let assert_head command_index command conn key expected =
       check_equal command_index command
         Alcotest.(option int64)
         "head content length"
-        (Some (Int64.of_int (String.length object_.body)))
+        (content_length_of_model object_)
         result.content_length;
       check_metadata command_index command "head metadata" object_.metadata
         result.metadata;
@@ -668,23 +676,42 @@ let put_options ~tags ~metadata =
   | None, None -> None
   | _ -> Some (Object.Put.options_exn ?tags ?metadata ())
 
+let assert_visible_store_object command_index command conn key object_ =
+  let expected = Some object_ in
+  assert_get command_index command conn key expected;
+  assert_head command_index command conn key expected;
+  assert_object_tags command_index command conn key expected
+
+let assert_absent_profile_key command_index command conn model key =
+  match Model.find key model with
+  | Some _ -> ()
+  | None ->
+      let result =
+        expect_ok command_index command
+          (Printf.sprintf "store absent exists %s" key)
+          (await_result "store absent exists"
+             (S3.Object.exists conn ~bucket ~key:(object_key key) ()))
+      in
+      check_equal command_index command Alcotest.bool
+        (Printf.sprintf "store absent exists %s" key)
+        false result
+
+let assert_absent_profile_keys command_index command conn model =
+  Command.keys_for_profile Command.Small
+  |> List.iter (assert_absent_profile_key command_index command conn model)
+
+let assert_prefix_domain command_index command conn model =
+  Command.prefix_domain
+  |> List.iter (fun prefix ->
+      assert_list_prefix command_index command conn prefix model)
+
 let check_store command_index command conn model =
   assert_list_keys command_index command conn model;
   Model.String_map.bindings model.objects
   |> List.iter (fun (key, object_) ->
-      let result =
-        expect_ok command_index command "store get"
-          (await_result "store get"
-             (S3.Object.get_string conn ~bucket ~key:(object_key key)
-                ~max_bytes:(Int64.of_int (String.length object_.body))
-                ()))
-      in
-      check_equal command_index command Alcotest.string
-        (Printf.sprintf "store body %s" key)
-        object_.body result.value;
-      check_metadata command_index command
-        (Printf.sprintf "store metadata %s" key)
-        object_.metadata result.metadata);
+      assert_visible_store_object command_index command conn key object_);
+  assert_absent_profile_keys command_index command conn model;
+  assert_prefix_domain command_index command conn model;
   assert_bucket_tags command_index command conn model.bucket_tags;
   assert_get_versioning command_index command conn model.versioning
 
@@ -886,7 +913,7 @@ let test_state_transcript_covers_minio_profile () =
         [
           Command.Put_string ("a.txt", "alpha", [ ("env", "dev") ]);
           Put_string ("logs/a.txt", "log-a", [ ("team", "storage") ]);
-          Put_string_metadata ("meta.txt", "meta", [], [ ("author", "awskit") ]);
+          Put_string ("photos/2026.jpg", "image-before-versioning", []);
           Get_string "a.txt";
           Head_object "logs/a.txt";
           Exists_object "missing.txt";
@@ -894,11 +921,7 @@ let test_state_transcript_covers_minio_profile () =
           List_prefix "logs/";
           List_keys_page { prefix = Some "logs/"; max_keys = 1 };
           Copy_object ("a.txt", "b.txt");
-          Copy_object_metadata
-            ( "meta.txt",
-              "meta-copy.txt",
-              Replace_metadata [ ("review", "broad") ] );
-          Head_object "meta-copy.txt";
+          Copy_object ("logs/a.txt", "photos/2026.jpg");
           Put_object_tags ("b.txt", [ ("env", "prod"); ("owner", "sdk") ]);
           Get_object_tags "b.txt";
           Delete_object_tags "b.txt";

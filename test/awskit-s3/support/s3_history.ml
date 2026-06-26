@@ -23,23 +23,24 @@ let minio_default =
     max_length = 25;
   }
 
-let command_supported config command =
-  match (config.target_profile, command) with
+let supports_command target_profile command =
+  match (target_profile, command) with
   | Strict, _ -> true
   | Minio, S3_command.Put_string_metadata _ -> false
   | Minio, List_versions_page _ -> false
   | Minio, Copy_object_metadata _ -> false
   | Minio, Put_versioning status -> (
       match status with
-      | Awskit_s3.Bucket.Versioning.Status.Suspended -> false
-      | Enabled | Unknown _ -> true)
+      | Awskit_s3.Bucket.Versioning.Status.Enabled -> true
+      | Suspended | Unknown _ -> false)
   | Minio, Copy_object (source_key, destination_key) ->
       not (String.equal source_key destination_key)
   | Minio, _ -> true
 
-let history_supported config =
-  List.for_all (fun command -> command_supported config command)
+let command_supported config command =
+  supports_command config.target_profile command
 
+let history_supported config = List.for_all (command_supported config)
 let existing_keys model = S3_model.keys model
 
 let absent_keys config model =
@@ -86,7 +87,20 @@ let copy_object_metadata_gen config source_gen =
     (oneof_destination_key config source)
     S3_command.gen_copy_metadata
 
-let versioning_command_generator config =
+type command_candidate = {
+  weight : int;
+  example : S3_command.t;
+  gen : S3_command.t QCheck.Gen.t;
+}
+
+let candidate weight example gen = { weight; example; gen }
+
+let supported_candidates config candidates =
+  List.filter
+    (fun candidate -> command_supported config candidate.example)
+    candidates
+
+let versioning_command_candidate config =
   let statuses =
     List.filter
       (fun status ->
@@ -95,19 +109,13 @@ let versioning_command_generator config =
   in
   match statuses with
   | [] -> None
-  | statuses ->
+  | example_status :: _ ->
       Some
-        QCheck.Gen.(
-          map
-            (fun status -> S3_command.Put_versioning status)
-            (oneof_list statuses))
-
-let maybe_supported config sample weight gen =
-  if command_supported config sample then [ (weight, gen) ] else []
-
-let maybe_weighted weight = function
-  | None -> []
-  | Some gen -> [ (weight, gen) ]
+        (candidate 1 (S3_command.Put_versioning example_status)
+           QCheck.Gen.(
+             map
+               (fun status -> S3_command.Put_versioning status)
+               (oneof_list statuses)))
 
 let command_gen config model =
   let open QCheck.Gen in
@@ -115,83 +123,111 @@ let command_gen config model =
   let body_gen = S3_command.body_gen_for_profile config.value_profile in
   let existing = oneof_existing_key model "a.txt" in
   let absent = oneof_absent_key config model "missing/generated.txt" in
-  oneof_weighted
+  let candidates =
     ([
-       ( 5,
-         map3
-           (fun key body tags -> S3_command.Put_string (key, body, tags))
-           key_gen body_gen S3_command.gen_tags );
-     ]
-    @ maybe_supported config
-        (S3_command.Put_string_metadata ("a.txt", "", [], []))
-        3
-        (map4
-           (fun key body tags metadata ->
-             S3_command.Put_string_metadata (key, body, tags, metadata))
-           key_gen body_gen S3_command.gen_tags S3_command.gen_metadata)
-    @ [
-        (3, map (fun key -> S3_command.Get_string key) existing);
-        (2, map (fun key -> S3_command.Get_string key) absent);
-        (2, map (fun key -> S3_command.Find_string key) existing);
-        (1, map (fun key -> S3_command.Find_string key) absent);
-        (3, map (fun key -> S3_command.Head_object key) existing);
-        (1, map (fun key -> S3_command.Head_object key) absent);
-        (2, map (fun key -> S3_command.Exists_object key) existing);
-        (1, map (fun key -> S3_command.Exists_object key) absent);
-        (2, map (fun key -> S3_command.Delete_object key) existing);
-        (1, map (fun key -> S3_command.Delete_object key) absent);
-        (2, copy_object_gen config existing);
-        (1, copy_object_gen config absent);
-      ]
-    @ maybe_supported config
-        (S3_command.Copy_object_metadata ("a.txt", "b.txt", Copy_source_metadata))
-        2
-        (copy_object_metadata_gen config existing)
-    @ maybe_supported config
-        (S3_command.Copy_object_metadata
-           ("missing.txt", "b.txt", Copy_source_metadata))
-        1
-        (copy_object_metadata_gen config absent)
-    @ [
-        (2, return S3_command.List_keys);
-        ( 2,
-          map
+       candidate 5
+         (S3_command.Put_string ("a.txt", "", []))
+         (map3
+            (fun key body tags -> S3_command.Put_string (key, body, tags))
+            key_gen body_gen S3_command.gen_tags);
+       candidate 3
+         (S3_command.Put_string_metadata ("a.txt", "", [], []))
+         (map4
+            (fun key body tags metadata ->
+              S3_command.Put_string_metadata (key, body, tags, metadata))
+            key_gen body_gen S3_command.gen_tags S3_command.gen_metadata);
+       candidate 3 (S3_command.Get_string "a.txt")
+         (map (fun key -> S3_command.Get_string key) existing);
+       candidate 2 (S3_command.Get_string "missing/generated.txt")
+         (map (fun key -> S3_command.Get_string key) absent);
+       candidate 2 (S3_command.Find_string "a.txt")
+         (map (fun key -> S3_command.Find_string key) existing);
+       candidate 1 (S3_command.Find_string "missing/generated.txt")
+         (map (fun key -> S3_command.Find_string key) absent);
+       candidate 3 (S3_command.Head_object "a.txt")
+         (map (fun key -> S3_command.Head_object key) existing);
+       candidate 1 (S3_command.Head_object "missing/generated.txt")
+         (map (fun key -> S3_command.Head_object key) absent);
+       candidate 2 (S3_command.Exists_object "a.txt")
+         (map (fun key -> S3_command.Exists_object key) existing);
+       candidate 1 (S3_command.Exists_object "missing/generated.txt")
+         (map (fun key -> S3_command.Exists_object key) absent);
+       candidate 2 (S3_command.Delete_object "a.txt")
+         (map (fun key -> S3_command.Delete_object key) existing);
+       candidate 1 (S3_command.Delete_object "missing/generated.txt")
+         (map (fun key -> S3_command.Delete_object key) absent);
+       candidate 2
+         (S3_command.Copy_object ("a.txt", fallback_destination "a.txt"))
+         (copy_object_gen config existing);
+       candidate 1
+         (S3_command.Copy_object
+            ( "missing/generated.txt",
+              fallback_destination "missing/generated.txt" ))
+         (copy_object_gen config absent);
+       candidate 2
+         (S3_command.Copy_object_metadata
+            ("a.txt", "b.txt", Copy_source_metadata))
+         (copy_object_metadata_gen config existing);
+       candidate 1
+         (S3_command.Copy_object_metadata
+            ("missing.txt", "b.txt", Copy_source_metadata))
+         (copy_object_metadata_gen config absent);
+       candidate 2 S3_command.List_keys (return S3_command.List_keys);
+       candidate 2 (S3_command.List_prefix "logs/")
+         (map
             (fun prefix -> S3_command.List_prefix prefix)
-            S3_command.gen_prefix );
-        ( 2,
-          map2
+            S3_command.gen_prefix);
+       candidate 2
+         (S3_command.List_keys_page { prefix = None; max_keys = 1 })
+         (map2
             (fun prefix max_keys ->
               S3_command.List_keys_page { prefix; max_keys })
             (oneof [ return None; map Option.some S3_command.gen_prefix ])
-            (int_range 1 3) );
-      ]
-    @ maybe_supported config
-        (S3_command.List_versions_page { max_keys = 1 })
-        1
-        (map
-           (fun max_keys -> S3_command.List_versions_page { max_keys })
-           (int_range 1 3))
-    @ [
-        ( 2,
-          map2
+            (int_range 1 3));
+       candidate 1
+         (S3_command.List_versions_page { max_keys = 1 })
+         (map
+            (fun max_keys -> S3_command.List_versions_page { max_keys })
+            (int_range 1 3));
+       candidate 2
+         (S3_command.Put_object_tags ("a.txt", []))
+         (map2
             (fun key tags -> S3_command.Put_object_tags (key, tags))
-            existing S3_command.gen_tags );
-        ( 1,
-          map2
+            existing S3_command.gen_tags);
+       candidate 1
+         (S3_command.Put_object_tags ("missing/generated.txt", []))
+         (map2
             (fun key tags -> S3_command.Put_object_tags (key, tags))
-            absent S3_command.gen_tags );
-        (1, map (fun key -> S3_command.Get_object_tags key) existing);
-        (1, map (fun key -> S3_command.Get_object_tags key) absent);
-        (1, map (fun key -> S3_command.Delete_object_tags key) existing);
-        (1, map (fun key -> S3_command.Delete_object_tags key) absent);
-        ( 1,
-          map (fun tags -> S3_command.Put_bucket_tags tags) S3_command.gen_tags
-        );
-        (1, return S3_command.Get_bucket_tags);
-        (1, return S3_command.Delete_bucket_tags);
-        (1, return S3_command.Get_versioning);
-      ]
-    @ maybe_weighted 1 (versioning_command_generator config))
+            absent S3_command.gen_tags);
+       candidate 1 (S3_command.Get_object_tags "a.txt")
+         (map (fun key -> S3_command.Get_object_tags key) existing);
+       candidate 1 (S3_command.Get_object_tags "missing/generated.txt")
+         (map (fun key -> S3_command.Get_object_tags key) absent);
+       candidate 1 (S3_command.Delete_object_tags "a.txt")
+         (map (fun key -> S3_command.Delete_object_tags key) existing);
+       candidate 1 (S3_command.Delete_object_tags "missing/generated.txt")
+         (map (fun key -> S3_command.Delete_object_tags key) absent);
+       candidate 1 (S3_command.Put_bucket_tags [])
+         (map (fun tags -> S3_command.Put_bucket_tags tags) S3_command.gen_tags);
+       candidate 1 S3_command.Get_bucket_tags
+         (return S3_command.Get_bucket_tags);
+       candidate 1 S3_command.Delete_bucket_tags
+         (return S3_command.Delete_bucket_tags);
+       candidate 1 S3_command.Get_versioning (return S3_command.Get_versioning);
+     ]
+    @
+    match versioning_command_candidate config with
+    | None -> []
+    | Some candidate -> [ candidate ])
+    |> supported_candidates config
+  in
+  match candidates with
+  | [] -> return S3_command.List_keys
+  | candidates ->
+      oneof_weighted
+        (List.map
+           (fun candidate -> (candidate.weight, candidate.gen))
+           candidates)
 
 let generator config =
   let open QCheck.Gen in
