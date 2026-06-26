@@ -299,6 +299,14 @@ module Make (Target : TARGET) = struct
                  scenario
                 : bool)))
 
+  let replay_cases =
+    List.map Runtime_http_replay.all ~f:(fun replay ->
+        Alcotest.test_case replay.path `Quick (fun () ->
+            ignore
+              (check_scenario ~target_name:Target.name Target.run_scenario
+                 replay.scenario
+                : bool)))
+
   let generated_case =
     let count = count_from_env ~var:"AWSKIT_QCHECK_COUNT" ~default:250 in
     QCheck.Test.make ~count ~name:"generated scenarios"
@@ -310,6 +318,7 @@ module Make (Target : TARGET) = struct
     [
       ( Printf.sprintf "workload:%s:runtime-http" Target.name,
         deterministic_cases
+        @ replay_cases
         @ [
             Alcotest.test_case "generator semantic coverage" `Quick
               test_generator_coverage;

@@ -6,7 +6,7 @@
 
 (library
  (name awskit_runtime_http_workload)
- (modules runtime_http_model runtime_http_workload)
+ (modules runtime_http_model runtime_http_replay runtime_http_workload)
  (wrapped false)
  (libraries
   awskit

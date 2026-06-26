@@ -30,6 +30,11 @@ responses, adversarial framing conflicts, early closes, malformed header/body
 wire cases, response-body reader consumption modes, and callback exception
 preservation.
 
+Reduced runtime HTTP replay scenarios live in
+`test/support/runtime_http_replay.ml`. The path-scoped corpus directory
+`test/fixtures/runtime-http-replay` is reserved for opaque replay bytes when a
+case needs fixture data outside OCaml.
+
 The suite IDs are `workload:awskit-eio:runtime-http` and
 `workload:awskit-lwt:runtime-http`.
 
@@ -58,9 +63,15 @@ workload without network access:
 
 The suite IDs are `workload:awskit-s3-sim:s3-state` and
 `workload:awskit-s3-sim:transfer-faults`, plus
+`replay:awskit-s3-sim:s3-state`,
 `contract:awskit-s3-sim:multipart-validation`,
 `contract:awskit-s3-sim:list-pagination`, and
 `contract:awskit-s3-sim:body-lifecycle`.
+
+Reduced S3 workload replays live under
+`test/awskit-s3/fixtures/workload-replay` and run through the simulator
+workload alias. Each replay file is a deterministic command transcript whose
+path is the replay identifier.
 
 S3 protocol wire workloads live in `test/awskit-s3/protocol`. The private
 `awskit_s3_protocol_test_support` library keeps fixture diffing, independent
@@ -130,6 +141,11 @@ with `QCHECK_SEED=<seed>` on the focused alias that reported the seed.
 Backtesting uses temporary mutations to verify a workload catches a bug class.
 Restore the mutation before committing. Commit workload improvements or reduced
 replay cases, not the mutation itself.
+
+When generated or fuzz workloads expose a product bug, reduce the failure into
+the smallest replay artifact that preserves the behavior. Use the fixture path
+as the durable identifier; do not add a central manifest, known-ID registry, or
+compatibility shim around old replay spellings.
 
 During the migration, the previous test tree may exist locally as `test.o/`.
 That directory is historical reference material only. Do not stage it, do not

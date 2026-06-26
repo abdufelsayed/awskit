@@ -1,0 +1,2 @@
+put photos/2026.jpg image-before-versioning
+put-versioning Enabled

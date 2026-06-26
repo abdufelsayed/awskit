@@ -646,4 +646,44 @@ end
 
 module Workload = S3_workload.Make (Target)
 
-let suite = Workload.suite
+let workload_replay_dir =
+  List.fold_left Filename.concat ".." [ "fixtures"; "workload-replay" ]
+
+let replay_path name = Filename.concat workload_replay_dir name
+
+let read_file path =
+  let input = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr input)
+    (fun () -> really_input_string input (in_channel_length input))
+
+let parse_replay_file path =
+  match S3_replay.decode (read_file path) with
+  | Ok commands -> commands
+  | Error error ->
+      Alcotest.failf "%s: %s" path (S3_replay.parse_error_to_string error)
+
+let run_replay_file path =
+  let commands = parse_replay_file path in
+  Target.with_connection (fun conn ->
+      Target.check_store 0 Command.List_keys conn Model.empty;
+      let (_ : Model.t) =
+        List.fold_left
+          (fun model (index, command) ->
+            let next_model = Target.run_command index conn model command in
+            Target.check_store index command conn next_model;
+            next_model)
+          Model.empty
+          (List.mapi (fun index command -> (index + 1, command)) commands)
+      in
+      ())
+
+let replay_case name =
+  Alcotest.test_case name `Quick (fun () -> run_replay_file (replay_path name))
+
+let suite =
+  Workload.suite
+  @ [
+      ( "replay:awskit-s3-sim:s3-state",
+        [ replay_case "versioning-after-put.txt" ] );
+    ]
