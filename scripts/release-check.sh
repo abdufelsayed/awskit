@@ -21,6 +21,7 @@ if [ "$actual_count" != "$expected_count" ]; then
 fi
 
 awskit_require_release_version
+release_opam_switch=$(opam switch show)
 
 opam exec -- dune build @opam
 opam lint ./*.opam
@@ -62,7 +63,7 @@ tar -xjf "$dist_archive" -C "$dist_dir"
 dist_log=$(mktemp "${TMPDIR:-/tmp}/awskit-dist-doc.XXXXXX")
 if ! (
   cd "$dist_dir/awskit-$AWSKIT_RELEASE_VERSION"
-  opam exec -- dune build @doc
+  opam exec --switch="$release_opam_switch" -- dune build @doc
 ) >"$dist_log" 2>&1; then
   cat "$dist_log"
   rm -rf "$dist_dir" "$dist_log"

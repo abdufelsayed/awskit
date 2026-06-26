@@ -3,6 +3,7 @@ module Model = Runtime_http_model
 
 module type TARGET = sig
   val name : string
+  val ensure_loopback_available : unit -> unit
   val run_scenario : Model.scenario -> Model.observed
 end
 
@@ -757,6 +758,8 @@ module Make (Target : TARGET) = struct
       (QCheck.make ~print:Model.to_string ~shrink:shrink_scenario scenario_gen)
       (check_scenario ~target_name:Target.name Target.run_scenario)
     |> QCheck_alcotest.to_alcotest ~speed_level:`Quick
+    |> Loopback_policy.with_loopback_preflight
+         ~ensure_loopback_available:Target.ensure_loopback_available
 
   let suite =
     [

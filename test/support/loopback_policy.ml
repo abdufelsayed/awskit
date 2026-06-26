@@ -20,3 +20,11 @@ let handle_bind_denied () =
   match bind_denied_action ~require_loopback:(require_loopback_from_env ()) with
   | Skip -> Alcotest.skip ()
   | Fail message -> Alcotest.fail message
+
+let with_loopback_preflight ~ensure_loopback_available
+    ((name, speed_level, run) : unit Alcotest.test_case) =
+  ( name,
+    speed_level,
+    fun () ->
+      ensure_loopback_available ();
+      run () )

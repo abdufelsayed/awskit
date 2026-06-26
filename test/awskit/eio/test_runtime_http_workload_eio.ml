@@ -19,6 +19,16 @@ let listener_bind_denied_by_sandbox = function
   | Unix.Unix_error (Unix.EPERM, "bind", _) -> true
   | _ -> false
 
+let ensure_loopback_listener_available env =
+  try
+    Eio.Switch.run @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    ignore
+      (Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:1
+         (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)))
+  with exn when listener_bind_denied_by_sandbox exn ->
+    Loopback_policy.handle_bind_denied ()
+
 let rec read_headers input =
   match Eio.Buf_read.line input with "" -> () | _ -> read_headers input
 
@@ -56,7 +66,7 @@ let with_loopback_server env scenario test =
       (Model.method_to_string scenario.Model.method_)
       observed_method
   in
-  Eio.Fiber.fork ~sw (fun () ->
+  Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.accept_fork listening_socket ~sw
         ~on_error:(fun _ -> ())
         (fun flow _addr ->
@@ -73,7 +83,8 @@ let with_loopback_server env scenario test =
               write_response output scenario;
               match scenario.connection with
               | Close -> ()
-              | Keep_alive -> Eio.Promise.await hold_open)));
+              | Keep_alive -> Eio.Promise.await hold_open));
+      `Stop_daemon);
   let endpoint = Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port () in
   match test endpoint with
   | result ->
@@ -245,9 +256,27 @@ let test_reader_invalidated_after_read_error env () =
   | Ok () -> ()
   | Error error -> Alcotest.failf "%a" Awskit.Error.pp error
 
+let no_request_scenario =
+  Model.scenario ~name:"eio-loopback-no-request" ~method_:`GET ~status:200
+    ~framing:Empty ~connection:Close ()
+
+let test_loopback_server_returns_without_request env () =
+  let clock = Eio.Stdenv.clock env in
+  match
+    Eio.Time.with_timeout_exn clock 0.25 (fun () ->
+        ignore
+          (with_loopback_server env no_request_scenario (fun _endpoint ->
+               Error (timeout_error "synthetic no-request path"))
+            : (string, Awskit.Error.t) Result.t))
+  with
+  | () -> ()
+  | exception Eio.Time.Timeout ->
+      Alcotest.fail "loopback server waited for accept after client returned"
+
 let suite env =
   let module Target = struct
     let name = "awskit-eio"
+    let ensure_loopback_available () = ensure_loopback_listener_available env
     let run_scenario scenario = observe_run env scenario
   end in
   let module Workload = Runtime_http_workload.Make (Target) in
@@ -258,6 +287,9 @@ let suite env =
           @ [
               Alcotest.test_case "read error invalidates reader" `Quick
                 (test_reader_invalidated_after_read_error env);
+              Alcotest.test_case "loopback server returns without request"
+                `Quick
+                (test_loopback_server_returns_without_request env);
             ] )
       else (name, cases))
 

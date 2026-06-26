@@ -27,6 +27,28 @@ let listener_bind_denied_by_sandbox = function
   | Unix.Unix_error (Unix.EPERM, "bind", _) -> true
   | _ -> false
 
+let ensure_loopback_listener_available () =
+  let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
+  let bind_result =
+    Lwt_main.run
+      (Lwt.finalize
+         (fun () ->
+           Lwt.catch
+             (fun () ->
+               Lwt.bind
+                 (Lwt_unix.bind socket
+                    (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)))
+                 (fun () -> Lwt.return (Ok ())))
+             (fun exn -> Lwt.return (Error exn)))
+         (fun () -> close_socket socket))
+  in
+  match bind_result with
+  | Ok () -> ()
+  | Error exn when listener_bind_denied_by_sandbox exn ->
+      Loopback_policy.handle_bind_denied ()
+  | Error exn -> raise exn
+
 let read_line fd =
   let buffer = Buffer.create 64 in
   let byte = Stdlib.Bytes.create 1 in
@@ -310,6 +332,7 @@ let test_reader_invalidated_after_read_error () =
 
 module Target = struct
   let name = "awskit-lwt"
+  let ensure_loopback_available = ensure_loopback_listener_available
   let run_scenario = run_scenario
 end
 
