@@ -96,6 +96,12 @@ release evidence that downstream runtime authors can rely on.
 - Eio response readers now latch EOF so chunked keep-alive responses do not
   block during cleanup drains after the final chunk has already been read.
   (#10, f02497a)
+- Runtime adapters now reject invalid or conflicting response framing,
+  including malformed `Content-Length`, `Transfer-Encoding` plus
+  `Content-Length`, and premature EOF before the declared response length.
+  (de895c1)
+- `Awskit.Request.add_header` now preserves the documented append order.
+  (de895c1)
 - Transfer helpers now share the runtime-neutral planner, preserve callback
   exceptions and cancellation through owned cleanup, validate
   `Error_if_exists` downloads before transport, use `PutObject` for empty file
@@ -124,6 +130,8 @@ release evidence that downstream runtime authors can rely on.
   are materialized only when the operation executes, object and multipart
   errors carry S3 operation/resource context, and outbound write validation
   uses the shared header rules. (b5e5e4d, e8d7032)
+- S3 simulator versioning now promotes existing unversioned current objects to
+  the null version when bucket versioning is enabled or suspended. (de895c1)
 
 ## Documentation, CI, and Release
 
