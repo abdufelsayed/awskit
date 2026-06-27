@@ -41,6 +41,9 @@ jobs:
           opam-local-packages: |
             *.opam
 
+      - name: Use opam archive cache
+        run: opam option --global 'archive-mirrors=["https://opam.ocaml.org/cache"]'
+
       - name: Install stress test dependencies
         run: opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
 

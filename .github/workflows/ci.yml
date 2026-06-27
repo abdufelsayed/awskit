@@ -36,6 +36,9 @@ jobs:
           opam-local-packages: |
             *.opam
 
+      - name: Use opam archive cache
+        run: opam option --global 'archive-mirrors=["https://opam.ocaml.org/cache"]'
+
       - name: Install project dependencies
         run: opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
 
@@ -67,6 +70,9 @@ jobs:
           dune-cache: true
           opam-local-packages: |
             *.opam
+
+      - name: Use opam archive cache
+        run: opam option --global 'archive-mirrors=["https://opam.ocaml.org/cache"]'
 
       - name: Install test dependencies
         run: opam install --yes --with-test --deps-only .
@@ -100,6 +106,9 @@ jobs:
           opam-local-packages: |
             *.opam
 
+      - name: Use opam archive cache
+        run: opam option --global 'archive-mirrors=["https://opam.ocaml.org/cache"]'
+
       - name: Install project dependencies
         run: opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
 
@@ -126,6 +135,9 @@ jobs:
           dune-cache: true
           opam-local-packages: |
             *.opam
+
+      - name: Use opam archive cache
+        run: opam option --global 'archive-mirrors=["https://opam.ocaml.org/cache"]'
 
       - name: Install integration test dependencies
         run: opam install --yes --with-test --deps-only .
@@ -180,6 +192,9 @@ jobs:
             !awskit-eio.opam
             !awskit-s3-eio.opam
 
+      - name: Use opam archive cache
+        run: opam option --global 'archive-mirrors=["https://opam.ocaml.org/cache"]'
+
       - name: Install package test dependencies
         run: opam install --yes --with-test --deps-only "${{ matrix.package }}"
 
@@ -223,6 +238,9 @@ jobs:
             awskit-eio.opam
             awskit-s3.opam
             awskit-s3-eio.opam
+
+      - name: Use opam archive cache
+        run: opam option --global 'archive-mirrors=["https://opam.ocaml.org/cache"]'
 
       - name: Install package test dependencies
         run: opam install --yes --with-test --deps-only "${{ matrix.package }}"

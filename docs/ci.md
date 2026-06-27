@@ -34,6 +34,10 @@ on these jobs:
 This keeps failures grouped by evidence type while preserving direct
 `opam`/`dune` commands in CI.
 
+Each job configures `https://opam.ocaml.org/cache` as an opam archive mirror
+before installing dependencies. Package installs should not depend on every
+upstream source host being reachable during a matrix run.
+
 ## Advisory Stress Tests
 
 The `Stress tests` workflow is not a required PR gate. It is scheduled and
