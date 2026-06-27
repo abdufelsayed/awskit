@@ -111,11 +111,8 @@ Required release-branch checks:
 
 - `Required CI` from `.github/workflows/ci.yml`, which aggregates package
   metadata, per-package opam install/test matrices,
-  documentation/examples, no-network correctness evidence, MinIO S3
-  integration evidence, and source distribution validation.
-- `Source distribution` from `.github/workflows/ci.yml`, which runs as part of
-  `Required CI` on pull requests, `main`, release branches, `v*` tags, and
-  manual dispatch.
+  documentation/examples, no-network correctness evidence, and MinIO S3
+  integration evidence.
 
 The `Publish docs` workflow is expected to skip on release branches because it
 only runs after `CI` succeeds on `main`.
@@ -136,7 +133,6 @@ Record:
 
 - the release branch head SHA used for validation;
 - the `gh pr checks` result;
-- the `Source distribution` result;
 - the local `scripts/check.sh release` result;
 - public API review status;
 - support/security docs status;

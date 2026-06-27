@@ -1,8 +1,7 @@
 # CI Workflows
 
 Awskit uses GitHub Actions for required CI, generated documentation publishing,
-and advisory stress evidence. Source distribution validation lives inside the
-main CI workflow and is part of the stable aggregate check.
+and advisory stress evidence.
 
 Related maintainer docs:
 
@@ -14,7 +13,7 @@ Related maintainer docs:
 
 | Workflow | File | Purpose | Runs on |
 | --- | --- | --- | --- |
-| `CI` | `.github/workflows/ci.yml` | Required package metadata, per-package opam install/test, docs/examples, no-network correctness, MinIO evidence, and source distribution validation. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, pushes to `v*` tags, and manual dispatch. Draft pull requests are skipped. |
+| `CI` | `.github/workflows/ci.yml` | Required package metadata, per-package opam install/test, docs/examples, no-network correctness, and MinIO evidence. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, pushes to `v*` tags, and manual dispatch. Draft pull requests are skipped. |
 | `Publish docs` | `.github/workflows/docs.yml` | Publishes generated odoc documentation to GitHub Pages. | Successful `CI` workflow runs on `main`, and manual dispatch from `main`. |
 | `Stress evidence` | `.github/workflows/stress.yml` | Runs high-cost discovery evidence outside required PR CI. | Weekly schedule and manual dispatch. |
 
@@ -31,7 +30,6 @@ on these jobs:
 | `Documentation and examples` | Runs `scripts/check.sh docs-examples` for example and odoc builds. |
 | `No-network correctness` | Runs `scripts/check.sh no-network --label no-network-correctness` and uploads `.logs/` as an artifact with `if: always()`. |
 | `S3 MinIO integration` | Runs `scripts/check.sh minio --label s3-minio-integration` against script-managed local MinIO and uploads `.logs/` as an artifact with `if: always()`. |
-| `Source distribution` | Runs `scripts/check.sh source-distribution` for `dune-release` checks, source distribution archive generation, and documentation checks from the extracted archive. |
 
 `No-network correctness` does not start local services. MinIO adapter evidence
 stays in `S3 MinIO integration`.
@@ -67,8 +65,8 @@ scripts/check.sh package --package <package>
 This catches package-specific `with-test` dependency gaps in normal PR CI
 instead of waiting for the opam-repository PR.
 
-The `Source distribution` job in `.github/workflows/ci.yml` runs with required
-CI. It runs:
+Source distribution validation is not a GitHub CI job. Run it locally when
+creating a release:
 
 ```sh
 scripts/check.sh source-distribution
@@ -77,9 +75,7 @@ scripts/check.sh source-distribution
 That command runs `dune-release check`, builds the source distribution archive,
 extracts it, and builds documentation from the extracted tree.
 
-The job infers `AWSKIT_RELEASE_VERSION` from a `release/vX.Y.Z` branch, a
-`vX.Y.Z` tag, the manual dispatch input, or `dune-project`. The complete local
-release gate remains:
+The complete local release gate remains:
 
 ```sh
 scripts/check.sh release
@@ -124,9 +120,9 @@ Watch a rerun:
 gh run watch <run-id> --interval 10 --exit-status
 ```
 
-For `No-network correctness`, `S3 MinIO integration`, `Stress evidence`, and
-`Source distribution` failures, download the `.logs/` artifact when available
-and reproduce locally with the closest command. For MinIO failures:
+For `No-network correctness`, `S3 MinIO integration`, and `Stress evidence`
+failures, download the `.logs/` artifact when available and reproduce locally
+with the closest command. For MinIO failures:
 
 ```sh
 scripts/check.sh minio --label minio-debug
