@@ -145,9 +145,10 @@ The suite IDs are `integration:minio:profile`, `workload:minio:s3-state`,
 `AWSKIT_INTEGRATION_PROFILE` selects the MinIO workload cost profile. Unset or
 empty means `bounded`; invalid non-empty values fail with the allowed values.
 
-- `bounded` is the default local and CI profile.
-- `expensive` explores broader values and longer generated histories while
-  keeping the default count modest enough for a local MinIO service.
+- `bounded` is the default local profile.
+- `expensive` is the required CI profile and explores broader values and
+  longer generated histories while keeping the default count modest enough for a
+  local MinIO service.
 
 The generated MinIO profile honors `AWSKIT_QCHECK_COUNT=<positive-int>` as an
 explicit count override. It excludes command families whose behavior is outside
@@ -176,9 +177,10 @@ running `@s3-local-service` or `@integration` directly.
 
 ## Discovery And Backtesting
 
-`@stress` is the opt-in no-network pressure gate. It recurses through
-focused `discovery` aliases for runtime HTTP, S3 simulator, S3 transfer faults,
-S3 protocol wire properties, and S3 protocol replay. Local MinIO stays under
+`@stress` is the no-network randomized correctness pressure gate. It recurses
+through focused `discovery` aliases for runtime HTTP, S3 simulator, S3 transfer
+faults, S3 protocol wire properties, and S3 protocol replay. Required CI runs
+it with `AWSKIT_QCHECK_COUNT=2000`. Local MinIO stays under
 `@s3-local-service` and `@integration`; use `scripts/test.sh stress` when the
 pressure run should leave a durable report.
 

@@ -16,6 +16,7 @@ permissions:
 
 env:
   OCAML_LATEST: "5"
+  AWSKIT_STRESS_QCHECK_COUNT: "2000"
 
 jobs:
   hygiene:
@@ -53,11 +54,11 @@ jobs:
           git diff --check
           git diff --exit-code
 
-  no-service-correctness:
-    name: No-service correctness tests
+  no-service-stress:
+    name: No-service stress tests
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout tree
@@ -74,17 +75,17 @@ jobs:
       - name: Use opam archive cache
         run: opam option --global 'archive-mirrors=["https://opam.ocaml.org/cache"]'
 
-      - name: Install test dependencies
-        run: opam install --yes --with-test --deps-only .
+      - name: Install stress test dependencies
+        run: opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
 
-      - name: Run no-service correctness tests
-        run: scripts/test.sh quick --label no-service-correctness
+      - name: Run no-service stress tests
+        run: AWSKIT_QCHECK_COUNT="$AWSKIT_STRESS_QCHECK_COUNT" scripts/test.sh stress --label no-service-stress
 
-      - name: Upload no-service test report
+      - name: Upload no-service stress test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: no-service-correctness-report
+          name: no-service-stress-report
           path: .logs/
           if-no-files-found: ignore
 
@@ -118,11 +119,11 @@ jobs:
       - name: Build documentation and example targets
         run: opam exec -- dune build @examples @doc
 
-  s3-local-service-integration:
-    name: S3 local-service integration tests
+  s3-local-service-stress:
+    name: S3 local-service stress tests
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout tree
@@ -142,14 +143,14 @@ jobs:
       - name: Install integration test dependencies
         run: opam install --yes --with-test --deps-only .
 
-      - name: Run local-service integration tests
-        run: scripts/test.sh integration --label s3-local-service-integration
+      - name: Run expensive local-service integration tests
+        run: AWSKIT_INTEGRATION_PROFILE=expensive scripts/test.sh integration --label s3-local-service-stress
 
-      - name: Upload local-service test report
+      - name: Upload local-service stress test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: s3-local-service-integration-report
+          name: s3-local-service-stress-report
           path: .logs/
           if-no-files-found: ignore
 
@@ -253,9 +254,9 @@ jobs:
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     needs:
       - hygiene
-      - no-service-correctness
+      - no-service-stress
       - docs-examples
-      - s3-local-service-integration
+      - s3-local-service-stress
       - package-install-build-test-default
       - package-install-build-test-eio
     runs-on: ubuntu-latest
@@ -265,9 +266,9 @@ jobs:
       - name: Summarize required checks
         env:
           HYGIENE: ${{ needs.hygiene.result }}
-          NO_SERVICE_CORRECTNESS: ${{ needs.no-service-correctness.result }}
+          NO_SERVICE_STRESS: ${{ needs.no-service-stress.result }}
           DOCS_EXAMPLES: ${{ needs.docs-examples.result }}
-          S3_LOCAL_SERVICE_INTEGRATION: ${{ needs.s3-local-service-integration.result }}
+          S3_LOCAL_SERVICE_STRESS: ${{ needs.s3-local-service-stress.result }}
           PACKAGE_INSTALL_BUILD_TEST_DEFAULT: ${{ needs.package-install-build-test-default.result }}
           PACKAGE_INSTALL_BUILD_TEST_EIO: ${{ needs.package-install-build-test-eio.result }}
         run: |
@@ -289,9 +290,9 @@ jobs:
 
           echo "### Required CI" >> "$GITHUB_STEP_SUMMARY"
           check_result "Hygiene" "$HYGIENE"
-          check_result "No-service correctness tests" "$NO_SERVICE_CORRECTNESS"
+          check_result "No-service stress tests" "$NO_SERVICE_STRESS"
           check_result "Documentation and example build" "$DOCS_EXAMPLES"
-          check_result "S3 local-service integration tests" "$S3_LOCAL_SERVICE_INTEGRATION"
+          check_result "S3 local-service stress tests" "$S3_LOCAL_SERVICE_STRESS"
           check_result "Default package install/build/test matrix" "$PACKAGE_INSTALL_BUILD_TEST_DEFAULT"
           check_result "Eio package install/build/test matrix" "$PACKAGE_INSTALL_BUILD_TEST_EIO"
 

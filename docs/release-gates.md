@@ -67,7 +67,7 @@ Release branch CI must be green before merging the release PR. The required CI
 evidence is:
 
 - `Required CI` from `.github/workflows/ci.yml`, covering package metadata,
-  no-service correctness, documentation/examples, local-service integration, and
+  no-service stress, documentation/examples, local-service stress, and
   per-package install/build/test matrices on Linux and macOS.
 
 Check PR state with:

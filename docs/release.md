@@ -113,8 +113,8 @@ gh pr checks <pr-number> --watch=false
 Required release-branch checks:
 
 - `Required CI` from `.github/workflows/ci.yml`, which aggregates package
-  metadata, no-service correctness, documentation/examples, local-service
-  integration, and per-package install/build/test matrices.
+  metadata, no-service stress, documentation/examples, local-service stress,
+  and per-package install/build/test matrices.
 
 The `Publish docs` workflow is expected to skip on release branches because it
 only runs after `CI` succeeds on `main`.

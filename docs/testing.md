@@ -79,9 +79,9 @@ evidence.
 
 | Alias | When to run | Includes | External service |
 | --- | --- | --- | --- |
-| `@correctness` | Fast no-service correctness for active development and CI. | Test support contracts, core contracts, recording-runtime support contracts, runtime HTTP workloads, simulator workloads, transfer fault workloads, protocol/domain properties, protocol fixtures, and protocol replay. | No |
-| `@integration` | Service-backed S3 contract evidence. | Local-service S3 workload and bounded transfer cases. Fails when local MinIO is not reachable. | Local MinIO |
-| `@stress` | Higher-pressure generated workload discovery. | `@correctness` plus directory-owned `discovery` aliases. Use `AWSKIT_QCHECK_COUNT` to raise counts. | No |
+| `@correctness` | Fast no-service correctness for active development and as the base of `@stress`. | Test support contracts, core contracts, recording-runtime support contracts, runtime HTTP workloads, simulator workloads, transfer fault workloads, protocol/domain properties, protocol fixtures, and protocol replay. | No |
+| `@integration` | Service-backed S3 contract evidence. | Local-service S3 workload and transfer cases using the selected MinIO cost profile. Fails when local MinIO is not reachable. | Local MinIO |
+| `@stress` | Higher-pressure randomized correctness. | `@correctness` plus directory-owned `discovery` aliases. Required CI runs it with `AWSKIT_QCHECK_COUNT=2000`; use a higher count for deeper manual pressure. | No |
 
 ## Focused Aliases
 
@@ -162,8 +162,8 @@ run is not a claim about arbitrary S3-compatible providers.
 
 | Profile | Use | Claim |
 | --- | --- | --- |
-| `bounded` | Default service integration. | Bounded generated shared S3 workload plus deterministic transfer cases against the configured local MinIO test double. |
-| `expensive` | Manual deeper local exploration before risky changes or release work. | Broader and longer generated shared S3 workload against the same local MinIO target profile, with a service-realistic default count. |
+| `bounded` | Default local service integration. | Bounded generated shared S3 workload plus deterministic transfer cases against the configured local MinIO test double. |
+| `expensive` | Required CI local-service stress and deeper local exploration before risky changes or release work. | Broader and longer generated shared S3 workload against the same local MinIO target profile, with a service-realistic default count. |
 
 Unset or empty `AWSKIT_INTEGRATION_PROFILE` means `bounded`. Invalid non-empty
 values fail so an intended expensive run cannot silently fall back.
@@ -209,8 +209,8 @@ outside `@correctness`, `@integration`, and local-service aliases unless
 
 ## Discovery And Backtesting
 
-`@stress` is the opt-in no-service Dune alias for generated workload
-pressure. It depends on recursive `discovery` aliases in focused test
+`@stress` is the no-service Dune alias for randomized correctness pressure. It
+depends on `@correctness` and recursive `discovery` aliases in focused test
 directories, currently covering runtime HTTP workloads, the S3 simulator
 workload, S3 transfer fault workloads, S3 protocol wire properties, and S3
 protocol replay. It does not run local MinIO; use `@s3-local-service` or
@@ -282,17 +282,19 @@ The report filename is
 | `scripts/test.sh integration` | Reported test run of `@integration` with script-managed MinIO. |
 | `scripts/test.sh stress` | Reported test run of `@stress`. |
 
-The stress workflow runs `scripts/test.sh stress` with `AWSKIT_QCHECK_COUNT`
-set from manual dispatch or the workflow default, then runs the expensive
-local-service integration tests once. Raise the no-service count explicitly for
-deeper local discovery:
+Required CI runs `scripts/test.sh stress` with `AWSKIT_QCHECK_COUNT=2000` and
+runs `scripts/test.sh integration` with `AWSKIT_INTEGRATION_PROFILE=expensive`.
+The manual stress workflow uses the same default no-service count, accepts an
+explicit dispatch override, and also runs the expensive local-service
+integration tests once. Raise the no-service count explicitly for deeper local
+discovery:
 
 ```sh
 AWSKIT_QCHECK_COUNT=10000 scripts/test.sh stress --label overnight
 ```
 
-Run the service-backed expensive profile separately when investigating MinIO
-or release-risky S3 changes:
+Run the service-backed expensive profile separately when investigating MinIO or
+release-risky S3 changes:
 
 ```sh
 AWSKIT_INTEGRATION_PROFILE=expensive scripts/test.sh integration --label local-service-expensive
