@@ -16,7 +16,7 @@ Related maintainer docs:
 | `CI` | `.github/workflows/ci.yml` | Required build, test, docs/examples, no-network correctness, and MinIO evidence. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, and manual dispatch. Draft pull requests are skipped. |
 | `Publish docs` | `.github/workflows/docs.yml` | Publishes generated odoc documentation to GitHub Pages. | Successful `CI` workflow runs on `main`, and manual dispatch from `main`. |
 | `Stress evidence` | `.github/workflows/stress.yml` | Runs high-cost discovery evidence outside required PR CI. | Weekly schedule and manual dispatch. |
-| `Release validation` | `.github/workflows/release-validation.yml` | Mirrors `scripts/check.sh release` in CI, including package-isolated opam install/test validation. | Pushes to `release/**` and manual dispatch. |
+| `Release validation` | `.github/workflows/release-validation.yml` | Mirrors `scripts/check.sh release` in CI, including package-isolated opam install/test validation. | Pushes to `main`, pushes to `release/**`, and manual dispatch. |
 
 ## Required CI
 
@@ -55,17 +55,17 @@ normal PR feedback so expensive exploration does not slow every change.
 
 ## Release Validation
 
-Release branch pushes run both required CI and the release validation workflow.
-Before merging a release PR, record:
+Pushes to `main` and release branches run both required CI and the release
+validation workflow. Before merging a release PR, record:
 
 - the `Required CI` result;
 - the `Release check` result from `.github/workflows/release-validation.yml`;
 - the local `scripts/check.sh release` result when required by
   `docs/release-gates.md`.
 
-The release validation workflow uses the release branch name to infer
-`AWSKIT_RELEASE_VERSION`, or a manual `release_version` input when validating
-another ref. It uploads `.logs/` as an artifact.
+The release validation workflow uses the release branch name, an exact release
+tag, or `dune-project` to infer `AWSKIT_RELEASE_VERSION`; manual dispatch may
+also pass a `release_version` input. It uploads `.logs/` as an artifact.
 
 The `package-isolation` check creates a temporary opam switch, pins the
 released packages from the checkout, and resets the switch between packages

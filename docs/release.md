@@ -114,7 +114,7 @@ Required release-branch checks:
   documentation/examples, no-network correctness evidence, and MinIO S3
   integration evidence.
 - `Release check` from `.github/workflows/release-validation.yml`, which runs
-  `scripts/check.sh release` for release branch pushes.
+  `scripts/check.sh release` for `main` and release branch pushes.
 
 The `Publish docs` workflow is expected to skip on release branches because it
 only runs after `CI` succeeds on `main`.

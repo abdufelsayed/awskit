@@ -42,8 +42,8 @@ the release archive.
 
 ## CI Gates
 
-Release branch CI must be green before merging the release PR. The required CI
-evidence is:
+Release branch CI must be green before merging the release PR. Pushes to
+`main` run the same release validation after merge. The required CI evidence is:
 
 - `Required CI` from `.github/workflows/ci.yml`, covering package metadata,
   default package build and tests on Linux and macOS, Eio package build and
