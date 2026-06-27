@@ -12,6 +12,7 @@ type family =
   | Header_newline
   | Invalid_content_range
   | Invalid_tag_field
+  | Object_key
   | Oversized_tag_set
   | Percent_encoded_object_key
   | Tagging_xml_mutation
@@ -30,6 +31,7 @@ let family_bin = function
   | Header_newline -> "protocol.family.header-newline"
   | Invalid_content_range -> "protocol.family.invalid-content-range"
   | Invalid_tag_field -> "protocol.family.invalid-tag-field"
+  | Object_key -> "protocol.family.object-key"
   | Oversized_tag_set -> "protocol.family.oversized-tag-set"
   | Percent_encoded_object_key -> "protocol.family.percent-encoded-object-key"
   | Tagging_xml_mutation -> "protocol.family.tagging-xml-mutation"
@@ -62,10 +64,24 @@ let valid_dotted_bucket_name =
   in
   return (String.concat "." labels)
 
-let object_key_chars =
-  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 /._-~+="
+let object_key_segment_chars =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ._-~+="
 
-let protocol_object_key = gen_string ~min:1 ~max:80 ~chars:object_key_chars
+let object_key_segment =
+  let open QCheck.Gen in
+  let* first = gen_from_chars lower_digit_chars in
+  let* rest = gen_string ~min:0 ~max:15 ~chars:object_key_segment_chars in
+  return (String.make 1 first ^ rest)
+
+let protocol_object_key =
+  let open QCheck.Gen in
+  oneof
+    [
+      return "soap";
+      (let* first = object_key_segment in
+       let* rest = list_size (int_range 0 5) object_key_segment in
+       return (String.concat "/" (first :: rest)));
+    ]
 
 let percent_encoded_object_key =
   QCheck.Gen.oneof_list

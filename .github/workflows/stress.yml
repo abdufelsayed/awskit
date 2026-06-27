@@ -8,9 +8,6 @@ on:
         required: false
         default: "2000"
         type: string
-  schedule:
-    # Run explicit high-cost discovery weekly, separate from required PR CI.
-    - cron: 0 1 * * MON
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

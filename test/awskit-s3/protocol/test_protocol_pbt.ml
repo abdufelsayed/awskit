@@ -214,6 +214,12 @@ let prop_mutated_endpoint_values_are_rejected_or_canonical =
       | Error _ -> true
       | Ok endpoint -> is_safe_canonical_endpoint endpoint)
 
+let prop_protocol_object_keys_are_valid =
+  QCheck.Test.make ~count:default_count
+    ~name:"protocol object-key generator emits valid object keys"
+    (QCheck.make ~print:String.escaped Protocol_generators.protocol_object_key)
+    (fun key -> Result.is_ok (Object_key.of_string key))
+
 let prop_endpoint_auto_virtual_hosted_object_paths =
   QCheck.Test.make ~count:default_count
     ~name:
@@ -853,6 +859,7 @@ type protocol_generator_sample =
   | Sample_header_newline of string
   | Sample_invalid_content_range of string
   | Sample_invalid_tag_field of [ `Key of string | `Value of string ]
+  | Sample_object_key of string
   | Sample_oversized_tag_set of (string * string) list
   | Sample_percent_encoded_object_key of string
   | Sample_tagging_xml_mutation of string
@@ -900,6 +907,9 @@ let protocol_generator_sample_gen =
         (fun value -> Sample_invalid_tag_field value)
         Protocol_generators.invalid_tag_field;
       map
+        (fun value -> Sample_object_key value)
+        Protocol_generators.protocol_object_key;
+      map
         (fun value -> Sample_oversized_tag_set value)
         Protocol_generators.oversized_tag_set;
       map
@@ -925,6 +935,7 @@ let protocol_generator_sample_family = function
   | Sample_header_newline _ -> Protocol_generators.Header_newline
   | Sample_invalid_content_range _ -> Protocol_generators.Invalid_content_range
   | Sample_invalid_tag_field _ -> Protocol_generators.Invalid_tag_field
+  | Sample_object_key _ -> Protocol_generators.Object_key
   | Sample_oversized_tag_set _ -> Protocol_generators.Oversized_tag_set
   | Sample_percent_encoded_object_key _ ->
       Protocol_generators.Percent_encoded_object_key
@@ -970,6 +981,7 @@ let stable_protocol_generator_sample_bins =
     "protocol.family.header-newline";
     "protocol.family.invalid-content-range";
     "protocol.family.invalid-tag-field";
+    "protocol.family.object-key";
     "protocol.family.oversized-tag-set";
     "protocol.family.percent-encoded-object-key";
     "protocol.family.tagging-xml-mutation";
@@ -1047,6 +1059,7 @@ let protocol_family_properties =
     (Protocol_generators.Header_newline, prop_header_values_reject_newline);
     ( Protocol_generators.Invalid_tag_field,
       prop_tagging_xml_rejects_invalid_tag_fields );
+    (Protocol_generators.Object_key, prop_protocol_object_keys_are_valid);
     ( Protocol_generators.Oversized_tag_set,
       prop_tagging_xml_rejects_oversized_tag_sets );
     ( Protocol_generators.Percent_encoded_object_key,

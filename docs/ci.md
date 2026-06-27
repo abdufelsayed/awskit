@@ -1,7 +1,7 @@
 # CI Workflows
 
 Awskit uses GitHub Actions for required CI, generated documentation publishing,
-and advisory stress evidence.
+and manually requested deeper stress evidence.
 
 Related maintainer docs:
 
@@ -13,9 +13,9 @@ Related maintainer docs:
 
 | Workflow | File | Purpose | Runs on |
 | --- | --- | --- | --- |
-| `CI` | `.github/workflows/ci.yml` | Hygiene, no-service correctness, docs/examples, local-service integration, and per-package install/build/test matrices. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, pushes to `v*` tags, and manual dispatch. Draft pull requests are skipped. |
+| `CI` | `.github/workflows/ci.yml` | Hygiene, no-service stress, docs/examples, local-service stress, and per-package install/build/test matrices. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, pushes to `v*` tags, and manual dispatch. Draft pull requests are skipped. |
 | `Publish docs` | `.github/workflows/docs.yml` | Publishes generated odoc documentation to GitHub Pages. | Successful `CI` workflow runs on `main`, and manual dispatch from `main`. |
-| `Stress tests` | `.github/workflows/stress.yml` | Runs high-cost no-service stress tests and expensive local-service integration tests outside required PR CI. | Weekly schedule and manual dispatch. |
+| `Stress tests` | `.github/workflows/stress.yml` | Runs manually requested no-service stress tests and expensive local-service integration tests for ad hoc reruns or raised no-service counts. | Manual dispatch. |
 
 ## Required CI
 
@@ -25,10 +25,10 @@ on these jobs:
 | Job | Evidence |
 | --- | --- |
 | `Hygiene` | Installs project dependencies, regenerates opam metadata, runs `opam lint`, runs `dune fmt`, and checks whitespace plus generated-file drift. |
-| `No-service correctness tests` | Runs `scripts/test.sh quick --label no-service-correctness`, which runs `@correctness` tests and uploads `.logs/`. |
+| `No-service stress tests` | Runs `AWSKIT_QCHECK_COUNT=2000 scripts/test.sh stress --label no-service-stress`, which runs `@stress` as randomized correctness pressure and uploads `.logs/`. |
 | `Documentation and example build` | Builds `@examples @doc` after installing documentation and example dependencies. |
-| `S3 local-service integration tests` | Runs `scripts/test.sh integration --label s3-local-service-integration`, which runs `@integration` tests against script-managed local MinIO and uploads `.logs/`. |
-| `Default package install/build/test matrix` | Runs direct package `opam install --with-test --deps-only <package>` and `dune build -p <package> @install @runtest` commands for each non-Eio opam package on Ubuntu and macOS with OCaml 4.14 and the latest OCaml 5 compiler. |
+| `S3 local-service stress tests` | Runs `AWSKIT_INTEGRATION_PROFILE=expensive scripts/test.sh integration --label s3-local-service-stress`, which runs `@integration` tests against script-managed local MinIO with the expensive profile and uploads `.logs/`. |
+| `Lwt package install/build/test matrix` | Runs direct package `opam install --with-test --deps-only <package>` and `dune build -p <package> @install @runtest` commands for each Lwt-compatible opam package on Ubuntu and macOS with OCaml 4.14 and the latest OCaml 5 compiler. |
 | `Eio package install/build/test matrix` | Runs the same direct package commands for each Eio-compatible opam package on Ubuntu and macOS with OCaml 5.2 and the latest OCaml 5 compiler. |
 
 This keeps failures grouped by evidence type while preserving direct
@@ -38,17 +38,25 @@ Each job configures `https://opam.ocaml.org/cache` as an opam archive mirror
 before installing dependencies. Package installs should not depend on every
 upstream source host being reachable during a matrix run.
 
-## Advisory Stress Tests
+## Stress Tests
 
-The `Stress tests` workflow is not a required PR gate. It is scheduled and
-manually dispatched discovery pressure. The first test step raises the
-no-service generated workload count:
+Required CI includes stress-shaped no-service and local-service evidence. The
+no-service job raises the generated workload count while staying inside
+no-network correctness checks:
 
 ```sh
-AWSKIT_QCHECK_COUNT=2000 scripts/test.sh stress --label stress-evidence
+AWSKIT_QCHECK_COUNT=2000 scripts/test.sh stress --label no-service-stress
 ```
 
-The second test step runs the expensive local-service integration profile once:
+The local-service job uses the expensive MinIO-backed profile:
+
+```sh
+AWSKIT_INTEGRATION_PROFILE=expensive scripts/test.sh integration --label s3-local-service-stress
+```
+
+The manual `Stress tests` workflow is for deeper ad hoc pressure. Its
+no-service stress count defaults to `2000` and can be raised at dispatch time.
+It also runs the expensive local-service integration profile once:
 
 ```sh
 AWSKIT_INTEGRATION_PROFILE=expensive scripts/test.sh integration --label local-service-expensive
@@ -58,8 +66,7 @@ Manual dispatch accepts:
 
 - `qcheck_count`: stress alias count. Defaults to `2000`.
 
-Treat stress failures as regressions to triage. Keep the workflow separate from
-normal PR feedback so expensive exploration does not slow every change.
+Treat stress failures as correctness regressions to triage.
 
 ## Package And Release Checks
 
@@ -124,12 +131,12 @@ Watch a rerun:
 gh run watch <run-id> --interval 10 --exit-status
 ```
 
-For `No-service correctness tests`, `S3 local-service integration tests`, and
+For `No-service stress tests`, `S3 local-service stress tests`, and
 `Stress tests` failures, download the `.logs/` artifact when available and
-reproduce locally with the closest command. For local-service test failures:
+reproduce locally with the closest command. For local-service stress failures:
 
 ```sh
-scripts/test.sh integration --label minio-debug
+AWSKIT_INTEGRATION_PROFILE=expensive scripts/test.sh integration --label minio-debug
 ```
 
 Fix the underlying contract mismatch. Use skips, looser checks, or retries only
