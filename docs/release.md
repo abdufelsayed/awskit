@@ -240,13 +240,40 @@ If opam-ci fails, classify the failure before changing anything:
 - For metadata-only failures, such as missing `with-test` dependencies,
   constraints, source URLs, or checksums, fix Awskit source metadata first.
   Update `dune-project`, regenerate `*.opam` with `opam exec -- dune build
-  @opam`, validate locally, merge the Awskit fix, and rerun the opam publish
-  flow for the same version. `opam publish` handles initial publications, new
-  releases, and metadata updates through the same submission flow.
-- For failures that require changing released source code, tests, or archive
-  contents, do not mutate the existing tag or uploaded archive. Prepare a new
-  Awskit patch release; opam-publish warns that changing an already published
-  package archive breaks reproducibility.
+  @opam`, validate locally, merge the Awskit fix, and rerun the release
+  publication flow for the same version.
+- For failures that require changing source code, tests, or archive contents
+  while the opam-repository PR is still open and unpublished, merge the Awskit
+  fix first. After the squash merge reaches `main`, wait for the required
+  `main` branch CI run to pass before republishing the same version.
+
+For an open unpublished opam-repository PR, republish the same version from the
+corrected `main` branch:
+
+```sh
+git checkout main
+git pull --ff-only
+gh run list --branch main --workflow CI --limit 1
+gh run watch <run-id>
+git tag -f -a vX.Y.Z -m "vX.Y.Z"
+git push --force origin vX.Y.Z
+dune-release distrib --tag vX.Y.Z --keep-v --pkg-version X.Y.Z
+gh release upload vX.Y.Z _build/awskit-vX.Y.Z.tbz --clobber
+dune-release opam pkg \
+  --tag vX.Y.Z \
+  --keep-v \
+  --pkg-version X.Y.Z \
+  --dist-uri https://github.com/abdufelsayed/awskit/releases/download/vX.Y.Z/awskit-vX.Y.Z.tbz
+dune-release opam submit --tag vX.Y.Z --keep-v --pkg-version X.Y.Z
+```
+
+`opam publish` and the equivalent `dune-release opam submit` flow can update an
+existing open submission for the same version. After rerunning the submission,
+monitor the existing opam-repository PR instead of opening a new Awskit release.
+
+Once opam-repository has accepted and published the package version, do not
+mutate the accepted tag or uploaded archive. Prepare a new Awskit patch release
+for any later source, test, metadata, or archive correction.
 
 Do not hand-edit generated package metadata only in the opam-repository PR
 while leaving `dune-project` or Awskit `*.opam` out of date. Downstream

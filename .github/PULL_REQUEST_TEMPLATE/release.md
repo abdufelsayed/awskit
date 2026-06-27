@@ -47,10 +47,12 @@ surfaces, and publication targets. -->
 dune-release distribution archive upload, checksum verification,
 opam-repository PR, opam-ci status, and generated docs publication.
 
-If opam-ci fails, metadata fixes must be made in Awskit source metadata and
-published by rerunning the opam publish flow for the same version. Do not
-hand-edit generated opam-repository package files while leaving Awskit metadata
-out of date. Source/archive fixes require a new patch release. -->
+If opam-ci fails while the opam-repository PR is still open and unpublished,
+merge the Awskit fix, wait for main branch CI, retag and rebuild the same
+version, then rerun the opam publish flow so the existing opam-repository PR is
+updated. Do not hand-edit generated opam-repository package files while leaving
+Awskit metadata out of date. After opam-repository accepts a package version,
+later corrections require a new patch release. -->
 
 - Final archive URL and checksum plan:
 - opam-repository PR and opam-ci:
