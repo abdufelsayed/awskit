@@ -64,7 +64,7 @@ A strong check combines four evidence axes:
 | Runtime HTTP workloads | Package-owned runtime HTTP adapter workloads against loopback servers, including bodiless responses, framing, body-reader, and error-path behavior. | `opam exec -- dune build @runtime-http` |
 | MinIO workload | Local adapter interoperability for the shared S3 state workload through a service-backed S3-compatible test double. | `opam exec -- dune build --force @s3-minio` |
 | Examples/docs | Extracted examples, odoc pages, and future docs checks. Examples should compile, and simulator-backed examples should execute when practical. | `opam exec -- dune build @examples @doc` |
-| Release gates | Composed local evidence plus opam, install, archive, documentation, and service lifecycle checks. | `scripts/release-check.sh` |
+| Release gates | Composed local evidence plus opam, package-isolated install/test, archive, documentation, and service lifecycle checks. | `scripts/release-check.sh` |
 
 For protocol behavior, prefer structured assertions or fixture comparisons over
 string containment. String containment is appropriate when the contract is the
@@ -118,6 +118,23 @@ Exact package-owned aliases are useful when rerunning one failing surface:
 
 Tracked aliases are evidence claims. Add or document a new support claim only
 after the runnable alias, script workflow, or release gate exists.
+
+## Package Isolation
+
+Grouped package installs are useful for normal CI throughput, but they can mask
+missing `:with-test` dependencies when another package in the same switch
+happens to install the library. Release validation therefore checks every
+package in `AWSKIT_RELEASE_PACKAGES` in a temporary opam switch that is reset
+between package checks:
+
+```sh
+opam install --with-test --deps-only <package>
+dune build -p <package> @install @runtest
+```
+
+This gate protects opam-repository publication. If it fails because a test
+library is missing, fix `dune-project` and regenerate the generated `*.opam`
+files instead of patching only downstream publication metadata.
 
 ## External Services
 

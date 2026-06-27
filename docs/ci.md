@@ -16,7 +16,7 @@ Related maintainer docs:
 | `CI` | `.github/workflows/ci.yml` | Required build, test, docs/examples, no-network correctness, and MinIO evidence. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, and manual dispatch. Draft pull requests are skipped. |
 | `Publish docs` | `.github/workflows/docs.yml` | Publishes generated odoc documentation to GitHub Pages. | Successful `CI` workflow runs on `main`, and manual dispatch from `main`. |
 | `Stress evidence` | `.github/workflows/stress.yml` | Runs high-cost discovery evidence outside required PR CI. | Weekly schedule and manual dispatch. |
-| `Release validation` | `.github/workflows/release-validation.yml` | Mirrors the local release script in CI. | Pushes to `release/**` and manual dispatch. |
+| `Release validation` | `.github/workflows/release-validation.yml` | Mirrors the local release script in CI, including package-isolated opam install/test validation. | Pushes to `release/**` and manual dispatch. |
 
 ## Required CI
 
@@ -66,6 +66,19 @@ Before merging a release PR, record:
 The release validation workflow uses the release branch name to infer
 `AWSKIT_RELEASE_VERSION`, or a manual `release_version` input when validating
 another ref. It uploads `.logs/` as an artifact.
+
+`scripts/release-check.sh` creates a temporary opam switch, pins the released
+packages from the checkout, and resets the switch between packages before
+running isolated `opam install --with-test --deps-only <package>` plus
+`dune build -p <package> @install @runtest`. By default the temporary switch
+uses `ocaml-base-compiler` for the active compiler version; set
+`AWSKIT_OPAM_ISOLATION_COMPILER_PACKAGE` to validate with another compiler
+package. This catches package-specific test dependencies that grouped CI jobs
+can mask.
+
+Release validation is Awskit's pre-merge opam packaging check. The official
+opam publication flow still happens after the release tag, through
+`opam publish` or the equivalent dune-release opam submission flow.
 
 The workflow is a CI mirror for the local release script. It does not replace
 the release gate policy in `docs/release-gates.md`.

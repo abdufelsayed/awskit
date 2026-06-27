@@ -25,8 +25,57 @@ release_opam_switch=$(opam switch show)
 
 opam exec -- dune build @opam
 opam lint ./*.opam
+isolation_compiler=${AWSKIT_OPAM_ISOLATION_COMPILER_PACKAGE:-}
+if [ -z "$isolation_compiler" ]; then
+  isolation_compiler="ocaml-base-compiler.$(opam exec -- ocamlc -version)"
+fi
+isolation_prefix=${AWSKIT_OPAM_ISOLATION_SWITCH_PREFIX:-awskit-release-isolation}
+isolation_switch="$isolation_prefix-$$"
+cleanup_isolation_switch() {
+  if [ "${AWSKIT_OPAM_ISOLATION_KEEP_SWITCHES:-}" = "1" ]; then
+    return 0
+  fi
+
+  opam switch remove --yes "$isolation_switch" >/dev/null 2>&1 || true
+}
+trap cleanup_isolation_switch EXIT HUP INT TERM
+echo "Creating package isolation switch $isolation_switch with $isolation_compiler"
+opam switch create --yes --no-switch "$isolation_switch" "$isolation_compiler"
+for pinned_package in "$@"; do
+  opam pin add --switch="$isolation_switch" --yes --no-action --kind=path \
+    "$pinned_package" .
+done
+isolation_base_packages=$(opam list --switch="$isolation_switch" --installed --short)
+cleanup_isolation_packages() {
+  installed_packages=$(opam list --switch="$isolation_switch" --installed --short)
+  remove_packages=""
+  for installed_package in $installed_packages; do
+    keep_package=0
+    for base_package in $isolation_base_packages; do
+      if [ "$installed_package" = "$base_package" ]; then
+        keep_package=1
+        break
+      fi
+    done
+    if [ "$keep_package" = "0" ]; then
+      remove_packages="$remove_packages $installed_package"
+    fi
+  done
+
+  if [ -n "$remove_packages" ]; then
+    opam remove --switch="$isolation_switch" --yes --auto-remove $remove_packages
+  fi
+}
 for package in "$@"; do
-  opam pin add --yes --no-action "$package" .
+  cleanup_isolation_packages
+  echo "Checking isolated opam metadata for $package with $isolation_compiler"
+  opam install --switch="$isolation_switch" --yes --deps-only --with-test \
+    "$package"
+  opam exec --switch="$isolation_switch" -- dune build -p "$package" @install @runtest
+done
+cleanup_isolation_packages
+for package in "$@"; do
+  opam pin add --yes --no-action --kind=path "$package" .
 done
 opam install --yes --working-dir --with-test --with-doc --with-dev-setup "$@"
 opam exec -- dune fmt
