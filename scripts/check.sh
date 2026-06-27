@@ -4,13 +4,19 @@ set -u
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/test-report.sh [workflow] [--log-dir DIR] [--label LABEL]
+Usage: scripts/check.sh CHECK [--log-dir DIR] [--label LABEL]
 
-Workflows:
-  quick        Format, whitespace, and no-network correctness.
-  integration  Bounded MinIO integration with service lifecycle.
-  full         Broad workflow plus bounded MinIO integration.
-  stress       Full workflow with higher generated workload pressure.
+Checks:
+  package-metadata   Generated opam, opam lint, formatting, and drift checks.
+  package-isolation  Per-package opam install/test isolation.
+  packages-default   Default package build and test set.
+  packages-eio       Eio package build and test set.
+  docs-examples      Documentation and examples.
+  no-network         Reported no-network correctness evidence.
+  minio              Reported bounded MinIO integration evidence.
+  stress             Reported high-cost discovery evidence.
+  release-archive    Release archive and archive documentation checks.
+  release            Composed release validation.
 
 Options:
   --log-dir DIR  Write reports under DIR instead of .logs.
@@ -18,6 +24,14 @@ Options:
   -h, --help     Show this help.
 
 Environment:
+  AWSKIT_DEFAULT_OPAM_PACKAGES
+  AWSKIT_DEFAULT_DUNE_PACKAGES
+  AWSKIT_EIO_OPAM_PACKAGES
+  AWSKIT_EIO_DUNE_PACKAGES
+  AWSKIT_MINIO_OPAM_PACKAGES
+  AWSKIT_RELEASE_PACKAGES
+  AWSKIT_EXAMPLE_OPAM_PACKAGES
+                            Override check package sets.
   AWSKIT_QCHECK_COUNT       Overrides generated no-service workload counts.
   AWSKIT_STRESS_QCHECK_COUNT
                             Default count used by stress for @check-stress
@@ -29,14 +43,19 @@ Environment:
 USAGE
 }
 
-workflow=quick
+check=
 log_dir=.logs
 label=
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    quick | integration | full | stress)
-      workflow=$1
+    package-metadata | package-isolation | packages-default | packages-eio | \
+    docs-examples | no-network | minio | stress | release-archive | release)
+      if [ -n "$check" ]; then
+        echo "Only one CHECK may be provided." >&2
+        exit 2
+      fi
+      check=$1
       shift
       ;;
     --log-dir)
@@ -67,15 +86,29 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ -z "$check" ]; then
+  echo "Missing CHECK." >&2
+  usage >&2
+  exit 2
+fi
+
 if ! root=$(git rev-parse --show-toplevel 2>/dev/null); then
-  echo "scripts/test-report.sh must run inside a git checkout." >&2
+  echo "scripts/check.sh must run inside a git checkout." >&2
   exit 2
 fi
 
 cd "$root"
 
+. "$root/scripts/release-env.sh"
+
+AWSKIT_DEFAULT_OPAM_PACKAGES="${AWSKIT_DEFAULT_OPAM_PACKAGES:-awskit awskit-unix awskit-lwt awskit-lwt-unix awskit-s3 awskit-s3-sim awskit-s3-lwt awskit-s3-lwt-unix}"
+AWSKIT_DEFAULT_DUNE_PACKAGES="${AWSKIT_DEFAULT_DUNE_PACKAGES:-awskit,awskit-unix,awskit-lwt,awskit-lwt-unix,awskit-s3,awskit-s3-sim,awskit-s3-lwt,awskit-s3-lwt-unix}"
+AWSKIT_EIO_OPAM_PACKAGES="${AWSKIT_EIO_OPAM_PACKAGES:-awskit awskit-unix awskit-eio awskit-s3 awskit-s3-eio}"
+AWSKIT_EIO_DUNE_PACKAGES="${AWSKIT_EIO_DUNE_PACKAGES:-awskit,awskit-unix,awskit-eio,awskit-s3,awskit-s3-eio}"
+AWSKIT_MINIO_OPAM_PACKAGES="${AWSKIT_MINIO_OPAM_PACKAGES:-awskit awskit-unix awskit-lwt awskit-lwt-unix awskit-eio awskit-s3 awskit-s3-lwt awskit-s3-lwt-unix awskit-s3-eio}"
+
 stress_check_qcheck_count=
-case "$workflow" in
+case "$check" in
   stress)
     if [ -n "${AWSKIT_QCHECK_COUNT:-}" ]; then
       stress_check_qcheck_count=$AWSKIT_QCHECK_COUNT
@@ -85,12 +118,10 @@ case "$workflow" in
     ;;
 esac
 
-mkdir -p "$log_dir"
-
-slug_source=${label:-$workflow}
+slug_source=${label:-$check}
 slug=$(printf "%s" "$slug_source" | tr -c "A-Za-z0-9_.-" "-" | sed 's/--*/-/g; s/^-//; s/-$//')
 if [ -z "$slug" ]; then
-  slug=$workflow
+  slug=$check
 fi
 
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
@@ -103,6 +134,8 @@ alcotest_output_tail_lines=240
 failed=0
 minio_started=0
 minio_failed=0
+isolation_switch=
+report_started=0
 
 display_path() {
   case "$1" in
@@ -137,6 +170,15 @@ print_command() {
 
 record_failure() {
   failed=1
+}
+
+run_checked() {
+  print_command "$@"
+  "$@"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    exit "$status"
+  fi
 }
 
 alcotest_output_has_failure_marker() {
@@ -292,7 +334,7 @@ run_metadata() {
   {
     echo "# Awskit test report"
     echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo "workflow=$workflow"
+    echo "check=$check"
     echo "root=$root"
     echo "branch=$(git branch --show-current 2>/dev/null || true)"
     echo "head=$(git rev-parse --short HEAD 2>/dev/null || true)"
@@ -310,17 +352,43 @@ run_metadata() {
   run_cmd "opam exec -- ocamlc -version" opam exec -- ocamlc -version
 }
 
-run_format_and_diff() {
-  run_cmd "opam exec -- dune fmt --root $root" opam exec -- dune fmt --root "$root"
-  run_cmd "git diff --check" git diff --check
+start_report() {
+  if [ "$report_started" = "1" ]; then
+    return 0
+  fi
+
+  mkdir -p "$log_dir"
+  report_started=1
+  run_metadata
 }
 
-run_quick() {
-  run_format_and_diff
+finish_report() {
+  if [ "$report_started" != "1" ]; then
+    return 0
+  fi
+
+  append_line ""
+  append_line "finished_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  append_line "overall_failed=$failed"
+  append_line "report_path=$(display_path "$report")"
+  if [ -d "$artifact_dir" ]; then
+    append_line "artifact_dir=$(display_path "$artifact_dir")"
+  fi
+
+  ln -sf "$(basename "$report")" "$latest"
+  append_line "latest_report=$(display_path "$latest")"
+
+  if [ "$failed" -ne 0 ]; then
+    exit 1
+  fi
+}
+
+report_no_network() {
+  start_report
   dune_build_force "opam exec -- dune build --force @check-quick" @check-quick
 }
 
-run_docs_examples() {
+report_docs_examples() {
   dune_build "opam exec -- dune build @examples @doc" @examples @doc
 }
 
@@ -461,60 +529,254 @@ run_minio() {
   fi
 }
 
+cleanup_isolation_switch() {
+  if [ -z "$isolation_switch" ]; then
+    return 0
+  fi
+  if [ "${AWSKIT_OPAM_ISOLATION_KEEP_SWITCHES:-}" = "1" ]; then
+    return 0
+  fi
+
+  opam switch remove --yes "$isolation_switch" >/dev/null 2>&1 || true
+  isolation_switch=
+}
+
+release_packages() {
+  printf "%s" "$AWSKIT_RELEASE_PACKAGES" | tr "," " "
+}
+
+check_release_package_count() {
+  expected_count=0
+  for package in $(release_packages); do
+    expected_count=$((expected_count + 1))
+    test -f "$package.opam"
+  done
+
+  actual_count=$(find . -maxdepth 1 -name "*.opam" | wc -l | tr -d " ")
+  if [ "$actual_count" != "$expected_count" ]; then
+    echo "Expected $expected_count opam packages from AWSKIT_RELEASE_PACKAGES, found $actual_count" >&2
+    exit 1
+  fi
+}
+
+check_clean_worktree() {
+  git diff --check
+  if ! git diff --quiet || ! git diff --cached --quiet ||
+     [ -n "$(git ls-files --others --exclude-standard)" ]; then
+    echo "Release checks require a clean git worktree before building the archive." >&2
+    exit 1
+  fi
+}
+
+check_package_metadata() {
+  run_checked opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
+  run_checked opam exec -- dune build @opam
+  run_checked opam lint ./*.opam
+  run_checked opam exec -- dune fmt
+  run_checked git diff --check
+  run_checked git diff --exit-code
+}
+
+check_packages_default() {
+  run_checked opam install --yes --with-test --deps-only $AWSKIT_DEFAULT_OPAM_PACKAGES
+  run_checked opam exec -- dune build -p "$AWSKIT_DEFAULT_DUNE_PACKAGES" @install @runtest
+}
+
+check_packages_eio() {
+  run_checked opam install --yes --with-test --deps-only $AWSKIT_EIO_OPAM_PACKAGES
+  run_checked opam exec -- dune build -p "$AWSKIT_EIO_DUNE_PACKAGES" @install @runtest
+}
+
+check_docs_examples() {
+  run_checked opam install --yes --with-test --with-doc --deps-only .
+  if [ -n "$AWSKIT_EXAMPLE_OPAM_PACKAGES" ]; then
+    run_checked opam install --yes $AWSKIT_EXAMPLE_OPAM_PACKAGES
+  fi
+  run_checked opam exec -- dune build @examples @doc
+}
+
+check_no_network() {
+  run_checked opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
+  report_no_network
+  finish_report
+}
+
+check_minio() {
+  run_checked opam install --yes --with-test --deps-only $AWSKIT_MINIO_OPAM_PACKAGES
+  start_report
+  run_minio no
+  finish_report
+}
+
+check_stress() {
+  run_checked opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
+  if [ -n "$AWSKIT_EXAMPLE_OPAM_PACKAGES" ]; then
+    run_checked opam install --yes $AWSKIT_EXAMPLE_OPAM_PACKAGES
+  fi
+  report_stress
+  finish_report
+}
+
+check_package_isolation() {
+  check_release_package_count
+
+  isolation_compiler=${AWSKIT_OPAM_ISOLATION_COMPILER_PACKAGE:-}
+  if [ -z "$isolation_compiler" ]; then
+    isolation_compiler="ocaml-base-compiler.$(opam exec -- ocamlc -version)"
+  fi
+  isolation_prefix=${AWSKIT_OPAM_ISOLATION_SWITCH_PREFIX:-awskit-release-isolation}
+  isolation_switch="$isolation_prefix-$$"
+
+  echo "Creating package isolation switch $isolation_switch with $isolation_compiler"
+  run_checked opam switch create --yes --no-switch "$isolation_switch" "$isolation_compiler"
+  for pinned_package in $(release_packages); do
+    run_checked opam pin add --switch="$isolation_switch" --yes --no-action \
+      --kind=path "$pinned_package" .
+  done
+
+  isolation_base_packages=$(opam list --switch="$isolation_switch" --installed --short)
+
+  cleanup_isolation_packages() {
+    installed_packages=$(opam list --switch="$isolation_switch" --installed --short)
+    remove_packages=""
+    for installed_package in $installed_packages; do
+      keep_package=0
+      for base_package in $isolation_base_packages; do
+        if [ "$installed_package" = "$base_package" ]; then
+          keep_package=1
+          break
+        fi
+      done
+      if [ "$keep_package" = "0" ]; then
+        remove_packages="$remove_packages $installed_package"
+      fi
+    done
+
+    if [ -n "$remove_packages" ]; then
+      run_checked opam remove --switch="$isolation_switch" --yes --auto-remove \
+        $remove_packages
+    fi
+  }
+
+  for package in $(release_packages); do
+    cleanup_isolation_packages
+    echo "Checking isolated opam metadata for $package with $isolation_compiler"
+    run_checked opam install --switch="$isolation_switch" --yes --deps-only \
+      --with-test "$package"
+    run_checked opam exec --switch="$isolation_switch" -- dune build -p "$package" \
+      @install @runtest
+  done
+
+  cleanup_isolation_packages
+  cleanup_isolation_switch
+}
+
+check_current_doc_warnings() {
+  doc_log=$(mktemp "${TMPDIR:-/tmp}/awskit-doc.XXXXXX")
+  if ! opam exec -- dune build @doc >"$doc_log" 2>&1; then
+    cat "$doc_log"
+    rm -f "$doc_log"
+    exit 1
+  fi
+  if grep -E "Warning|Error|Failed to resolve" "$doc_log"; then
+    echo "Documentation build emitted warnings or unresolved references." >&2
+    rm -f "$doc_log"
+    exit 1
+  fi
+  rm -f "$doc_log"
+}
+
+check_release_archive() {
+  awskit_require_release_version
+  release_opam_switch=$(opam switch show)
+
+  check_clean_worktree
+  check_current_doc_warnings
+  run_checked opam exec -- dune-release check -V "$AWSKIT_RELEASE_VERSION"
+  run_checked opam exec -- dune-release distrib -V "$AWSKIT_RELEASE_VERSION"
+
+  dist_archive="_build/awskit-$AWSKIT_RELEASE_VERSION.tbz"
+  dist_dir=$(mktemp -d "${TMPDIR:-/tmp}/awskit-dist-doc.XXXXXX")
+  dist_log=$(mktemp "${TMPDIR:-/tmp}/awskit-dist-doc.XXXXXX")
+  tar -xjf "$dist_archive" -C "$dist_dir"
+  if ! (
+    cd "$dist_dir/awskit-$AWSKIT_RELEASE_VERSION"
+    opam exec --switch="$release_opam_switch" -- dune build @doc
+  ) >"$dist_log" 2>&1; then
+    cat "$dist_log"
+    rm -rf "$dist_dir" "$dist_log"
+    exit 1
+  fi
+  if grep -E "Warning|Error|Failed to resolve" "$dist_log"; then
+    echo "Distribution archive documentation emitted warnings or unresolved references." >&2
+    rm -rf "$dist_dir" "$dist_log"
+    exit 1
+  fi
+  rm -rf "$dist_dir" "$dist_log"
+}
+
+check_release() {
+  check_package_metadata
+  check_package_isolation
+  check_docs_examples
+  check_release_archive
+
+  start_report
+  report_no_network
+  run_checked opam install --yes --with-test --deps-only $AWSKIT_MINIO_OPAM_PACKAGES
+  run_minio no
+  finish_report
+}
+
 cleanup() {
   stop_minio
+  cleanup_isolation_switch
 }
 
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
-run_full_workflow() {
-  run_format_and_diff
-  dune_build_force "opam exec -- dune build --force @check-quick" @check-quick
-  run_docs_examples
-  run_minio no
-}
-
-run_stress_workflow() {
-  run_format_and_diff
+report_stress() {
+  start_report
   dune_build_force_with_qcheck_count "$stress_check_qcheck_count" \
     "AWSKIT_QCHECK_COUNT=$stress_check_qcheck_count opam exec -- dune build --force @check-stress" \
     @check-stress
-  run_docs_examples
+  report_docs_examples
   run_minio yes
 }
 
-run_metadata
-
-case "$workflow" in
-  quick)
-    run_quick
+case "$check" in
+  package-metadata)
+    check_package_metadata
     ;;
-  integration)
-    run_minio no
+  package-isolation)
+    check_package_isolation
     ;;
-  full)
-    run_full_workflow
+  packages-default)
+    check_packages_default
+    ;;
+  packages-eio)
+    check_packages_eio
+    ;;
+  docs-examples)
+    check_docs_examples
+    ;;
+  no-network)
+    check_no_network
+    ;;
+  minio)
+    check_minio
     ;;
   stress)
-    run_stress_workflow
+    check_stress
+    ;;
+  release-archive)
+    check_release_archive
+    ;;
+  release)
+    check_release
     ;;
 esac
-
-append_line ""
-append_line "finished_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-append_line "overall_failed=$failed"
-append_line "report_path=$(display_path "$report")"
-if [ -d "$artifact_dir" ]; then
-  append_line "artifact_dir=$(display_path "$artifact_dir")"
-fi
-
-ln -sf "$(basename "$report")" "$latest"
-append_line "latest_report=$(display_path "$latest")"
-
-if [ "$failed" -ne 0 ]; then
-  exit 1
-fi
 
 exit 0

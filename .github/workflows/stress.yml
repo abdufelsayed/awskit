@@ -25,8 +25,6 @@ permissions:
 
 env:
   OCAML_LATEST: "5"
-  EXAMPLE_OPAM_PACKAGES: >-
-    eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
   AWSKIT_STRESS_QCHECK_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.qcheck_count || '2000' }}
   AWSKIT_MINIO_QCHECK_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.minio_qcheck_count || '' }}
 
@@ -48,13 +46,8 @@ jobs:
           opam-local-packages: |
             *.opam
 
-      - name: Install dependencies
-        run: |
-          opam install --with-test --with-doc --with-dev-setup --deps-only .
-          opam install ${{ env.EXAMPLE_OPAM_PACKAGES }}
-
       - name: Run stress evidence
-        run: scripts/test-report.sh stress --label stress-evidence
+        run: scripts/check.sh stress --label stress-evidence
 
       - name: Upload stress report
         if: always()

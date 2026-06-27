@@ -42,7 +42,7 @@ jobs:
             *.opam
 
       - name: Run release validation
-        run: scripts/release-check.sh
+        run: scripts/check.sh release --label release-validation
 
       - name: Upload release validation report
         if: always()

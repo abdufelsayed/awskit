@@ -114,7 +114,7 @@ Required release-branch checks:
   documentation/examples, no-network correctness evidence, and MinIO S3
   integration evidence.
 - `Release check` from `.github/workflows/release-validation.yml`, which runs
-  `scripts/release-check.sh` for release branch pushes.
+  `scripts/check.sh release` for release branch pushes.
 
 The `Publish docs` workflow is expected to skip on release branches because it
 only runs after `CI` succeeds on `main`.
@@ -122,7 +122,7 @@ only runs after `CI` succeeds on `main`.
 Before marking the release PR ready to merge, run:
 
 ```sh
-scripts/release-check.sh
+scripts/check.sh release
 ```
 
 This validates package metadata, package-isolated opam installs and tests,
@@ -136,7 +136,7 @@ Record:
 - the release branch head SHA used for validation;
 - the `gh pr checks` result;
 - the `Release check` result;
-- the local `scripts/release-check.sh` result;
+- the local `scripts/check.sh release` result;
 - public API review status;
 - support/security docs status;
 - whether live AWS tests are outside the support promise.
@@ -148,7 +148,7 @@ opam publication flow starts from a tagged release, then opens an
 opam-repository PR through `opam publish`. Pre-merge validation is local
 evidence that the tagged release should publish cleanly.
 
-Before merging the release PR, `scripts/release-check.sh` must catch the
+Before merging the release PR, `scripts/check.sh release` must catch the
 opam-ci-style packaging failures that are practical to detect locally:
 
 - generated opam metadata from `dune-project`;
@@ -228,8 +228,8 @@ If opam-ci fails, classify the failure before changing anything:
   constraints, source URLs, or checksums, fix Awskit source metadata first.
   Update `dune-project`, regenerate `*.opam` with `opam exec -- dune build
   @opam`, validate locally, merge the Awskit fix, and rerun the opam publish
-  flow for the same version. The official opam documentation says
-  `opam publish` can be rerun to update an existing submission.
+  flow for the same version. `opam publish` handles initial publications, new
+  releases, and metadata updates through the same submission flow.
 - For failures that require changing released source code, tests, or archive
   contents, do not mutate the existing tag or uploaded archive. Prepare a new
   Awskit patch release; opam-publish warns that changing an already published

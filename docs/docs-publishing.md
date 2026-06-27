@@ -60,7 +60,7 @@ Run:
 opam exec -- dune build @examples @doc
 ```
 
-For release validation, `scripts/release-check.sh` also checks documentation
+For release validation, `scripts/check.sh release` also checks documentation
 build output, example executables, generated documentation warnings, and
 documentation generation from the distribution archive.
 

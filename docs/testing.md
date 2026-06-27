@@ -64,7 +64,7 @@ A strong check combines four evidence axes:
 | Runtime HTTP workloads | Package-owned runtime HTTP adapter workloads against loopback servers, including bodiless responses, framing, body-reader, and error-path behavior. | `opam exec -- dune build @runtime-http` |
 | MinIO workload | Local adapter interoperability for the shared S3 state workload through a service-backed S3-compatible test double. | `opam exec -- dune build --force @s3-minio` |
 | Examples/docs | Extracted examples, odoc pages, and future docs checks. Examples should compile, and simulator-backed examples should execute when practical. | `opam exec -- dune build @examples @doc` |
-| Release gates | Composed local evidence plus opam, package-isolated install/test, archive, documentation, and service lifecycle checks. | `scripts/release-check.sh` |
+| Release gates | Composed local evidence plus opam, package-isolated install/test, archive, documentation, and service lifecycle checks. | `scripts/check.sh release` |
 
 For protocol behavior, prefer structured assertions or fixture comparisons over
 string containment. String containment is appropriate when the contract is the
@@ -72,8 +72,9 @@ presence of a fragment, such as a human diagnostic mentioning a field name.
 
 ## Gate Map
 
-Use Dune aliases for precise test selection. Use `scripts/test-report.sh` when a
-workflow should leave a durable local transcript, manage MinIO, or capture logs.
+Use Dune aliases for precise test selection. Use `scripts/check.sh` for named
+repository gates, durable local transcripts, MinIO lifecycle management, and
+log capture.
 
 | Alias | When to run | Includes | External service |
 | --- | --- | --- | --- |
@@ -136,6 +137,12 @@ This gate protects opam-repository publication. If it fails because a test
 library is missing, fix `dune-project` and regenerate the generated `*.opam`
 files instead of patching only downstream publication metadata.
 
+Run the package-isolation gate directly with:
+
+```sh
+scripts/check.sh package-isolation
+```
+
 ## External Services
 
 `@s3-minio` is the named local MinIO test-service gate for the shared S3
@@ -157,7 +164,7 @@ MinIO aliases fail when no reachable local MinIO service is available. For the
 script-managed Docker lifecycle, run:
 
 ```sh
-scripts/test-report.sh integration --label s3-integration
+scripts/check.sh minio --label s3-integration
 ```
 
 For a direct Dune rerun after starting the local service yourself, pass the
@@ -199,7 +206,7 @@ pressure. It depends on recursive `discovery` aliases in focused test
 directories, currently covering runtime HTTP workloads, the S3 simulator
 workload, S3 transfer fault workloads, S3 protocol wire properties, and S3
 protocol replay. It does not run local MinIO; use `@s3-minio`,
-`@check-integration`, or `scripts/test-report.sh stress` for service-backed
+`@check-integration`, or `scripts/check.sh stress` for service-backed
 evidence.
 
 Generated workloads honor `AWSKIT_QCHECK_COUNT=<positive-int>` as an override
@@ -249,15 +256,15 @@ shared S3 workload core.
 
 ## Saved Test Reports
 
-Use `scripts/test-report.sh` when a run should leave a durable local
-transcript. Reports are written under `.logs/` by default and are not committed.
-The script records repository metadata, command start and exit lines, test
-output, QCheck seeds, shrunk failure transcripts, bounded tails of
-failure-marked Alcotest `.output` artifacts, and MinIO service logs when a MinIO
-workflow fails. Full captured `.output` files are saved beside the report under
-the matching artifact directory. The script returns nonzero if any command in
-the selected workflow fails and continues later commands so the report shows
-the full evidence picture.
+Use the reported `scripts/check.sh` checks when a run should leave a durable
+local transcript. Reports are written under `.logs/` by default and are not
+committed. The script records repository metadata, command start and exit
+lines, test output, QCheck seeds, shrunk failure transcripts, bounded tails of
+failure-marked Alcotest `.output` artifacts, and MinIO service logs when a
+MinIO workflow fails. Full captured `.output` files are saved beside the report
+under the matching artifact directory. Reported checks return nonzero if any
+command in the selected check fails and continue later commands so the report
+shows the full evidence picture.
 
 The report filename is
 `.logs/awskit-test-<label-or-workflow>-<utc-timestamp>.log`; the matching
@@ -265,10 +272,10 @@ The report filename is
 
 | Command | Use |
 | --- | --- |
-| `scripts/test-report.sh quick` | Developer loop: formatting, whitespace, and no-service correctness. |
-| `scripts/test-report.sh integration` | Bounded MinIO integration with Docker lifecycle. |
-| `scripts/test-report.sh full` | Broad confidence: quick workflow, docs/examples, and bounded MinIO. |
-| `scripts/test-report.sh stress` | Bug-finding pressure: high-count generated workloads plus bounded and expensive MinIO. The two MinIO profiles use separate Docker lifecycles. |
+| `scripts/check.sh no-network` | No-service correctness report around `@check-quick`. |
+| `scripts/check.sh minio` | Bounded MinIO integration report with Docker lifecycle. |
+| `scripts/check.sh stress` | Bug-finding pressure: high-count generated workloads plus bounded and expensive MinIO. The two MinIO profiles use separate Docker lifecycles. |
+| `scripts/check.sh release` | Complete release validation, including package metadata, package isolation, docs/examples, reported no-network and MinIO evidence, and archive checks. |
 
 `stress` runs the no-service `@check-stress` alias with `AWSKIT_QCHECK_COUNT`
 from the caller or `AWSKIT_STRESS_QCHECK_COUNT` when that is unset. The default
@@ -276,7 +283,7 @@ stress count is `2000`. This high-count default is scoped to `@check-stress` and
 is not exported into the MinIO phases:
 
 ```sh
-AWSKIT_STRESS_QCHECK_COUNT=10000 scripts/test-report.sh stress --label overnight
+AWSKIT_STRESS_QCHECK_COUNT=10000 scripts/check.sh stress --label overnight
 ```
 
 Script-managed MinIO phases use their bounded or expensive profile defaults
@@ -286,20 +293,21 @@ store checks. That value is passed to the MinIO Dune command as
 `AWSKIT_QCHECK_COUNT` only for the service-backed phase:
 
 ```sh
-AWSKIT_MINIO_QCHECK_COUNT=100 scripts/test-report.sh integration --label minio-deeper
+AWSKIT_MINIO_QCHECK_COUNT=100 scripts/check.sh minio --label minio-deeper
 ```
 
 Use `--log-dir DIR` to put reports somewhere other than `.logs/`, and
 `--label LABEL` to make the filename describe the investigation.
 
-CI jobs that use this script should upload `.logs/` as an artifact with
+CI jobs that use reported checks should upload `.logs/` as an artifact with
 `if: always()` so failed runs keep their generated evidence.
 
-When the script starts Docker for a MinIO workflow, it supplies the default
-local endpoint, credentials, and region as explicit `AWSKIT_S3_MINIO_*`
-configuration. A setup or preflight error in that lifecycle is a failed gate.
-If matching Docker Compose resources already exist for the checkout, the script
-fails instead of sharing or tearing down a lifecycle it did not start.
+When `scripts/check.sh` starts Docker for a MinIO workflow, it supplies the
+default local endpoint, credentials, and region as explicit
+`AWSKIT_S3_MINIO_*` configuration. A setup or preflight error in that lifecycle
+is a failed gate. If matching Docker Compose resources already exist for the
+checkout, the script fails instead of sharing or tearing down a lifecycle it
+did not start.
 
 ## Test Identity
 
@@ -415,7 +423,7 @@ opam exec -- dune build @s3-transfer
 Release validation:
 
 ```sh
-scripts/release-check.sh
+scripts/check.sh release
 ```
 
 If a broad command is too expensive for the current change, run the focused

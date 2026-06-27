@@ -20,8 +20,8 @@ Record each item in the release PR before merge:
 | Release branch identity | Release branch head SHA used for validation. |
 | Required CI | `gh pr checks <pr-number> --watch=false` result showing `Required CI` green. |
 | Release validation CI | `Release check` result from `.github/workflows/release-validation.yml`. |
-| Local release validation | `scripts/release-check.sh` result from the release branch. |
-| Package isolation | `scripts/release-check.sh` result showing each released package passed isolated `opam install --with-test --deps-only <package>` and `dune build -p <package> @install @runtest`. |
+| Local release validation | `scripts/check.sh release` result from the release branch. |
+| Package isolation | `scripts/check.sh package-isolation` result showing each released package passed isolated `opam install --with-test --deps-only <package>` and `dune build -p <package> @install @runtest`. |
 | Public API review | Status of `.mli` files, package docs, examples, and focused behavior tests. |
 | Support/security scope | Status of `SUPPORT.md` and `SECURITY.md` against the release scope. |
 | Live AWS scope | Statement that live AWS is outside the gate unless `SUPPORT.md` promises live AWS coverage. |
@@ -31,7 +31,7 @@ Record each item in the release PR before merge:
 Run the complete local release validation with:
 
 ```sh
-scripts/release-check.sh
+scripts/check.sh release
 ```
 
 The script validates generated opam metadata, package-isolated opam

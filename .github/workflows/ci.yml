@@ -15,19 +15,6 @@ permissions:
 
 env:
   OCAML_LATEST: "5"
-  DEFAULT_OPAM_PACKAGES: >-
-    awskit awskit-unix awskit-lwt awskit-lwt-unix awskit-s3 awskit-s3-sim awskit-s3-lwt awskit-s3-lwt-unix
-  DEFAULT_DUNE_PACKAGES: >-
-    awskit,awskit-unix,awskit-lwt,awskit-lwt-unix,awskit-s3,awskit-s3-sim,awskit-s3-lwt,awskit-s3-lwt-unix
-  EIO_OPAM_PACKAGES: >-
-    awskit awskit-unix awskit-eio awskit-s3 awskit-s3-eio
-  EIO_DUNE_PACKAGES: >-
-    awskit,awskit-unix,awskit-eio,awskit-s3,awskit-s3-eio
-  MINIO_OPAM_PACKAGES: >-
-    awskit awskit-unix awskit-lwt awskit-lwt-unix awskit-eio
-    awskit-s3 awskit-s3-lwt awskit-s3-lwt-unix awskit-s3-eio
-  EXAMPLE_OPAM_PACKAGES: >-
-    eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
 
 jobs:
   package-metadata:
@@ -48,20 +35,8 @@ jobs:
           opam-local-packages: |
             *.opam
 
-      - name: Install maintenance dependencies
-        run: opam install --with-test --with-doc --with-dev-setup --deps-only .
-
-      - name: Validate generated opam files
-        run: opam exec -- dune build @opam
-
-      - name: Lint opam files
-        run: opam lint ./*.opam
-
-      - name: Check formatting and generated-file drift
-        run: |
-          opam exec -- dune fmt
-          git diff --check
-          git diff --exit-code
+      - name: Run package metadata check
+        run: scripts/check.sh package-metadata
 
   build-test-default:
     name: Default packages (${{ matrix.os }}, OCaml ${{ matrix.ocaml-compiler }})
@@ -95,14 +70,8 @@ jobs:
           dune-cache: true
           opam-local-packages: ${{ matrix.local-packages }}
 
-      - name: Install dependencies
-        run: opam install --with-test --deps-only ${{ env.DEFAULT_OPAM_PACKAGES }}
-
-      - name: Build packages
-        run: opam exec -- dune build -p "${{ env.DEFAULT_DUNE_PACKAGES }}" @install
-
-      - name: Run tests
-        run: opam exec -- dune build -p "${{ env.DEFAULT_DUNE_PACKAGES }}" @runtest
+      - name: Run default package checks
+        run: scripts/check.sh packages-default
 
   build-test-eio:
     name: Eio packages (${{ matrix.os }}, OCaml ${{ matrix.ocaml-compiler }})
@@ -138,14 +107,8 @@ jobs:
           dune-cache: true
           opam-local-packages: ${{ matrix.local-packages }}
 
-      - name: Install dependencies
-        run: opam install --with-test --deps-only ${{ env.EIO_OPAM_PACKAGES }}
-
-      - name: Build packages
-        run: opam exec -- dune build -p "${{ env.EIO_DUNE_PACKAGES }}" @install
-
-      - name: Run tests
-        run: opam exec -- dune build -p "${{ env.EIO_DUNE_PACKAGES }}" @runtest
+      - name: Run Eio package checks
+        run: scripts/check.sh packages-eio
 
   docs-examples:
     name: Documentation and examples
@@ -165,13 +128,8 @@ jobs:
           opam-local-packages: |
             *.opam
 
-      - name: Install documentation and example dependencies
-        run: |
-          opam install --with-test --with-doc --deps-only .
-          opam install ${{ env.EXAMPLE_OPAM_PACKAGES }}
-
-      - name: Build examples and documentation
-        run: opam exec -- dune build @examples @doc
+      - name: Run documentation and example checks
+        run: scripts/check.sh docs-examples
 
   no-network-correctness:
     name: No-network correctness
@@ -191,11 +149,8 @@ jobs:
           opam-local-packages: |
             *.opam
 
-      - name: Install dependencies
-        run: opam install --with-test --with-doc --with-dev-setup --deps-only .
-
       - name: Build no-network correctness evidence
-        run: scripts/test-report.sh quick --label no-network-correctness
+        run: scripts/check.sh no-network --label no-network-correctness
 
       - name: Upload no-network correctness report
         if: always()
@@ -223,11 +178,8 @@ jobs:
           opam-local-packages: |
             *.opam
 
-      - name: Install dependencies
-        run: opam install --with-test --deps-only ${{ env.MINIO_OPAM_PACKAGES }}
-
       - name: Run MinIO integration checks
-        run: scripts/test-report.sh integration --label s3-minio-integration
+        run: scripts/check.sh minio --label s3-minio-integration
 
       - name: Upload MinIO integration report
         if: always()

@@ -16,7 +16,7 @@ Related maintainer docs:
 | `CI` | `.github/workflows/ci.yml` | Required build, test, docs/examples, no-network correctness, and MinIO evidence. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, and manual dispatch. Draft pull requests are skipped. |
 | `Publish docs` | `.github/workflows/docs.yml` | Publishes generated odoc documentation to GitHub Pages. | Successful `CI` workflow runs on `main`, and manual dispatch from `main`. |
 | `Stress evidence` | `.github/workflows/stress.yml` | Runs high-cost discovery evidence outside required PR CI. | Weekly schedule and manual dispatch. |
-| `Release validation` | `.github/workflows/release-validation.yml` | Mirrors the local release script in CI, including package-isolated opam install/test validation. | Pushes to `release/**` and manual dispatch. |
+| `Release validation` | `.github/workflows/release-validation.yml` | Mirrors `scripts/check.sh release` in CI, including package-isolated opam install/test validation. | Pushes to `release/**` and manual dispatch. |
 
 ## Required CI
 
@@ -25,12 +25,12 @@ on these jobs:
 
 | Job | Evidence |
 | --- | --- |
-| `Package metadata` | Builds generated opam metadata with `opam exec -- dune build @opam`, runs `opam lint ./*.opam`, and checks formatting/generated-file drift with `opam exec -- dune fmt`, `git diff --check`, and `git diff --exit-code`. |
-| `Default packages` | Runs on Ubuntu and macOS for OCaml 4.14 and the latest OCaml 5 compiler. Covers the default package set and excludes Eio packages. |
-| `Eio packages` | Runs on Ubuntu and macOS for OCaml 5.2 and the latest OCaml 5 compiler. Covers Eio packages. |
-| `Documentation and examples` | Installs test and documentation dependencies for all packages, installs Eio HTTPS example-only packages separately, and builds `opam exec -- dune build @examples @doc`. |
-| `No-network correctness` | Runs `scripts/test-report.sh quick --label no-network-correctness` and uploads `.logs/` as an artifact with `if: always()`. |
-| `S3 MinIO integration` | Runs `scripts/test-report.sh integration --label s3-minio-integration` against script-managed local MinIO and uploads `.logs/` as an artifact with `if: always()`. |
+| `Package metadata` | Runs `scripts/check.sh package-metadata` for generated opam metadata, opam lint, formatting, whitespace, and generated-file drift. |
+| `Default packages` | Runs `scripts/check.sh packages-default` on Ubuntu and macOS for OCaml 4.14 and the latest OCaml 5 compiler. Covers the default package set and excludes Eio packages. |
+| `Eio packages` | Runs `scripts/check.sh packages-eio` on Ubuntu and macOS for OCaml 5.2 and the latest OCaml 5 compiler. Covers Eio packages. |
+| `Documentation and examples` | Runs `scripts/check.sh docs-examples` for example and odoc builds. |
+| `No-network correctness` | Runs `scripts/check.sh no-network --label no-network-correctness` and uploads `.logs/` as an artifact with `if: always()`. |
+| `S3 MinIO integration` | Runs `scripts/check.sh minio --label s3-minio-integration` against script-managed local MinIO and uploads `.logs/` as an artifact with `if: always()`. |
 
 `No-network correctness` does not start local services. MinIO adapter evidence
 stays in `S3 MinIO integration`.
@@ -41,7 +41,7 @@ The `Stress evidence` workflow is not a required PR gate. It is scheduled and
 manually dispatched discovery pressure:
 
 ```sh
-scripts/test-report.sh stress --label stress-evidence
+scripts/check.sh stress --label stress-evidence
 ```
 
 Manual dispatch accepts:
@@ -60,16 +60,16 @@ Before merging a release PR, record:
 
 - the `Required CI` result;
 - the `Release check` result from `.github/workflows/release-validation.yml`;
-- the local `scripts/release-check.sh` result when required by
+- the local `scripts/check.sh release` result when required by
   `docs/release-gates.md`.
 
 The release validation workflow uses the release branch name to infer
 `AWSKIT_RELEASE_VERSION`, or a manual `release_version` input when validating
 another ref. It uploads `.logs/` as an artifact.
 
-`scripts/release-check.sh` creates a temporary opam switch, pins the released
-packages from the checkout, and resets the switch between packages before
-running isolated `opam install --with-test --deps-only <package>` plus
+The `package-isolation` check creates a temporary opam switch, pins the
+released packages from the checkout, and resets the switch between packages
+before running isolated `opam install --with-test --deps-only <package>` plus
 `dune build -p <package> @install @runtest`. By default the temporary switch
 uses `ocaml-base-compiler` for the active compiler version; set
 `AWSKIT_OPAM_ISOLATION_COMPILER_PACKAGE` to validate with another compiler
@@ -80,7 +80,7 @@ Release validation is Awskit's pre-merge opam packaging check. The official
 opam publication flow still happens after the release tag, through
 `opam publish` or the equivalent dune-release opam submission flow.
 
-The workflow is a CI mirror for the local release script. It does not replace
+The workflow is a CI mirror for the local release check. It does not replace
 the release gate policy in `docs/release-gates.md`.
 
 ## Documentation Publishing
@@ -122,7 +122,7 @@ For `No-network correctness`, `S3 MinIO integration`, `Stress evidence`, and
 with the closest command. For MinIO failures:
 
 ```sh
-scripts/test-report.sh integration --label minio-debug
+scripts/check.sh minio --label minio-debug
 ```
 
 Fix the underlying contract mismatch. Use skips, looser checks, or retries only
