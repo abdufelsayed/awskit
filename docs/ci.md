@@ -28,7 +28,7 @@ on these jobs:
 | `No-service stress tests` | Runs `AWSKIT_QCHECK_COUNT=2000 scripts/test.sh stress --label no-service-stress`, which runs `@stress` as randomized correctness pressure and uploads `.logs/`. |
 | `Documentation and example build` | Builds `@examples @doc` after installing documentation and example dependencies. |
 | `S3 local-service stress tests` | Runs `AWSKIT_INTEGRATION_PROFILE=expensive scripts/test.sh integration --label s3-local-service-stress`, which runs `@integration` tests against script-managed local MinIO with the expensive profile and uploads `.logs/`. |
-| `Default package install/build/test matrix` | Runs direct package `opam install --with-test --deps-only <package>` and `dune build -p <package> @install @runtest` commands for each non-Eio opam package on Ubuntu and macOS with OCaml 4.14 and the latest OCaml 5 compiler. |
+| `Lwt package install/build/test matrix` | Runs direct package `opam install --with-test --deps-only <package>` and `dune build -p <package> @install @runtest` commands for each Lwt-compatible opam package on Ubuntu and macOS with OCaml 4.14 and the latest OCaml 5 compiler. |
 | `Eio package install/build/test matrix` | Runs the same direct package commands for each Eio-compatible opam package on Ubuntu and macOS with OCaml 5.2 and the latest OCaml 5 compiler. |
 
 This keeps failures grouped by evidence type while preserving direct

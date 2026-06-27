@@ -154,8 +154,8 @@ jobs:
           path: .logs/
           if-no-files-found: ignore
 
-  package-install-build-test-default:
-    name: Default package install/build/test (${{ matrix.package }}, ${{ matrix.os }}, OCaml ${{ matrix.ocaml-compiler }})
+  package-install-build-test-lwt:
+    name: Lwt package install/build/test (${{ matrix.package }}, ${{ matrix.os }}, OCaml ${{ matrix.ocaml-compiler }})
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
@@ -257,7 +257,7 @@ jobs:
       - no-service-stress
       - docs-examples
       - s3-local-service-stress
-      - package-install-build-test-default
+      - package-install-build-test-lwt
       - package-install-build-test-eio
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -269,7 +269,7 @@ jobs:
           NO_SERVICE_STRESS: ${{ needs.no-service-stress.result }}
           DOCS_EXAMPLES: ${{ needs.docs-examples.result }}
           S3_LOCAL_SERVICE_STRESS: ${{ needs.s3-local-service-stress.result }}
-          PACKAGE_INSTALL_BUILD_TEST_DEFAULT: ${{ needs.package-install-build-test-default.result }}
+          PACKAGE_INSTALL_BUILD_TEST_LWT: ${{ needs.package-install-build-test-lwt.result }}
           PACKAGE_INSTALL_BUILD_TEST_EIO: ${{ needs.package-install-build-test-eio.result }}
         run: |
           failed=0
@@ -293,7 +293,7 @@ jobs:
           check_result "No-service stress tests" "$NO_SERVICE_STRESS"
           check_result "Documentation and example build" "$DOCS_EXAMPLES"
           check_result "S3 local-service stress tests" "$S3_LOCAL_SERVICE_STRESS"
-          check_result "Default package install/build/test matrix" "$PACKAGE_INSTALL_BUILD_TEST_DEFAULT"
+          check_result "Lwt package install/build/test matrix" "$PACKAGE_INSTALL_BUILD_TEST_LWT"
           check_result "Eio package install/build/test matrix" "$PACKAGE_INSTALL_BUILD_TEST_EIO"
 
           exit "$failed"
