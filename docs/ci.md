@@ -1,8 +1,7 @@
 # CI Workflows
 
 Awskit uses GitHub Actions for required CI, generated documentation publishing,
-and advisory stress evidence. Release archive validation lives inside the main
-CI workflow as a release-branch/manual job, not as a separate workflow.
+and advisory stress evidence.
 
 Related maintainer docs:
 
@@ -14,9 +13,9 @@ Related maintainer docs:
 
 | Workflow | File | Purpose | Runs on |
 | --- | --- | --- | --- |
-| `CI` | `.github/workflows/ci.yml` | Required package metadata, per-package opam install/test, docs/examples, no-network correctness, and MinIO evidence. It also contains the release-archive job for release branches and manual dispatch. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, and manual dispatch. Draft pull requests are skipped. |
+| `CI` | `.github/workflows/ci.yml` | Hygiene, no-service correctness, docs/examples, local-service integration, and per-package install/build/test matrices. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, pushes to `v*` tags, and manual dispatch. Draft pull requests are skipped. |
 | `Publish docs` | `.github/workflows/docs.yml` | Publishes generated odoc documentation to GitHub Pages. | Successful `CI` workflow runs on `main`, and manual dispatch from `main`. |
-| `Stress evidence` | `.github/workflows/stress.yml` | Runs high-cost discovery evidence outside required PR CI. | Weekly schedule and manual dispatch. |
+| `Stress tests` | `.github/workflows/stress.yml` | Runs high-cost no-service stress tests and expensive local-service integration tests outside required PR CI. | Weekly schedule and manual dispatch. |
 
 ## Required CI
 
@@ -25,30 +24,39 @@ on these jobs:
 
 | Job | Evidence |
 | --- | --- |
-| `Package metadata` | Runs `scripts/check.sh package-metadata` for generated opam metadata, opam lint, formatting, whitespace, and generated-file drift. |
-| `Default package install/test matrix` | Runs `scripts/check.sh package --package <package>` for each non-Eio opam package on Ubuntu and macOS with OCaml 4.14 and the latest OCaml 5 compiler. |
-| `Eio package install/test matrix` | Runs `scripts/check.sh package --package <package>` for each Eio-compatible opam package on Ubuntu and macOS with OCaml 5.2 and the latest OCaml 5 compiler. |
-| `Documentation and examples` | Runs `scripts/check.sh docs-examples` for example and odoc builds. |
-| `No-network correctness` | Runs `scripts/check.sh no-network --label no-network-correctness` and uploads `.logs/` as an artifact with `if: always()`. |
-| `S3 MinIO integration` | Runs `scripts/check.sh minio --label s3-minio-integration` against script-managed local MinIO and uploads `.logs/` as an artifact with `if: always()`. |
+| `Hygiene` | Installs project dependencies, regenerates opam metadata, runs `opam lint`, runs `dune fmt`, and checks whitespace plus generated-file drift. |
+| `No-service correctness tests` | Runs `scripts/test.sh quick --label no-service-correctness`, which runs `@correctness` tests and uploads `.logs/`. |
+| `Documentation and example build` | Builds `@examples @doc` after installing documentation and example dependencies. |
+| `S3 local-service integration tests` | Runs `scripts/test.sh integration --label s3-local-service-integration`, which runs `@integration` tests against script-managed local MinIO and uploads `.logs/`. |
+| `Default package install/build/test matrix` | Runs direct package `opam install --with-test --deps-only <package>` and `dune build -p <package> @install @runtest` commands for each non-Eio opam package on Ubuntu and macOS with OCaml 4.14 and the latest OCaml 5 compiler. |
+| `Eio package install/build/test matrix` | Runs the same direct package commands for each Eio-compatible opam package on Ubuntu and macOS with OCaml 5.2 and the latest OCaml 5 compiler. |
 
-`No-network correctness` does not start local services. MinIO adapter evidence
-stays in `S3 MinIO integration`.
+This keeps failures grouped by evidence type while preserving direct
+`opam`/`dune` commands in CI.
 
-## Advisory Stress Evidence
+Each job configures `https://opam.ocaml.org/cache` as an opam archive mirror
+before installing dependencies. Package installs should not depend on every
+upstream source host being reachable during a matrix run.
 
-The `Stress evidence` workflow is not a required PR gate. It is scheduled and
-manually dispatched discovery pressure:
+## Advisory Stress Tests
+
+The `Stress tests` workflow is not a required PR gate. It is scheduled and
+manually dispatched discovery pressure. The first test step raises the
+no-service generated workload count:
 
 ```sh
-scripts/check.sh stress --label stress-evidence
+AWSKIT_QCHECK_COUNT=2000 scripts/test.sh stress --label stress-evidence
+```
+
+The second test step runs the expensive local-service integration profile once:
+
+```sh
+AWSKIT_INTEGRATION_PROFILE=expensive scripts/test.sh integration --label local-service-expensive
 ```
 
 Manual dispatch accepts:
 
-- `qcheck_count`: no-network stress alias count. Defaults to `2000`.
-- `minio_qcheck_count`: optional count override for script-managed MinIO
-  phases. Empty means the MinIO profile defaults apply.
+- `qcheck_count`: stress alias count. Defaults to `2000`.
 
 Treat stress failures as regressions to triage. Keep the workflow separate from
 normal PR feedback so expensive exploration does not slow every change.
@@ -56,35 +64,31 @@ normal PR feedback so expensive exploration does not slow every change.
 ## Package And Release Checks
 
 The required package matrices are Awskit's opam-ci-shaped pre-publication gate.
-Each matrix leaf installs one package's test dependencies and builds only that
+Each matrix leaf installs one package's test dependencies, then builds that
 package's install and test targets:
 
 ```sh
-scripts/check.sh package --package <package>
+opam install --yes --with-test --deps-only <package>
+opam exec -- dune build -p <package> @install @runtest
 ```
+
+Documentation and example evidence runs in its own CI job:
+
+```sh
+opam install --yes eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
+opam exec -- dune build @examples @doc
+```
+
+Release source-distribution checks remain local release evidence.
 
 This catches package-specific `with-test` dependency gaps in normal PR CI
 instead of waiting for the opam-repository PR.
 
-The optional `Release archive` job in `.github/workflows/ci.yml` runs on
-release branch pushes and manual dispatch when `release_version` is supplied.
-It runs:
-
-```sh
-scripts/check.sh release-archive
-```
-
-The job infers `AWSKIT_RELEASE_VERSION` from a `release/vX.Y.Z` branch when the
-manual input is empty. The complete local release gate remains:
-
-```sh
-scripts/check.sh release
-```
-
-That local gate includes package metadata, temporary-switch package isolation,
-docs/examples, release archive generation, no-network evidence, and MinIO
-evidence. The official opam publication flow still happens after the release
-tag through `opam publish` or the equivalent dune-release opam submission flow.
+Source distribution validation is not a GitHub CI job. Run the direct
+`dune-release` commands locally when creating a release; `docs/release.md` and
+`docs/release-gates.md` list the complete release evidence. The official opam
+publication flow still happens after the release tag through `opam publish` or
+the equivalent dune-release opam submission flow.
 
 ## Documentation Publishing
 
@@ -120,12 +124,12 @@ Watch a rerun:
 gh run watch <run-id> --interval 10 --exit-status
 ```
 
-For `No-network correctness`, `S3 MinIO integration`, `Stress evidence`, and
-`Release archive` failures, download the `.logs/` artifact when available and
-reproduce locally with the closest command. For MinIO failures:
+For `No-service correctness tests`, `S3 local-service integration tests`, and
+`Stress tests` failures, download the `.logs/` artifact when available and
+reproduce locally with the closest command. For local-service test failures:
 
 ```sh
-scripts/check.sh minio --label minio-debug
+scripts/test.sh integration --label minio-debug
 ```
 
 Fix the underlying contract mismatch. Use skips, looser checks, or retries only

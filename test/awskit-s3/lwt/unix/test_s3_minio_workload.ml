@@ -103,19 +103,20 @@ let metadata_of_model metadata = Metadata.of_list_exn metadata
 
 let report_selected_profile profile =
   Format.eprintf
-    "@[<v>MinIO integration profile: %s@;\
+    "@[<v>Local-service integration profile: %s@;\
      Evidence target: local S3-compatible MinIO test double; this is not AWS \
      provider certification.@]@."
     (integration_profile_to_string profile)
 
 let fail_unconfigured_minio profile label error =
   Alcotest.failf
-    "MinIO integration profile %s requires a reachable local MinIO test \
-     double. No AWSKIT_S3_MINIO_* configuration was supplied and %s failed \
-     against the default endpoint. Start local MinIO with default credentials, \
-     run scripts/test-report.sh integration, or set AWSKIT_S3_MINIO_ENDPOINT, \
-     AWSKIT_S3_MINIO_ACCESS_KEY_ID, AWSKIT_S3_MINIO_SECRET_ACCESS_KEY, and \
-     AWSKIT_S3_MINIO_REGION explicitly. Original error: %a"
+    "Local-service integration profile %s requires a reachable local MinIO \
+     test double. No AWSKIT_S3_MINIO_* configuration was supplied and %s \
+     failed against the default endpoint. Start local MinIO with default \
+     credentials, run scripts/test.sh integration, or set \
+     AWSKIT_S3_MINIO_ENDPOINT, AWSKIT_S3_MINIO_ACCESS_KEY_ID, \
+     AWSKIT_S3_MINIO_SECRET_ACCESS_KEY, and AWSKIT_S3_MINIO_REGION explicitly. \
+     Original error: %a"
     (integration_profile_to_string profile)
     label Awskit_s3.Error.pp error
 

@@ -1009,7 +1009,7 @@ let test_protocol_generator_sample_observability () =
       Alcotest.failf
         "S3 protocol generator sample observability failed across %d samples:\n\
          sample seed: %d\n\
-         reproduce: QCHECK_SEED=%d opam exec -- dune build @s3-protocol\n\n\
+         reproduce: QCHECK_SEED=%d opam exec -- dune build @s3-protocol-laws\n\n\
          missing stable families:\n\
          %s\n\n\
          weak stable families:\n\

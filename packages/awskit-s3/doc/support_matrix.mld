@@ -18,8 +18,8 @@ Rows are intentionally conservative:
 }
 
 The simulator is deterministic application-level evidence. It is not live AWS
-coverage and is not a wire-protocol authority. MinIO evidence is the opt-in
-local S3-compatible test-double profile run by [@s3-minio]; it does
+coverage and is not a wire-protocol authority. MinIO test coverage is the
+opt-in local S3-compatible test-double profile run by [@s3-local-service]; it does
 not imply support for arbitrary S3-compatible providers.
 
 {1 Object Operations}
@@ -35,7 +35,7 @@ not imply support for arbitrary S3-compatible providers.
     {!module:Awskit_s3.Make}.}
   {li {b Simulator coverage}: yes, including known-length request bodies,
     buffered helpers, validation, checksums, metadata, tags, and version ids.}
-  {li {b MinIO/evidence coverage}: yes for object create/read/update/delete
+  {li {b MinIO test coverage}: yes for object create/read/update/delete
     flow through the shared contract and targeted MinIO object tests. Response
     checksum echo is not part of the MinIO capability profile.}
   {li {b Notes and boundaries}: request bodies must have a known content
@@ -56,7 +56,7 @@ not imply support for arbitrary S3-compatible providers.
   {li {b Simulator coverage}: yes, including scoped readers, buffered download
     limits, optional not-found helpers, range reads, metadata, checksums, and
     version ids.}
-  {li {b MinIO/evidence coverage}: yes for object reads, bounded buffering,
+  {li {b MinIO test coverage}: yes for object reads, bounded buffering,
     range reads, metadata, and copy-related reads. Time-based preconditions and
     response checksum echo are not part of the MinIO capability profile.}
   {li {b Notes and boundaries}: [get_string], [get_bytes], [find_string], and
@@ -73,7 +73,7 @@ not imply support for arbitrary S3-compatible providers.
   {li {b Package/runtime coverage}: [Object.head], [find_metadata], and
     [exists] across all runtime-backed clients, simulator, and custom runtimes.}
   {li {b Simulator coverage}: yes.}
-  {li {b MinIO/evidence coverage}: yes through shared object contracts and
+  {li {b MinIO test coverage}: yes through shared object contracts and
     targeted metadata/copy tests.}
   {li {b Notes and boundaries}: [HeadObject] returns the same modeled metadata
     shape as [GetObject] without a body. [find_metadata] treats object
@@ -91,7 +91,7 @@ not imply support for arbitrary S3-compatible providers.
     custom runtimes.}
   {li {b Simulator coverage}: yes, including current-object deletes, version
     deletes, delete markers, and per-object [DeleteObjects] results.}
-  {li {b MinIO/evidence coverage}: yes for object deletion, bulk deletion, and
+  {li {b MinIO test coverage}: yes for object deletion, bulk deletion, and
     versioned deletes through the shared contract and targeted MinIO versioning
     tests. Delete preconditions and one missing-version-delete behavior differ
     from the strict profile and are recorded in the MinIO capability profile.}
@@ -111,7 +111,7 @@ not imply support for arbitrary S3-compatible providers.
   {li {b Simulator coverage}: yes, including metadata copy/replace, source
     version selection, checksums, storage class validation, and embedded copy
     errors.}
-  {li {b MinIO/evidence coverage}: yes for copy, metadata copy/replace, and
+  {li {b MinIO test coverage}: yes for copy, metadata copy/replace, and
     copying explicit source versions. MinIO does not return every strict-profile
     source-version echo for current-version copies.}
   {li {b Notes and boundaries}: modeled options include source version id,
@@ -132,7 +132,7 @@ not imply support for arbitrary S3-compatible providers.
     and custom runtimes.}
   {li {b Simulator coverage}: yes, including continuation tokens, delimiters,
     common prefixes, and bounded collection helpers.}
-  {li {b MinIO/evidence coverage}: yes through shared list/copy/delete object
+  {li {b MinIO test coverage}: yes through shared list/copy/delete object
     contracts. Bucket-list exclusivity differs in the MinIO profile, but
     object-listing contracts are covered for the named test bucket.}
   {li {b Notes and boundaries}: options model prefix, delimiter, max keys,
@@ -150,7 +150,7 @@ not imply support for arbitrary S3-compatible providers.
     results, [Object.list_versions], and [Object.Versions] pagination helpers.}
   {li {b Simulator coverage}: yes, including version ids, delete markers,
     suspended versioning behavior, and version-list pagination.}
-  {li {b MinIO/evidence coverage}: yes for enabling versioning, reading prior
+  {li {b MinIO test coverage}: yes for enabling versioning, reading prior
     versions, copying prior versions, delete markers, and restoring a current
     object. Version-listing pagination is simulator/protocol evidence in this
     release rather than part of the MinIO capability profile. Suspended
@@ -168,7 +168,7 @@ not imply support for arbitrary S3-compatible providers.
   {li {b Package/runtime coverage}: object metadata on put/get/head/copy,
     object tag sets on put, and [Object.Tagging.get]/[put]/[delete].}
   {li {b Simulator coverage}: yes.}
-  {li {b MinIO/evidence coverage}: yes through shared object-tagging,
+  {li {b MinIO test coverage}: yes through shared object-tagging,
     metadata, copy, and object create/read/update/delete flow contracts.}
   {li {b Notes and boundaries}: tags and metadata use validated Awskit domain
     values. Broad ACL, IAM, public-access policy semantics, and provider-specific
@@ -185,7 +185,7 @@ not imply support for arbitrary S3-compatible providers.
   {li {b Simulator coverage}: yes for modeled range, ETag/time precondition,
     checksum, storage class, and encryption metadata behavior that the simulator
     implements.}
-  {li {b MinIO/evidence coverage}: partial. Range reads, ETag preconditions,
+  {li {b MinIO test coverage}: partial. Range reads, ETag preconditions,
     storage metadata, and selected version/copy behavior are covered. Response
     checksums, multipart checksums, time preconditions, and delete preconditions
     are recorded as MinIO capability differences.}
@@ -209,7 +209,7 @@ not imply support for arbitrary S3-compatible providers.
     [exists], [list], and [get_location] across all runtime-backed clients,
     simulator, and custom runtimes.}
   {li {b Simulator coverage}: yes.}
-  {li {b MinIO/evidence coverage}: yes through shared bucket
+  {li {b MinIO test coverage}: yes through shared bucket
     create/delete/list flow contracts. Bucket-list exclusivity differs in the
     MinIO profile because a local MinIO server may expose buckets outside the
     current test fixture.}
@@ -229,7 +229,7 @@ not imply support for arbitrary S3-compatible providers.
     [Bucket.Ownership_controls].}
   {li {b Simulator coverage}: yes for the strict shared contract profile and
     modeled simulator state.}
-  {li {b MinIO/evidence coverage}: partial. MinIO integration tests cover
+  {li {b MinIO test coverage}: partial. MinIO integration tests cover
     policy, versioning, and tagging roundtrips, with known profile differences for
     exact policy JSON and deleted bucket tags. Bucket encryption, CORS,
     public-access-block, and ownership-controls are not enabled in the MinIO
@@ -255,7 +255,7 @@ not imply support for arbitrary S3-compatible providers.
   {li {b Simulator coverage}: yes, including known-length part validation,
     stream error handling, list-parts pagination, abort behavior, complete-size
     checks, and checksum validation.}
-  {li {b MinIO/evidence coverage}: yes for multipart
+  {li {b MinIO test coverage}: yes for multipart
     create/upload/complete/abort flow, list-parts pagination, stale ETag
     handling, missing-upload behavior, and multipart local-file transfer.
     Multipart checksum echo is not part of the MinIO capability profile.}
@@ -281,7 +281,7 @@ not imply support for arbitrary S3-compatible providers.
     managed transfer helpers.}
   {li {b Simulator coverage}: no direct filesystem helper. The simulator covers
     the underlying S3 operations and transfer planning is runtime-neutral.}
-  {li {b MinIO/evidence coverage}: yes through Lwt Unix MinIO tests for path
+  {li {b MinIO test coverage}: yes through Lwt Unix MinIO tests for path
     upload/download streaming and resumed multipart path transfer.}
   {li {b Notes and boundaries}: small uploads/downloads use one S3 request;
     larger uploads use multipart upload, and larger downloads use ranged
@@ -302,7 +302,7 @@ not imply support for arbitrary S3-compatible providers.
     [UploadPart].}
   {li {b Simulator coverage}: yes for adapter-bound generation using simulator
     credentials, region, clock, and endpoint configuration.}
-  {li {b MinIO/evidence coverage}: fixture and unit evidence covers artifact
+  {li {b MinIO test coverage}: fixture and unit evidence covers artifact
     construction; MinIO integration tests primarily exercise runtime operations,
     not a separate presigned HTTP execution flow.}
   {li {b Notes and boundaries}: artifacts use SigV4 query authentication and
@@ -328,7 +328,7 @@ not imply support for arbitrary S3-compatible providers.
   {li {b Simulator coverage}: the simulator implements the synchronous client
     shape, in-memory store, operation history, deterministic clock, and fault
     injection.}
-  {li {b MinIO/evidence coverage}: the named MinIO integration target is
+  {li {b MinIO test coverage}: the named MinIO integration target is
     tested through [awskit-s3-lwt-unix].}
   {li {b Notes and boundaries}: there is no ready Eio Unix aggregate package.
     Eio callers own HTTPS/TLS, CA roots, RNG initialization, and platform
@@ -344,8 +344,8 @@ not imply support for arbitrary S3-compatible providers.
     plaintext and custom endpoints, but endpoint configurability is not a
     provider compatibility promise.}
   {li {b Simulator coverage}: no, simulator evidence is local model evidence.}
-  {li {b MinIO/evidence coverage}: MinIO is the named local S3-compatible test
-    double where [@s3-minio] states coverage.}
+  {li {b MinIO test coverage}: MinIO is the named local S3-compatible test
+    double where [@s3-local-service] states coverage.}
   {li {b Notes and boundaries}: arbitrary S3-compatible providers, provider
     extensions, and provider-specific behavior are unsupported. Live AWS account
     compatibility is optional/manual and is not a release gate for this support

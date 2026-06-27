@@ -8,7 +8,7 @@ under this directory. Use concise names that describe behavior, such as
 `transfer_fault_workload`.
 
 Shared test-helper contracts live under `test/support` and are part of
-`@check-quick` through `@awskit-test-contracts`:
+`@correctness` through `@awskit-test-contracts`:
 
 - `@test/support/runtest`
 - `@awskit-test-contracts`
@@ -33,9 +33,9 @@ timeout classification, and caller cancellation classification.
 
 Runtime HTTP adapter work runs through package-owned aliases:
 
-- `@test/awskit/eio/runtime-http`
-- `@test/awskit/lwt/runtime-http`
-- `@runtime-http`
+- `@test/awskit/eio/runtime-http-contracts`
+- `@test/awskit/lwt/runtime-http-contracts`
+- `@runtime-http-contracts`
 
 The shared runtime HTTP workload covers generated response framing, bodiless
 responses, adversarial framing conflicts, early closes, malformed header/body
@@ -63,7 +63,7 @@ progress traces, cancellation, multipart ownership, and cleanup-secondary
 workloads.
 
 Pure S3 model contracts run through the support-owned alias, which is also part
-of the composed `@s3-sim` gate:
+of the composed `@s3-simulator` gate:
 
 - `@test/awskit-s3/support/s3-model-contracts`
 
@@ -73,10 +73,10 @@ The simulator runner lives in `test/awskit-s3/sim` and runs the shared S3 state
 workload, deterministic simulator contracts, and generated transfer fault
 workload without network access:
 
-- `@test/awskit-s3/sim/s3-state`
-- `@test/awskit-s3/sim/s3-transfer`
-- `@s3-sim`
-- `@s3-transfer`
+- `@test/awskit-s3/sim/simulator-state`
+- `@test/awskit-s3/sim/transfer-faults`
+- `@s3-simulator`
+- `@s3-transfer-faults`
 
 The suite IDs are `workload:awskit-s3-sim:s3-state` and
 `workload:awskit-s3-sim:transfer-faults`, plus
@@ -114,12 +114,12 @@ Protocol and domain runners use no network access. The protocol alias runs
 wire-level properties, and the domain alias runs pure S3 domain validation
 properties plus deterministic boundary regressions:
 
-- `@test/awskit-s3/protocol/wire`
-- `@test/awskit-s3/protocol/domain`
+- `@test/awskit-s3/protocol/protocol-laws`
+- `@test/awskit-s3/protocol/domain-laws`
 - `@test/awskit-s3/protocol/fixtures`
 - `@test/awskit-s3/protocol/replay`
-- `@s3-protocol`
-- `@s3-domain`
+- `@s3-protocol-laws`
+- `@s3-domain-laws`
 - `@s3-protocol-fixtures`
 - `@s3-protocol-replay`
 
@@ -130,12 +130,12 @@ The suite IDs are `workload:awskit-s3:protocol-wire`,
 `unit:awskit-s3:domain:regression`, `fixture:awskit-s3:protocol-wire`,
 and `replay:awskit-s3:protocol-wire`.
 
-The MinIO runner lives in `test/awskit-s3/lwt/unix` and runs a local-service
+The local-service runner lives in `test/awskit-s3/lwt/unix` and runs a MinIO
 profile of the same shared S3 state workload plus deterministic transfer cases
 against a local MinIO service:
 
-- `@test/awskit-s3/lwt/unix/s3-minio`
-- `@s3-minio`
+- `@test/awskit-s3/lwt/unix/local-service`
+- `@s3-local-service`
 
 The suite IDs are `integration:minio:profile`, `workload:minio:s3-state`,
 `integration:minio:s3-state`, `integration:minio:object`,
@@ -169,18 +169,18 @@ strict model still expects `InvalidRange`, and a successful read still fails the
 test. This gate is evidence for the configured local MinIO test double only; it
 is not a compatibility claim for other S3-compatible providers.
 
-The MinIO alias fails when the local service is not reachable. Use
-`scripts/test-report.sh integration` for the script-managed Docker lifecycle, or
-start MinIO yourself and pass explicit `AWSKIT_S3_MINIO_*` configuration before
-running `@s3-minio` or `@check-integration` directly.
+The local-service alias fails when the local service is not reachable. Use
+`scripts/test.sh integration` for the script-managed Docker lifecycle, or start
+MinIO yourself and pass explicit `AWSKIT_S3_MINIO_*` configuration before
+running `@s3-local-service` or `@integration` directly.
 
 ## Discovery And Backtesting
 
-`@check-stress` is the opt-in no-network pressure gate. It recurses through
+`@stress` is the opt-in no-network pressure gate. It recurses through
 focused `discovery` aliases for runtime HTTP, S3 simulator, S3 transfer faults,
 S3 protocol wire properties, and S3 protocol replay. Local MinIO stays under
-`@s3-minio` and `@check-integration`; use `scripts/test-report.sh stress` when
-the pressure run should include bounded and expensive MinIO profiles.
+`@s3-local-service` and `@integration`; use `scripts/test.sh stress` when the
+pressure run should leave a durable report.
 
 Use `AWSKIT_QCHECK_COUNT=<positive-int>` to override generated workload counts,
 optionally raising them for deeper discovery. Unset or invalid values keep the
@@ -195,9 +195,9 @@ replay cases, not the mutation itself.
 Backtesting selectors should stay focused:
 
 - Runtime bodiless response mutants should fail under
-  `@test/awskit/eio/runtime-http` or `@test/awskit/lwt/runtime-http` with
+  `@test/awskit/eio/runtime-http-contracts` or `@test/awskit/lwt/runtime-http-contracts` with
   replay-ready output.
-- Simulator object-tag mutants should fail under `@s3-sim` with a
+- Simulator object-tag mutants should fail under `@s3-simulator` with a
   shrunk `put-object-tags` transcript.
 - Protocol XML mutants should fail under `@s3-protocol-replay` with the
   fixture path as the identifier.
@@ -211,7 +211,7 @@ instead of relying on cached evidence. The current no-network transfer fault
 target covers simulated transfer byte movement, progress, callback, and owned
 multipart cleanup behavior. Local-file download publication and caller-owned
 resumable upload cleanup need separate no-network target coverage before they
-can be claimed by `@s3-transfer`.
+can be claimed by `@s3-transfer-faults`.
 
 When generated or fuzz workloads expose a product bug, reduce the failure into
 the smallest replay artifact that preserves the behavior. Use the fixture path
@@ -229,18 +229,14 @@ Promotion flow:
 
 ## Saved Reports
 
-Use `scripts/test-report.sh` from the repository root when a workflow should
-leave a durable transcript. Reports default to `.logs/` and are intentionally
-outside version control.
+Use `scripts/test.sh` from the repository root when a workflow should leave a
+durable transcript. Reports default to `.logs/` and are intentionally outside
+version control.
 
-- `scripts/test-report.sh quick` runs formatting, whitespace, and no-service
-  correctness.
-- `scripts/test-report.sh integration` starts MinIO, runs bounded integration,
-  logs service output on failure, and cleans the service up.
-- `scripts/test-report.sh full` adds docs/examples and bounded MinIO.
-- `scripts/test-report.sh stress` raises generated workload pressure and runs
-  bounded plus expensive MinIO. The two MinIO profiles use separate Docker
-  lifecycles so one failing profile does not pollute the other.
+- `scripts/test.sh quick` runs `@correctness` tests.
+- `scripts/test.sh integration` starts MinIO, runs `@integration` tests, logs
+  service output on failure, and cleans the service up.
+- `scripts/test.sh stress` runs `@stress` tests.
 
 Use `--label <name>` to make a report easy to identify, and replay a failure
 with the printed `QCHECK_SEED` on the focused alias that produced it.

@@ -14,7 +14,7 @@
   (source_tree ../fixtures/workload-replay)))
 
 (rule
- (alias s3-state)
+ (alias simulator-state)
  (package awskit-s3-sim)
  (deps
   test_awskit_s3_sim.exe
@@ -44,7 +44,7 @@
     "contract:awskit-s3-sim:body-lifecycle"))))
 
 (rule
- (alias s3-transfer)
+ (alias transfer-faults)
  (package awskit-s3-sim)
  (deps
   test_awskit_s3_sim.exe

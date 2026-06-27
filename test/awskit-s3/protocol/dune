@@ -48,7 +48,7 @@
   fmt))
 
 (rule
- (alias wire)
+ (alias protocol-laws)
  (package awskit-s3)
  (deps
   test_protocol_pbt.exe
@@ -58,7 +58,7 @@
   (run ./test_protocol_pbt.exe test "workload:awskit-s3:protocol-wire")))
 
 (rule
- (alias domain)
+ (alias domain-laws)
  (package awskit-s3)
  (deps
   test_domain_pbt.exe
@@ -118,5 +118,5 @@
  (name discovery)
  (package awskit-s3)
  (deps
-  (alias wire)
+  (alias protocol-laws)
   (alias replay)))
