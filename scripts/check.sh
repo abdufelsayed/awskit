@@ -4,30 +4,27 @@ set -u
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/check.sh CHECK [--log-dir DIR] [--label LABEL]
+Usage: scripts/check.sh CHECK [--package PACKAGE] [--log-dir DIR] [--label LABEL]
 
 Checks:
+  package            Install and test one opam package.
   package-metadata   Generated opam, opam lint, formatting, and drift checks.
   package-isolation  Per-package opam install/test isolation.
-  packages-default   Default package build and test set.
-  packages-eio       Eio package build and test set.
   docs-examples      Documentation and examples.
   no-network         Reported no-network correctness evidence.
   minio              Reported bounded MinIO integration evidence.
   stress             Reported high-cost discovery evidence.
   release-archive    Release archive and archive documentation checks.
-  release            Composed release validation.
+  release            Composed local release gate.
 
 Options:
+  --package PACKAGE
+                 Package name for the package check.
   --log-dir DIR  Write reports under DIR instead of .logs.
   --label LABEL  Use LABEL in the report filename.
   -h, --help     Show this help.
 
 Environment:
-  AWSKIT_DEFAULT_OPAM_PACKAGES
-  AWSKIT_DEFAULT_DUNE_PACKAGES
-  AWSKIT_EIO_OPAM_PACKAGES
-  AWSKIT_EIO_DUNE_PACKAGES
   AWSKIT_MINIO_OPAM_PACKAGES
   AWSKIT_RELEASE_PACKAGES
   AWSKIT_EXAMPLE_OPAM_PACKAGES
@@ -44,12 +41,13 @@ USAGE
 }
 
 check=
+package=
 log_dir=.logs
 label=
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    package-metadata | package-isolation | packages-default | packages-eio | \
+    package | package-metadata | package-isolation | \
     docs-examples | no-network | minio | stress | release-archive | release)
       if [ -n "$check" ]; then
         echo "Only one CHECK may be provided." >&2
@@ -57,6 +55,14 @@ while [ "$#" -gt 0 ]; do
       fi
       check=$1
       shift
+      ;;
+    --package)
+      if [ "$#" -lt 2 ]; then
+        echo "--package requires a value" >&2
+        exit 2
+      fi
+      package=$2
+      shift 2
       ;;
     --log-dir)
       if [ "$#" -lt 2 ]; then
@@ -101,10 +107,6 @@ cd "$root"
 
 . "$root/scripts/release-env.sh"
 
-AWSKIT_DEFAULT_OPAM_PACKAGES="${AWSKIT_DEFAULT_OPAM_PACKAGES:-awskit awskit-unix awskit-lwt awskit-lwt-unix awskit-s3 awskit-s3-sim awskit-s3-lwt awskit-s3-lwt-unix}"
-AWSKIT_DEFAULT_DUNE_PACKAGES="${AWSKIT_DEFAULT_DUNE_PACKAGES:-awskit,awskit-unix,awskit-lwt,awskit-lwt-unix,awskit-s3,awskit-s3-sim,awskit-s3-lwt,awskit-s3-lwt-unix}"
-AWSKIT_EIO_OPAM_PACKAGES="${AWSKIT_EIO_OPAM_PACKAGES:-awskit awskit-unix awskit-eio awskit-s3 awskit-s3-eio}"
-AWSKIT_EIO_DUNE_PACKAGES="${AWSKIT_EIO_DUNE_PACKAGES:-awskit,awskit-unix,awskit-eio,awskit-s3,awskit-s3-eio}"
 AWSKIT_MINIO_OPAM_PACKAGES="${AWSKIT_MINIO_OPAM_PACKAGES:-awskit awskit-unix awskit-lwt awskit-lwt-unix awskit-eio awskit-s3 awskit-s3-lwt awskit-s3-lwt-unix awskit-s3-eio}"
 
 stress_check_qcheck_count=
@@ -577,14 +579,18 @@ check_package_metadata() {
   run_checked git diff --exit-code
 }
 
-check_packages_default() {
-  run_checked opam install --yes --with-test --deps-only $AWSKIT_DEFAULT_OPAM_PACKAGES
-  run_checked opam exec -- dune build -p "$AWSKIT_DEFAULT_DUNE_PACKAGES" @install @runtest
-}
+check_package() {
+  if [ -z "$package" ]; then
+    echo "The package check requires --package PACKAGE." >&2
+    exit 2
+  fi
+  if [ ! -f "$package.opam" ]; then
+    echo "No opam file found for package: $package" >&2
+    exit 2
+  fi
 
-check_packages_eio() {
-  run_checked opam install --yes --with-test --deps-only $AWSKIT_EIO_OPAM_PACKAGES
-  run_checked opam exec -- dune build -p "$AWSKIT_EIO_DUNE_PACKAGES" @install @runtest
+  run_checked opam install --yes --with-test --deps-only "$package"
+  run_checked opam exec -- dune build -p "$package" @install @runtest
 }
 
 check_docs_examples() {
@@ -634,10 +640,14 @@ check_package_isolation() {
       --kind=path "$pinned_package" .
   done
 
-  isolation_base_packages=$(opam list --switch="$isolation_switch" --installed --short)
+  isolation_base_packages=$(
+    OPAMCOLOR=never opam list --switch="$isolation_switch" --installed --short
+  )
 
   cleanup_isolation_packages() {
-    installed_packages=$(opam list --switch="$isolation_switch" --installed --short)
+    installed_packages=$(
+      OPAMCOLOR=never opam list --switch="$isolation_switch" --installed --short
+    )
     remove_packages=""
     for installed_package in $installed_packages; do
       keep_package=0
@@ -747,17 +757,14 @@ report_stress() {
 }
 
 case "$check" in
+  package)
+    check_package
+    ;;
   package-metadata)
     check_package_metadata
     ;;
   package-isolation)
     check_package_isolation
-    ;;
-  packages-default)
-    check_packages_default
-    ;;
-  packages-eio)
-    check_packages_eio
     ;;
   docs-examples)
     check_docs_examples

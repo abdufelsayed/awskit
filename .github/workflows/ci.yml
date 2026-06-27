@@ -2,6 +2,11 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: Release version to validate when running release archive checks
+        required: false
+        type: string
   pull_request:
   push:
     branches: [main, release/**]
@@ -15,6 +20,7 @@ permissions:
 
 env:
   OCAML_LATEST: "5"
+  AWSKIT_RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.release_version || '' }}
 
 jobs:
   package-metadata:
@@ -38,8 +44,8 @@ jobs:
       - name: Run package metadata check
         run: scripts/check.sh package-metadata
 
-  build-test-default:
-    name: Default packages (${{ matrix.os }}, OCaml ${{ matrix.ocaml-compiler }})
+  package-test-default:
+    name: Default package install/test (${{ matrix.package }}, ${{ matrix.os }}, OCaml ${{ matrix.ocaml-compiler }})
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
@@ -50,11 +56,15 @@ jobs:
         ocaml-compiler:
           - "4.14"
           - "5"
-        local-packages:
-          - |
-            *.opam
-            !awskit-eio.opam
-            !awskit-s3-eio.opam
+        package:
+          - awskit
+          - awskit-unix
+          - awskit-lwt
+          - awskit-lwt-unix
+          - awskit-s3
+          - awskit-s3-sim
+          - awskit-s3-lwt
+          - awskit-s3-lwt-unix
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -68,13 +78,16 @@ jobs:
         with:
           ocaml-compiler: ${{ matrix.ocaml-compiler }}
           dune-cache: true
-          opam-local-packages: ${{ matrix.local-packages }}
+          opam-local-packages: |
+            *.opam
+            !awskit-eio.opam
+            !awskit-s3-eio.opam
 
-      - name: Run default package checks
-        run: scripts/check.sh packages-default
+      - name: Run package install/test check
+        run: scripts/check.sh package --package "${{ matrix.package }}"
 
-  build-test-eio:
-    name: Eio packages (${{ matrix.os }}, OCaml ${{ matrix.ocaml-compiler }})
+  package-test-eio:
+    name: Eio package install/test (${{ matrix.package }}, ${{ matrix.os }}, OCaml ${{ matrix.ocaml-compiler }})
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
@@ -85,13 +98,12 @@ jobs:
         ocaml-compiler:
           - "5.2"
           - "5"
-        local-packages:
-          - |
-            awskit.opam
-            awskit-unix.opam
-            awskit-eio.opam
-            awskit-s3.opam
-            awskit-s3-eio.opam
+        package:
+          - awskit
+          - awskit-unix
+          - awskit-eio
+          - awskit-s3
+          - awskit-s3-eio
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -105,10 +117,15 @@ jobs:
         with:
           ocaml-compiler: ${{ matrix.ocaml-compiler }}
           dune-cache: true
-          opam-local-packages: ${{ matrix.local-packages }}
+          opam-local-packages: |
+            awskit.opam
+            awskit-unix.opam
+            awskit-eio.opam
+            awskit-s3.opam
+            awskit-s3-eio.opam
 
-      - name: Run Eio package checks
-        run: scripts/check.sh packages-eio
+      - name: Run package install/test check
+        run: scripts/check.sh package --package "${{ matrix.package }}"
 
   docs-examples:
     name: Documentation and examples
@@ -189,13 +206,53 @@ jobs:
           path: .logs/
           if-no-files-found: ignore
 
+  release-archive:
+    name: Release archive
+    if: |
+      github.event_name != 'pull_request' &&
+      (startsWith(github.ref, 'refs/heads/release/') ||
+       (github.event_name == 'workflow_dispatch' && inputs.release_version != ''))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set-up OCaml ${{ env.OCAML_LATEST }}
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ env.OCAML_LATEST }}
+          dune-cache: true
+          opam-local-packages: |
+            *.opam
+
+      - name: Run release archive check
+        env:
+          AWSKIT_RELEASE_REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ -z "${AWSKIT_RELEASE_VERSION:-}" ]; then
+            case "$AWSKIT_RELEASE_REF_NAME" in
+              release/v*)
+                AWSKIT_RELEASE_VERSION=${AWSKIT_RELEASE_REF_NAME#release/v}
+                ;;
+              release/*)
+                AWSKIT_RELEASE_VERSION=${AWSKIT_RELEASE_REF_NAME#release/}
+                ;;
+            esac
+            export AWSKIT_RELEASE_VERSION
+          fi
+          scripts/check.sh release-archive
+
   ci-required:
     name: Required CI
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     needs:
       - package-metadata
-      - build-test-default
-      - build-test-eio
+      - package-test-default
+      - package-test-eio
       - docs-examples
       - no-network-correctness
       - s3-minio-integration
@@ -206,8 +263,8 @@ jobs:
       - name: Summarize required checks
         env:
           PACKAGE_METADATA: ${{ needs.package-metadata.result }}
-          BUILD_TEST_DEFAULT: ${{ needs.build-test-default.result }}
-          BUILD_TEST_EIO: ${{ needs.build-test-eio.result }}
+          PACKAGE_TEST_DEFAULT: ${{ needs.package-test-default.result }}
+          PACKAGE_TEST_EIO: ${{ needs.package-test-eio.result }}
           DOCS_EXAMPLES: ${{ needs.docs-examples.result }}
           NO_NETWORK_CORRECTNESS: ${{ needs.no-network-correctness.result }}
           S3_MINIO_INTEGRATION: ${{ needs.s3-minio-integration.result }}
@@ -230,8 +287,8 @@ jobs:
 
           echo "### Required CI" >> "$GITHUB_STEP_SUMMARY"
           check_result "Package metadata" "$PACKAGE_METADATA"
-          check_result "Default package matrix" "$BUILD_TEST_DEFAULT"
-          check_result "Eio package matrix" "$BUILD_TEST_EIO"
+          check_result "Default package install/test matrix" "$PACKAGE_TEST_DEFAULT"
+          check_result "Eio package install/test matrix" "$PACKAGE_TEST_EIO"
           check_result "Documentation and examples" "$DOCS_EXAMPLES"
           check_result "No-network correctness" "$NO_NETWORK_CORRECTNESS"
           check_result "S3 MinIO integration" "$S3_MINIO_INTEGRATION"

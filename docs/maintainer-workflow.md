@@ -40,7 +40,7 @@ contributors who need durable project policy in one place.
   ledger.
 - Public package documentation lives in `packages/*/doc`.
 - Maintainer workflows live in `docs`.
-- CI, stress evidence, release validation, and documentation publishing live in
+- CI, stress evidence, release gates, and documentation publishing live in
   `.github/workflows/*.yml`.
 - Local and CI validation entrypoints live in `scripts/check.sh`.
 
