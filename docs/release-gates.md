@@ -6,8 +6,9 @@ production-ready for the scope in `SUPPORT.md`.
 Related maintainer docs:
 
 - `docs/release.md` is the step-by-step release playbook.
-- `docs/ci.md` explains the `Required CI` and `Release check` jobs.
-- `docs/testing.md` explains the local evidence included in release validation.
+- `docs/ci.md` explains the `Required CI` package matrix and release archive
+  job.
+- `docs/testing.md` explains the local evidence included in release gates.
 - `docs/security-threat-model.md` names security-sensitive contracts that need
   review before support claims expand.
 
@@ -19,8 +20,8 @@ Record each item in the release PR before merge:
 | --- | --- |
 | Release branch identity | Release branch head SHA used for validation. |
 | Required CI | `gh pr checks <pr-number> --watch=false` result showing `Required CI` green. |
-| Release validation CI | `Release check` result from `.github/workflows/release-validation.yml`. |
-| Local release validation | `scripts/check.sh release` result from the release branch. |
+| Release archive CI | `Release archive` job result from `.github/workflows/ci.yml` on the release branch, or the matching manual dispatch result. |
+| Local release gate | `scripts/check.sh release` result from the release branch. |
 | Package isolation | `scripts/check.sh package-isolation` result showing each released package passed isolated `opam install --with-test --deps-only <package>` and `dune build -p <package> @install @runtest`. |
 | Public API review | Status of `.mli` files, package docs, examples, and focused behavior tests. |
 | Support/security scope | Status of `SUPPORT.md` and `SECURITY.md` against the release scope. |
@@ -28,7 +29,7 @@ Record each item in the release PR before merge:
 
 ## Local Gate
 
-Run the complete local release validation with:
+Run the complete local release gate with:
 
 ```sh
 scripts/check.sh release
@@ -42,14 +43,15 @@ the release archive.
 
 ## CI Gates
 
-Release branch CI must be green before merging the release PR. Pushes to
-`main` run the same release validation after merge. The required CI evidence is:
+Release branch CI must be green before merging the release PR. The required CI
+evidence is:
 
 - `Required CI` from `.github/workflows/ci.yml`, covering package metadata,
-  default package build and tests on Linux and macOS, Eio package build and
-  tests on Linux and macOS, docs/examples, no-network correctness evidence, and
-  MinIO S3 integration evidence;
-- `Release check` from `.github/workflows/release-validation.yml`.
+  per-package opam install/test matrices on Linux and macOS, docs/examples,
+  no-network correctness evidence, and MinIO S3 integration evidence;
+- `Release archive` from `.github/workflows/ci.yml` on release branch pushes
+  or manual dispatch, covering distribution archive generation and archive
+  documentation checks.
 
 Check PR state with:
 

@@ -6,7 +6,7 @@ Related maintainer docs:
 
 - `docs/ci.md` describes the `Publish docs` workflow in the CI map.
 - `docs/release.md` includes the post-merge documentation publication check.
-- `docs/release-gates.md` covers release validation evidence.
+- `docs/release-gates.md` covers release documentation evidence.
 
 ## Public URL
 
@@ -60,7 +60,7 @@ Run:
 opam exec -- dune build @examples @doc
 ```
 
-For release validation, `scripts/check.sh release` also checks documentation
+For release gates, `scripts/check.sh release` also checks documentation
 build output, example executables, generated documentation warnings, and
 documentation generation from the distribution archive.
 

@@ -110,11 +110,12 @@ gh pr checks <pr-number> --watch=false
 Required release-branch checks:
 
 - `Required CI` from `.github/workflows/ci.yml`, which aggregates package
-  metadata, default package build/tests, Eio package build/tests,
+  metadata, per-package opam install/test matrices,
   documentation/examples, no-network correctness evidence, and MinIO S3
   integration evidence.
-- `Release check` from `.github/workflows/release-validation.yml`, which runs
-  `scripts/check.sh release` for `main` and release branch pushes.
+- `Release archive` from `.github/workflows/ci.yml`, which runs
+  `scripts/check.sh release-archive` for release branch pushes and manual
+  dispatch with a release version.
 
 The `Publish docs` workflow is expected to skip on release branches because it
 only runs after `CI` succeeds on `main`.
@@ -135,7 +136,7 @@ Record:
 
 - the release branch head SHA used for validation;
 - the `gh pr checks` result;
-- the `Release check` result;
+- the `Release archive` result;
 - the local `scripts/check.sh release` result;
 - public API review status;
 - support/security docs status;
@@ -143,9 +144,10 @@ Record:
 
 ## Opam Packaging Before Merge
 
-Use release validation as Awskit's pre-merge opam packaging check. The official
-opam publication flow starts from a tagged release, then opens an
-opam-repository PR through `opam publish`. Pre-merge validation is local
+Use the package matrices and local release gate as Awskit's pre-merge opam
+packaging checks. The official opam publication flow starts from a tagged
+release, then opens an opam-repository PR through `opam publish`.
+Pre-merge validation is local
 evidence that the tagged release should publish cleanly.
 
 Before merging the release PR, `scripts/check.sh release` must catch the

@@ -64,7 +64,7 @@ A strong check combines four evidence axes:
 | Runtime HTTP workloads | Package-owned runtime HTTP adapter workloads against loopback servers, including bodiless responses, framing, body-reader, and error-path behavior. | `opam exec -- dune build @runtime-http` |
 | MinIO workload | Local adapter interoperability for the shared S3 state workload through a service-backed S3-compatible test double. | `opam exec -- dune build --force @s3-minio` |
 | Examples/docs | Extracted examples, odoc pages, and future docs checks. Examples should compile, and simulator-backed examples should execute when practical. | `opam exec -- dune build @examples @doc` |
-| Release gates | Composed local evidence plus opam, package-isolated install/test, archive, documentation, and service lifecycle checks. | `scripts/check.sh release` |
+| Release gates | Composed local evidence plus opam metadata, package-level install/test, package-isolated install/test, archive, documentation, and service lifecycle checks. | `scripts/check.sh release` |
 
 For protocol behavior, prefer structured assertions or fixture comparisons over
 string containment. String containment is appropriate when the contract is the
@@ -120,27 +120,44 @@ Exact package-owned aliases are useful when rerunning one failing surface:
 Tracked aliases are evidence claims. Add or document a new support claim only
 after the runnable alias, script workflow, or release gate exists.
 
-## Package Isolation
+## Package Install And Isolation
 
-Grouped package installs are useful for normal CI throughput, but they can mask
-missing `:with-test` dependencies when another package in the same switch
-happens to install the library. Release validation therefore checks every
-package in `AWSKIT_RELEASE_PACKAGES` in a temporary opam switch that is reset
-between package checks:
+Required CI runs package install/test checks as one matrix leaf per opam
+package, matching the way opam-repository CI reports package failures:
+
+```sh
+scripts/check.sh package --package <package>
+```
+
+The package check installs the selected package's test dependencies and builds
+only that package's install and test targets:
 
 ```sh
 opam install --with-test --deps-only <package>
 dune build -p <package> @install @runtest
 ```
 
-This gate protects opam-repository publication. If it fails because a test
-library is missing, fix `dune-project` and regenerate the generated `*.opam`
-files instead of patching only downstream publication metadata.
+This keeps missing `:with-test` dependencies visible during normal PR review.
+If it fails because a test library is missing, fix `dune-project` and
+regenerate the generated `*.opam` files instead of patching only downstream
+publication metadata.
 
-Run the package-isolation gate directly with:
+The local release gate goes further by checking every package in
+`AWSKIT_RELEASE_PACKAGES` in a temporary opam switch that is reset between
+package checks. Run that isolation gate directly with:
 
 ```sh
 scripts/check.sh package-isolation
+```
+
+By default the temporary switch uses `ocaml-base-compiler` for the active
+compiler version; set `AWSKIT_OPAM_ISOLATION_COMPILER_PACKAGE` to validate with
+another compiler package. The isolated package commands intentionally use the
+same opam and Dune shape:
+
+```sh
+opam install --with-test --deps-only <package>
+dune build -p <package> @install @runtest
 ```
 
 ## External Services
@@ -275,7 +292,7 @@ The report filename is
 | `scripts/check.sh no-network` | No-service correctness report around `@check-quick`. |
 | `scripts/check.sh minio` | Bounded MinIO integration report with Docker lifecycle. |
 | `scripts/check.sh stress` | Bug-finding pressure: high-count generated workloads plus bounded and expensive MinIO. The two MinIO profiles use separate Docker lifecycles. |
-| `scripts/check.sh release` | Complete release validation, including package metadata, package isolation, docs/examples, reported no-network and MinIO evidence, and archive checks. |
+| `scripts/check.sh release` | Complete local release gate, including package metadata, package isolation, docs/examples, reported no-network and MinIO evidence, and archive checks. |
 
 `stress` runs the no-service `@check-stress` alias with `AWSKIT_QCHECK_COUNT`
 from the caller or `AWSKIT_STRESS_QCHECK_COUNT` when that is unset. The default
@@ -420,7 +437,7 @@ opam exec -- dune build @runtime-http
 opam exec -- dune build @s3-transfer
 ```
 
-Release validation:
+Release gate:
 
 ```sh
 scripts/check.sh release

@@ -1,7 +1,8 @@
 # CI Workflows
 
-Awskit uses separate GitHub Actions workflows for required CI, generated
-documentation publishing, advisory stress evidence, and release validation.
+Awskit uses GitHub Actions for required CI, generated documentation publishing,
+and advisory stress evidence. Release archive validation lives inside the main
+CI workflow as a release-branch/manual job, not as a separate workflow.
 
 Related maintainer docs:
 
@@ -13,10 +14,9 @@ Related maintainer docs:
 
 | Workflow | File | Purpose | Runs on |
 | --- | --- | --- | --- |
-| `CI` | `.github/workflows/ci.yml` | Required build, test, docs/examples, no-network correctness, and MinIO evidence. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, and manual dispatch. Draft pull requests are skipped. |
+| `CI` | `.github/workflows/ci.yml` | Required package metadata, per-package opam install/test, docs/examples, no-network correctness, and MinIO evidence. It also contains the release-archive job for release branches and manual dispatch. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, and manual dispatch. Draft pull requests are skipped. |
 | `Publish docs` | `.github/workflows/docs.yml` | Publishes generated odoc documentation to GitHub Pages. | Successful `CI` workflow runs on `main`, and manual dispatch from `main`. |
 | `Stress evidence` | `.github/workflows/stress.yml` | Runs high-cost discovery evidence outside required PR CI. | Weekly schedule and manual dispatch. |
-| `Release validation` | `.github/workflows/release-validation.yml` | Mirrors `scripts/check.sh release` in CI, including package-isolated opam install/test validation. | Pull requests, pushes to `main`, pushes to `release/**`, and manual dispatch. |
 
 ## Required CI
 
@@ -26,8 +26,8 @@ on these jobs:
 | Job | Evidence |
 | --- | --- |
 | `Package metadata` | Runs `scripts/check.sh package-metadata` for generated opam metadata, opam lint, formatting, whitespace, and generated-file drift. |
-| `Default packages` | Runs `scripts/check.sh packages-default` on Ubuntu and macOS for OCaml 4.14 and the latest OCaml 5 compiler. Covers the default package set and excludes Eio packages. |
-| `Eio packages` | Runs `scripts/check.sh packages-eio` on Ubuntu and macOS for OCaml 5.2 and the latest OCaml 5 compiler. Covers Eio packages. |
+| `Default package install/test matrix` | Runs `scripts/check.sh package --package <package>` for each non-Eio opam package on Ubuntu and macOS with OCaml 4.14 and the latest OCaml 5 compiler. |
+| `Eio package install/test matrix` | Runs `scripts/check.sh package --package <package>` for each Eio-compatible opam package on Ubuntu and macOS with OCaml 5.2 and the latest OCaml 5 compiler. |
 | `Documentation and examples` | Runs `scripts/check.sh docs-examples` for example and odoc builds. |
 | `No-network correctness` | Runs `scripts/check.sh no-network --label no-network-correctness` and uploads `.logs/` as an artifact with `if: always()`. |
 | `S3 MinIO integration` | Runs `scripts/check.sh minio --label s3-minio-integration` against script-managed local MinIO and uploads `.logs/` as an artifact with `if: always()`. |
@@ -53,35 +53,38 @@ Manual dispatch accepts:
 Treat stress failures as regressions to triage. Keep the workflow separate from
 normal PR feedback so expensive exploration does not slow every change.
 
-## Release Validation
+## Package And Release Checks
 
-Pull requests and pushes to `main` or release branches run both required CI and
-the release validation workflow. Before merging a release PR, record:
+The required package matrices are Awskit's opam-ci-shaped pre-publication gate.
+Each matrix leaf installs one package's test dependencies and builds only that
+package's install and test targets:
 
-- the `Required CI` result;
-- the `Release check` result from `.github/workflows/release-validation.yml`;
-- the local `scripts/check.sh release` result when required by
-  `docs/release-gates.md`.
+```sh
+scripts/check.sh package --package <package>
+```
 
-The release validation workflow uses the release branch name, an exact release
-tag, or `dune-project` to infer `AWSKIT_RELEASE_VERSION`; manual dispatch may
-also pass a `release_version` input. It uploads `.logs/` as an artifact.
+This catches package-specific `with-test` dependency gaps in normal PR CI
+instead of waiting for the opam-repository PR.
 
-The `package-isolation` check creates a temporary opam switch, pins the
-released packages from the checkout, and resets the switch between packages
-before running isolated `opam install --with-test --deps-only <package>` plus
-`dune build -p <package> @install @runtest`. By default the temporary switch
-uses `ocaml-base-compiler` for the active compiler version; set
-`AWSKIT_OPAM_ISOLATION_COMPILER_PACKAGE` to validate with another compiler
-package. This catches package-specific test dependencies that grouped CI jobs
-can mask.
+The optional `Release archive` job in `.github/workflows/ci.yml` runs on
+release branch pushes and manual dispatch when `release_version` is supplied.
+It runs:
 
-Release validation is Awskit's pre-merge opam packaging check. The official
-opam publication flow still happens after the release tag, through
-`opam publish` or the equivalent dune-release opam submission flow.
+```sh
+scripts/check.sh release-archive
+```
 
-The workflow is a CI mirror for the local release check. It does not replace
-the release gate policy in `docs/release-gates.md`.
+The job infers `AWSKIT_RELEASE_VERSION` from a `release/vX.Y.Z` branch when the
+manual input is empty. The complete local release gate remains:
+
+```sh
+scripts/check.sh release
+```
+
+That local gate includes package metadata, temporary-switch package isolation,
+docs/examples, release archive generation, no-network evidence, and MinIO
+evidence. The official opam publication flow still happens after the release
+tag through `opam publish` or the equivalent dune-release opam submission flow.
 
 ## Documentation Publishing
 
@@ -118,8 +121,8 @@ gh run watch <run-id> --interval 10 --exit-status
 ```
 
 For `No-network correctness`, `S3 MinIO integration`, `Stress evidence`, and
-`Release check` failures, download the `.logs/` artifact and reproduce locally
-with the closest command. For MinIO failures:
+`Release archive` failures, download the `.logs/` artifact when available and
+reproduce locally with the closest command. For MinIO failures:
 
 ```sh
 scripts/check.sh minio --label minio-debug
