@@ -42,7 +42,7 @@ contributors who need durable project policy in one place.
 - Maintainer workflows live in `docs`.
 - CI, stress evidence, release validation, and documentation publishing live in
   `.github/workflows/*.yml`.
-- Release validation lives in `scripts/release-check.sh`.
+- Local and CI validation entrypoints live in `scripts/check.sh`.
 
 ## Working In The Tree
 

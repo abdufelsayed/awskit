@@ -25,7 +25,7 @@ jobs:
   release-check:
     name: Release check
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
       - name: Checkout tree
@@ -42,7 +42,7 @@ jobs:
             *.opam
 
       - name: Run release validation
-        run: scripts/release-check.sh
+        run: scripts/check.sh release --label release-validation
 
       - name: Upload release validation report
         if: always()

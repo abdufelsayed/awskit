@@ -11,6 +11,11 @@ Related maintainer docs:
 - `docs/ci.md` maps release branch CI jobs.
 - `docs/docs-publishing.md` covers generated documentation publication.
 
+Official opam publication references:
+
+- `https://opam.ocaml.org/doc/Packaging.html`
+- `https://github.com/ocaml-opam/opam-publish`
+
 ## Release Flow
 
 1. Create `release/vX.Y.Z` from `main`.
@@ -18,8 +23,8 @@ Related maintainer docs:
 3. Update release-facing metadata and regenerate opam files when needed.
 4. Open a release PR with the release template.
 5. Record CI and local release-gate evidence.
-6. Merge, tag from updated `main`, create the GitHub release, and confirm docs
-   publication.
+6. Merge, tag from updated `main`, create the GitHub release, upload the
+   distribution archive, submit opam packages, and confirm docs publication.
 
 ## Release Branch
 
@@ -109,7 +114,7 @@ Required release-branch checks:
   documentation/examples, no-network correctness evidence, and MinIO S3
   integration evidence.
 - `Release check` from `.github/workflows/release-validation.yml`, which runs
-  `scripts/release-check.sh` for release branch pushes.
+  `scripts/check.sh release` for release branch pushes.
 
 The `Publish docs` workflow is expected to skip on release branches because it
 only runs after `CI` succeeds on `main`.
@@ -117,13 +122,13 @@ only runs after `CI` succeeds on `main`.
 Before marking the release PR ready to merge, run:
 
 ```sh
-scripts/release-check.sh
+scripts/check.sh release
 ```
 
-This validates package metadata, formatting, tests, examples, no-network
-correctness evidence, generated documentation, distribution archives, and MinIO
-integration evidence. The script requires a clean worktree before building the
-distribution archive.
+This validates package metadata, package-isolated opam installs and tests,
+formatting, tests, examples, no-network correctness evidence, generated
+documentation, distribution archives, and MinIO integration evidence. The
+script requires a clean worktree before building the distribution archive.
 
 Follow `docs/release-gates.md` before merging a production-ready release PR.
 Record:
@@ -131,10 +136,25 @@ Record:
 - the release branch head SHA used for validation;
 - the `gh pr checks` result;
 - the `Release check` result;
-- the local `scripts/release-check.sh` result;
+- the local `scripts/check.sh release` result;
 - public API review status;
 - support/security docs status;
 - whether live AWS tests are outside the support promise.
+
+## Opam Packaging Before Merge
+
+Use release validation as Awskit's pre-merge opam packaging check. The official
+opam publication flow starts from a tagged release, then opens an
+opam-repository PR through `opam publish`. Pre-merge validation is local
+evidence that the tagged release should publish cleanly.
+
+Before merging the release PR, `scripts/check.sh release` must catch the
+opam-ci-style packaging failures that are practical to detect locally:
+
+- generated opam metadata from `dune-project`;
+- package-isolated `opam install --with-test --deps-only <package>`;
+- package-isolated `dune build -p <package> @install @runtest`;
+- release archive creation and documentation build from the archive.
 
 ## Merge, Tag, And Publish
 
@@ -153,6 +173,71 @@ Confirm the last commit is the merged release PR, or the expected squash commit,
 before creating the tag.
 
 Create the GitHub release from the `CHANGES.md` section for the version.
+
+Build the release distribution archive with the same `v`-prefixed name that
+the GitHub release asset and opam-repository metadata will use:
+
+```sh
+dune-release distrib --tag vX.Y.Z --keep-v --pkg-version X.Y.Z
+```
+
+Upload the generated archive to the GitHub release:
+
+```sh
+gh release upload vX.Y.Z _build/awskit-vX.Y.Z.tbz
+```
+
+Verify that the uploaded asset is reachable and that its checksums match the
+local archive:
+
+```sh
+shasum -a 256 _build/awskit-vX.Y.Z.tbz
+shasum -a 512 _build/awskit-vX.Y.Z.tbz
+curl -L --fail \
+  https://github.com/abdufelsayed/awskit/releases/download/vX.Y.Z/awskit-vX.Y.Z.tbz \
+  -o /tmp/awskit-vX.Y.Z.tbz
+shasum -a 256 /tmp/awskit-vX.Y.Z.tbz
+shasum -a 512 /tmp/awskit-vX.Y.Z.tbz
+```
+
+Generate and submit opam-repository package metadata against the uploaded
+archive URL:
+
+```sh
+dune-release opam pkg \
+  --tag vX.Y.Z \
+  --keep-v \
+  --pkg-version X.Y.Z \
+  --dist-uri https://github.com/abdufelsayed/awskit/releases/download/vX.Y.Z/awskit-vX.Y.Z.tbz
+
+dune-release opam submit --tag vX.Y.Z --keep-v --pkg-version X.Y.Z
+```
+
+The equivalent `opam publish` shape is `opam publish` from the source
+directory for a normal GitHub-hosted release, or `opam publish URL .` when the
+archive URL is explicit and the opam files should be read from the current
+directory.
+
+After opening the opam-repository PR, monitor opam-ci.
+
+## Update An Open opam-repository PR
+
+If opam-ci fails, classify the failure before changing anything:
+
+- For metadata-only failures, such as missing `with-test` dependencies,
+  constraints, source URLs, or checksums, fix Awskit source metadata first.
+  Update `dune-project`, regenerate `*.opam` with `opam exec -- dune build
+  @opam`, validate locally, merge the Awskit fix, and rerun the opam publish
+  flow for the same version. `opam publish` handles initial publications, new
+  releases, and metadata updates through the same submission flow.
+- For failures that require changing released source code, tests, or archive
+  contents, do not mutate the existing tag or uploaded archive. Prepare a new
+  Awskit patch release; opam-publish warns that changing an already published
+  package archive breaks reproducibility.
+
+Do not hand-edit generated package metadata only in the opam-repository PR
+while leaving `dune-project` or Awskit `*.opam` out of date. Downstream
+metadata must stay derived from the source release metadata.
 
 After merge to `main`, confirm the documentation publishing job completes and
 the generated docs are available at:

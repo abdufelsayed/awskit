@@ -22,6 +22,8 @@ depends: [
   "eio_main" {with-test & >= "1.3"}
   "digestif" {with-test & >= "1.3.0"}
   "alcotest" {with-test}
+  "qcheck-core" {with-test}
+  "qcheck-alcotest" {with-test}
   "odoc" {with-doc}
 ]
 build: [

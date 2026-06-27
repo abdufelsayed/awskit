@@ -57,7 +57,10 @@
    (>= v0.16.3))
   ptime
   (fmt
-   (>= 0.11.0))))
+   (>= 0.11.0))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-lwt)
@@ -114,7 +117,9 @@
   uri
   ptime
   yojson
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-eio)
@@ -222,7 +227,9 @@
    (and
     :with-test
     (>= 6.2.1)))
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-s3-lwt-unix)
@@ -281,4 +288,6 @@
    (and
     :with-test
     (>= 1.3.0)))
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
