@@ -1,7 +1,7 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_error
 open Simulator_runtime
+module Range = Awskit_s3.Range
 
 let invalid_range () = service ~status:416 ~code:"InvalidRange" ()
 
@@ -12,15 +12,15 @@ let ranged_body body = function
       let length64 = Int64.of_int length in
       let bounds =
         match Range.view range with
-        | Bytes (start, finish) ->
+        | Range.Bytes (start, finish) ->
             if Int64.compare start length64 >= 0 then None
             else
               let finish = Int64.min finish (Int64.sub length64 1L) in
               Some (start, finish)
-        | From start ->
+        | Range.From start ->
             if Int64.compare start length64 >= 0 then None
             else Some (start, Int64.sub length64 1L)
-        | Suffix suffix ->
+        | Range.Suffix suffix ->
             if length = 0 then None
             else
               let start =
@@ -36,6 +36,7 @@ let ranged_body body = function
           let slice_length = Int64.(to_int (add (sub finish start) 1L)) in
           let headers =
             [
+              ("accept-ranges", "bytes");
               ("content-range", Fmt.str "bytes %Ld-%Ld/%d" start finish length);
             ]
           in
@@ -46,32 +47,10 @@ let request_body_result body =
   match descriptor.content_length with
   | None ->
       Error
-        (Awskit.Error.validation ~field:"content_length"
+        (Awskit.Error.Producer.validation ~field:"content_length"
            "S3 uploads require a known content length before SigV4 chunked \
             streaming")
   | Some _ -> (
       match Awskit.Body.Request.validate_descriptor descriptor with
       | Error error -> Error error
       | Ok () -> Runtime.request_body_result body)
-
-let consume_string ~max_bytes reader =
-  let chunk = Bytes.create 8192 in
-  let buffer = Buffer.create 128 in
-  let rec loop total =
-    match
-      Runtime.Response_body.read reader chunk ~off:0 ~len:(Bytes.length chunk)
-    with
-    | Error error -> Error error
-    | Ok 0 -> Ok (Buffer.contents buffer)
-    | Ok n ->
-        let total = Int64.add total (Int64.of_int n) in
-        if Int64.compare total max_bytes > 0 then
-          Error
-            (Awskit.Error.body ~limit:max_bytes
-               "response body exceeded max_bytes")
-        else begin
-          Buffer.add_subbytes buffer chunk 0 n;
-          loop total
-        end
-  in
-  loop 0L

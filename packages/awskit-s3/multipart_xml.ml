@@ -1,4 +1,4 @@
-open Common
+module Xml = S3_xml
 open Response
 
 let checksum_xml_name = function
@@ -17,7 +17,7 @@ let checksum_xml_name = function
 let checksum_values_from_xml nodes =
   let find algorithm name =
     Option.map
-      (fun value -> { Object.Checksum.algorithm; value })
+      (fun value -> Object.Checksum.response_value ~algorithm ~value)
       (Xml.child_text name nodes)
   in
   [
@@ -57,8 +57,10 @@ let complete_result response body =
   | Error _ as error -> error
   | Ok ("Error", _) -> Error (embedded_service_error response body)
   | Ok ("CompleteMultipartUploadResult", nodes) -> (
-      let etag = Xml.child_text "ETag" nodes in
-      let etag = option_map_result Object.Etag.of_string etag in
+      let etag =
+        Xml.optional_child_result ~path:"CompleteMultipartUploadResult" "ETag"
+          Object.Etag.of_string nodes
+      in
       let version_id = response_version response in
       match (etag, version_id) with
       | Error error, _ | _, Error error -> Error error
@@ -75,5 +77,5 @@ let complete_result response body =
             })
   | Ok (actual, _) ->
       Error
-        (Awskit.Error.decode
+        (Xml.decode_with_context ~what:"CompleteMultipartUploadResult XML"
            (Fmt.str "expected CompleteMultipartUploadResult XML, got %s" actual))

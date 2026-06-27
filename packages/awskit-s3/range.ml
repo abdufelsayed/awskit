@@ -1,11 +1,10 @@
 type view = Bytes of int64 * int64 | From of int64 | Suffix of int64
 type t = view
 
-let invalid ?field message = Error (Awskit.Error.validation ?field message)
+let invalid ?field message =
+  Error (Awskit.Error.Producer.validation ?field message)
 
-let result_exn = function
-  | Ok value -> value
-  | Error error -> invalid_arg (Awskit.Error.to_string_hum error)
+let ( let* ) = Result.bind
 
 let non_negative ~field value =
   if Int64.compare value 0L < 0 then
@@ -24,21 +23,22 @@ let bytes ~start ~finish =
               "finish must be greater than or equal to start"
           else Ok (Bytes (start, finish)))
 
-let bytes_exn ~start ~finish = result_exn (bytes ~start ~finish)
+let bytes_exn ~start ~finish =
+  Awskit.Error.Producer.get_ok_exn (bytes ~start ~finish)
 
 let from start =
   match non_negative ~field:"range start" start with
   | Error _ as error -> error
   | Ok () -> Ok (From start)
 
-let from_exn start = result_exn (from start)
+let from_exn start = Awskit.Error.Producer.get_ok_exn (from start)
 
 let suffix length =
   if Int64.compare length 0L <= 0 then
     invalid ~field:"range suffix" "suffix length must be positive"
   else Ok (Suffix length)
 
-let suffix_exn length = result_exn (suffix length)
+let suffix_exn length = Awskit.Error.Producer.get_ok_exn (suffix length)
 
 let to_header = function
   | Bytes (start, finish) -> Fmt.str "bytes=%Ld-%Ld" start finish
@@ -49,3 +49,61 @@ let view = function
   | Bytes (start, finish) -> Bytes (start, finish)
   | From start -> From start
   | Suffix length -> Suffix length
+
+module Content_range = struct
+  type t = { start : int64; finish : int64; complete_length : int64 option }
+
+  let decode message = Error (Awskit.Error.Producer.decode message)
+
+  let parse_int64 ~field value =
+    if not (S3_parse.is_decimal value) then
+      decode (field ^ " must be a decimal integer")
+    else
+      match S3_parse.decimal_int64_of_string_opt value with
+      | Some value -> Ok value
+      | None -> decode (field ^ " is out of int64 range")
+
+  let of_header value =
+    let value = String.trim value in
+    let prefix = "bytes " in
+    match S3_string.drop_prefix ~prefix value with
+    | None | Some "" -> decode "Content-Range must use bytes range-unit"
+    | Some spec -> (
+        match String.split_on_char '/' spec with
+        | [ positions; complete_length ] -> (
+            match String.split_on_char '-' positions with
+            | [ start; finish ] ->
+                let* start = parse_int64 ~field:"Content-Range start" start in
+                let* finish =
+                  parse_int64 ~field:"Content-Range finish" finish
+                in
+                if Int64.compare finish start < 0 then
+                  decode
+                    "Content-Range finish must be greater than or equal to \
+                     start"
+                else
+                  let* complete_length =
+                    match complete_length with
+                    | "*" -> Ok None
+                    | value ->
+                        let* length =
+                          parse_int64 ~field:"Content-Range complete length"
+                            value
+                        in
+                        if Int64.compare finish length >= 0 then
+                          decode
+                            "Content-Range finish must be below complete length"
+                        else Ok (Some length)
+                  in
+                  Ok { start; finish; complete_length }
+            | _ -> decode "Content-Range byte positions must be start-finish")
+        | _ -> decode "Content-Range must be start-finish/length")
+
+  let to_header { start; finish; complete_length } =
+    let length =
+      match complete_length with
+      | None -> "*"
+      | Some length -> Int64.to_string length
+    in
+    Fmt.str "bytes %Ld-%Ld/%s" start finish length
+end

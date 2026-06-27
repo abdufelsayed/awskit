@@ -7,6 +7,7 @@ maintainer: ["Abdullah Elsayed <hey@abdufelsayed.dev>"]
 authors: ["Abdullah Elsayed <hey@abdufelsayed.dev>"]
 license: "MIT"
 homepage: "https://github.com/abdufelsayed/awskit"
+doc: "https://abdufelsayed.github.io/awskit/"
 bug-reports: "https://github.com/abdufelsayed/awskit/issues"
 depends: [
   "dune" {>= "3.22"}
@@ -20,6 +21,8 @@ depends: [
   "fmt" {>= "0.11.0"}
   "ptime"
   "alcotest" {with-test}
+  "qcheck-core" {with-test}
+  "qcheck-alcotest" {with-test}
   "odoc" {with-doc}
 ]
 build: [

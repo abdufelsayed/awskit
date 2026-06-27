@@ -6,15 +6,24 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 type net = Net : _ Eio.Net.t -> net
 type time_clock = Time_clock : _ Eio.Time.clock -> time_clock
+type http_connection = [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Std.r
+
+type 'flow https = (Uri.t -> http_connection -> 'flow) option
+  constraint 'flow = [> Eio.Resource.close_ty ] Eio.Flow.two_way
+
+let http_only = None
 
 type conn = {
   net : net;
   time_clock : time_clock;
   sw : Eio.Switch.t;
+  https : (Uri.t -> http_connection -> http_connection) option;
   region : Awskit.Region.t;
   credentials : Awskit.Credentials.t;
   clock : unit -> Ptime.t;
   retry_policy : Awskit.Retry.t;
+  random_float : upper_bound:float -> float;
+  timeout_policy : Awskit.Timeout.policy;
   endpoint : Awskit.Endpoint.t option;
   max_response_drain_bytes : int;
 }
@@ -64,15 +73,34 @@ type request_body =
       Awskit.Body.Request.descriptor
       * (request_body_writer -> (unit, Awskit.Error.t) Result.t)
 
+type response_body_framing =
+  | Response_unknown
+  | Response_content_length of int64
+  | Response_chunked
+
 type response_body = {
   body : Cohttp_eio.Body.t;
+  time_clock : time_clock;
+  timeout_policy : Awskit.Timeout.policy;
   max_response_drain_bytes : int;
+  framing : response_body_framing;
+  bodiless : bool;
+      (* True when the response carries no message body per RFC 7230 §3.3.3
+         (a response to HEAD, or status 1xx/204/304). The framing headers may
+         still advertise a Content-Length, so we must NOT read the body flow
+         or the read blocks until the timeout. *)
 }
 
 type response_body_reader = {
   body : Cohttp_eio.Body.t;
+  time_clock : time_clock;
+  timeout_policy : Awskit.Timeout.policy;
+  bodiless : bool;
+  mutable active : bool;
   mutable chunk : string;
   mutable offset : int;
+  mutable eof : bool;
+  mutable remaining : int64 option;
 }
 
 type request_body_bridge = {
@@ -81,53 +109,66 @@ type request_body_bridge = {
 }
 
 let default_max_response_drain_bytes = 64 * 1024 * 1024
-let authenticator = lazy (Ca_certs.authenticator ())
 
-let tls_config =
-  lazy
-    (match Lazy.force authenticator with
-    | Error (`Msg msg) ->
-        invalid_arg
-          (Fmt.str
-             "Awskit_eio.create: failed to create system X509 authenticator: %s"
-             msg)
-    | Ok authenticator -> (
-        match Tls.Config.client ~authenticator () with
-        | Error (`Msg msg) ->
-            invalid_arg
-              (Fmt.str "Awskit_eio.create: failed to create TLS config: %s" msg)
-        | Ok config -> config))
+let now_from_eio_clock (Time_clock clock) =
+  Eio.Time.now clock |> Ptime.of_float_s |> Option.value ~default:Ptime.epoch
 
-let ensure_tls_runtime () = Mirage_crypto_rng_unix.use_default ()
+let close_https (https : 'flow https) =
+  Option.map https ~f:(fun connector uri flow ->
+      (connector uri flow :> http_connection))
 
-let https_connector uri raw =
-  ensure_tls_runtime ();
-  let host =
-    Uri.host uri
-    |> Option.map ~f:(fun x -> Domain_name.(host_exn (of_string_exn x)))
-  in
-  Tls_eio.client_of_flow ?host (Lazy.force tls_config) raw
+let parse_endpoint = function
+  | None -> Ok None
+  | Some endpoint ->
+      Result.map (Awskit.Endpoint.of_string endpoint) ~f:Option.some
 
-let create ~env ~sw ~region ~credentials ?(clock = Ptime_clock.now)
-    ?(retry_policy = Awskit.Retry.default) ?endpoint
+let create ~env ~sw ~https ~region ~credentials ?clock
+    ?(retry_policy = Awskit.Retry.default) ?random_float
+    ?(timeout_policy = Awskit.Timeout.default) ?endpoint
     ?(max_response_drain_bytes = default_max_response_drain_bytes) () =
-  if max_response_drain_bytes <= 0 then
-    invalid_arg "Awskit_eio.create: max_response_drain_bytes must be positive";
-  let net = Net (env :> < net : _ Eio.Net.t ; .. >)#net in
-  let time_clock =
-    Time_clock (env :> < clock : _ Eio.Time.clock ; .. >)#clock
+  let validate_max_response_drain_bytes () =
+    if max_response_drain_bytes <= 0 then
+      Error
+        (Awskit.Error.Producer.validation ~field:"max_response_drain_bytes"
+           "max_response_drain_bytes must be positive")
+    else Ok ()
   in
-  {
-    net;
-    time_clock;
-    sw;
-    region;
-    credentials;
-    clock;
-    retry_policy;
-    endpoint;
-    max_response_drain_bytes;
-  }
+  match
+    ( validate_max_response_drain_bytes (),
+      Awskit.Region.of_string region,
+      parse_endpoint endpoint )
+  with
+  | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error
+  | Ok (), Ok region, Ok endpoint ->
+      let net = Net (env :> < net : _ Eio.Net.t ; .. >)#net in
+      let time_clock =
+        Time_clock (env :> < clock : _ Eio.Time.clock ; .. >)#clock
+      in
+      let clock =
+        Option.value clock ~default:(fun () -> now_from_eio_clock time_clock)
+      in
+      let random_float =
+        match random_float with
+        | Some random_float -> random_float
+        | None ->
+            let state = Random.State.make_self_init () in
+            fun ~upper_bound -> Random.State.float state upper_bound
+      in
+      Ok
+        {
+          net;
+          time_clock;
+          sw;
+          https = close_https https;
+          region;
+          credentials;
+          clock;
+          retry_policy;
+          random_float;
+          timeout_policy;
+          endpoint;
+          max_response_drain_bytes;
+        }
 
 let to_cohttp_meth = function
   | `GET -> `GET
@@ -155,13 +196,17 @@ let make_uri (request : Awskit.Request.t) =
     (Fmt.str "%s://%s%s" scheme_str host_port
        (Awskit.Request.Target.path_and_query target))
 
+let missing_https_connector_error =
+  Awskit.Error.Producer.transport ~retryable:false
+    "HTTPS endpoint requires an HTTPS connector. Pass ~https with a connector \
+     compatible with Cohttp_eio.Client.make. For local HTTP endpoints, pass \
+     ~https:Awskit_eio.http_only and an explicit http:// endpoint."
+
 let descriptor_for_string body =
-  {
-    Awskit.Body.Request.content_length =
-      Some (String.length body |> Int64.of_int);
-    payload_hash = Awskit.Body.Payload_hash.sha256_of_string body;
-    replayable = true;
-  }
+  Awskit.Body.Request.descriptor_exn
+    ~content_length:(String.length body |> Int64.of_int)
+    ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string body)
+    ~replayable:true ()
 
 let empty_request_body =
   Source (descriptor_for_string "", Cohttp_eio.Body.of_string "")
@@ -179,10 +224,110 @@ let request_body_descriptor = function
   | Source (descriptor, _) -> descriptor
   | Stream (descriptor, _) -> descriptor
 
-let body_error message = Awskit.Error.body message
+let body_error message = Awskit.Error.Producer.body message
+let int64_equal left right = Stdlib.Int64.compare left right = 0
+
+let split_header_values values =
+  values
+  |> List.concat_map ~f:(fun value -> String.split value ~on:',')
+  |> List.map ~f:String.strip
+  |> List.filter ~f:(fun value -> not (String.is_empty value))
+
+let split_content_length_values values =
+  values
+  |> List.concat_map ~f:(fun value -> String.split value ~on:',')
+  |> List.map ~f:String.strip
+
+let ascii_digits value =
+  (not (String.is_empty value))
+  && String.for_all value ~f:(function '0' .. '9' -> true | _ -> false)
+
+let parse_content_length_value value =
+  if ascii_digits value then
+    match Stdlib.Int64.of_string_opt value with
+    | Some length -> Ok length
+    | None -> Error (body_error "invalid response Content-Length header")
+  else Error (body_error "invalid response Content-Length header")
+
+let rec parse_content_lengths = function
+  | [] -> Ok []
+  | value :: values -> (
+      match parse_content_length_value value with
+      | Error _ as error -> error
+      | Ok length ->
+          Result.map (parse_content_lengths values) ~f:(fun lengths ->
+              length :: lengths))
+
+let content_length_from_headers values =
+  match values with
+  | [] -> Ok None
+  | _ -> (
+      match split_content_length_values values with
+      | [] -> Ok None
+      | values -> (
+          match parse_content_lengths values with
+          | Error _ as error -> error
+          | Ok [] -> Ok None
+          | Ok (length :: lengths) ->
+              if List.for_all lengths ~f:(int64_equal length) then
+                Ok (Some length)
+              else
+                Error
+                  (body_error
+                     "conflicting response Content-Length header values")))
+
+let has_chunked_transfer_encoding values =
+  split_header_values values
+  |> List.exists ~f:(fun value ->
+      String.equal (String.lowercase value) "chunked")
+
+let response_body_framing headers =
+  let transfer_encoding_values =
+    split_header_values (Http.Header.get_multi headers "transfer-encoding")
+  in
+  let has_transfer_encoding = not (List.is_empty transfer_encoding_values) in
+  let transfer_encoding_chunked =
+    has_chunked_transfer_encoding transfer_encoding_values
+  in
+  match
+    content_length_from_headers (Http.Header.get_multi headers "content-length")
+  with
+  | Error _ as error -> error
+  | Ok (Some _) when has_transfer_encoding ->
+      Error
+        (body_error "response has both Transfer-Encoding and Content-Length")
+  | Ok (Some content_length) -> Ok (Response_content_length content_length)
+  | Ok None when transfer_encoding_chunked -> Ok Response_chunked
+  | Ok None -> Ok Response_unknown
+
+let validate_bodiless_response_headers headers =
+  Result.map
+    (content_length_from_headers
+       (Http.Header.get_multi headers "content-length"))
+    ~f:(fun _ -> ())
+
+let timeout_phase_name = function
+  | `Connect -> "connect"
+  | `Attempt -> "attempt"
+  | `Operation -> "operation"
+  | `Request_body -> "request body"
+  | `Response_body -> "response body"
+  | `Drain -> "response drain"
+
+let timeout_error phase span =
+  let phase_name = timeout_phase_name phase in
+  Awskit.Error.Producer.timeout ~operation:phase_name
+    (Fmt.str "%s timed out after %.3fs" phase_name (Ptime.Span.to_float_s span))
+
+let with_timeout_result (Time_clock clock) timeout_policy phase f =
+  match Awskit.Timeout.span timeout_policy phase with
+  | None -> f ()
+  | Some span -> (
+      try Eio.Time.with_timeout_exn clock (Ptime.Span.to_float_s span) f
+      with Eio.Time.Timeout -> Error (timeout_error phase span))
 
 let drain_limit_error max_response_drain_bytes =
-  Awskit.Error.body
+  Awskit.Error.Producer.body
     ~limit:(Int64.of_int max_response_drain_bytes)
     "response body exceeded max_response_drain_bytes"
 
@@ -193,18 +338,21 @@ let writer_for descriptor stream =
     write_error = None;
   }
 
-let check_write_length writer string =
+let check_write_length (writer : request_body_writer) length =
   match !(writer.remaining) with
   | None -> Ok ()
   | Some remaining ->
-      let length = Int64.of_int (String.length string) in
-      if Stdlib.Int64.compare length remaining > 0 then
+      let length64 = Int64.of_int length in
+      if Stdlib.Int64.compare length64 remaining > 0 then
         Error (body_error "request body exceeded declared content_length")
       else (
-        writer.remaining := Some (Stdlib.Int64.sub remaining length);
+        writer.remaining := Some (Stdlib.Int64.sub remaining length64);
         Ok ())
 
-let check_finished_length writer =
+let invalid_write_bounds bytes ~off ~len =
+  off < 0 || len < 0 || len > Bytes.length bytes - off
+
+let check_finished_length (writer : request_body_writer) =
   match writer.write_error with
   | Some error -> Error error
   | None -> (
@@ -218,7 +366,7 @@ let write_request_body_string writer string =
   match writer.write_error with
   | Some error -> Error error
   | None -> (
-      match check_write_length writer string with
+      match check_write_length writer (String.length string) with
       | Error error ->
           writer.write_error <- Some error;
           Error error
@@ -226,16 +374,42 @@ let write_request_body_string writer string =
           Eio.Stream.add writer.stream (Chunk string);
           Ok ())
 
+let write_request_body_subbytes writer bytes ~off ~len =
+  if invalid_write_bounds bytes ~off ~len then
+    Error (body_error "invalid write bounds")
+  else
+    match writer.write_error with
+    | Some error -> Error error
+    | None -> (
+        match check_write_length writer len with
+        | Error error ->
+            writer.write_error <- Some error;
+            Error error
+        | Ok () ->
+            Eio.Stream.add writer.stream
+              (Chunk (Stdlib.Bytes.sub_string bytes off len));
+            Ok ())
+
 module Request_body = struct
+  type 'a io = 'a
+  type t = request_body
+  type writer = request_body_writer
+
   let empty = empty_request_body
   let of_string = string_request_body
   let of_bytes = bytes_request_body
   let of_stream = stream_request_body
   let descriptor = request_body_descriptor
+  let content_length body = (request_body_descriptor body).content_length
   let write_string = write_request_body_string
+  let write_subbytes = write_request_body_subbytes
+
+  let write_bytes writer bytes =
+    write_request_body_subbytes writer bytes ~off:0 ~len:(Bytes.length bytes)
 end
 
-let body_to_cohttp ~sw = function
+let body_to_cohttp ?(on_error = fun _ -> ()) ?(on_escaped_exn = fun _ -> ())
+    ~(conn : conn) ~sw = function
   | Source (_, body) ->
       { body = Some body; finished = Eio.Promise.create_resolved (Ok ()) }
   | Stream (descriptor, write) ->
@@ -249,7 +423,10 @@ let body_to_cohttp ~sw = function
           (Eio.Promise.try_resolve wake_request_body_finished result : bool)
       in
       Eio.Fiber.fork ~sw (fun () ->
-          match write writer with
+          match
+            with_timeout_result conn.time_clock conn.timeout_policy
+              `Request_body (fun () -> write writer)
+          with
           | Ok () ->
               let result = check_finished_length writer in
               Eio.Stream.add stream End;
@@ -258,108 +435,200 @@ let body_to_cohttp ~sw = function
               Log.warn (fun m ->
                   m "request body stream failed: %s"
                     (Awskit.Error.to_string_hum error));
+              on_error error;
               finish (Error error);
               Eio.Stream.add stream (Failed (Awskit.Error.to_string_hum error))
           | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-          | exception exn ->
-              let error = body_error (Exn.to_string exn) in
-              Log.warn (fun m ->
-                  m "request body stream raised: %s"
-                    (Awskit.Error.to_string_hum error));
-              finish (Error error);
-              Eio.Stream.add stream (Failed (Awskit.Error.to_string_hum error)));
+          | exception exn -> (
+              match Awskit.Body.Request.escaped_exn exn with
+              | Some escaped ->
+                  on_escaped_exn escaped;
+                  finish
+                    (Error (body_error "request body writer escaped exception"));
+                  Eio.Stream.add stream End
+              | None ->
+                  let error = body_error (Exn.to_string exn) in
+                  Log.warn (fun m ->
+                      m "request body stream raised: %s"
+                        (Awskit.Error.to_string_hum error));
+                  on_error error;
+                  finish (Error error);
+                  Eio.Stream.add stream
+                    (Failed (Awskit.Error.to_string_hum error))));
       { body = Some (stream_source stream); finished = request_body_finished }
 
 let do_with_response (conn : conn) (request : Awskit.Request.t) request_body ~f
     =
   let (Net net) = conn.net in
-  let https =
-    match request.target.scheme with
-    | `Http -> None
-    | `Https -> Some https_connector
-  in
-  let client = Cohttp_eio.Client.make ~https net in
   let headers = Http.Header.of_list request.headers in
   let uri = make_uri request in
-  let meth = to_cohttp_meth request.method_ in
-  let make_response_body body =
-    { body; max_response_drain_bytes = conn.max_response_drain_bytes }
-  in
-  let successful_status status = status >= 200 && status < 300 in
-  let early_result = ref None in
-  let exception Early_response in
-  let exception Callback_raised of exn in
-  let call_f response body =
-    match f response body with
-    | result -> result
-    | exception exn -> raise (Callback_raised exn)
-  in
-  let run_call ~call_sw =
-    let bridge = body_to_cohttp ~sw:call_sw request_body in
-    try
-      let response, body =
-        Cohttp_eio.Client.call client ~sw:call_sw ~headers ?body:bridge.body
-          meth uri
+  match (request.target.scheme, conn.https) with
+  | `Https, None -> Error missing_https_connector_error
+  | `Http, _ | `Https, Some _ ->
+      let client = Cohttp_eio.Client.make ~https:conn.https net in
+      let meth = to_cohttp_meth request.method_ in
+      (* A response to HEAD, or a 1xx/204/304 status, has no message body even
+         if Content-Length is present; reading it would block until timeout. *)
+      let is_head = match request.method_ with `HEAD -> true | _ -> false in
+      let response_is_bodiless status =
+        is_head
+        || status = 204
+        || status = 304
+        || (status >= 100 && status < 200)
       in
-      let status = Http.Response.status response |> Http.Status.to_int in
-      let request_body_result =
-        if successful_status status then Eio.Promise.await bridge.finished
-        else
-          match Eio.Promise.peek bridge.finished with
-          | Some result -> result
-          | None ->
-              early_result :=
-                Some
-                  (call_f (to_aws_response response) (make_response_body body));
-              raise Early_response
+      let make_response_body ~status response body =
+        let bodiless = response_is_bodiless status in
+        let headers = Http.Response.headers response in
+        let framing =
+          if bodiless then
+            Result.map (validate_bodiless_response_headers headers)
+              ~f:(fun () -> Response_unknown)
+          else response_body_framing headers
+        in
+        match framing with
+        | Error _ as error -> error
+        | Ok framing ->
+            Ok
+              {
+                body;
+                time_clock = conn.time_clock;
+                timeout_policy = conn.timeout_policy;
+                max_response_drain_bytes = conn.max_response_drain_bytes;
+                framing = (if bodiless then Response_unknown else framing);
+                bodiless;
+              }
       in
-      match request_body_result with
-      | Error _ as error -> error
-      | Ok () ->
-          Log.debug (fun m -> m "HTTP %d" status);
-          call_f (to_aws_response response) (make_response_body body)
-    with
-    | Early_response as exn -> raise exn
-    | Callback_raised exn -> raise exn
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> (
-        match Eio.Promise.peek bridge.finished with
-        | Some (Error error) -> Error error
-        | _ ->
-            let message = Exn.to_string exn in
-            Log.warn (fun m -> m "HTTP call failed: %s" message);
-            Error (Awskit.Error.transport ~retryable:true message))
-  in
-  match request_body with
-  | Source _ -> run_call ~call_sw:conn.sw
-  | Stream _ -> (
-      try
-        Eio.Switch.run ~name:"awskit stream request body attempt"
-          (fun request_body_sw -> run_call ~call_sw:request_body_sw)
-      with Early_response -> (
-        match !early_result with
-        | Some result -> result
-        | None -> Error (body_error "missing early response result")))
-
-type +'a t = 'a
-
-let return x = x
-let bind x f = f x
+      let successful_status status = status >= 200 && status < 300 in
+      let early_result = ref None in
+      let request_body_stream_error = ref None in
+      let request_body_escaped_exn = ref None in
+      let exception Early_response in
+      let exception Callback_raised of exn in
+      let call_f response response_body =
+        match f response response_body with
+        | result -> result
+        | exception exn -> raise (Callback_raised exn)
+      in
+      let call_response ~status response body =
+        match make_response_body ~status response body with
+        | Error _ as error -> error
+        | Ok response_body -> call_f (to_aws_response response) response_body
+      in
+      let run_call ~call_sw =
+        let bridge =
+          body_to_cohttp ~conn ~sw:call_sw
+            ~on_error:(fun error -> request_body_stream_error := Some error)
+            ~on_escaped_exn:(fun exn -> request_body_escaped_exn := Some exn)
+            request_body
+        in
+        try
+          with_timeout_result conn.time_clock conn.timeout_policy `Attempt
+            (fun () ->
+              match
+                with_timeout_result conn.time_clock conn.timeout_policy `Connect
+                  (fun () ->
+                    let response, body =
+                      Cohttp_eio.Client.call client ~sw:call_sw ~headers
+                        ?body:bridge.body meth uri
+                    in
+                    Ok (response, body))
+              with
+              | Error _ as error -> error
+              | Ok (response, body) -> (
+                  let status =
+                    Http.Response.status response |> Http.Status.to_int
+                  in
+                  let request_body_result =
+                    if successful_status status then
+                      Eio.Promise.await bridge.finished
+                    else
+                      match Eio.Promise.peek bridge.finished with
+                      | Some result -> result
+                      | None ->
+                          early_result :=
+                            Some (call_response ~status response body);
+                          raise Early_response
+                  in
+                  match !request_body_escaped_exn with
+                  | Some escaped -> raise escaped
+                  | None -> (
+                      match request_body_result with
+                      | Error _ as error -> error
+                      | Ok () ->
+                          Log.debug (fun m -> m "HTTP %d" status);
+                          call_response ~status response body)))
+        with
+        | Early_response as exn -> raise exn
+        | Callback_raised exn -> raise exn
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> (
+            match !request_body_escaped_exn with
+            | Some escaped -> raise escaped
+            | None -> (
+                match Eio.Promise.peek bridge.finished with
+                | Some (Error error) -> Error error
+                | _ ->
+                    let message = Exn.to_string exn in
+                    let error =
+                      Awskit.Error.Producer.transport ~retryable:true message
+                    in
+                    Log.warn (fun m ->
+                        m "HTTP call failed: %s"
+                          (Awskit.Error.to_string_hum error));
+                    Error error))
+      in
+      let run_attempt () =
+        try
+          Eio.Switch.run ~name:"awskit http attempt" (fun call_sw ->
+              run_call ~call_sw)
+        with
+        | Early_response -> (
+            match !early_result with
+            | Some result -> result
+            | None -> Error (body_error "missing early response result"))
+        | Callback_raised exn -> raise exn
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> (
+            match !request_body_escaped_exn with
+            | Some escaped -> raise escaped
+            | None -> (
+                match !request_body_stream_error with
+                | Some error -> Error error
+                | None -> raise exn))
+      in
+      with_timeout_result conn.time_clock conn.timeout_policy `Operation
+        run_attempt
 
 type connection = conn
-
-let now c = c.clock ()
-let region c = c.region
-let credentials c = Ok c.credentials
-let endpoint c = c.endpoint
-let retry_policy c = c.retry_policy
-
-let sleep c span =
-  let (Time_clock clock) = c.time_clock in
-  Eio.Time.sleep clock (Ptime.Span.to_float_s span)
+type 'a t = 'a
 
 let invalid_read_bounds bytes ~off ~len =
   off < 0 || len < 0 || len > Bytes.length bytes - off
+
+let inactive_reader_error =
+  Awskit.Error.Producer.body "response body reader used outside its scope"
+
+let close_response_body_reader reader = reader.active <- false
+
+let initial_response_body_remaining = function
+  | Response_content_length content_length -> Some content_length
+  | Response_unknown | Response_chunked -> None
+
+let record_response_body_read reader length =
+  match reader.remaining with
+  | None -> ()
+  | Some remaining ->
+      let length = Int64.of_int length in
+      let remaining = Stdlib.Int64.sub remaining length in
+      reader.remaining <- Some remaining
+
+let response_body_eof reader =
+  match reader.remaining with
+  | Some remaining when Stdlib.Int64.compare remaining 0L > 0 ->
+      Error (body_error "response body ended before declared Content-Length")
+  | None | Some _ ->
+      reader.eof <- true;
+      Ok 0
 
 let rec read_from_current reader bytes ~off ~len =
   if len = 0 then Ok 0
@@ -368,60 +637,196 @@ let rec read_from_current reader bytes ~off ~len =
     let copied = min available len in
     Stdlib.String.blit reader.chunk reader.offset bytes off copied;
     reader.offset <- reader.offset + copied;
+    record_response_body_read reader copied;
     Ok copied
   end
+  else if reader.eof then Ok 0
   else
     let buffer = Cstruct.create 0x8000 in
     let read = Eio.Flow.single_read reader.body buffer in
-    reader.chunk <- Cstruct.to_string (Cstruct.sub buffer 0 read);
+    reader.chunk <- Cstruct.to_string ~len:read buffer;
     reader.offset <- 0;
     read_from_current reader bytes ~off ~len
 
 let read_response_body reader bytes ~off ~len =
-  if invalid_read_bounds bytes ~off ~len then
-    Error (Awskit.Error.body "invalid read bounds")
+  if not reader.active then Error inactive_reader_error
+  else if invalid_read_bounds bytes ~off ~len then
+    Error (Awskit.Error.Producer.body "invalid read bounds")
+  else if reader.bodiless then Ok 0
   else
-    try read_from_current reader bytes ~off ~len with
-    | End_of_file -> Ok 0
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Awskit.Error.body (Exn.to_string exn))
+    match
+      with_timeout_result reader.time_clock reader.timeout_policy `Response_body
+        (fun () ->
+          try read_from_current reader bytes ~off ~len with
+          | End_of_file -> response_body_eof reader
+          | Eio.Cancel.Cancelled _ as exn ->
+              close_response_body_reader reader;
+              raise exn
+          | exn ->
+              close_response_body_reader reader;
+              Error (Awskit.Error.Producer.body (Exn.to_string exn)))
+    with
+    | Error _ as error ->
+        close_response_body_reader reader;
+        error
+    | Ok _ as ok -> ok
 
-let rec discard_reader reader ~remaining ~max_response_drain_bytes =
+let next_response_body ?(chunk_size = 8192) reader =
+  if chunk_size <= 0 then
+    Error (Awskit.Error.Producer.body "chunk_size must be positive")
+  else
+    let buffer = Bytes.create chunk_size in
+    match read_response_body reader buffer ~off:0 ~len:chunk_size with
+    | Error _ as error -> error
+    | Ok 0 -> Ok None
+    | Ok n -> Ok (Some (Bytes.sub buffer ~pos:0 ~len:n))
+
+let discard_reader reader ~remaining ~max_response_drain_bytes =
   let buffer = Bytes.create 8192 in
-  let len = if remaining <= 0 then 1 else min (Bytes.length buffer) remaining in
-  match read_response_body reader buffer ~off:0 ~len with
-  | Error _ as error -> error
-  | Ok 0 -> Ok ()
-  | Ok n ->
-      if n > remaining then Error (drain_limit_error max_response_drain_bytes)
-      else
-        discard_reader reader ~remaining:(remaining - n)
-          ~max_response_drain_bytes
+  let rec loop remaining =
+    let len =
+      if remaining <= 0 then 1 else min (Bytes.length buffer) remaining
+    in
+    match read_response_body reader buffer ~off:0 ~len with
+    | Error _ as error -> error
+    | Ok 0 -> Ok ()
+    | Ok n ->
+        if n > remaining then Error (drain_limit_error max_response_drain_bytes)
+        else loop (remaining - n)
+  in
+  loop remaining
 
 let discard_response_body_reader (reader : response_body_reader)
     (body : response_body) =
-  discard_reader reader ~remaining:body.max_response_drain_bytes
-    ~max_response_drain_bytes:body.max_response_drain_bytes
+  with_timeout_result body.time_clock body.timeout_policy `Drain (fun () ->
+      discard_reader reader ~remaining:body.max_response_drain_bytes
+        ~max_response_drain_bytes:body.max_response_drain_bytes)
+
+let discard_response_body_after_exception reader body = function
+  | exn ->
+      Eio.Cancel.protect (fun () ->
+          match discard_response_body_reader reader body with
+          | Ok () | Error _ -> ()
+          | exception _ -> ());
+      close_response_body_reader reader;
+      raise exn
 
 let with_response_body (body : response_body) ~consume =
-  let reader = { body = body.body; chunk = ""; offset = 0 } in
+  let reader =
+    {
+      body = body.body;
+      time_clock = body.time_clock;
+      timeout_policy = body.timeout_policy;
+      bodiless = body.bodiless;
+      active = true;
+      chunk = "";
+      offset = 0;
+      eof = false;
+      remaining = initial_response_body_remaining body.framing;
+    }
+  in
   match consume reader with
+  | exception exn -> discard_response_body_after_exception reader body exn
   | Ok _ as result -> (
       match discard_response_body_reader reader body with
-      | Ok () -> result
-      | Error _ as error -> error)
+      | Ok () ->
+          close_response_body_reader reader;
+          result
+      | Error _ as error ->
+          close_response_body_reader reader;
+          error)
   | Error _ as error -> (
       match discard_response_body_reader reader body with
-      | Ok () -> error
-      | Error _ as drain_error -> drain_error)
+      | Ok () | Error _ ->
+          close_response_body_reader reader;
+          error)
 
 let discard_response_body (body : response_body) =
-  discard_response_body_reader { body = body.body; chunk = ""; offset = 0 } body
+  discard_response_body_reader
+    {
+      body = body.body;
+      time_clock = body.time_clock;
+      timeout_policy = body.timeout_policy;
+      bodiless = body.bodiless;
+      active = true;
+      chunk = "";
+      offset = 0;
+      eof = false;
+      remaining = initial_response_body_remaining body.framing;
+    }
+    body
 
 module Response_body = struct
+  type 'a io = 'a
+  type t = response_body
+  type reader = response_body_reader
+
   let read = read_response_body
+  let next = next_response_body
   let with_reader = with_response_body
   let discard = discard_response_body
 end
 
-let with_response = do_with_response
+module IO = struct
+  type 'a t = 'a
+
+  let return x = x
+  let bind x f = f x
+end
+
+module Transport = struct
+  type 'a io = 'a
+  type connection = conn
+  type nonrec request_body = request_body
+  type nonrec response_body = response_body
+
+  let with_response conn request ~body ~consume =
+    do_with_response conn request body ~f:consume
+end
+
+module Clock = struct
+  type connection = conn
+
+  let now c = c.clock ()
+end
+
+module Sleeper = struct
+  type 'a io = 'a
+  type connection = conn
+
+  let sleep (c : conn) span =
+    let (Time_clock clock) = c.time_clock in
+    Eio.Time.sleep clock (Ptime.Span.to_float_s span)
+end
+
+module Random = struct
+  type connection = conn
+
+  let float c ~upper_bound = c.random_float ~upper_bound
+end
+
+module Credentials = struct
+  type 'a io = 'a
+  type connection = conn
+
+  let resolve c = Ok c.credentials
+end
+
+module Endpoint = struct
+  type connection = conn
+
+  let region c = c.region
+  let endpoint c = c.endpoint
+end
+
+module Retry = struct
+  type connection = conn
+
+  let policy c = c.retry_policy
+end
+
+module Timeout = struct
+  type connection = conn
+
+  let policy (c : conn) = c.timeout_policy
+end

@@ -1,34 +1,358 @@
+let buffer_size = 128 * 1024
+let temp_counter = Atomic.make 0
+
+let body_error action path exn =
+  Awskit.Error.Producer.body
+    (Fmt.str "failed to %s path %S: %s" action path (Printexc.to_string exn))
+
+exception Callback_raised of exn
+
+let notify_progress callback bytes =
+  match callback with
+  | None -> ()
+  | Some f -> (
+      try f bytes with
+      | Lwt.Canceled -> raise Lwt.Canceled
+      | Callback_raised _ as exn -> raise exn
+      | exn -> raise (Callback_raised exn))
+
+let body_error_or_fail action path = function
+  | Lwt.Canceled -> Lwt.fail Lwt.Canceled
+  | Callback_raised _ as exn -> Lwt.fail exn
+  | exn -> Lwt.return_error (body_error action path exn)
+
+let body_error_or_raise_callback action path = function
+  | Callback_raised exn -> Lwt.fail exn
+  | exn -> body_error_or_fail action path exn
+
+let body_error_or_escape_callback action path = function
+  | Callback_raised exn -> Awskit.Body.Request.raise_escaped_exn exn
+  | exn -> body_error_or_fail action path exn
+
+let raise_escaped_callback_or_fail = function
+  | exn -> (
+      match Awskit.Body.Request.escaped_exn exn with
+      | Some escaped -> Lwt.fail escaped
+      | None -> Lwt.fail exn)
+
+let raise_callback_or_fail = function
+  | Callback_raised exn -> Lwt.fail exn
+  | exn -> Lwt.fail exn
+
+let file_kind_to_string = function
+  | Unix.S_REG -> "regular file"
+  | Unix.S_DIR -> "directory"
+  | Unix.S_CHR -> "character device"
+  | Unix.S_BLK -> "block device"
+  | Unix.S_LNK -> "symbolic link"
+  | Unix.S_FIFO -> "fifo"
+  | Unix.S_SOCK -> "socket"
+
+let regular_file_length path =
+  Lwt.catch
+    (fun () ->
+      Lwt.bind (Lwt_unix.LargeFile.stat path) (fun stat ->
+          match stat.st_kind with
+          | Unix.S_REG -> Lwt.return_ok stat.st_size
+          | kind ->
+              Lwt.return_error
+                (Awskit.Error.Producer.validation ~field:"path"
+                   (Fmt.str "expected regular file, got %s"
+                      (file_kind_to_string kind)))))
+    (body_error_or_raise_callback "stat upload" path)
+
+let reject_existing_download_target path =
+  Lwt.catch
+    (fun () ->
+      Lwt.bind (Lwt_unix.LargeFile.stat path) (fun _stat ->
+          Lwt.return_error
+            (Awskit.Error.Producer.validation ~field:"path"
+               "download target already exists")))
+    (function
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_ok ()
+      | exn -> body_error_or_raise_callback "stat download target" path exn)
+
+let validate_download_target path
+    (options : Awskit_s3.Transfer.download_options) =
+  match options.overwrite with
+  | Awskit_s3.Transfer.Replace -> Lwt.return_ok ()
+  | Awskit_s3.Transfer.Error_if_exists -> reject_existing_download_target path
+
+let temp_download_path path attempt =
+  let dir = Filename.dirname path in
+  let base = Filename.basename path in
+  let id = Atomic.fetch_and_add temp_counter 1 in
+  Filename.concat dir
+    (Fmt.str ".%s.awskit-download.%d.%08x.%d.tmp" base (Unix.getpid ()) id
+       attempt)
+
+let remove_temp_download path =
+  Lwt.catch
+    (fun () -> Lwt.bind (Lwt_unix.unlink path) (fun () -> Lwt.return_ok ()))
+    (function
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_ok ()
+      | exn -> body_error_or_raise_callback "remove temporary download" path exn)
+
+let close_temp_download path fd =
+  Lwt.catch
+    (fun () -> Lwt.bind (Lwt_unix.close fd) (fun () -> Lwt.return_ok ()))
+    (body_error_or_raise_callback "close temporary download" path)
+
+let cleanup_temp_download path error =
+  Lwt.bind (remove_temp_download path) (function
+    | Ok () -> Lwt.return_error error
+    | Error cleanup_error ->
+        Lwt.return_error
+          (Awskit.Error.Producer.multiple [ error; cleanup_error ]
+          |> Awskit.Error.Producer.with_context
+               "download failed and temporary file cleanup also failed"))
+
+let cleanup_temp_download_with_failures path errors =
+  Lwt.bind (remove_temp_download path) (fun cleanup_result ->
+      let errors =
+        match cleanup_result with
+        | Ok () -> errors
+        | Error cleanup_error -> errors @ [ cleanup_error ]
+      in
+      Lwt.return_error
+        (Awskit.Error.Producer.multiple errors
+        |> Awskit.Error.Producer.with_context
+             "download failed and temporary file cleanup also failed"))
+
+let write_all fd bytes offset length =
+  let rec loop offset remaining =
+    if remaining = 0 then Lwt.return_ok ()
+    else
+      Lwt.bind (Lwt_unix.write fd bytes offset remaining) (function
+        | 0 ->
+            Lwt.return_error
+              (Awskit.Error.Producer.body "download write made no progress")
+        | written -> loop (offset + written) (remaining - written))
+  in
+  loop offset length
+
+let reserve_temp_download_file path =
+  let rec loop attempt =
+    if attempt >= 100 then
+      Lwt.return_error
+        (Awskit.Error.Producer.body
+           (Fmt.str "failed to reserve temporary download path for %S" path))
+    else
+      let temp_path = temp_download_path path attempt in
+      Lwt.catch
+        (fun () ->
+          Lwt.bind
+            (Lwt_unix.openfile temp_path
+               [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ]
+               0o600)
+            (fun fd -> Lwt.return_ok (temp_path, fd)))
+        (function
+          | Unix.Unix_error (Unix.EEXIST, _, _) -> loop (attempt + 1)
+          | exn ->
+              body_error_or_raise_callback "create temporary download" temp_path
+                exn)
+  in
+  loop 0
+
+let with_temp_download path f =
+  Lwt.bind (reserve_temp_download_file path) (function
+    | Error _ as error -> Lwt.return error
+    | Ok (temp_path, fd) ->
+        let close_and_cleanup error =
+          Lwt.bind (close_temp_download temp_path fd) (function
+            | Error close_error ->
+                cleanup_temp_download_with_failures temp_path
+                  [ error; close_error ]
+            | Ok () -> cleanup_temp_download temp_path error)
+        in
+        let close_and_publish value =
+          Lwt.bind (close_temp_download temp_path fd) (function
+            | Error close_error -> cleanup_temp_download temp_path close_error
+            | Ok () ->
+                Lwt.catch
+                  (fun () ->
+                    Lwt.bind (Lwt_unix.chmod temp_path 0o600) (fun () ->
+                        Lwt.bind (Lwt_unix.rename temp_path path) (fun () ->
+                            Lwt.return_ok value)))
+                  (fun exn ->
+                    match exn with
+                    | Lwt.Canceled -> Lwt.fail Lwt.Canceled
+                    | Callback_raised callback_exn -> Lwt.fail callback_exn
+                    | exn ->
+                        cleanup_temp_download temp_path
+                          (body_error "rename download" path exn)))
+        in
+        let close_and_cleanup_then_fail exn =
+          Lwt.bind (close_temp_download temp_path fd) (fun _ ->
+              Lwt.bind (remove_temp_download temp_path) (fun _ -> Lwt.fail exn))
+        in
+        Lwt.catch
+          (fun () ->
+            Lwt.bind (f temp_path fd) (function
+              | Error error -> close_and_cleanup error
+              | Ok value -> close_and_publish value))
+          (function
+            | Lwt.Canceled -> close_and_cleanup_then_fail Lwt.Canceled
+            | Callback_raised exn -> close_and_cleanup_then_fail exn
+            | exn -> close_and_cleanup (body_error "write download" path exn)))
+
+module Make_body_reader
+    (Runtime : Awskit_s3.RUNTIME with type 'a t = 'a Lwt.t)
+    (S3 : sig
+      module Body :
+        Awskit_s3.BODY
+          with type 'a io := 'a Lwt.t
+           and type t = Runtime.request_body
+
+      module Reader :
+        Awskit_s3.READER
+          with type 'a io := 'a Lwt.t
+           and type t = Runtime.response_body_reader
+    end) =
+struct
+  module Body = struct
+    include S3.Body
+
+    let descriptor ~content_length ~replayable =
+      Awskit.Body.Request.descriptor_exn ~content_length
+        ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable ()
+
+    let copy_channel_to_writer ?on_progress channel writer =
+      let bytes = Bytes.create buffer_size in
+      let rec loop transferred =
+        Lwt.bind (Lwt_io.read_into channel bytes 0 buffer_size) (function
+          | 0 -> Lwt.return_ok ()
+          | n ->
+              Lwt.bind (Writer.write_subbytes writer bytes ~off:0 ~len:n)
+                (function
+                | Error _ as error -> Lwt.return error
+                | Ok () ->
+                    let transferred = Int64.add transferred (Int64.of_int n) in
+                    notify_progress on_progress transferred;
+                    loop transferred))
+      in
+      loop 0L
+
+    let of_lwt_stream ~content_length stream =
+      let write writer =
+        Lwt.catch
+          (fun () ->
+            let rec loop () =
+              Lwt.bind (Lwt_stream.get stream) (function
+                | None -> Lwt.return_ok ()
+                | Some chunk ->
+                    Lwt.bind (Writer.write_string writer chunk) (function
+                      | Error _ as error -> Lwt.return error
+                      | Ok () -> loop ()))
+            in
+            loop ())
+          (body_error_or_raise_callback "read upload stream" "<stream>")
+      in
+      of_stream ~content_length ~replayable:false ~write
+
+    let of_channel ~content_length ?on_progress channel =
+      let write writer =
+        Lwt.catch
+          (fun () -> copy_channel_to_writer ?on_progress channel writer)
+          (body_error_or_escape_callback "read upload channel" "<channel>")
+      in
+      of_stream ~content_length ~replayable:false ~write
+
+    let of_path ?on_progress path =
+      Lwt.bind (regular_file_length path) (function
+        | Error _ as error -> Lwt.return error
+        | Ok content_length ->
+            let write writer =
+              Lwt.catch
+                (fun () ->
+                  Lwt_io.with_file ~mode:Lwt_io.Input path (fun channel ->
+                      copy_channel_to_writer ?on_progress channel writer))
+                (body_error_or_escape_callback "read upload" path)
+            in
+            Lwt.return (of_stream ~content_length ~replayable:true ~write))
+  end
+
+  module Reader = struct
+    include S3.Reader
+
+    let copy_reader_to_channel ?on_progress channel reader =
+      let bytes = Bytes.create buffer_size in
+      let rec loop transferred =
+        Lwt.bind
+          (Runtime.Response_body.read reader bytes ~off:0 ~len:buffer_size)
+          (function
+          | Error _ as error -> Lwt.return error
+          | Ok 0 -> Lwt.return_ok ()
+          | Ok n ->
+              Lwt.bind (Lwt_io.write_from_exactly channel bytes 0 n) (fun () ->
+                  let transferred = Int64.add transferred (Int64.of_int n) in
+                  notify_progress on_progress transferred;
+                  loop transferred))
+      in
+      loop 0L
+
+    let copy_reader_to_fd ?on_progress fd reader =
+      let bytes = Bytes.create buffer_size in
+      let rec loop transferred =
+        Lwt.bind
+          (Runtime.Response_body.read reader bytes ~off:0 ~len:buffer_size)
+          (function
+          | Error _ as error -> Lwt.return error
+          | Ok 0 -> Lwt.return_ok ()
+          | Ok n ->
+              Lwt.bind (write_all fd bytes 0 n) (function
+                | Error _ as error -> Lwt.return error
+                | Ok () ->
+                    let transferred = Int64.add transferred (Int64.of_int n) in
+                    notify_progress on_progress transferred;
+                    loop transferred))
+      in
+      loop 0L
+
+    let to_channel ?on_progress channel reader =
+      Lwt.catch
+        (fun () -> copy_reader_to_channel ?on_progress channel reader)
+        (body_error_or_raise_callback "write download channel" "<channel>")
+
+    let to_path ?on_progress path reader =
+      with_temp_download path (fun _temp_path fd ->
+          Lwt.catch
+            (fun () -> copy_reader_to_fd ?on_progress fd reader)
+            (body_error_or_fail "write download" path))
+  end
+end
+
 module Make
     (Runtime : Awskit_s3.RUNTIME with type 'a t = 'a Lwt.t)
     (S3 : sig
       module Object : sig
         val put :
           Runtime.connection ->
-          bucket:string ->
-          key:string ->
-          ?options:Awskit_s3.Put_object.options ->
+          bucket:Awskit_s3.Bucket_name.t ->
+          key:Awskit_s3.Object_key.t ->
+          ?options:Awskit_s3.Object.Put.options ->
           body:Runtime.request_body ->
           unit ->
-          (Awskit_s3.Put_object.result, Awskit_s3.Error.t) result Lwt.t
+          (Awskit_s3.Object.Put.result, Awskit_s3.Error.t) result Lwt.t
 
         val get :
           Runtime.connection ->
-          bucket:string ->
-          key:string ->
-          ?options:Awskit_s3.Get_object.options ->
+          bucket:Awskit_s3.Bucket_name.t ->
+          key:Awskit_s3.Object_key.t ->
+          ?options:Awskit_s3.Object.Get.options ->
           consume:
             (Runtime.response_body_reader ->
             ('a, Awskit_s3.Error.t) result Lwt.t) ->
           unit ->
-          (Awskit_s3.Get_object.result * 'a, Awskit_s3.Error.t) result Lwt.t
+          ('a Awskit_s3.Object.Get.result, Awskit_s3.Error.t) result Lwt.t
 
         val head :
           Runtime.connection ->
-          bucket:string ->
-          key:string ->
-          ?options:Awskit_s3.Head_object.options ->
+          bucket:Awskit_s3.Bucket_name.t ->
+          key:Awskit_s3.Object_key.t ->
+          ?options:Awskit_s3.Object.Head.options ->
           unit ->
-          (Awskit_s3.Head_object.result, Awskit_s3.Error.t) result Lwt.t
+          (Awskit_s3.Object.Head.result, Awskit_s3.Error.t) result Lwt.t
       end
 
       module Multipart :
@@ -36,136 +360,63 @@ module Make
           with type connection := Runtime.connection
            and type 'a io := 'a Lwt.t
            and type request_body := Runtime.request_body
+    end)
+    (Body : sig
+      type t = Runtime.request_body
+
+      val of_path :
+        ?on_progress:(int64 -> unit) ->
+        string ->
+        (t, Awskit_s3.Error.t) result Lwt.t
+    end)
+    (Reader : sig
+      type t = Runtime.response_body_reader
+
+      val to_path :
+        ?on_progress:(int64 -> unit) ->
+        string ->
+        t ->
+        (unit, Awskit_s3.Error.t) result Lwt.t
     end) =
 struct
-  let buffer_size = 128 * 1024
-
-  type part_spec = { part_number : int; offset : int64; length : int }
-  type range_spec = { index : int; offset : int64; length : int }
-
-  let body_error action path exn =
-    Awskit.Error.body
-      (Fmt.str "failed to %s path %S: %s" action path (Printexc.to_string exn))
-
   let ( let* ) result f =
     Lwt.bind result (function
       | Ok value -> f value
       | Error _ as error -> Lwt.return error)
 
-  let file_kind_to_string = function
-    | Unix.S_REG -> "regular file"
-    | Unix.S_DIR -> "directory"
-    | Unix.S_CHR -> "character device"
-    | Unix.S_BLK -> "block device"
-    | Unix.S_LNK -> "symbolic link"
-    | Unix.S_FIFO -> "fifo"
-    | Unix.S_SOCK -> "socket"
+  module Transfer = Awskit_s3.Transfer
+  module Plan = Transfer.Plan
 
-  let regular_file_length path =
-    Lwt.catch
-      (fun () ->
-        Lwt.bind (Lwt_unix.LargeFile.stat path) (fun stat ->
-            match stat.st_kind with
-            | Unix.S_REG -> Lwt.return_ok stat.st_size
-            | kind ->
-                Lwt.return_error
-                  (Awskit.Error.validation ~field:"path"
-                     (Fmt.str "expected regular file, got %s"
-                        (file_kind_to_string kind)))))
-      (fun exn -> Lwt.return_error (body_error "stat upload" path exn))
-
-  let request_body_of_path ?on_progress path =
-    Lwt.bind (regular_file_length path) (function
-      | Error _ as error -> Lwt.return error
-      | Ok content_length ->
-          let descriptor =
-            {
-              Awskit.Body.Request.content_length = Some content_length;
-              payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-              replayable = true;
-            }
-          in
-          let write writer =
-            Lwt.catch
-              (fun () ->
-                Lwt_io.with_file ~mode:Lwt_io.Input path (fun channel ->
-                    let bytes = Bytes.create buffer_size in
-                    let rec loop transferred =
-                      Lwt.bind (Lwt_io.read_into channel bytes 0 buffer_size)
-                        (function
-                        | 0 -> Lwt.return_ok ()
-                        | n ->
-                            let chunk = Bytes.sub_string bytes 0 n in
-                            Lwt.bind
-                              (Runtime.Request_body.write_string writer chunk)
-                              (function
-                              | Error _ as error -> Lwt.return error
-                              | Ok () ->
-                                  let transferred =
-                                    Int64.add transferred (Int64.of_int n)
-                                  in
-                                  Option.iter
-                                    (fun f -> f transferred)
-                                    on_progress;
-                                  loop transferred))
-                    in
-                    loop 0L))
-              (fun exn -> Lwt.return_error (body_error "read upload" path exn))
-          in
-          Lwt.return_ok (Runtime.Request_body.of_stream descriptor ~write))
-
-  let put_file conn ~bucket ~key ?options ?on_progress ~path () =
-    Lwt.bind (request_body_of_path ?on_progress path) (function
-      | Error _ as error -> Lwt.return error
-      | Ok body -> S3.Object.put conn ~bucket ~key ?options ~body ())
-
-  let bounded_specs ~content_length ~part_size ~empty_error ~make =
-    if Int64.equal content_length 0L then
-      match empty_error with None -> Ok [] | Some error -> Error error
-    else
-      let rec loop index offset acc =
-        if Int64.compare offset content_length >= 0 then Ok (List.rev acc)
-        else
-          let remaining = Int64.sub content_length offset in
-          let length = min part_size (Int64.to_int remaining) in
-          loop (index + 1)
-            (Int64.add offset (Int64.of_int length))
-            (make index offset length :: acc)
-      in
-      loop 1 0L []
-
-  let multipart_specs ~content_length ~part_size =
-    let empty_error =
-      Awskit.Error.validation ~field:"path"
-        "multipart file upload requires a non-empty file"
+  let notify_transfer_progress callback ~direction ~phase ?total ?part_number
+      transferred =
+    let progress =
+      Transfer.progress ~direction ~phase ~transferred ?total ?part_number ()
     in
-    match
-      Awskit_s3.Transfer.validate_multipart_part_count ~content_length
-        ~part_size
-    with
-    | Error _ as error -> error
-    | Ok () ->
-        bounded_specs ~content_length ~part_size ~empty_error:(Some empty_error)
-          ~make:(fun part_number offset length ->
-            { part_number; offset; length })
+    notify_progress callback progress
 
-  let range_specs ~content_length ~part_size =
-    match
-      Awskit_s3.Transfer.validate_multipart_part_count ~content_length
-        ~part_size
-    with
-    | Error _ as error -> error
-    | Ok () ->
-        bounded_specs ~content_length ~part_size ~empty_error:None
-          ~make:(fun index offset length -> { index; offset; length })
+  let byte_progress_callback callback ~direction ~phase ?total ?part_number () =
+    match callback with
+    | None -> None
+    | Some _ ->
+        Some
+          (fun transferred ->
+            notify_transfer_progress callback ~direction ~phase ?total
+              ?part_number transferred)
 
-  let range_body_of_path path (spec : part_spec) =
+  let tracked_byte_progress_callback callback ~direction ~phase ?total
+      ?part_number transferred_ref =
+    Some
+      (fun transferred ->
+        transferred_ref := transferred;
+        notify_transfer_progress callback ~direction ~phase ?total ?part_number
+          transferred)
+
+  let range_body_of_path path (spec : Plan.upload_part) =
     let descriptor =
-      {
-        Awskit.Body.Request.content_length = Some (Int64.of_int spec.length);
-        payload_hash = Awskit.Body.Payload_hash.unsigned_payload;
-        replayable = true;
-      }
+      Awskit.Body.Request.descriptor_exn
+        ~content_length:(Int64.of_int spec.length)
+        ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:true
+        ()
     in
     let write writer =
       Lwt.catch
@@ -184,155 +435,198 @@ struct
                           Lwt.bind (Lwt_unix.read fd bytes 0 len) (function
                             | 0 ->
                                 Lwt.return_error
-                                  (Awskit.Error.body
+                                  (Awskit.Error.Producer.body
                                      (Fmt.str
                                         "unexpected end of file while reading \
                                          part %d from %S"
-                                        spec.part_number path))
+                                        (Awskit_s3.Multipart.Part_number.to_int
+                                           spec.part_number)
+                                        path))
                             | n ->
-                                let chunk = Bytes.sub_string bytes 0 n in
                                 Lwt.bind
-                                  (Runtime.Request_body.write_string writer
-                                     chunk) (function
+                                  (Runtime.Request_body.write_subbytes writer
+                                     bytes ~off:0 ~len:n) (function
                                   | Error _ as error -> Lwt.return error
                                   | Ok () -> loop (remaining - n)))
                       in
                       loop spec.length))
                 (fun () -> Lwt_unix.close fd)))
-        (fun exn ->
-          Lwt.return_error (body_error "read multipart upload" path exn))
+        (body_error_or_raise_callback "read multipart upload" path)
     in
     Runtime.Request_body.of_stream descriptor ~write
 
-  let split_batch ~concurrency specs =
-    let rec loop remaining acc = function
-      | rest when remaining = 0 -> (List.rev acc, rest)
-      | [] -> (List.rev acc, [])
-      | spec :: rest -> loop (remaining - 1) (spec :: acc) rest
+  let take_batch ~concurrency specs =
+    let rec loop remaining acc specs =
+      if remaining = 0 then (List.rev acc, specs)
+      else
+        match specs () with
+        | Seq.Nil -> (List.rev acc, Seq.empty)
+        | Seq.Cons (spec, rest) -> loop (remaining - 1) (spec :: acc) rest
     in
     loop concurrency [] specs
 
-  let first_error_or_parts results =
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
-      | Error error :: _ -> Error error
-      | Ok part :: rest -> loop (part :: acc) rest
-    in
-    loop [] results
+  type 'a batch_outcome =
+    | Batch_result of ('a, Awskit_s3.Error.t) result
+    | Batch_raised of exn
 
-  let first_error_or_unit results =
-    let rec loop = function
-      | [] -> Ok ()
-      | Error error :: _ -> Error error
-      | Ok () :: rest -> loop rest
+  let joined_batch f batch =
+    let jobs =
+      batch
+      |> List.map (fun item ->
+          let promise = try f item with exn -> Lwt.fail exn in
+          let outcome =
+            Lwt.catch
+              (fun () -> Lwt.map (fun result -> Batch_result result) promise)
+              (function
+                | Lwt.Canceled -> Lwt.fail Lwt.Canceled
+                | exn -> Lwt.return (Batch_raised exn))
+          in
+          (promise, outcome))
     in
-    loop results
+    let outcomes = List.map snd jobs in
+    let cancel_jobs () =
+      List.iter
+        (fun (promise, outcome) ->
+          Lwt.cancel promise;
+          Lwt.cancel outcome)
+        jobs
+    in
+    let cancellation =
+      let never_resolved () =
+        let promise, _wakener = Lwt.task () in
+        promise
+      in
+      outcomes
+      |> List.map (fun outcome ->
+          Lwt.catch
+            (fun () -> Lwt.bind outcome (fun _ -> never_resolved ()))
+            (function Lwt.Canceled -> Lwt.return_unit | exn -> Lwt.fail exn))
+      |> Lwt.pick
+    in
+    Lwt.finalize
+      (fun () ->
+        Lwt.bind
+          (Lwt.pick
+             [
+               Lwt.map (fun outcomes -> `Outcomes outcomes) (Lwt.all outcomes);
+               Lwt.map (fun () -> `Canceled) cancellation;
+             ])
+          (function
+            | `Outcomes outcomes -> Lwt.return outcomes
+            | `Canceled ->
+                cancel_jobs ();
+                Lwt.fail Lwt.Canceled))
+      (fun () ->
+        Lwt.cancel cancellation;
+        Lwt.return_unit)
 
-  let upload_part_from_path conn ~bucket ~key ~upload_id ~options ~path
-      (spec : part_spec) =
+  let first_batch_error_or_parts outcomes =
+    match
+      List.find_map
+        (function Batch_raised exn -> Some exn | Batch_result _ -> None)
+        outcomes
+    with
+    | Some exn -> Lwt.fail exn
+    | None ->
+        let rec loop acc = function
+          | [] -> Lwt.return_ok (List.rev acc)
+          | Batch_result (Error error) :: _ -> Lwt.return_error error
+          | Batch_result (Ok part) :: rest -> loop (part :: acc) rest
+          | Batch_raised _ :: _ -> assert false
+        in
+        loop [] outcomes
+
+  let first_batch_error_or_unit outcomes =
+    match
+      List.find_map
+        (function Batch_raised exn -> Some exn | Batch_result _ -> None)
+        outcomes
+    with
+    | Some exn -> Lwt.fail exn
+    | None ->
+        let rec loop = function
+          | [] -> Lwt.return_ok ()
+          | Batch_result (Error error) :: _ -> Lwt.return_error error
+          | Batch_result (Ok ()) :: rest -> loop rest
+          | Batch_raised _ :: _ -> assert false
+        in
+        loop outcomes
+
+  let upload_part_from_path conn ~upload ~options ~path
+      (spec : Plan.upload_part) =
     let body = range_body_of_path path spec in
     Lwt.bind
-      (S3.Multipart.upload_part conn ~bucket ~key ~upload_id
-         ~part_number:spec.part_number ~body
+      (S3.Multipart.upload_part conn ~upload ~part_number:spec.part_number ~body
          ~options:options.Awskit_s3.Transfer.upload_part_options ()) (function
       | Error _ as error -> Lwt.return error
       | Ok uploaded -> Lwt.return_ok uploaded.part)
 
-  let upload_missing_parts conn ~bucket ~key ~upload_id ~options ~path
-      ?on_progress ~initial_completed specs =
-    let completed = ref initial_completed in
-    Option.iter
-      (fun f -> if Int64.compare !completed 0L > 0 then f !completed)
-      on_progress;
-    let upload_one spec =
-      Lwt.bind
-        (upload_part_from_path conn ~bucket ~key ~upload_id ~options ~path spec)
-        (function
-        | Error _ as error -> Lwt.return error
-        | Ok part ->
-            completed := Int64.add !completed (Int64.of_int spec.length);
-            Option.iter (fun f -> f !completed) on_progress;
-            Lwt.return_ok part)
-    in
-    let rec loop acc specs =
-      match specs with
-      | [] -> Lwt.return_ok (List.rev acc)
-      | _ ->
+  let upload_missing_parts conn ~upload ~options ~path ?on_progress
+      ~content_length specs =
+    Lwt.catch
+      (fun () ->
+        let completed = ref 0L in
+        let upload_one spec =
+          Lwt.bind (upload_part_from_path conn ~upload ~options ~path spec)
+            (function
+            | Error _ as error -> Lwt.return error
+            | Ok part ->
+                completed := Int64.add !completed (Int64.of_int spec.length);
+                notify_transfer_progress on_progress ~direction:Transfer.Upload
+                  ~phase:Transfer.Part ~total:content_length
+                  ~part_number:spec.part_number !completed;
+                Lwt.return_ok part)
+        in
+        let rec loop acc specs =
           let batch, rest =
-            split_batch ~concurrency:options.Awskit_s3.Transfer.concurrency
-              specs
+            take_batch ~concurrency:options.Awskit_s3.Transfer.concurrency specs
           in
-          Lwt.bind (Lwt_list.map_p upload_one batch) (fun results ->
-              match first_error_or_parts results with
-              | Error _ as error -> Lwt.return error
-              | Ok parts -> loop (List.rev_append parts acc) rest)
-    in
-    loop [] specs
+          match batch with
+          | [] -> Lwt.return_ok (List.rev acc)
+          | _ ->
+              Lwt.bind (joined_batch upload_one batch) (fun outcomes ->
+                  Lwt.bind (first_batch_error_or_parts outcomes) (function
+                    | Error _ as error -> Lwt.return error
+                    | Ok parts -> loop (List.rev_append parts acc) rest))
+        in
+        loop [] specs)
+      raise_callback_or_fail
 
   let sort_parts parts =
     List.sort
       (fun (left : Awskit_s3.Multipart.Part.t) right ->
-        compare left.part_number right.part_number)
+        Int.compare
+          (Awskit_s3.Multipart.Part.part_number left
+          |> Awskit_s3.Multipart.Part_number.to_int)
+          (Awskit_s3.Multipart.Part.part_number right
+          |> Awskit_s3.Multipart.Part_number.to_int))
       parts
 
-  let completed_bytes specs parts =
-    parts
-    |> List.fold_left
-         (fun total (part : Awskit_s3.Multipart.Part.t) ->
-           match
-             List.find_opt
-               (fun spec -> spec.part_number = part.part_number)
-               specs
-           with
-           | None -> total
-           | Some spec -> Int64.add total (Int64.of_int spec.length))
-         0L
-
-  let matching_uploaded_parts conn ~bucket ~key ~upload_id ~options specs =
+  let verify_resume_upload conn ~upload ~options =
     Lwt.bind
-      (S3.Multipart.List_parts.parts conn ~bucket ~key ~upload_id
-         ~options:options.Awskit_s3.Transfer.list_parts_options ()) (function
+      (S3.Multipart.List_parts.parts conn ~upload
+         ~options:options.Awskit_s3.Transfer.list_parts_options ~max_pages:1 ())
+      (function
       | Error _ as error -> Lwt.return error
-      | Ok uploaded ->
-          let part_for_spec spec =
-            match
-              List.find_opt
-                (fun (part : Awskit_s3.List_parts.part_info) ->
-                  part.part_number = spec.part_number)
-                uploaded
-            with
-            | None -> None
-            | Some part -> (
-                match (part.etag, part.size) with
-                | Some etag, Some size
-                  when Int64.equal size (Int64.of_int spec.length) ->
-                    Awskit_s3.Multipart.Part.create
-                      ~part_number:spec.part_number ~etag ()
-                    |> Result.to_option
-                | _ -> None)
-          in
-          Lwt.return_ok (List.filter_map part_for_spec specs))
+      | Ok _parts -> Lwt.return_ok ())
 
-  let remaining_specs specs uploaded_parts =
-    specs
-    |> List.filter (fun spec ->
-        not
-          (List.exists
-             (fun (part : Awskit_s3.Multipart.Part.t) ->
-               part.part_number = spec.part_number)
-             uploaded_parts))
-
-  let complete_multipart conn ~bucket ~key ~upload_id ~options upload parts =
+  let complete_multipart conn ~upload ~options ~bytes_transferred parts =
     let parts = sort_parts parts in
     Lwt.bind
-      (S3.Multipart.complete_upload conn ~bucket ~key ~upload_id parts
-         ~options:options.Awskit_s3.Transfer.complete_options) (function
+      (S3.Multipart.complete_upload conn ~upload ~parts
+         ~options:options.Awskit_s3.Transfer.complete_options ()) (function
       | Error _ as error -> Lwt.return error
       | Ok complete ->
-          Lwt.return_ok { Awskit_s3.Transfer.upload; parts; complete })
+          Lwt.return_ok
+            {
+              Awskit_s3.Transfer.upload =
+                Awskit_s3.Multipart.Upload.as_caller_owned upload;
+              parts;
+              complete;
+              bytes_transferred;
+            })
 
-  let resume_multipart_upload_file conn ~bucket ~key ~upload_id ?options
-      ?on_progress ~path () =
+  let resume_multipart_upload_file conn ~upload ?options ?on_progress ~path () =
     let options =
       Option.value ~default:Awskit_s3.Transfer.default_upload_options options
     in
@@ -343,22 +637,16 @@ struct
     in
     let* content_length = regular_file_length path in
     let* specs =
-      Lwt.return (multipart_specs ~content_length ~part_size:options.part_size)
+      Lwt.return
+        (Plan.upload_part_seq ~content_length ~part_size:options.part_size)
     in
-    let* upload =
-      Lwt.return (Awskit_s3.Multipart.Upload.create ~bucket ~key ~upload_id)
-    in
-    let* uploaded_parts =
-      matching_uploaded_parts conn ~bucket ~key ~upload_id ~options specs
-    in
-    let initial_completed = completed_bytes specs uploaded_parts in
-    let missing = remaining_specs specs uploaded_parts in
+    let* () = verify_resume_upload conn ~upload ~options in
     let* uploaded_now =
-      upload_missing_parts conn ~bucket ~key ~upload_id ~options ~path
-        ?on_progress ~initial_completed missing
+      upload_missing_parts conn ~upload ~options ~path ?on_progress
+        ~content_length specs
     in
-    complete_multipart conn ~bucket ~key ~upload_id ~options upload
-      (uploaded_parts @ uploaded_now)
+    complete_multipart conn ~upload ~options ~bytes_transferred:content_length
+      uploaded_now
 
   let multipart_upload_file conn ~bucket ~key ?options ?on_progress ~path () =
     let options =
@@ -371,28 +659,50 @@ struct
     in
     let* content_length = regular_file_length path in
     let* specs =
-      Lwt.return (multipart_specs ~content_length ~part_size:options.part_size)
+      Lwt.return
+        (Plan.upload_part_seq ~content_length ~part_size:options.part_size)
     in
     let* created =
       S3.Multipart.create_upload conn ~bucket ~key
         ~options:options.create_options ()
     in
-    let upload_id = created.upload.upload_id in
     let abort_and_return error =
       Lwt.bind
-        (S3.Multipart.abort_upload conn ~bucket ~key ~upload_id
-           ~options:options.abort_options ()) (fun _ -> Lwt.return_error error)
+        (S3.Multipart.abort_upload conn ~upload:created.upload
+           ~options:options.abort_options ()) (function
+        | Ok _ -> Lwt.return_error error
+        | Error cleanup_error ->
+            Lwt.return_error
+              (Awskit.Error.Producer.multiple [ error; cleanup_error ]
+              |> Awskit.Error.Producer.with_context
+                   "multipart upload failed and abort also failed"))
     in
-    Lwt.bind
-      (upload_missing_parts conn ~bucket ~key ~upload_id ~options ~path
-         ?on_progress ~initial_completed:0L specs) (function
-      | Error error -> abort_and_return error
-      | Ok parts ->
+    let abort_cleanup_ignore_errors () =
+      Lwt.catch
+        (fun () ->
           Lwt.bind
-            (complete_multipart conn ~bucket ~key ~upload_id ~options
-               created.upload parts) (function
-            | Ok _ as result -> Lwt.return result
-            | Error error -> abort_and_return error))
+            (Lwt.protected
+               (S3.Multipart.abort_upload conn ~upload:created.upload
+                  ~options:options.abort_options ()))
+            (fun _ -> Lwt.return_unit))
+        (fun _exn -> Lwt.return_unit)
+    in
+    let abort_then_fail exn =
+      Lwt.bind (abort_cleanup_ignore_errors ()) (fun () -> Lwt.fail exn)
+    in
+    let upload_and_complete () =
+      Lwt.bind
+        (upload_missing_parts conn ~upload:created.upload ~options ~path
+           ?on_progress ~content_length specs) (function
+        | Error error -> abort_and_return error
+        | Ok parts ->
+            Lwt.bind
+              (complete_multipart conn ~upload:created.upload ~options
+                 ~bytes_transferred:content_length parts) (function
+              | Ok _ as result -> Lwt.return result
+              | Error error -> abort_and_return error))
+    in
+    Lwt.catch upload_and_complete abort_then_fail
 
   let upload_file conn ~bucket ~key ?options ?on_progress ~path () =
     let options =
@@ -404,13 +714,25 @@ struct
         Lwt.bind (regular_file_length path) (function
           | Error _ as error -> Lwt.return error
           | Ok content_length -> (
-              if Int64.compare content_length options.multipart_threshold < 0
+              if
+                Int64.equal content_length 0L
+                || Int64.compare content_length options.multipart_threshold < 0
               then
-                Lwt.bind
-                  (put_file conn ~bucket ~key ~options:options.put_options
-                     ?on_progress ~path ()) (function
-                  | Error _ as error -> Lwt.return error
-                  | Ok result -> Lwt.return_ok (Awskit_s3.Transfer.Put result))
+                let upload_progress =
+                  byte_progress_callback on_progress ~direction:Transfer.Upload
+                    ~phase:Transfer.Single_request ~total:content_length ()
+                in
+                let* body = Body.of_path ?on_progress:upload_progress path in
+                let* result =
+                  Lwt.catch
+                    (fun () ->
+                      S3.Object.put conn ~bucket ~key
+                        ~options:options.put_options ~body ())
+                    raise_escaped_callback_or_fail
+                in
+                Lwt.return_ok
+                  (Awskit_s3.Transfer.Put
+                     { put = result; bytes_transferred = content_length })
               else
                 match
                   Awskit_s3.Transfer.validate_upload_multipart_selection options
@@ -424,168 +746,118 @@ struct
                       | Ok result ->
                           Lwt.return_ok (Awskit_s3.Transfer.Multipart result))))
 
-  let get_file conn ~bucket ~key ?options ?on_progress ~path () =
-    let consume reader =
-      Lwt.catch
-        (fun () ->
-          Lwt_io.with_file ~mode:Lwt_io.Output ~perm:0o600 path (fun channel ->
-              let bytes = Bytes.create buffer_size in
-              let rec loop transferred =
-                Lwt.bind
-                  (Runtime.Response_body.read reader bytes ~off:0
-                     ~len:buffer_size) (function
-                  | Error _ as error -> Lwt.return error
-                  | Ok 0 -> Lwt.return_ok ()
-                  | Ok n ->
-                      Lwt.bind (Lwt_io.write_from_exactly channel bytes 0 n)
-                        (fun () ->
-                          let transferred =
-                            Int64.add transferred (Int64.of_int n)
-                          in
-                          Option.iter (fun f -> f transferred) on_progress;
-                          loop transferred))
-              in
-              loop 0L))
-        (fun exn -> Lwt.return_error (body_error "write download" path exn))
-    in
-    Lwt.bind (S3.Object.get conn ~bucket ~key ?options ~consume ()) (function
-      | Error _ as error -> Lwt.return error
-      | Ok (info, ()) -> Lwt.return_ok info)
-
-  let temp_download_path path =
-    let dir = Filename.dirname path in
-    let base = Filename.basename path in
-    Filename.concat dir ("." ^ base ^ ".awskit-download.tmp")
-
-  let unlink_if_exists path =
-    Lwt.catch
-      (fun () -> Lwt_unix.unlink path)
-      (function
-        | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
-        | _ -> Lwt.return_unit)
-
-  let with_temp_download path f =
-    let temp_path = temp_download_path path in
-    Lwt.bind (unlink_if_exists temp_path) (fun () ->
-        Lwt.bind (f temp_path) (function
-          | Error error ->
-              Lwt.bind (unlink_if_exists temp_path) (fun () ->
-                  Lwt.return_error error)
-          | Ok value ->
-              Lwt.catch
-                (fun () ->
-                  Lwt.bind (Lwt_unix.rename temp_path path) (fun () ->
-                      Lwt.return_ok value))
-                (fun exn ->
-                  Lwt.bind (unlink_if_exists temp_path) (fun () ->
-                      Lwt.return_error (body_error "rename download" path exn)))))
-
-  let head_options_of_get_options (options : Awskit_s3.Get_object.options) :
-      Awskit_s3.Head_object.options =
+  let head_options_of_get_options (options : Awskit_s3.Object.Get.options) :
+      Awskit_s3.Object.Head.options =
     {
       preconditions = options.preconditions;
       version_id = options.version_id;
       checksum_mode = options.checksum_mode;
+      source_encryption = options.source_encryption;
       expected_bucket_owner = options.expected_bucket_owner;
     }
 
-  let write_all fd bytes offset length =
-    let rec loop offset remaining =
-      if remaining = 0 then Lwt.return_ok ()
-      else
-        Lwt.bind (Lwt_unix.write fd bytes offset remaining) (function
-          | 0 ->
-              Lwt.return_error
-                (Awskit.Error.body "download write made no progress")
-          | written -> loop (offset + written) (remaining - written))
-    in
-    loop offset length
+  let get_info (result : _ Awskit_s3.Object.Get.result) :
+      Awskit_s3.Object.Get.info =
+    {
+      etag = result.etag;
+      content_type = result.content_type;
+      content_length = result.content_length;
+      content_range = result.content_range;
+      last_modified = result.last_modified;
+      metadata = result.metadata;
+      storage_class = result.storage_class;
+      version_id = result.version_id;
+      checksum = result.checksum;
+      encryption = result.encryption;
+      response = result.response;
+    }
 
-  let download_range_to_path conn ~bucket ~key ~options ~path ~completed
-      ?on_progress spec =
-    let finish =
-      Int64.add spec.offset (Int64.of_int spec.length) |> Int64.pred
-    in
-    let range = Awskit_s3.Range.bytes_exn ~start:spec.offset ~finish in
-    let get_options =
-      { options.Awskit_s3.Transfer.get_options with range = Some range }
-    in
+  let ranged_get_options_of_head (info : Awskit_s3.Object.Head.result)
+      (get_options : Awskit_s3.Object.Get.options) :
+      Awskit_s3.Object.Get.options =
+    match info.version_id with
+    | Some version_id -> { get_options with version_id = Some version_id }
+    | None -> (
+        match info.etag with
+        | None -> get_options
+        | Some etag ->
+            let preconditions =
+              {
+                get_options.preconditions with
+                if_match = Some (Awskit_s3.Object.Etag_condition.Etag etag);
+              }
+            in
+            { get_options with preconditions })
+
+  let download_range_to_fd conn ~bucket ~key
+      ~(get_options : Awskit_s3.Object.Get.options) ~path ~fd ~write_mutex
+      ~completed ~content_length ?on_progress (spec : Plan.download_range) =
+    let get_options = { get_options with range = Some spec.range } in
     let consume reader =
       Lwt.catch
         (fun () ->
-          Lwt.bind (Lwt_unix.openfile path [ Unix.O_WRONLY ] 0) (fun fd ->
-              Lwt.finalize
-                (fun () ->
-                  Lwt.bind
-                    (Lwt_unix.LargeFile.lseek fd spec.offset Unix.SEEK_SET)
-                    (fun _ ->
-                      let bytes = Bytes.create buffer_size in
-                      let rec loop remaining =
-                        if remaining = 0 then Lwt.return_ok ()
-                        else
-                          let len = min buffer_size remaining in
-                          Lwt.bind
-                            (Runtime.Response_body.read reader bytes ~off:0 ~len)
-                            (function
-                            | Error _ as error -> Lwt.return error
-                            | Ok 0 ->
-                                Lwt.return_error
-                                  (Awskit.Error.body
-                                     (Fmt.str
-                                        "unexpected end of response while \
-                                         downloading range %d"
-                                        spec.index))
-                            | Ok n ->
-                                Lwt.bind (write_all fd bytes 0 n) (function
-                                  | Error _ as error -> Lwt.return error
-                                  | Ok () ->
-                                      completed :=
-                                        Int64.add !completed (Int64.of_int n);
-                                      Option.iter
-                                        (fun f -> f !completed)
-                                        on_progress;
-                                      loop (remaining - n)))
-                      in
-                      loop spec.length))
-                (fun () -> Lwt_unix.close fd)))
-        (fun exn -> Lwt.return_error (body_error "write download" path exn))
+          let bytes = Bytes.create buffer_size in
+          let rec loop position remaining =
+            if remaining = 0 then Lwt.return_ok ()
+            else
+              let len = min buffer_size remaining in
+              Lwt.bind (Runtime.Response_body.read reader bytes ~off:0 ~len)
+                (function
+                | Error _ as error -> Lwt.return error
+                | Ok 0 ->
+                    Lwt.return_error
+                      (Awskit.Error.Producer.body
+                         (Fmt.str
+                            "unexpected end of response while downloading \
+                             range %d"
+                            spec.index))
+                | Ok n ->
+                    Lwt.bind
+                      (Lwt_mutex.with_lock write_mutex (fun () ->
+                           Lwt.bind
+                             (Lwt_unix.LargeFile.lseek fd position Unix.SEEK_SET)
+                             (fun _ -> write_all fd bytes 0 n)))
+                      (function
+                        | Error _ as error -> Lwt.return error
+                        | Ok () ->
+                            completed := Int64.add !completed (Int64.of_int n);
+                            notify_transfer_progress on_progress
+                              ~direction:Transfer.Download
+                              ~phase:Transfer.Ranged_get ~total:content_length
+                              !completed;
+                            loop
+                              (Int64.add position (Int64.of_int n))
+                              (remaining - n)))
+          in
+          loop spec.offset spec.length)
+        (body_error_or_fail "write download" path)
     in
     Lwt.bind (S3.Object.get conn ~bucket ~key ~options:get_options ~consume ())
       (function
       | Error _ as error -> Lwt.return error
-      | Ok (_, ()) -> Lwt.return_ok ())
+      | Ok { value = (); _ } -> Lwt.return_ok ())
 
-  let ranged_download_to_path conn ~bucket ~key ~options ?on_progress ~path
-      ranges =
+  let ranged_download_to_fd conn ~bucket ~key
+      ~(options : Awskit_s3.Transfer.download_options)
+      ~(get_options : Awskit_s3.Object.Get.options) ?on_progress ~path ~fd
+      ~content_length ranges =
     let completed = ref 0L in
-    Lwt.bind
-      (Lwt.catch
-         (fun () ->
-           Lwt.bind
-             (Lwt_io.with_file ~mode:Lwt_io.Output ~perm:0o600 path (fun _ ->
-                  Lwt.return_unit))
-             (fun () -> Lwt.return_ok ()))
-         (fun exn -> Lwt.return_error (body_error "create download" path exn)))
-      (function
-        | Error _ as error -> Lwt.return error
-        | Ok () ->
-            let download_one spec =
-              download_range_to_path conn ~bucket ~key ~options ~path ~completed
-                ?on_progress spec
-            in
-            let rec loop ranges =
-              match ranges with
-              | [] -> Lwt.return_ok ()
-              | _ ->
-                  let batch, rest =
-                    split_batch ~concurrency:options.concurrency ranges
-                  in
-                  Lwt.bind (Lwt_list.map_p download_one batch) (fun results ->
-                      match first_error_or_unit results with
-                      | Error _ as error -> Lwt.return error
-                      | Ok () -> loop rest)
-            in
-            loop ranges)
+    let write_mutex = Lwt_mutex.create () in
+    let download_one spec =
+      download_range_to_fd conn ~bucket ~key ~get_options ~path ~fd ~write_mutex
+        ~completed ~content_length ?on_progress spec
+    in
+    let rec loop parts ranges =
+      let batch, rest = take_batch ~concurrency:options.concurrency ranges in
+      match batch with
+      | [] -> Lwt.return_ok parts
+      | _ ->
+          Lwt.bind (joined_batch download_one batch) (fun outcomes ->
+              Lwt.bind (first_batch_error_or_unit outcomes) (function
+                | Error _ as error -> Lwt.return error
+                | Ok () -> loop (parts + List.length batch) rest))
+    in
+    loop 0 ranges
 
   let download_file conn ~bucket ~key ?options ?on_progress ~path () =
     let options =
@@ -594,13 +866,21 @@ struct
     let* () =
       Lwt.return (Awskit_s3.Transfer.validate_download_options options)
     in
-    let download_with_get () =
-      with_temp_download path (fun temp_path ->
-          let* result =
-            get_file conn ~bucket ~key ~options:options.get_options ?on_progress
-              ~path:temp_path ()
-          in
-          Lwt.return_ok (Awskit_s3.Transfer.Get result))
+    let* () = validate_download_target path options in
+    let download_with_get ?total () =
+      let bytes_transferred = ref 0L in
+      let download_progress =
+        tracked_byte_progress_callback on_progress ~direction:Transfer.Download
+          ~phase:Transfer.Single_request ?total bytes_transferred
+      in
+      let* result =
+        S3.Object.get conn ~bucket ~key ~options:options.get_options
+          ~consume:(Reader.to_path ?on_progress:download_progress path)
+          ()
+      in
+      Lwt.return_ok
+        (Awskit_s3.Transfer.Get
+           { info = get_info result; bytes_transferred = !bytes_transferred })
     in
     let head_options = head_options_of_get_options options.get_options in
     let* info = S3.Object.head conn ~bucket ~key ~options:head_options () in
@@ -609,16 +889,20 @@ struct
     | Some content_length
       when Int64.compare content_length options.multipart_threshold < 0
            || Int64.equal content_length 0L ->
-        download_with_get ()
+        download_with_get ~total:content_length ()
     | Some content_length ->
         let* ranges =
-          Lwt.return (range_specs ~content_length ~part_size:options.part_size)
+          Lwt.return
+            (Plan.download_range_seq ~content_length
+               ~part_size:options.part_size)
         in
-        with_temp_download path (fun temp_path ->
-            let* () =
-              ranged_download_to_path conn ~bucket ~key ~options ?on_progress
-                ~path:temp_path ranges
+        let get_options = ranged_get_options_of_head info options.get_options in
+        with_temp_download path (fun temp_path fd ->
+            let* parts =
+              ranged_download_to_fd conn ~bucket ~key ~options ~get_options
+                ?on_progress ~path:temp_path ~fd ~content_length ranges
             in
             Lwt.return_ok
-              (Awskit_s3.Transfer.Ranged { info; parts = List.length ranges }))
+              (Awskit_s3.Transfer.Ranged
+                 { info; parts; bytes_transferred = content_length }))
 end

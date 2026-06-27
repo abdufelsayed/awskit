@@ -1,8 +1,9 @@
 {0 AWS Core Guides}
 
-The core package is a pure foundation plus explicit runtime adapters at the
-edge. Service packages use this foundation for signing, request construction,
-response metadata, and structured errors.
+The core package gives service clients a runtime-agnostic foundation for
+signing, request construction, response metadata, retries, and structured
+errors. Runtime adapters sit at the edge of the application, where IO,
+concurrency, clocks, environment variables, and filesystem access belong.
 
 {1 Credentials}
 
@@ -28,13 +29,15 @@ let credentials =
     ()
 ]}
 
-Credentials are opaque. Use {!val:Awskit.Credentials.access_key_id} and
-{!val:Awskit.Credentials.session_token} to read non-secret fields. The secret
-access key is accepted at construction time but not exposed afterward.
+Credentials are opaque so secret access keys are harder to log accidentally.
+Use {!val:Awskit.Credentials.access_key_id} and
+{!val:Awskit.Credentials.session_token} only when code deliberately needs those
+fields. Session tokens are credential material. The secret access key is
+accepted at construction time but not exposed afterward.
 
 {2 Environment Variables}
 
-[awskit-unix] and [awskit-lwt-unix] can read:
+[awskit-unix] reads local static credential and region sources:
 
 {[
 AWS_ACCESS_KEY_ID
@@ -45,10 +48,19 @@ AWS_DEFAULT_REGION
 AWS_PROFILE
 AWS_SHARED_CREDENTIALS_FILE
 AWS_CONFIG_FILE
+]}
+
+[awskit-lwt-unix] extends those local sources with refreshable ECS/container
+credentials and EC2 instance profile credentials. Its container and metadata
+providers also inspect:
+
+{[
 AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
 AWS_CONTAINER_CREDENTIALS_FULL_URI
 AWS_CONTAINER_AUTHORIZATION_TOKEN
 AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
+AWS_EC2_METADATA_DISABLED
+AWS_EC2_METADATA_V1_DISABLED
 ]}
 
 [awskit-unix] also reads static shared AWS profiles from
@@ -56,11 +68,11 @@ AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
 [AWS_PROFILE], defaulting to ["default"]. Environment credentials win over
 profile files when present.
 
-[awskit-lwt-unix] extends the local static sources with refreshable ECS
-container credentials and EC2 instance profile credentials. The EC2 provider
-uses IMDSv2 when available and refreshes metadata credentials before
-expiration. Process providers, web identity, and STS assume-role profiles
-remain future work.
+[awskit-lwt-unix] refreshes metadata credentials before expiration. The EC2
+provider uses IMDSv2 when available; tokenless IMDSv1 fallback is attempted
+only for IMDS token endpoint HTTP 403, 404, or 405 responses, and can be
+disabled explicitly. Process providers, web identity, and STS assume-role
+profiles are not currently implemented.
 
 {1 Regions And Endpoints}
 
@@ -74,13 +86,13 @@ Endpoints are scheme/host/port records:
 
 {[
 let endpoint =
-  Awskit.Endpoint.https
+  Awskit.Endpoint.https_exn
     ~host:"s3.us-east-1.amazonaws.com"
     ()
 ]}
 
-Runtime adapters can take endpoint overrides, but service-specific packages
-usually expose their own endpoint configuration because addressing rules are
+Runtime adapters can take endpoint overrides, but service packages usually
+expose richer endpoint configuration because addressing rules are
 service-specific. For S3, pass endpoint and addressing options directly to the
 [awskit-s3] adapter [create] functions.
 
@@ -88,17 +100,18 @@ service-specific. For S3, pass endpoint and addressing options directly to the
 
 {!module:Awskit.Signing} implements AWS Signature Version 4 without IO.
 
-Use [payload_hash] metadata instead of passing a raw body to signing:
+Use [payload_hash] metadata and structured query parameters instead of passing
+a raw body or pre-rendered query string to signing:
 
 {[
 let signed =
-  Awskit.Signing.sign_request
+  Awskit.Signing.sign_request_params
     ~credentials
     ~region
     ~service:"s3"
     ~method_:`PUT
     ~path:"/my-key"
-    ~query:""
+    ~query_params:[]
     ~headers:[ ("host", "my-bucket.s3.us-east-1.amazonaws.com") ]
     ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string "hello")
     ~now:Ptime.epoch
@@ -117,26 +130,55 @@ Useful low-level helpers:
 
 {1 Structured Errors}
 
-Core errors are structured values:
+Core errors are structured SDK values. Runtime-backed operations return
+[('a, Awskit.Error.t) result io], while pure constructors return
+[('a, Awskit.Error.t) result].
+
+{!type:Awskit.Error.t} is opaque. Use {!val:Awskit.Error.kind} to inspect the
+coarse error kind, and {!val:Awskit.Error.context} to read attached operation,
+resource, retry-attempt, and diagnostic context. Use {!val:Awskit.Error.pp} or
+{!val:Awskit.Error.to_string_hum} for human-readable logs, and
+{!val:Awskit.Error.sexp_of_t} for structured diagnostics and tests.
+
+Functions ending in [_exn] raise {!exception:Awskit.Error.Awskit_error} on SDK
+validation or construction failure. Prefer the result-returning form in
+libraries and long-running services. Cancellation and user callback exceptions
+are not converted into SDK errors.
+
+Application code should inspect, classify, and print errors returned by Awskit
+operations. Custom runtimes, Awskit runtime adapters, service packages, and
+simulators construct shared error values through
+{!module:Awskit.Error.Producer}.
+
+The public kind and retry classifications are matchable variants. Error kind
+constructors are private, so application code can inspect returned errors but
+cannot construct new {!type:Awskit.Error.t} values directly:
 
 {[
-type t =
+type kind = private
   | Validation of validation
-  | Signing of string
+  | Credentials of credentials_error
+  | Signing of signing_error
+  | Endpoint of endpoint_error
   | Transport of transport
+  | Timeout of timeout
+  | Cancelled of cancellation
   | Service of service
-  | Decode of string
   | Body of body
+  | Decode of decode
+  | Retry_exhausted of retry_exhausted
+  | Not_supported of not_supported
+  | Multiple of Awskit.Error.t list
 ]}
 
 Use {!val:Awskit.Error.retry_class} for manual retry decisions:
 
 {[
 match Awskit.Error.retry_class err with
-| `Throttled | `Retryable -> retry ()
-| `Auth -> refresh_or_fail ()
-| `Not_found -> handle_missing ()
-| `Conflict | `Fatal | `Unknown -> fail err
+| Awskit.Error.Throttled | Awskit.Error.Retryable -> retry ()
+| Awskit.Error.Auth -> refresh_or_fail ()
+| Awskit.Error.Not_found -> handle_missing ()
+| Awskit.Error.Conflict | Awskit.Error.Fatal | Awskit.Error.Unknown -> fail err
 ]}
 
 Service packages preserve {!type:Awskit.Error.t} and add classifier helpers.
@@ -147,7 +189,9 @@ For example, [awskit-s3] exposes [Awskit_s3.Error.is_no_such_key] and
 
 Service packages use {!module:Awskit.Retry} for built-in retries. The default
 policy retries retryable transport failures, throttling responses, and 5xx
-service responses when the request body is replayable.
+service responses when the request body is replayable. The default policy uses
+jitter and a per-operation retry budget so repeated transient failures cannot
+turn into an unbounded tight loop.
 
 {[
 let retry_policy =
@@ -162,12 +206,39 @@ let retry_policy =
 Use {!val:Awskit.Retry.disabled} when an application wants to own all retry
 behavior itself.
 
+Runtime adapters must provide the sleep and random capabilities used by retry
+delays. Generic adapters that do not have a real sleeper or random source reject
+retry-enabled construction instead of silently spinning.
+
+{1 Timeout Policy}
+
+Use {!module:Awskit.Timeout} to describe timeout spans by phase. A policy can
+carry connect, per-attempt, runtime-operation, request-body, response-body, and
+drain limits. The runtime-operation limit is applied to one transport operation
+attempt; service calls that retry apply it independently to each attempt and do
+not include retry sleeps in that span:
+
+{[
+let timeout_policy =
+  Awskit.Timeout.create_exn
+    ~connect:(Ptime.Span.of_float_s 3.1 |> Option.get)
+    ~attempt:(Ptime.Span.of_float_s 30.0 |> Option.get)
+    ~operation:(Ptime.Span.of_float_s 120.0 |> Option.get)
+    ~drain:(Ptime.Span.of_float_s 10.0 |> Option.get)
+    ()
+]}
+
+Timeout support is part of the runtime contract. Each adapter documents and
+tests the phases it can enforce natively. Cancellation remains runtime-native:
+for example, Eio cancellation and [Lwt.Canceled] are preserved as native
+cancellation rather than converted into ordinary SDK errors.
+
 {1 Runtime Body Model}
 
 The runtime abstraction keeps HTTP metadata separate from bodies:
 
 {ul
-  {li request bodies are passed separately to [Runtime.with_response]}
+  {li request bodies are passed separately to [Runtime.Transport.with_response]}
   {li response bodies are valid inside the [with_response] callback}
   {li response body readers are scoped through [Runtime.Response_body.with_reader]}
   {li request and response records are body-free}
@@ -179,39 +250,40 @@ data in memory.
 Request bodies carry a descriptor:
 
 {[
-{
-  Awskit.Body.Request.content_length = Some 5L;
-  payload_hash = Awskit.Body.Payload_hash.sha256_of_string "hello";
-  replayable = true;
-}
+Awskit.Body.Request.descriptor_exn
+  ~content_length:5L
+  ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string "hello")
+  ~replayable:true
+  ()
 ]}
 
-The descriptor records the declared request body length, the payload hash used for
-signing, and whether the body can be replayed. Service packages may reject
+The descriptor records the declared request body length, the payload hash used
+for signing, and whether the body can be replayed. Service packages may reject
 unknown lengths. For example, S3 [PutObject] and [UploadPart] currently require
 a known [content_length]; Awskit does not implement SigV4 aws-chunked streaming
 for unknown-length request bodies.
 
-For custom [Runtime.Request_body.of_stream] values, the producer callback is part of the
-request operation. Errors returned by that callback are request body failures.
-When a known
-length is declared, the producer must emit exactly that number of bytes; prefer
-[Runtime.Request_body.of_string] or [Runtime.Request_body.of_bytes] when data is already buffered. Mark a custom
-stream [replayable] only if a retry can recreate the same body.
+For custom [Runtime.Request_body.of_stream] values, the producer callback is
+part of the request operation. Errors returned by that callback are request body
+failures. When a known length is declared, the producer must emit exactly that
+number of bytes. Prefer [Runtime.Request_body.of_string] or
+[Runtime.Request_body.of_bytes] when data is already buffered. Mark a custom
+stream [replayable] only if a retry can recreate the same bytes from the
+beginning.
 
 Response bodies must be consumed inside the [with_response] callback, normally
 through [Runtime.Response_body.with_reader]:
 
 {[
-Runtime.with_response conn request body ~f:(fun response body ->
+Runtime.Transport.with_response conn request ~body ~consume:(fun response body ->
   Runtime.Response_body.with_reader body ~consume:(fun reader ->
     Runtime.Response_body.read reader bytes ~off:0 ~len:(Bytes.length bytes)))
 ]}
 
 Service packages expose higher-level helpers when buffering is intentional.
-For example, [awskit-s3] uses [Object.get_as_string ~max_bytes]. These
-helpers keep response-size limits explicit when buffering or draining a
-streaming response.
+For example, [awskit-s3] adapters expose [Reader.to_string ~max_bytes] and
+[Reader.to_bytes ~max_bytes]. These helpers keep response-size limits explicit
+when buffering or draining a streaming response.
 
 Response body readers are scoped. After the consumer returns successfully, the
 runtime drains the remaining response body up to [max_response_drain_bytes] so
@@ -225,17 +297,49 @@ consumer error wins.
 
 Use [awskit-eio] for direct-style OCaml 5 applications:
 
+Eio callers own HTTPS transport policy, TLS configuration, CA roots, RNG
+initialization, and platform policy. Awskit does not currently provide a ready
+Eio Unix aggregate adapter.
+
 {[
+module Https = struct
+  let connector () =
+    Mirage_crypto_rng_unix.use_default ();
+    let authenticator =
+      match Ca_certs.authenticator () with
+      | Ok authenticator -> authenticator
+      | Error (`Msg msg) -> invalid_arg ("failed to load CA roots: " ^ msg)
+    in
+    let tls_config =
+      match Tls.Config.client ~authenticator () with
+      | Ok config -> config
+      | Error (`Msg msg) -> invalid_arg ("failed to create TLS config: " ^ msg)
+    in
+    Some
+      (fun uri raw ->
+        let host =
+          match Uri.host uri with
+          | Some host -> Domain_name.host_exn (Domain_name.of_string_exn host)
+          | None -> invalid_arg "HTTPS URI is missing a host"
+        in
+        (Tls_eio.client_of_flow tls_config ~host raw
+          :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Flow.two_way))
+end
+
+Eio_main.run @@ fun env ->
 Eio.Switch.run @@ fun sw ->
-let conn =
-  Awskit_eio.create
-    ~env
-    ~sw
-    ~region
-    ~credentials
-    ()
-in
-ignore conn
+  let https = Https.connector () in
+  let conn =
+    Awskit_eio.create
+      ~env
+      ~sw
+      ~https
+      ~region:"us-east-1"
+      ~credentials
+      ()
+    |> Result.get_ok
+  in
+  ignore conn
 ]}
 
 The monad type is [type 'a t = 'a]. Errors are returned as [result] values by
@@ -243,7 +347,8 @@ service operations.
 
 {2 Lwt Unix}
 
-Use [awskit-lwt-unix] for ordinary Lwt applications on Unix:
+Use [awskit-lwt-unix] for Lwt applications on Unix that should read the
+standard AWS environment and profile configuration:
 
 {[
 let conn =
@@ -267,15 +372,21 @@ module Runtime = Awskit_lwt.Make (Cohttp_lwt_unix.Client)
 {1 Custom Runtime Adapters}
 
 Implement {!module-type:Awskit.Runtime.S} when integrating another concurrency
-or HTTP stack. The service package functors need:
+or HTTP stack. The signature is grouped into named capabilities so adapter
+authors can see exactly which law belongs to which part of the runtime:
 
 {ul
-  {li a monad type and bind/return}
-  {li connection region, credentials, clock, and optional endpoint}
-  {li request body constructors and request descriptors}
-  {li response body scoped consumption}
-  {li HTTP transport through [with_response]}
+  {li [IO] for bind and return}
+  {li [Transport] for HTTP execution and response-body scope}
+  {li [Request_body] and [Response_body] for streaming bodies}
+  {li [Clock], [Sleeper], and [Random] for signing time and retry delay}
+  {li [Credentials] and [Endpoint] for request configuration}
+  {li [Retry] and [Timeout] for operational policy}
 }
 
-S3 adapters extend the core runtime with [s3_endpoint_config] so S3 endpoint
-resolution can stay AWS-aware without putting S3 concepts into the pure core.
+S3 adapters extend the core runtime with [S3_endpoint.s3_endpoint_config] so S3
+endpoint resolution can stay AWS-aware without putting S3 concepts into the core
+AWS runtime abstraction. Run [opam exec -- dune build @runtime-http]
+when changing a runtime implementation; the workload checks shared runtime HTTP
+behavior, including bodiless responses, framing, body-reader, and error-path
+behavior.

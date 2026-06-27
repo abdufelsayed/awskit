@@ -1,9 +1,12 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_state
 open Simulator_error
 open Simulator_store
 open Simulator_runtime
+module Bucket_model = Awskit_s3.Bucket
+module Bucket_name = Awskit_s3.Bucket_name
+module Error = Awskit_s3.Error
+module Tag = Awskit_s3.Tag
 
 module Bucket = struct
   type connection = t
@@ -24,17 +27,17 @@ module Bucket = struct
               versions = Hashtbl.create 17;
               multipart_uploads = Hashtbl.create 17;
               policy = None;
-              bucket_tags = [];
+              bucket_tags = Tag.Set.empty;
               versioning = None;
               encryption = None;
               cors = None;
               public_access_block = None;
               ownership_controls = None;
             };
-          Ok { Create_bucket.response = response 200 }
+          Ok { Bucket_model.Create.response = response 200 }
         end
 
-  let delete ?expected_bucket_owner:_ conn ~bucket =
+  let delete conn ~bucket ?options:_ () =
     match require_bucket conn bucket with
     | Error error -> Error error
     | Ok state ->
@@ -42,48 +45,49 @@ module Bucket = struct
           Error (service ~status:409 ~code:"BucketNotEmpty" ())
         else begin
           remove_bucket (store conn) bucket;
-          Ok { Delete_bucket.response = response 204 }
+          Ok { Bucket_model.Delete.response = response 204 }
         end
 
-  let head ?expected_bucket_owner:_ conn ~bucket =
+  let head conn ~bucket ?options:_ () =
     match require_bucket conn bucket with
     | Error error -> Error error
     | Ok _ ->
         Ok
           {
-            Head_bucket.name = bucket;
-            region = Some (Runtime.region conn);
+            Bucket_model.Head.name = Bucket_name.of_string_exn bucket;
+            region = Some (Runtime.Endpoint.region conn);
             response = response 200;
           }
 
-  let exists ?expected_bucket_owner conn ~bucket =
-    match head ?expected_bucket_owner conn ~bucket with
+  let exists conn ~bucket ?options () =
+    match head conn ~bucket ?options () with
     | Ok _ -> Ok true
     | Error error when Error.is_not_found error -> Ok false
     | Error error -> Error error
 
   let list conn =
     let buckets =
-      buckets_seq (store conn)
-      |> Seq.map (fun (name, state) ->
-          { Bucket.name; creation_date = Some state.created_at })
-      |> List.of_seq
-      |> List.sort (fun (a : Bucket.info) b -> String.compare a.name b.name)
+      buckets (store conn)
+      |> List.map (fun (name, state) ->
+          {
+            Bucket_model.name = Bucket_name.of_string_exn name;
+            creation_date = Some state.created_at;
+          })
     in
-    Ok { List_buckets.buckets; response = response 200 }
+    Ok { Bucket_model.List_buckets.buckets; response = response 200 }
 
-  let get_location ?expected_bucket_owner:_ conn ~bucket =
+  let get_location conn ~bucket ?options:_ () =
     match require_bucket conn bucket with
     | Error error -> Error error
     | Ok _ ->
         Ok
           {
-            Get_bucket_location.region = Some (Runtime.region conn);
+            Bucket_model.Get_location.region = Runtime.Endpoint.region conn;
             response = response 200;
           }
 
   module Policy = struct
-    let get ?expected_bucket_owner:_ conn ~bucket =
+    let get conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state -> (
@@ -91,14 +95,14 @@ module Bucket = struct
           | Some p -> Ok p
           | None -> Error (no_such_key ()))
 
-    let put conn ~bucket ?expected_bucket_owner:_ policy =
+    let put conn ~bucket ?options:_ ~policy () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
           state.policy <- Some policy;
           Ok (response 200)
 
-    let delete ?expected_bucket_owner:_ conn ~bucket =
+    let delete conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
@@ -107,33 +111,45 @@ module Bucket = struct
   end
 
   module Versioning = struct
-    let get ?expected_bucket_owner:_ conn ~bucket =
+    let validate_status = function
+      | Bucket_model.Versioning.Status.Enabled | Suspended -> Ok ()
+      | Unknown value ->
+          invalid ~field:"status"
+            "unknown bucket versioning status %S cannot be sent" value
+
+    let get conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
           Ok
             {
-              Bucket.Versioning.status = state.versioning;
+              Bucket_model.Versioning.status = state.versioning;
               response = response 200;
             }
 
-    let put conn ~bucket ?expected_bucket_owner:_ status =
+    let put conn ~bucket ?options:_ ~status () =
       match require_bucket conn bucket with
       | Error error -> Error error
-      | Ok state ->
-          state.versioning <- Some status;
-          Ok (response 200)
+      | Ok state -> (
+          match validate_status status with
+          | Error error -> Error error
+          | Ok () ->
+              set_versioning state status;
+              Ok (response 200))
   end
 
   module Tagging = struct
-    let get ?expected_bucket_owner:_ conn ~bucket =
+    let get conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
           Ok
-            { Bucket.Tagging.tags = state.bucket_tags; response = response 200 }
+            {
+              Bucket_model.Tagging.tags = state.bucket_tags;
+              response = response 200;
+            }
 
-    let put conn ~bucket ?expected_bucket_owner:_ tags =
+    let put conn ~bucket ?options:_ ~tags () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state -> (
@@ -143,16 +159,16 @@ module Bucket = struct
               state.bucket_tags <- tags;
               Ok (response 200))
 
-    let delete ?expected_bucket_owner:_ conn ~bucket =
+    let delete conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
-          state.bucket_tags <- [];
+          state.bucket_tags <- Tag.Set.empty;
           Ok (response 204)
   end
 
   module Encryption = struct
-    let get ?expected_bucket_owner:_ conn ~bucket =
+    let get conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state -> (
@@ -162,16 +178,16 @@ module Bucket = struct
                 (service ~status:404
                    ~code:"ServerSideEncryptionConfigurationNotFoundError" ())
           | Some config ->
-              Ok { Bucket.Encryption.config; response = response 200 })
+              Ok { Bucket_model.Encryption.config; response = response 200 })
 
-    let put conn ~bucket ?expected_bucket_owner:_ config =
+    let put conn ~bucket ?options:_ ~config () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
           state.encryption <- Some config;
           Ok (response 200)
 
-    let delete ?expected_bucket_owner:_ conn ~bucket =
+    let delete conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
@@ -180,22 +196,23 @@ module Bucket = struct
   end
 
   module Cors = struct
-    let get ?expected_bucket_owner:_ conn ~bucket =
+    let get conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state -> (
           match state.cors with
           | None -> Error (no_such_key ())
-          | Some config -> Ok { Bucket.Cors.config; response = response 200 })
+          | Some config ->
+              Ok { Bucket_model.Cors.config; response = response 200 })
 
-    let put conn ~bucket ?expected_bucket_owner:_ config =
+    let put conn ~bucket ?options:_ ~config () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
           state.cors <- Some config;
           Ok (response 200)
 
-    let delete ?expected_bucket_owner:_ conn ~bucket =
+    let delete conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
@@ -204,23 +221,27 @@ module Bucket = struct
   end
 
   module Public_access_block = struct
-    let get ?expected_bucket_owner:_ conn ~bucket =
+    let get conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state -> (
           match state.public_access_block with
           | None -> Error (no_such_key ())
           | Some config ->
-              Ok { Bucket.Public_access_block.config; response = response 200 })
+              Ok
+                {
+                  Bucket_model.Public_access_block.config;
+                  response = response 200;
+                })
 
-    let put conn ~bucket ?expected_bucket_owner:_ config =
+    let put conn ~bucket ?options:_ ~config () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
           state.public_access_block <- Some config;
           Ok (response 200)
 
-    let delete ?expected_bucket_owner:_ conn ~bucket =
+    let delete conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
@@ -229,23 +250,37 @@ module Bucket = struct
   end
 
   module Ownership_controls = struct
-    let get ?expected_bucket_owner:_ conn ~bucket =
+    let validate_config (config : Bucket_model.Ownership_controls.config) =
+      match config.object_ownership with
+      | Bucket_owner_enforced | Bucket_owner_preferred | Object_writer -> Ok ()
+      | Unknown value ->
+          invalid ~field:"object_ownership"
+            "unknown object ownership %S cannot be sent" value
+
+    let get conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state -> (
           match state.ownership_controls with
           | None -> Error (no_such_key ())
           | Some config ->
-              Ok { Bucket.Ownership_controls.config; response = response 200 })
+              Ok
+                {
+                  Bucket_model.Ownership_controls.config;
+                  response = response 200;
+                })
 
-    let put conn ~bucket ?expected_bucket_owner:_ config =
+    let put conn ~bucket ?options:_ ~config () =
       match require_bucket conn bucket with
       | Error error -> Error error
-      | Ok state ->
-          state.ownership_controls <- Some config;
-          Ok (response 200)
+      | Ok state -> (
+          match validate_config config with
+          | Error error -> Error error
+          | Ok () ->
+              state.ownership_controls <- Some config;
+              Ok (response 200))
 
-    let delete ?expected_bucket_owner:_ conn ~bucket =
+    let delete conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->

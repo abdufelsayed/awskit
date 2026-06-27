@@ -1,0 +1,1 @@
+<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>&quot;part-1&quot;</ETag><ChecksumSHA256>sha256-part-1</ChecksumSHA256></Part><Part><PartNumber>2</PartNumber><ETag>&quot;part-2&quot;</ETag><ChecksumSHA256>sha256-part-2</ChecksumSHA256></Part></CompleteMultipartUpload>

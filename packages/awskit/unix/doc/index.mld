@@ -1,0 +1,28 @@
+{0 awskit-unix}
+
+Unix-specific helpers for Awskit applications.
+
+The public entrypoint is {!module:Awskit_unix}. This package owns local
+platform behavior such as environment variables, shared AWS profile files, and
+wall-clock access. It does not perform HTTP calls.
+
+Use this package when an application wants Unix credential or region sources
+while keeping the runtime-neutral {!module:Awskit} core free of platform
+dependencies.
+
+{1 Public Modules}
+
+{ul
+  {li {!module:Awskit_unix.Clock} reads the OS wall clock for signing and
+    explicit runtime construction.}
+  {li {!module:Awskit_unix.Credentials} loads static credentials from
+    [AWS_ACCESS_KEY_ID], [AWS_SECRET_ACCESS_KEY], optional
+    [AWS_SESSION_TOKEN], and shared AWS profile files.}
+  {li {!module:Awskit_unix.Region} reads [AWS_REGION] and then
+    [AWS_DEFAULT_REGION].}
+}
+
+The credential helpers intentionally stop at local static sources. Networked
+ECS/container metadata and EC2 instance metadata providers live in
+[awskit-lwt-unix], where the Lwt Unix runtime owns the HTTP client and refresh
+lifecycle.

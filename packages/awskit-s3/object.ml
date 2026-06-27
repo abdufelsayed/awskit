@@ -1,15 +1,16 @@
-open Common
+let ( let* ) = S3_result.( let* )
 
 module Etag = struct
   type t = string
 
   let of_string value =
-    if value = "" then invalid ~field:"etag" "etag must be non-empty"
-    else if has_ctl_or_del value then
-      invalid ~field:"etag" "etag contains control characters"
+    if value = "" then
+      S3_error_context.invalid ~field:"etag" "etag must be non-empty"
+    else if S3_string.has_ctl_or_del value then
+      S3_error_context.invalid ~field:"etag" "etag contains control characters"
     else Ok value
 
-  let of_string_exn value = result_exn (of_string value)
+  let of_string_exn value = S3_result.result_exn (of_string value)
   let to_string value = value
   let pp fmt value = Format.pp_print_string fmt value
   let equal = String.equal
@@ -20,12 +21,14 @@ module Version_id = struct
 
   let of_string value =
     if value = "" then
-      invalid ~field:"version_id" "version id must be non-empty"
-    else if has_ctl_or_del value then
-      invalid ~field:"version_id" "version id contains control characters"
+      S3_error_context.invalid ~field:"version_id"
+        "version id must be non-empty"
+    else if S3_string.has_ctl_or_del value then
+      S3_error_context.invalid ~field:"version_id"
+        "version id contains control characters"
     else Ok value
 
-  let of_string_exn value = result_exn (of_string value)
+  let of_string_exn value = S3_result.result_exn (of_string value)
   let to_string value = value
   let pp fmt value = Format.pp_print_string fmt value
   let equal = String.equal
@@ -94,6 +97,23 @@ module Checksum = struct
   end
 
   type value = { algorithm : Algorithm.t; value : string }
+
+  let value ~algorithm ~value =
+    match algorithm with
+    | Algorithm.Unknown algorithm ->
+        S3_error_context.invalid ~field:"checksum_algorithm"
+          "unknown checksum algorithm %S cannot be sent" algorithm
+    | _ ->
+        let* () =
+          S3_validation.validate_header_value ~field:"checksum_value" value
+        in
+        Ok { algorithm; value }
+
+  let value_exn ~algorithm ~value:checksum =
+    S3_result.result_exn (value ~algorithm ~value:checksum)
+
+  let response_value ~algorithm ~value = { algorithm; value }
+
   type response = { values : value list; checksum_type : Type.t option }
 
   type summary = {
@@ -105,10 +125,17 @@ module Checksum = struct
   let empty_summary = { algorithms = []; checksum_type = None }
 end
 
-module Encryption = struct
-  type kms = { key_id : string option; bucket_key_enabled : bool option }
-  type request = [ `AES256 | `Aws_kms of kms ]
-  type response = [ `AES256 | `Aws_kms of kms | `Unknown of string ]
+module Owner = struct
+  type t = { id : string option; display_name : string option }
+
+  let non_empty = function None | Some "" -> None | Some _ as value -> value
+
+  let create ?id ?display_name () =
+    let id = non_empty id in
+    let display_name = non_empty display_name in
+    match (id, display_name) with
+    | None, None -> None
+    | _ -> Some { id; display_name }
 end
 
 module Etag_condition = struct
@@ -174,17 +201,17 @@ end
 
 module Put = struct
   type options = {
-    content_type : string option;
+    content_type : Content_type.t option;
     metadata : Metadata.t;
     storage_class : Storage_class.t option;
-    tags : Tag.t list;
-    cache_control : string option;
-    content_encoding : string option;
-    content_disposition : string option;
+    tags : Tag.Set.t;
+    cache_control : Header_value.t option;
+    content_encoding : Header_value.t option;
+    content_disposition : Header_value.t option;
     preconditions : Preconditions.Write.t;
     checksum : Checksum.value option;
-    server_side_encryption : Encryption.request option;
-    expected_bucket_owner : string option;
+    encryption : Encryption.Destination.t option;
+    expected_bucket_owner : Account_id.t option;
   }
 
   type result = {
@@ -197,17 +224,60 @@ module Put = struct
   let default_options =
     {
       content_type = None;
-      metadata = [];
+      metadata = Metadata.empty;
       storage_class = None;
-      tags = [];
+      tags = Tag.Set.empty;
       cache_control = None;
       content_encoding = None;
       content_disposition = None;
       preconditions = Preconditions.Write.none;
       checksum = None;
-      server_side_encryption = None;
+      encryption = None;
       expected_bucket_owner = None;
     }
+
+  let validate_storage_class = function
+    | Some storage_class ->
+        S3_validation.validate_header_value ~field:"storage_class"
+          (Storage_class.to_string storage_class)
+    | _ -> Ok ()
+
+  let validate_checksum_value = function
+    | Some { Checksum.algorithm = Unknown value; _ } ->
+        S3_error_context.invalid ~field:"checksum_algorithm"
+          "unknown checksum algorithm %S cannot be sent" value
+    | Some { Checksum.value; _ } ->
+        S3_validation.validate_header_value ~field:"checksum_value" value
+    | _ -> Ok ()
+
+  let options ?content_type ?(metadata = Metadata.empty) ?storage_class
+      ?(tags = Tag.Set.empty) ?cache_control ?content_encoding
+      ?content_disposition ?(preconditions = Preconditions.Write.none) ?checksum
+      ?encryption ?expected_bucket_owner () =
+    let* () = validate_storage_class storage_class in
+    let* () = validate_checksum_value checksum in
+    Ok
+      {
+        content_type;
+        metadata;
+        storage_class;
+        tags;
+        cache_control;
+        content_encoding;
+        content_disposition;
+        preconditions;
+        checksum;
+        encryption;
+        expected_bucket_owner;
+      }
+
+  let options_exn ?content_type ?metadata ?storage_class ?tags ?cache_control
+      ?content_encoding ?content_disposition ?preconditions ?checksum
+      ?encryption ?expected_bucket_owner () =
+    Awskit.Error.Producer.get_ok_exn
+      (options ?content_type ?metadata ?storage_class ?tags ?cache_control
+         ?content_encoding ?content_disposition ?preconditions ?checksum
+         ?encryption ?expected_bucket_owner ())
 end
 
 module Get = struct
@@ -216,23 +286,38 @@ module Get = struct
     preconditions : Preconditions.Read.t;
     version_id : Version_id.t option;
     checksum_mode : Checksum.Mode.t option;
-    expected_bucket_owner : string option;
+    source_encryption : Encryption.Source.t option;
+    expected_bucket_owner : Account_id.t option;
   }
 
-  type result = {
+  type info = {
     etag : Etag.t option;
-    content_type : string option;
+    content_type : Content_type.t option;
     content_length : int64 option;
+    content_range : Range.Content_range.t option;
     last_modified : Ptime.t option;
     metadata : Metadata.t;
     storage_class : Storage_class.t option;
     version_id : Version_id.t option;
     checksum : Checksum.response;
-    server_side_encryption : Encryption.response option;
+    encryption : Encryption.Observed.t option;
     response : Awskit.Response.t;
   }
 
-  type info = result
+  type 'a result = {
+    value : 'a;
+    etag : Etag.t option;
+    content_type : Content_type.t option;
+    content_length : int64 option;
+    content_range : Range.Content_range.t option;
+    last_modified : Ptime.t option;
+    metadata : Metadata.t;
+    storage_class : Storage_class.t option;
+    version_id : Version_id.t option;
+    checksum : Checksum.response;
+    encryption : Encryption.Observed.t option;
+    response : Awskit.Response.t;
+  }
 
   let default_options =
     {
@@ -240,8 +325,27 @@ module Get = struct
       preconditions = Preconditions.Read.none;
       version_id = None;
       checksum_mode = None;
+      source_encryption = None;
       expected_bucket_owner = None;
     }
+
+  let options ?range ?(preconditions = Preconditions.Read.none) ?version_id
+      ?checksum_mode ?source_encryption ?expected_bucket_owner () =
+    Ok
+      {
+        range;
+        preconditions;
+        version_id;
+        checksum_mode;
+        source_encryption;
+        expected_bucket_owner;
+      }
+
+  let options_exn ?range ?preconditions ?version_id ?checksum_mode
+      ?source_encryption ?expected_bucket_owner () =
+    Awskit.Error.Producer.get_ok_exn
+      (options ?range ?preconditions ?version_id ?checksum_mode
+         ?source_encryption ?expected_bucket_owner ())
 end
 
 module Head = struct
@@ -249,26 +353,44 @@ module Head = struct
     preconditions : Preconditions.Read.t;
     version_id : Version_id.t option;
     checksum_mode : Checksum.Mode.t option;
-    expected_bucket_owner : string option;
+    source_encryption : Encryption.Source.t option;
+    expected_bucket_owner : Account_id.t option;
   }
 
-  type info = Get.result
-  type result = info
+  type result = Get.info
 
   let default_options =
     {
       preconditions = Preconditions.Read.none;
       version_id = None;
       checksum_mode = None;
+      source_encryption = None;
       expected_bucket_owner = None;
     }
+
+  let options ?(preconditions = Preconditions.Read.none) ?version_id
+      ?checksum_mode ?source_encryption ?expected_bucket_owner () =
+    Ok
+      {
+        preconditions;
+        version_id;
+        checksum_mode;
+        source_encryption;
+        expected_bucket_owner;
+      }
+
+  let options_exn ?preconditions ?version_id ?checksum_mode ?source_encryption
+      ?expected_bucket_owner () =
+    Awskit.Error.Producer.get_ok_exn
+      (options ?preconditions ?version_id ?checksum_mode ?expected_bucket_owner
+         ?source_encryption ())
 end
 
 module Delete = struct
   type options = {
     preconditions : Preconditions.Delete.t;
     version_id : Version_id.t option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
   }
 
   type result = {
@@ -283,22 +405,40 @@ module Delete = struct
       version_id = None;
       expected_bucket_owner = None;
     }
+
+  let options ?(preconditions = Preconditions.Delete.none) ?version_id
+      ?expected_bucket_owner () =
+    Ok { preconditions; version_id; expected_bucket_owner }
+
+  let options_exn ?preconditions ?version_id ?expected_bucket_owner () =
+    Awskit.Error.Producer.get_ok_exn
+      (options ?preconditions ?version_id ?expected_bucket_owner ())
 end
 
 module Delete_many = struct
+  let max_objects = 1000
+
   type object_ = {
-    key : string;
+    key : Object_key.t;
     version_id : Version_id.t option;
     etag : Etag.t option;
   }
 
+  let object_ ~key ?version_id ?etag () = { key; version_id; etag }
+
   type deleted = {
-    key : string;
+    key : Object_key.t;
     version_id : Version_id.t option;
     delete_marker : bool option;
+    delete_marker_version_id : Version_id.t option;
   }
 
-  type item_error = { key : string; code : string; message : string option }
+  type item_error = {
+    key : Object_key.t;
+    version_id : Version_id.t option;
+    code : string;
+    message : string option;
+  }
 
   type result = {
     deleted : deleted list;
@@ -306,9 +446,13 @@ module Delete_many = struct
     response : Awskit.Response.t;
   }
 
-  type options = { expected_bucket_owner : string option }
+  type options = { expected_bucket_owner : Account_id.t option }
 
   let default_options = { expected_bucket_owner = None }
+  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options_exn ?expected_bucket_owner () =
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module Copy = struct
@@ -320,9 +464,10 @@ module Copy = struct
     metadata_directive : metadata_directive option;
     storage_class : Storage_class.t option;
     checksum_algorithm : Checksum.Algorithm.t option;
-    server_side_encryption : Encryption.request option;
-    expected_bucket_owner : string option;
-    source_expected_bucket_owner : string option;
+    destination_encryption : Encryption.Destination.t option;
+    source_encryption : Encryption.Source.t option;
+    expected_bucket_owner : Account_id.t option;
+    source_expected_bucket_owner : Account_id.t option;
   }
 
   type result = {
@@ -340,53 +485,102 @@ module Copy = struct
       metadata_directive = None;
       storage_class = None;
       checksum_algorithm = None;
-      server_side_encryption = None;
+      destination_encryption = None;
+      source_encryption = None;
       expected_bucket_owner = None;
       source_expected_bucket_owner = None;
     }
+
+  let validate_storage_class = function
+    | Some storage_class ->
+        S3_validation.validate_header_value ~field:"storage_class"
+          (Storage_class.to_string storage_class)
+    | _ -> Ok ()
+
+  let validate_checksum_algorithm = function
+    | Some (Checksum.Algorithm.Unknown value) ->
+        S3_error_context.invalid ~field:"checksum_algorithm"
+          "unknown checksum algorithm %S cannot be sent" value
+    | _ -> Ok ()
+
+  let options ?source_version_id
+      ?(source_preconditions = Preconditions.Copy_source.none)
+      ?metadata_directive ?storage_class ?checksum_algorithm
+      ?destination_encryption ?source_encryption ?expected_bucket_owner
+      ?source_expected_bucket_owner () =
+    let* () = validate_storage_class storage_class in
+    let* () = validate_checksum_algorithm checksum_algorithm in
+    Ok
+      {
+        source_version_id;
+        source_preconditions;
+        metadata_directive;
+        storage_class;
+        checksum_algorithm;
+        destination_encryption;
+        source_encryption;
+        expected_bucket_owner;
+        source_expected_bucket_owner;
+      }
+
+  let options_exn ?source_version_id ?source_preconditions ?metadata_directive
+      ?storage_class ?checksum_algorithm ?destination_encryption
+      ?source_encryption ?expected_bucket_owner ?source_expected_bucket_owner ()
+      =
+    Awskit.Error.Producer.get_ok_exn
+      (options ?source_version_id ?source_preconditions ?metadata_directive
+         ?storage_class ?checksum_algorithm ?destination_encryption
+         ?source_encryption ?expected_bucket_owner ?source_expected_bucket_owner
+         ())
 end
 
 module Versions = struct
+  module Delimiter = struct
+    include Object_key.Delimiter
+
+    let slash = of_string_exn "/"
+  end
+
   type options = {
-    prefix : string option;
-    delimiter : string option;
+    prefix : Object_key.Prefix.t option;
+    delimiter : Delimiter.t option;
     max_keys : int option;
-    key_marker : string option;
+    key_marker : Object_key.t option;
     version_id_marker : Version_id.t option;
-    expected_bucket_owner : string option;
+    expected_bucket_owner : Account_id.t option;
   }
 
   type object_version = {
-    key : string;
+    key : Object_key.t;
     version_id : Version_id.t option;
     is_latest : bool option;
     last_modified : Ptime.t option;
     etag : Etag.t option;
     size : int64 option;
     storage_class : Storage_class.t option;
-    owner : string option;
+    owner : Owner.t option;
     checksum : Checksum.summary;
   }
 
   type delete_marker = {
-    key : string;
+    key : Object_key.t;
     version_id : Version_id.t option;
     is_latest : bool option;
     last_modified : Ptime.t option;
-    owner : string option;
+    owner : Owner.t option;
   }
 
   type page = {
-    bucket : string option;
-    prefix : string option;
-    delimiter : string option;
+    bucket : Bucket_name.t option;
+    prefix : Object_key.Prefix.t option;
+    delimiter : Delimiter.t option;
     versions : object_version list;
     delete_markers : delete_marker list;
-    common_prefixes : string list;
+    common_prefixes : Object_key.Prefix.t list;
     is_truncated : bool;
-    key_marker : string option;
+    key_marker : Object_key.t option;
     version_id_marker : Version_id.t option;
-    next_key_marker : string option;
+    next_key_marker : Object_key.t option;
     next_version_id_marker : Version_id.t option;
     response : Awskit.Response.t;
   }
@@ -400,20 +594,70 @@ module Versions = struct
       version_id_marker = None;
       expected_bucket_owner = None;
     }
+
+  let validate_max_keys = function
+    | None -> Ok ()
+    | Some value when value > 0 && value <= 1000 -> Ok ()
+    | Some _ ->
+        S3_error_context.invalid ~field:"max_keys"
+          "max_keys must be between 1 and 1000"
+
+  let options ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
+      ?expected_bucket_owner () =
+    let* () = validate_max_keys max_keys in
+    Ok
+      {
+        prefix;
+        delimiter;
+        max_keys;
+        key_marker;
+        version_id_marker;
+        expected_bucket_owner;
+      }
+
+  let options_exn ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
+      ?expected_bucket_owner () =
+    Awskit.Error.Producer.get_ok_exn
+      (options ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
+         ?expected_bucket_owner ())
 end
 
 module List = struct
+  module Continuation_token = struct
+    type t = string
+
+    let of_string value =
+      if value = "" then
+        S3_error_context.invalid ~field:"continuation_token"
+          "continuation token must be non-empty"
+      else if S3_string.has_ctl_or_del value then
+        S3_error_context.invalid ~field:"continuation_token"
+          "continuation token contains control characters"
+      else Ok value
+
+    let of_string_exn value = S3_result.result_exn (of_string value)
+    let to_string value = value
+    let pp fmt value = Format.pp_print_string fmt value
+    let equal = String.equal
+  end
+
+  module Delimiter = struct
+    include Object_key.Delimiter
+
+    let slash = of_string_exn "/"
+  end
+
   type options = {
-    prefix : string option;
-    delimiter : string option;
+    prefix : Object_key.Prefix.t option;
+    delimiter : Delimiter.t option;
     max_keys : int option;
-    start_after : string option;
-    continuation_token : string option;
-    expected_bucket_owner : string option;
+    start_after : Object_key.t option;
+    continuation_token : Continuation_token.t option;
+    expected_bucket_owner : Account_id.t option;
   }
 
   type object_summary = {
-    key : string;
+    key : Object_key.t;
     size : int64 option;
     etag : Etag.t option;
     last_modified : Ptime.t option;
@@ -422,15 +666,15 @@ module List = struct
   }
 
   type page = {
-    bucket : string option;
-    prefix : string option;
-    delimiter : string option;
+    bucket : Bucket_name.t option;
+    prefix : Object_key.Prefix.t option;
+    delimiter : Delimiter.t option;
     objects : object_summary list;
-    common_prefixes : string list;
+    common_prefixes : Object_key.Prefix.t list;
     key_count : int option;
     is_truncated : bool;
-    continuation_token : string option;
-    next_continuation_token : string option;
+    continuation_token : Continuation_token.t option;
+    next_continuation_token : Continuation_token.t option;
     response : Awskit.Response.t;
   }
 
@@ -443,11 +687,41 @@ module List = struct
       continuation_token = None;
       expected_bucket_owner = None;
     }
+
+  let validate_max_keys = function
+    | None -> Ok ()
+    | Some value when value > 0 && value <= 1000 -> Ok ()
+    | Some _ ->
+        S3_error_context.invalid ~field:"max_keys"
+          "max_keys must be between 1 and 1000"
+
+  let options ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
+      ?expected_bucket_owner () =
+    let* () = validate_max_keys max_keys in
+    Ok
+      {
+        prefix;
+        delimiter;
+        max_keys;
+        start_after;
+        continuation_token;
+        expected_bucket_owner;
+      }
+
+  let options_exn ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
+      ?expected_bucket_owner () =
+    Awskit.Error.Producer.get_ok_exn
+      (options ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
+         ?expected_bucket_owner ())
 end
 
 module Tagging = struct
-  type options = { expected_bucket_owner : string option }
-  type result = { tags : Tag.t list; response : Awskit.Response.t }
+  type options = { expected_bucket_owner : Account_id.t option }
+  type result = { tags : Tag.Set.t; response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
+  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options_exn ?expected_bucket_owner () =
+    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end

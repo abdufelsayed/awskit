@@ -1,0 +1,53 @@
+name: Release validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Release version to validate when not running from release/vX.Y.Z
+        required: false
+        type: string
+  push:
+    branches: [release/**]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  OCAML_LATEST: "5"
+  AWSKIT_RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.release_version || '' }}
+
+jobs:
+  release-check:
+    name: Release check
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set-up OCaml ${{ env.OCAML_LATEST }}
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ env.OCAML_LATEST }}
+          dune-cache: true
+          opam-local-packages: |
+            *.opam
+
+      - name: Run release validation
+        run: scripts/release-check.sh
+
+      - name: Upload release validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-validation-report
+          path: .logs/
+          if-no-files-found: ignore

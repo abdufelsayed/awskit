@@ -1,0 +1,8 @@
+replay-v1 put-string h72616e67652e747874 h616263646566 0
+replay-v1 get-range h72616e67652e747874 bytes 1 3
+replay-v1 get-range h72616e67652e747874 from 3
+replay-v1 get-range h72616e67652e747874 suffix 2
+replay-v1 get-range h72616e67652e747874 bytes 6 9
+replay-v1 put-string h656d7074792e747874 h 0
+replay-v1 get-range h656d7074792e747874 suffix 1
+replay-v1 get-range h6d697373696e672e747874 suffix 1

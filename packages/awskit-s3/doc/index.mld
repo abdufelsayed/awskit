@@ -1,56 +1,78 @@
 {0 awskit-s3}
 
-AWS S3 client surface for bucket/object storage operations, multipart uploads,
-S3 presigned URLs, and opaque bucket policy documents.
+AWS S3 client for bucket and object storage, multipart uploads, presigned
+request artifacts, and the supported bucket/object scope documented in
+{{!page-support_matrix}S3 Support Matrix} and
+{{:https://github.com/abdufelsayed/awskit/blob/main/SUPPORT.md}[SUPPORT.md]}.
 
-See {{:../../doc/awskit.html}[awskit]} for the pure core and runtime adapter
+See {{:../awskit/index.html}[awskit]} for the pure core and runtime adapter
 overview.
 
-The public entrypoint is {!module:Awskit_s3}. Implementation modules, XML
-codecs, request builders, and response parsers are private.
+The main entrypoint is {!module:Awskit_s3}. Advanced application APIs such as
+streaming bodies, scoped readers, presigning, multipart upload, endpoint
+configuration, retry, timeout, and transfer helpers are normal SDK APIs.
+Protocol encoders, protocol parsers, response helpers, and other implementation
+modules are private unless they are deliberately documented as public.
+
+Security reporting and sensitive-data handling are documented in
+{{:https://github.com/abdufelsayed/awskit/blob/main/SECURITY.md}[SECURITY.md]}.
 
 {1 Client Surface}
 
-[awskit-s3] provides an AWS S3 client surface for bucket and object storage
-applications:
+[awskit-s3] provides S3 operations for bucket and object storage applications:
 
 {ul
   {li object [put], [get], [head], [delete], [copy], [list], metadata, tags,
     ranges, checksums, conditional requests, version IDs, and version listings}
   {li multipart upload, multipart part listing, and
     local-file transfer helpers in Unix-capable adapters}
-  {li S3 presigned URLs for object and multipart upload-part workflows}
-  {li bucket lifecycle needed to create, locate, inspect, and remove buckets}
-  {li bucket configuration helpers for policy, CORS, encryption, tagging, and
-    versioning}
+  {li S3 presigned request artifacts for object and multipart upload-part
+    workflows}
+  {li bucket basics needed to create, locate, inspect, and remove buckets}
+  {li selected modeled bucket configuration helpers such as policy, CORS,
+    encryption metadata, tagging, and versioning}
   {li endpoint configuration, credentials, retries, pagination, streaming
     contracts, and structured error classifiers}
 }
 
-Bucket policy operations use opaque JSON policy documents, which lets
-applications provision bucket-level access rules while keeping policy document
-construction in application code.
+Bucket policy operations accept validated JSON policy documents. This lets
+applications use their own policy model while Awskit handles S3 request
+construction and response handling.
 
 {1 API Shape}
 
 Object APIs are split into explicit layers:
 
 {ul
-  {li primitive streaming operations under [Object]}
-  {li bounded in-memory helpers under [Object]}
-  {li local-path helpers under [Object.Transfer] in Unix-capable adapter
-    packages}
+  {li core object operations and bounded string/bytes conveniences under
+    [Object]}
+  {li upload body constructors under adapter [Body] modules for custom or
+    streaming request bodies}
+  {li download consumers under adapter [Reader] modules for scoped streaming
+    reads}
+  {li managed local-file transfer helpers under [Object.Transfer] in
+    Unix-capable adapter packages}
 }
 
-Primitive operations never expose string bodies as the primary API. Request
-bodies and response body readers come from the selected runtime adapter.
+Small buffered object workflows can start with [Object.put_string],
+[Object.put_bytes], [Object.get_string], [Object.get_bytes],
+[Object.find_string], and [Object.find_bytes]. Larger or custom workflows pass
+[Body] values to [Object.put] and scoped [Reader] consumers to [Object.get].
+Direct [Runtime] access remains available for integrations and runtime authors
+that need the raw runtime body layer.
+
+Managed local-file transfers are adapter features, not core S3 features. They
+live in [Object.Transfer] for [awskit-s3-eio] and [awskit-s3-lwt-unix]. The
+generic [awskit-s3-lwt] package exposes streaming body and reader primitives
+over a caller-supplied Lwt HTTP backend, but it does not own Unix paths or
+managed transfer helpers.
 
 {1 Libraries}
 
 {2 awskit-s3}
 
-{!module:Awskit_s3} contains pure types, S3 endpoint configuration, standalone
-presigned URL helpers, and the runtime functor.
+{!module:Awskit_s3} contains runtime-agnostic S3 types, endpoint configuration,
+standalone presigned request artifact helpers, and the runtime functor.
 
 Main modules:
 
@@ -64,11 +86,11 @@ Main modules:
     options, and result records}
   {li {!module:Awskit_s3.Transfer} — high-level upload/download options,
     limits, strategy results, and multipart transfer result records}
-  {li {!module:Awskit_s3.Presigned} — pure presigned URL generation}
-  {li {!module:Awskit_s3.Policy} — validated opaque bucket policy JSON
-    payloads}
+  {li {!module:Awskit_s3.Presigned} — runtime-agnostic presigned request
+    artifact generation}
+  {li {!module:Awskit_s3.Policy} — validated bucket policy JSON payloads}
   {li {!module:Awskit_s3.Make} — functor for wiring S3 operations to a custom
-    {!module-type:Awskit.Runtime.S} implementation}
+    [Awskit.Runtime.S] implementation}
 }
 
 {2 awskit-s3-sim}
@@ -76,47 +98,85 @@ Main modules:
 [Awskit_s3_sim] provides a deterministic in-memory S3 implementation for tests.
 It implements the same synchronous S3 operation shape as runtime-backed clients
 and adds a controllable clock, store inspection, operation history, and fault
-injection.
+injection. It is not live AWS coverage and is not a wire-protocol authority.
 
 {2 awskit-s3-eio}
 
-[Awskit_s3_eio] provides a direct-style Eio adapter. Operations return
-plain results. It also exposes local-path helpers under [Object.Transfer].
+[Awskit_s3_eio] provides a direct-style Eio adapter over a caller-owned HTTPS
+policy. Applications own TLS configuration, CA roots, RNG initialization, and
+platform policy. Operations return plain results. It also exposes local-path
+helpers under [Body] and [Reader], plus managed local-file helpers under
+[Object.Transfer]. Examples that call [Awskit_unix] also need the
+[awskit-unix] package, but [awskit-s3-eio] itself does not provide a ready
+Eio Unix aggregate adapter.
 
 {2 awskit-s3-lwt}
 
 [Awskit_s3_lwt] provides a functor over [Cohttp_lwt.S.Client].
-Operations return [Lwt.t].
+Operations return [Lwt.t]. It is the right package for custom Lwt HTTP
+backends; use [awskit-s3-lwt-unix] for Unix local-path body, reader, and
+managed transfer helpers.
 
 {2 awskit-s3-lwt-unix}
 
 [Awskit_s3_lwt_unix] provides the ready-to-use Lwt + Unix adapter.
 It can read credentials and region from the standard AWS environment variables
-through the underlying [awskit-lwt-unix] runtime.
+through the underlying [awskit-lwt-unix] runtime. It exposes local-path helpers
+under [Body] and [Reader], plus managed local-file helpers under
+[Object.Transfer].
 
 {1 Minimal Eio Example}
 
 {[
 open Eio.Std
 
+module Https = struct
+  let connector () =
+    Mirage_crypto_rng_unix.use_default ();
+    let authenticator =
+      match Ca_certs.authenticator () with
+      | Ok authenticator -> authenticator
+      | Error (`Msg msg) -> invalid_arg ("failed to load CA roots: " ^ msg)
+    in
+    let tls_config =
+      match Tls.Config.client ~authenticator () with
+      | Ok config -> config
+      | Error (`Msg msg) -> invalid_arg ("failed to create TLS config: " ^ msg)
+    in
+    Some
+      (fun uri raw ->
+        let host =
+          match Uri.host uri with
+          | Some host -> Domain_name.host_exn (Domain_name.of_string_exn host)
+          | None -> invalid_arg "HTTPS URI is missing a host"
+        in
+        (Tls_eio.client_of_flow tls_config ~host raw
+          :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Flow.two_way))
+end
+
 let run env =
   Switch.run @@ fun sw ->
   let credentials =
-    Awskit.Credentials.create_exn
-      ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
-      ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-      ()
+    Awskit_unix.Credentials.default_chain ()
+    |> Result.get_ok
   in
-  let region = Awskit.Region.of_string_exn "us-east-1" in
-  let s3 = Awskit_s3_eio.create ~sw ~env ~region ~credentials () in
+  let https = Https.connector () in
   match
-    Awskit_s3_eio.Object.put_string s3
-      ~bucket:"my-bucket"
-      ~key:"hello.txt"
-      "Hello, S3!"
+    Awskit_s3_eio.create ~sw ~env ~https ~region:"us-east-1" ~credentials ()
   with
-  | Ok _ -> ()
   | Error err -> Fmt.epr "%a@." Awskit_s3.Error.pp err
+  | Ok s3 -> (
+      let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
+      let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
+      match
+        Awskit_s3_eio.Object.put_string s3
+          ~bucket
+          ~key
+          ~contents:"Hello, S3!"
+          ()
+      with
+      | Ok _ -> ()
+      | Error err -> Fmt.epr "%a@." Awskit_s3.Error.pp err)
 ]}
 
 {1 Minimal Lwt Unix Example}
@@ -128,15 +188,17 @@ let run () =
   | Error err ->
       Lwt_io.eprintf "%s\n" (Awskit_s3.Error.to_string_hum err)
   | Ok s3 ->
+      let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
+      let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
       let* result =
-        Awskit_s3_lwt_unix.Object.get_as_string s3
-          ~bucket:"my-bucket"
-          ~key:"hello.txt"
+        Awskit_s3_lwt_unix.Object.get_string s3
+          ~bucket
+          ~key
           ~max_bytes:1_048_576L
           ()
       in
       match result with
-      | Ok (_info, body) -> Lwt_io.printl body
+      | Ok result -> Lwt_io.printl result.value
       | Error err -> Lwt_io.eprintf "%a\n" Awskit_s3.Error.pp err
 ]}
 
@@ -145,4 +207,7 @@ let run () =
 {ul
   {li {{!page-guides}S3 Guides} — objects, buffers, transfers, endpoint setup,
     buckets, multipart, presigning, and errors}
+  {li {{!page-support_matrix}S3 Support Matrix} — supported feature scope,
+    runtime coverage, simulator evidence, MinIO profile notes, and unsupported
+    S3 families}
 }

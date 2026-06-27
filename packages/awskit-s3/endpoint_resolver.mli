@@ -5,18 +5,16 @@
     runtimes can use the same endpoint configuration type as {!Awskit_s3.Make}.
 *)
 
-type addressing_style = [ `Auto | `Path | `Virtual_hosted ]
-(** Requested bucket addressing style. [`Auto] uses virtual-hosted addressing
-    when the bucket and endpoint support it, otherwise path-style. *)
+type addressing_style = Endpoint_config.addressing_style
+(** Requested bucket addressing style.
 
-type endpoint_variant =
-  [ `Regional
-  | `Dualstack
-  | `Fips
-  | `Fips_dualstack
-  | `Accelerate
-  | `Accelerate_dualstack ]
-(** AWS S3 endpoint variant used when no explicit endpoint is supplied. *)
+    For object key exactly ["soap"], [`Auto] selects path-style addressing
+    because AWS S3 does not support that key with virtual-hosted-style requests.
+    Explicit [`Virtual_hosted] resolution rejects that key with a validation
+    error instead of generating an invalid request. *)
+
+type endpoint_variant = Endpoint_config.endpoint_variant
+(** AWS S3 endpoint variant. *)
 
 type resolved_style = [ `Path | `Virtual_hosted ]
 (** Concrete addressing style selected for one request. *)
@@ -26,27 +24,24 @@ module Request : sig
     endpoint : Awskit.Endpoint.t;
     path : string;
     signing_path : string;
+    signing_region : Awskit.Region.t;
     style : resolved_style;
   }
   (** Resolved endpoint and paths for one S3 request. *)
 end
 
-type t
-
-val create :
-  ?addressing_style:addressing_style ->
-  ?endpoint_variant:endpoint_variant ->
-  ?scheme:Awskit.Endpoint.Scheme.t ->
-  ?endpoint:Awskit.Endpoint.t ->
-  unit ->
-  t
-(** Create S3 endpoint configuration. [endpoint] overrides AWS regional endpoint
-    construction; addressing still applies to bucket/object paths. *)
+type t = Endpoint_config.t
+(** S3 endpoint configuration. *)
 
 val default : t
+(** Default AWS S3 regional HTTPS endpoint configuration. *)
+
 val addressing_style : t -> addressing_style
-val endpoint_variant : t -> endpoint_variant
-val scheme : t -> Awskit.Endpoint.Scheme.t
+(** Return the configured addressing-style preference. *)
+
+val endpoint_variant : t -> endpoint_variant option
+(** Return the configured AWS endpoint variant, if this is an AWS endpoint
+    policy. *)
 
 val endpoint :
   t -> region:Awskit.Region.t -> (Awskit.Endpoint.t, Awskit.Error.t) result
@@ -55,7 +50,7 @@ val endpoint :
 val resolve_bucket_request :
   t ->
   region:Awskit.Region.t ->
-  bucket:string ->
+  bucket:Bucket_name.t ->
   suffix:string ->
   signing_suffix:string ->
   (Request.t, Awskit.Error.t) result
@@ -65,7 +60,11 @@ val resolve_bucket_request :
 val resolve_object_request :
   t ->
   region:Awskit.Region.t ->
-  bucket:string ->
-  key:string ->
+  bucket:Bucket_name.t ->
+  key:Object_key.t ->
   (Request.t, Awskit.Error.t) result
-(** Resolve endpoint, transport path, and signing path for an object request. *)
+(** Resolve endpoint, transport path, and signing path for an object request.
+
+    Object key exactly ["soap"] is resolved with path-style addressing when the
+    configuration is [`Auto] or [`Path]. It is rejected for explicit
+    [`Virtual_hosted] addressing. *)

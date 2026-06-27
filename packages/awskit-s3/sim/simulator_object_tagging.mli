@@ -1,27 +1,26 @@
-open Awskit_s3
-
 module Tagging : sig
   val get :
     Simulator_state.t ->
     bucket:string ->
     key:string ->
-    ?options:Object.Tagging.options ->
+    ?options:Awskit_s3.Object.Tagging.options ->
     unit ->
-    (Object.Tagging.result, Awskit.Error.t) result
+    (Awskit_s3.Object.Tagging.result, Awskit.Error.t) result
 
   val put :
     Simulator_state.t ->
     bucket:string ->
     key:string ->
-    ?options:Object.Tagging.options ->
-    Tag.t list ->
+    ?options:Awskit_s3.Object.Tagging.options ->
+    tags:Awskit_s3.Tag.Set.t ->
+    unit ->
     (Awskit.Response.t, Awskit.Error.t) result
 
   val delete :
     Simulator_state.t ->
     bucket:string ->
     key:string ->
-    ?options:Object.Tagging.options ->
+    ?options:Awskit_s3.Object.Tagging.options ->
     unit ->
     (Awskit.Response.t, Awskit.Error.t) result
 end

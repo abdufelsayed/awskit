@@ -1,0 +1,375 @@
+{0 S3 Support Matrix}
+
+This page records the supported S3 feature scope for [awskit-s3]. It is a
+release-reader matrix, not a promise that every AWS S3 feature or every
+S3-compatible storage provider is supported.
+
+Rows are intentionally conservative:
+
+{ul
+  {li {b supported} means the feature is exposed through public [awskit-s3]
+    APIs and is covered by the local evidence listed in the row.}
+  {li {b supported, scoped} means only the modeled fields or operation family
+    named in the row are supported. Adjacent AWS behavior is out of scope until
+    it has a public API and evidence.}
+  {li {b adapter only} means the runtime-neutral core has shared option/result
+    types, but the helper itself exists only in named runtime adapters.}
+  {li {b unsupported} means Awskit makes no support claim for the feature.}
+}
+
+The simulator is deterministic application-level evidence. It is not live AWS
+coverage and is not a wire-protocol authority. MinIO evidence is the opt-in
+local S3-compatible test-double profile run by [@s3-minio]; it does
+not imply support for arbitrary S3-compatible providers.
+
+{1 Object Operations}
+
+{2 PutObject and Buffered Upload Helpers}
+
+{ul
+  {li {b Status}: supported.}
+  {li {b Package/runtime coverage}: {!module:Awskit_s3.Object.Put} plus
+    [Object.put], [put_string], and [put_bytes] from [awskit-s3],
+    [awskit-s3-eio], [awskit-s3-lwt], [awskit-s3-lwt-unix],
+    [awskit-s3-sim], and custom runtimes built with
+    {!module:Awskit_s3.Make}.}
+  {li {b Simulator coverage}: yes, including known-length request bodies,
+    buffered helpers, validation, checksums, metadata, tags, and version ids.}
+  {li {b MinIO/evidence coverage}: yes for object create/read/update/delete
+    flow through the shared contract and targeted MinIO object tests. Response
+    checksum echo is not part of the MinIO capability profile.}
+  {li {b Notes and boundaries}: request bodies must have a known content
+    length. Modeled write options include content type, user metadata, storage
+    class, object tags, cache/content headers, write preconditions, explicit
+    checksum values, typed destination encryption request headers, and expected
+    bucket owner. Object Lock headers, ACLs, and arbitrary outbound encryption
+    variants are out of scope.}
+}
+
+{2 GetObject, Optional Reads, and Streaming Readers}
+
+{ul
+  {li {b Status}: supported.}
+  {li {b Package/runtime coverage}: [Object.get], [get_string], [get_bytes],
+    [find], [find_string], [find_bytes], adapter [Reader] modules, simulator
+    [Reader], and custom runtimes.}
+  {li {b Simulator coverage}: yes, including scoped readers, buffered download
+    limits, optional not-found helpers, range reads, metadata, checksums, and
+    version ids.}
+  {li {b MinIO/evidence coverage}: yes for object reads, bounded buffering,
+    range reads, metadata, and copy-related reads. Time-based preconditions and
+    response checksum echo are not part of the MinIO capability profile.}
+  {li {b Notes and boundaries}: [get_string], [get_bytes], [find_string], and
+    [find_bytes] require [max_bytes]. [Object.get] readers are scoped to the
+    consumer callback. Modeled options include one byte range, read
+    preconditions, version id, checksum mode, and expected bucket owner. S3
+    multiple-range [GET] requests are not supported.}
+}
+
+{2 HeadObject, Exists, and Metadata Lookup}
+
+{ul
+  {li {b Status}: supported.}
+  {li {b Package/runtime coverage}: [Object.head], [find_metadata], and
+    [exists] across all runtime-backed clients, simulator, and custom runtimes.}
+  {li {b Simulator coverage}: yes.}
+  {li {b MinIO/evidence coverage}: yes through shared object contracts and
+    targeted metadata/copy tests.}
+  {li {b Notes and boundaries}: [HeadObject] returns the same modeled metadata
+    shape as [GetObject] without a body. [find_metadata] treats object
+    not-found responses, including status-only [HEAD] 404 responses, as
+    [Ok None]. Missing buckets, authorization failures, transport errors, and
+    decode errors remain errors.}
+}
+
+{2 DeleteObject and DeleteObjects}
+
+{ul
+  {li {b Status}: supported, scoped.}
+  {li {b Package/runtime coverage}: [Object.delete] and
+    [Object.delete_objects] across all runtime-backed clients, simulator, and
+    custom runtimes.}
+  {li {b Simulator coverage}: yes, including current-object deletes, version
+    deletes, delete markers, and per-object [DeleteObjects] results.}
+  {li {b MinIO/evidence coverage}: yes for object deletion, bulk deletion, and
+    versioned deletes through the shared contract and targeted MinIO versioning
+    tests. Delete preconditions and one missing-version-delete behavior differ
+    from the strict profile and are recorded in the MinIO capability profile.}
+  {li {b Notes and boundaries}: [DeleteObject] models version id, expected
+    bucket owner, and ETag delete preconditions. [DeleteObjects] accepts up to
+    1,000 typed objects with optional version ids and ETag conditions. MFA
+    delete, Object Lock governance bypass, Requester Pays, and
+    directory-bucket-only delete conditions are out of scope.}
+}
+
+{2 CopyObject}
+
+{ul
+  {li {b Status}: supported, scoped.}
+  {li {b Package/runtime coverage}: [Object.copy] across all runtime-backed
+    clients, simulator, and custom runtimes.}
+  {li {b Simulator coverage}: yes, including metadata copy/replace, source
+    version selection, checksums, storage class validation, and embedded copy
+    errors.}
+  {li {b MinIO/evidence coverage}: yes for copy, metadata copy/replace, and
+    copying explicit source versions. MinIO does not return every strict-profile
+    source-version echo for current-version copies.}
+  {li {b Notes and boundaries}: modeled options include source version id,
+    copy-source preconditions, metadata copy or replacement, storage class,
+    checksum algorithm, typed destination encryption request headers, SSE-C
+    source encryption headers, and source/destination expected-owner guards.
+    Multipart copy, access-point copy sources, Object Lock headers, ACLs,
+    tagging directives, Local Zone restrictions, and Outposts-specific behavior
+    are out of scope.}
+}
+
+{2 ListObjectsV2 and Pagination}
+
+{ul
+  {li {b Status}: supported.}
+  {li {b Package/runtime coverage}: [Object.list] plus [Object.List] page,
+    fold, object, and key helpers across all runtime-backed clients, simulator,
+    and custom runtimes.}
+  {li {b Simulator coverage}: yes, including continuation tokens, delimiters,
+    common prefixes, and bounded collection helpers.}
+  {li {b MinIO/evidence coverage}: yes through shared list/copy/delete object
+    contracts. Bucket-list exclusivity differs in the MinIO profile, but
+    object-listing contracts are covered for the named test bucket.}
+  {li {b Notes and boundaries}: options model prefix, delimiter, max keys,
+    start-after, continuation token, and expected bucket owner. Collection
+    helpers require explicit [max_pages] bounds. [ListObjects] v1 is not a
+    supported public API.}
+}
+
+{2 Object Versions and Version Listing}
+
+{ul
+  {li {b Status}: supported, scoped.}
+  {li {b Package/runtime coverage}: [Bucket.Versioning.get]/[put],
+    version-aware object reads, heads, deletes, copies, multipart completion
+    results, [Object.list_versions], and [Object.Versions] pagination helpers.}
+  {li {b Simulator coverage}: yes, including version ids, delete markers,
+    suspended versioning behavior, and version-list pagination.}
+  {li {b MinIO/evidence coverage}: yes for enabling versioning, reading prior
+    versions, copying prior versions, delete markers, and restoring a current
+    object. Version-listing pagination is simulator/protocol evidence in this
+    release rather than part of the MinIO capability profile. Suspended
+    versioning null-version behavior is not part of the MinIO capability
+    profile.}
+  {li {b Notes and boundaries}: this is S3 object versioning, not Object Lock,
+    retention, legal hold, MFA delete, lifecycle expiration, replication, or
+    compliance governance.}
+}
+
+{2 Object Tags and Metadata}
+
+{ul
+  {li {b Status}: supported.}
+  {li {b Package/runtime coverage}: object metadata on put/get/head/copy,
+    object tag sets on put, and [Object.Tagging.get]/[put]/[delete].}
+  {li {b Simulator coverage}: yes.}
+  {li {b MinIO/evidence coverage}: yes through shared object-tagging,
+    metadata, copy, and object create/read/update/delete flow contracts.}
+  {li {b Notes and boundaries}: tags and metadata use validated Awskit domain
+    values. Broad ACL, IAM, public-access policy semantics, and provider-specific
+    metadata normalization are out of scope.}
+}
+
+{2 Ranges, Preconditions, Checksums, Storage Class, and Encryption Metadata}
+
+{ul
+  {li {b Status}: supported, scoped.}
+  {li {b Package/runtime coverage}: modeled option/result fields in
+    {!module:Awskit_s3.Object}, {!module:Awskit_s3.Multipart}, and
+    {!module:Awskit_s3.Transfer}.}
+  {li {b Simulator coverage}: yes for modeled range, ETag/time precondition,
+    checksum, storage class, and encryption metadata behavior that the simulator
+    implements.}
+  {li {b MinIO/evidence coverage}: partial. Range reads, ETag preconditions,
+    storage metadata, and selected version/copy behavior are covered. Response
+    checksums, multipart checksums, time preconditions, and delete preconditions
+    are recorded as MinIO capability differences.}
+  {li {b Notes and boundaries}: unknown read-side checksum and encryption
+    values are preserved where the public types model them. Unknown outbound
+    checksum algorithms are rejected, while unmodeled storage classes can be
+    sent through [Storage_class.Other]. Outbound object encryption is limited to
+    the typed {!module:Awskit_s3.Encryption} destination and source models.
+    Unmodeled checksum variants, arbitrary outbound encryption strings, KMS
+    policy behavior, Object Lock retention, and ACL edge cases are out of
+    scope.}
+}
+
+{1 Bucket Operations}
+
+{2 Bucket Basics}
+
+{ul
+  {li {b Status}: supported.}
+  {li {b Package/runtime coverage}: [Bucket.create], [delete], [head],
+    [exists], [list], and [get_location] across all runtime-backed clients,
+    simulator, and custom runtimes.}
+  {li {b Simulator coverage}: yes.}
+  {li {b MinIO/evidence coverage}: yes through shared bucket
+    create/delete/list flow contracts. Bucket-list exclusivity differs in the
+    MinIO profile because a local MinIO server may expose buckets outside the
+    current test fixture.}
+  {li {b Notes and boundaries}: bucket basics target general-purpose buckets.
+    Directory buckets, access points, Object Lambda, S3 on Outposts, bucket ACL
+    setup, object-lock-enabled bucket creation, and AWS redirect policy beyond
+    returned region hints are out of scope.}
+}
+
+{2 Selected Bucket Configuration Subresources}
+
+{ul
+  {li {b Status}: supported, scoped.}
+  {li {b Package/runtime coverage}: [Bucket.Policy],
+    [Bucket.Versioning], [Bucket.Tagging], [Bucket.Encryption],
+    [Bucket.Cors], [Bucket.Public_access_block], and
+    [Bucket.Ownership_controls].}
+  {li {b Simulator coverage}: yes for the strict shared contract profile and
+    modeled simulator state.}
+  {li {b MinIO/evidence coverage}: partial. MinIO integration tests cover
+    policy, versioning, and tagging roundtrips, with known profile differences for
+    exact policy JSON and deleted bucket tags. Bucket encryption, CORS,
+    public-access-block, and ownership-controls are not enabled in the MinIO
+    capability profile.}
+  {li {b Notes and boundaries}: policy operations validate and send JSON
+    payloads, but application IAM policy design and AWS authorization semantics
+    are outside Awskit's support scope. The modeled configuration helpers do
+    not imply support for lifecycle, replication, analytics, inventory, metrics,
+    notifications, website hosting, logging, requester-pays, accelerate
+    configuration, ACLs, or every public-access edge case.}
+}
+
+{1 Multipart Uploads}
+
+{2 Direct Multipart Operations}
+
+{ul
+  {li {b Status}: supported.}
+  {li {b Package/runtime coverage}: [Multipart.create_upload],
+    [upload_part], [complete_upload], [abort_upload], [list_parts], and
+    [Multipart.List_parts] pagination helpers across all runtime-backed
+    clients, simulator, and custom runtimes.}
+  {li {b Simulator coverage}: yes, including known-length part validation,
+    stream error handling, list-parts pagination, abort behavior, complete-size
+    checks, and checksum validation.}
+  {li {b MinIO/evidence coverage}: yes for multipart
+    create/upload/complete/abort flow, list-parts pagination, stale ETag
+    handling, missing-upload behavior, and multipart local-file transfer.
+    Multipart checksum echo is not part of the MinIO capability profile.}
+  {li {b Notes and boundaries}: part numbers are limited to S3's 1 to 10,000
+    range. Part bodies require known content lengths. Modeled options include
+    metadata, tags, storage class, content type, checksum algorithm/type or
+    values, typed destination encryption request headers, SSE-C customer-key
+    headers for upload-part and completion requests, multipart object size, and
+    expected bucket owner. Multipart copy and Object Lock multipart headers are
+    out of scope.}
+}
+
+{1 Transfer Helpers}
+
+{2 Local File Uploads and Downloads}
+
+{ul
+  {li {b Status}: adapter only.}
+  {li {b Package/runtime coverage}: shared {!module:Awskit_s3.Transfer}
+    option, planning, progress, and result types in [awskit-s3]; executable
+    [Object.Transfer] helpers in [awskit-s3-eio] and [awskit-s3-lwt-unix].
+    [awskit-s3-lwt] exposes streaming primitives but does not own Unix paths or
+    managed transfer helpers.}
+  {li {b Simulator coverage}: no direct filesystem helper. The simulator covers
+    the underlying S3 operations and transfer planning is runtime-neutral.}
+  {li {b MinIO/evidence coverage}: yes through Lwt Unix MinIO tests for path
+    upload/download streaming and resumed multipart path transfer.}
+  {li {b Notes and boundaries}: small uploads/downloads use one S3 request;
+    larger uploads use multipart upload, and larger downloads use ranged
+    [GetObject] requests. Download helpers publish through private temporary
+    files. Awskit-created multipart uploads are aborted on helper failure;
+    caller-owned resumed uploads remain caller-owned.}
+}
+
+{1 Presigned Request Artifacts}
+
+{2 Object and Upload-Part Presigning}
+
+{ul
+  {li {b Status}: supported, scoped.}
+  {li {b Package/runtime coverage}: standalone
+    {!module:Awskit_s3.Presigned} helpers and adapter-bound [Presigned] modules
+    for [GET Object], [PUT Object], [HEAD Object], [DELETE Object], and
+    [UploadPart].}
+  {li {b Simulator coverage}: yes for adapter-bound generation using simulator
+    credentials, region, clock, and endpoint configuration.}
+  {li {b MinIO/evidence coverage}: fixture and unit evidence covers artifact
+    construction; MinIO integration tests primarily exercise runtime operations,
+    not a separate presigned HTTP execution flow.}
+  {li {b Notes and boundaries}: artifacts use SigV4 query authentication and
+    [UNSIGNED-PAYLOAD]. Raw bearer URLs are hidden behind explicit reveal APIs.
+    Supported options include expiry, selected response overrides, version id,
+    expected bucket owner, checksum headers for [PUT] and [UploadPart], SSE-C
+    source encryption headers for [GET] and [HEAD], typed destination encryption
+    request headers for [PUT], SSE-C customer-key headers for [UploadPart], and
+    extra signed headers. Presigning is not provided for arbitrary S3 APIs.}
+}
+
+{1 Runtime, Simulator, and Provider Scope}
+
+{2 Runtime Coverage}
+
+{ul
+  {li {b Status}: supported.}
+  {li {b Package/runtime coverage}: runtime-neutral [awskit-s3],
+    custom runtimes through {!module:Awskit_s3.Make}, Eio via
+    [awskit-s3-eio], generic Lwt via [awskit-s3-lwt], ready Lwt Unix via
+    [awskit-s3-lwt-unix], and the deterministic simulator via
+    [awskit-s3-sim].}
+  {li {b Simulator coverage}: the simulator implements the synchronous client
+    shape, in-memory store, operation history, deterministic clock, and fault
+    injection.}
+  {li {b MinIO/evidence coverage}: the named MinIO integration target is
+    tested through [awskit-s3-lwt-unix].}
+  {li {b Notes and boundaries}: there is no ready Eio Unix aggregate package.
+    Eio callers own HTTPS/TLS, CA roots, RNG initialization, and platform
+    policy. Generic Lwt callers own their Cohttp client and required retry or
+    timeout capabilities.}
+}
+
+{2 S3-Compatible Providers and Live AWS}
+
+{ul
+  {li {b Status}: unsupported unless named by this support policy.}
+  {li {b Package/runtime coverage}: endpoint configuration can target local
+    plaintext and custom endpoints, but endpoint configurability is not a
+    provider compatibility promise.}
+  {li {b Simulator coverage}: no, simulator evidence is local model evidence.}
+  {li {b MinIO/evidence coverage}: MinIO is the named local S3-compatible test
+    double where [@s3-minio] states coverage.}
+  {li {b Notes and boundaries}: arbitrary S3-compatible providers, provider
+    extensions, and provider-specific behavior are unsupported. Live AWS account
+    compatibility is optional/manual and is not a release gate for this support
+    matrix unless the support policy changes.}
+}
+
+{1 Explicitly Unsupported S3 Families}
+
+Awskit does not claim support for these S3 feature families in this release:
+
+{ul
+  {li access points, Object Lambda access points, S3 on Outposts, and directory
+    buckets}
+  {li Object Lock, retention, legal hold, governance bypass, and MFA delete}
+  {li lifecycle, replication, inventory, analytics, metrics, notifications,
+    logging, website hosting, and requester-pays configuration}
+  {li broad ACL management, IAM policy semantics, public-access edge semantics,
+    and unmodeled bucket policy behavior}
+  {li arbitrary outbound server-side encryption strings and KMS policy behavior
+    beyond modeled request and response fields}
+  {li multipart copy and arbitrary presigning for APIs not listed above}
+  {li arbitrary S3-compatible providers and live AWS account release-gate
+    coverage}
+}
+
+See {{:https://github.com/abdufelsayed/awskit/blob/main/SUPPORT.md}[SUPPORT.md]}
+for the repository-wide support policy.

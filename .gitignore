@@ -20,6 +20,7 @@ _build/
 
 # Temporary
 *.temp
+.logs/
 
 # ocamlbuild targets
 *.byte
@@ -37,3 +38,12 @@ setup.log
 
 # Local OPAM switch
 _opam/
+
+# Agent plans
+.plans
+
+# Local feature worktrees
+.worktrees/
+
+# DS_Store
+.DS_Store

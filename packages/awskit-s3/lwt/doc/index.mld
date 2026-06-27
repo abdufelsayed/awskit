@@ -1,0 +1,25 @@
+{0 awskit-s3-lwt}
+
+Generic Lwt adapter for Awskit S3.
+
+The public entrypoint is {!module:Awskit_s3_lwt}. This package connects the
+runtime-neutral {!module:Awskit_s3} operation surface to a caller-supplied
+Awskit Lwt runtime.
+
+Use it when an application needs a custom Lwt HTTP backend. Use the
+[awskit-s3-lwt-unix] package when the ready Lwt + Unix S3 client is enough.
+
+{1 Runtime Shape}
+
+Use {!module:Awskit_s3_lwt.Make} with a [Cohttp_lwt.S.Client] implementation
+when the application owns the Lwt HTTP backend, context, credentials, region,
+clock, retry sleep, and timeout policy.
+
+This package exposes the S3 operation modules, in-memory body helpers, and
+[Body.of_lwt_stream] for custom streaming uploads. It intentionally does not
+own Unix local-path helpers or managed file transfer helpers; those live in
+[awskit-s3-lwt-unix].
+
+Custom stream bodies must declare the exact [content_length]. Mark them
+replayable only when retrying can recreate the same bytes from the beginning.
+Response readers are scoped to the [Object.get] consumer callback.

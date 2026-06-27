@@ -1,21 +1,7 @@
 (library
  (name awskit_eio)
  (public_name awskit-eio)
- (libraries
-  base
-  awskit
-  eio
-  cohttp
-  cohttp-eio
-  uri
-  ptime
-  ptime.clock.os
-  fmt
-  logs
-  ca-certs
-  domain-name
-  tls
-  tls-eio
-  mirage-crypto-rng.unix)
+ (private_modules runtime)
+ (libraries base awskit eio cohttp cohttp-eio uri ptime fmt logs)
  (preprocess
   (pps ppx_deriving.show ppx_deriving.eq)))

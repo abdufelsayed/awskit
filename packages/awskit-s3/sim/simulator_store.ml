@@ -1,7 +1,10 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_state
 open Simulator_error
+module Bucket = Awskit_s3.Bucket
+module Multipart = Awskit_s3.Multipart
+module Object = Awskit_s3.Object
+module Object_key = Awskit_s3.Object_key
 
 let bucket_state store bucket = find_bucket store bucket
 
@@ -20,15 +23,19 @@ let require_object t bucket key =
 let versioning_enabled (bucket : bucket_state) =
   match bucket.versioning with
   | Some Bucket.Versioning.Status.Enabled -> true
-  | Some Suspended | None -> false
+  | Some Suspended | Some (Unknown _) | None -> false
 
 let versioning_suspended (bucket : bucket_state) =
   match bucket.versioning with
   | Some Bucket.Versioning.Status.Suspended -> true
-  | Some Enabled | None -> false
+  | Some Enabled | Some (Unknown _) | None -> false
 
 let versioning_keeps_history bucket =
   versioning_enabled bucket || versioning_suspended bucket
+
+let status_keeps_history = function
+  | Bucket.Versioning.Status.Enabled | Suspended -> true
+  | Unknown _ -> false
 
 let next_version_id t = allocate_version_id t
 let null_version_id = Object.Version_id.of_string_exn "null"
@@ -59,6 +66,23 @@ let replace_null_version bucket key version =
           versions
   in
   Hashtbl.replace bucket.versions key (version :: versions)
+
+let promote_current_object_to_null_version bucket key = function
+  | Stored_object obj ->
+      obj.version_id <- Some null_version_id;
+      replace_null_version bucket key (Stored_object obj)
+  | Stored_delete_marker _ -> ()
+
+let promote_current_objects_to_null_versions bucket =
+  Simulator_state.objects bucket
+  |> List.iter (fun (key, version) ->
+      promote_current_object_to_null_version bucket key version)
+
+let set_versioning bucket status =
+  let was_unversioned = not (versioning_keeps_history bucket) in
+  bucket.versioning <- Some status;
+  if was_unversioned && status_keeps_history status then
+    promote_current_objects_to_null_versions bucket
 
 let store_object t bucket key (obj : stored_object) =
   let obj =
@@ -166,7 +190,11 @@ let delete_marker_error ~current marker =
     version_headers (Some marker.version_id) @ delete_marker_headers (Some true)
   in
   if current then service ~headers ~status:404 ~code:"NoSuchKey" ()
-  else method_not_allowed ~headers ()
+  else
+    method_not_allowed
+      ~headers:
+        (headers @ [ ("last-modified", ptime_to_header marker.last_modified) ])
+      ()
 
 let object_size (obj : stored_object) = Int64.of_int (String.length obj.body)
 
@@ -249,7 +277,10 @@ let require_multipart_upload t ~bucket ~key ~upload_id =
   match
     Hashtbl.find_opt bucket_state.multipart_uploads (upload_key upload_id)
   with
-  | Some upload when String.equal upload.upload.key key ->
+  | Some upload
+    when String.equal
+           (Multipart.Upload.key upload.upload |> Object_key.to_string)
+           key ->
       Ok (bucket_state, upload)
   | _ -> Error (no_such_upload ())
 

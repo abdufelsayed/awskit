@@ -1,0 +1,35 @@
+{0 awskit-s3-eio}
+
+Direct-style Eio S3 client.
+
+The public entrypoint is {!module:Awskit_s3_eio}. This package connects
+runtime-neutral S3 operations to the Awskit Eio runtime and returns plain result
+values in direct style.
+
+Applications provide the HTTPS policy and Eio environment explicitly. This
+package also owns Eio local-path body, reader, upload, and download helpers.
+
+{1 Client Surface}
+
+{!val:Awskit_s3_eio.create} requires an Eio switch, environment, HTTPS policy,
+region, and credentials. Use [Awskit_eio.http_only] only for intentional local
+plain-HTTP endpoints; normal AWS endpoints require an application-owned HTTPS
+connector.
+
+The package exposes:
+
+{ul
+  {li [Body.of_flow] and [Body.of_path] for request bodies with known content
+    lengths.}
+  {li [Reader.to_flow] and [Reader.to_path] for scoped response-body
+    consumers.}
+  {li [Object.Transfer.upload_file], [download_file],
+    [multipart_upload_file], and [resume_multipart_upload_file] for managed
+    local-file workflows over Eio paths.}
+}
+
+Managed uploads abort multipart uploads that Awskit created when the helper
+fails before completion. Resumed caller-owned uploads are left open on failure.
+Managed downloads write through a private temporary file before publishing the
+target path. Native Eio cancellation and user exceptions remain native control
+flow rather than ordinary SDK errors.

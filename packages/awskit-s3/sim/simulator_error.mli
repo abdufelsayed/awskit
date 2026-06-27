@@ -1,4 +1,4 @@
-open Awskit_s3
+(** Internal simulator service-error and fault helpers. *)
 
 val service :
   ?message:string ->
@@ -18,6 +18,13 @@ val method_not_allowed :
 val precondition_failed : unit -> Awskit.Error.t
 val not_modified : unit -> Awskit.Error.t
 val response : ?headers:(string * string) list -> int -> Awskit.Response.t
+
+val with_operation :
+  Simulator_state.operation ->
+  bucket:string ->
+  ?key:string ->
+  Awskit.Error.t ->
+  Awskit.Error.t
 
 val record :
   ?faulted:bool ->

@@ -1,4 +1,16 @@
-open Awskit_s3
+(** Internal simulator aliases for shared S3 header construction helpers. *)
+
+val add_opt_account_id_header :
+  string ->
+  Awskit_s3.Account_id.t option ->
+  (string * string) list ->
+  (string * string) list
+
+val add_opt_content_type_header :
+  string ->
+  Awskit_s3.Content_type.t option ->
+  (string * string) list ->
+  (string * string) list
 
 val write_precondition_headers :
   Awskit_s3.Object.Preconditions.Write.t -> (string * string) list
@@ -20,7 +32,7 @@ val validate_common_headers :
   unit ->
   (unit, Awskit.Error.t) result
 
-val tags_header : Awskit_s3.Tag.t list -> string option
+val tags_header : Awskit_s3.Tag.Set.t -> string option
 
 val checksum_header_name :
   Awskit_s3.Object.Checksum.Algorithm.t -> string option
@@ -33,6 +45,9 @@ val validate_checksum_type :
 
 val validate_checksum_value :
   Awskit_s3.Object.Checksum.value -> (unit, Awskit.Error.t) result
+
+val validate_storage_class :
+  Awskit_s3.Storage_class.t -> (unit, Awskit.Error.t) result
 
 val checksum_value_headers :
   Awskit_s3.Object.Checksum.value option -> (string * string) list
@@ -48,5 +63,14 @@ val checksum_mode_header :
 
 val multipart_object_size_header : int64 option -> (string * string) list
 
-val encryption_request_headers :
-  Awskit_s3.Object.Encryption.request option -> (string * string) list
+val destination_encryption_headers :
+  Awskit_s3.Encryption.Destination.t option -> (string * string) list
+
+val source_encryption_headers :
+  Awskit_s3.Encryption.Source.t option -> (string * string) list
+
+val copy_source_encryption_headers :
+  Awskit_s3.Encryption.Source.t option -> (string * string) list
+
+val customer_key_headers :
+  Awskit_s3.Encryption.Customer_key.t option -> (string * string) list

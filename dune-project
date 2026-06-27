@@ -7,6 +7,8 @@
 (source
  (github abdufelsayed/awskit))
 
+(documentation "https://abdufelsayed.github.io/awskit/")
+
 (authors "Abdullah Elsayed <hey@abdufelsayed.dev>")
 
 (maintainers "Abdullah Elsayed <hey@abdufelsayed.dev>")
@@ -29,10 +31,14 @@
   ptime
   (fmt
    (>= 0.11.0))
-  logs
   ppx_deriving
+  ppx_sexp_conv
   (dune-release :with-dev-setup)
   (opam-publish :with-dev-setup)
+  (ocamlformat
+   (and
+    :with-dev-setup
+    (= 0.29.0)))
   (alcotest :with-test)
   (qcheck-core :with-test)
   (qcheck-alcotest :with-test)))
@@ -80,7 +86,9 @@
    (and
     :with-test
     (>= 6.2.1)))
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-lwt-unix)
@@ -112,7 +120,7 @@
  (name awskit-eio)
  (synopsis "Eio runtime adapter for Awskit")
  (description
-  "Direct-style Eio runtime adapter for Awskit using Cohttp Eio.")
+  "Direct-style Eio runtime adapter for Awskit with caller-owned transport and HTTPS policy.")
  (depends
   (ocaml
    (>= 5.2))
@@ -131,19 +139,14 @@
   (fmt
    (>= 0.11.0))
   logs
-  ca-certs
-  domain-name
-  (tls
-   (>= 2.1.0))
-  (tls-eio
-   (>= 2.1.0))
-  mirage-crypto-rng
   ppx_deriving
   (eio_main
    (and
     :with-test
     (>= 1.3)))
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-s3)
@@ -164,12 +167,15 @@
   yojson
   (base64
    (>= 3.5.2))
+  uucp
   uri
   ezxmlm
   ppx_protocol_conv_xmlm
   ppx_deriving
   ppx_yojson_conv
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-s3-sim)
@@ -191,7 +197,9 @@
   (base64
    (>= 3.5.2))
   uri
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-s3-lwt)
@@ -238,12 +246,15 @@
   (fmt
    (>= 0.11.0))
   ptime
-  (alcotest :with-test)))
+  (alcotest :with-test)
+  (qcheck-core :with-test)
+  (qcheck-alcotest :with-test)))
 
 (package
  (name awskit-s3-eio)
  (synopsis "Eio adapter for Awskit S3")
- (description "S3 client adapter over the Awskit Eio runtime.")
+ (description
+  "S3 client adapter over the Awskit Eio runtime with caller-owned HTTPS transport policy.")
  (depends
   (ocaml
    (>= 5.2))

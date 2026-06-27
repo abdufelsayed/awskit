@@ -1,50 +1,57 @@
 {0 S3 Guides}
 
 Guides for using [awskit-s3] with AWS S3 object and bucket workflows. The
-client surface is streaming-first, endpoint-configurable, and result-returning.
+client is streaming-first, endpoint-configurable, and result-returning, so
+applications can make memory use, retries, and error handling explicit.
+The supported S3 scope is defined in
+{{!page-support_matrix}S3 Support Matrix} and
+{{:https://github.com/abdufelsayed/awskit/blob/main/SUPPORT.md}[SUPPORT.md]}.
 
 {1 Object Operations}
 
-Primitive object operations live under [Object]. They use runtime-owned request
-bodies and scoped response body readers.
+Object operations live under [Object]. Small buffered workflows can start with
+[Object.put_string], [Object.put_bytes], [Object.get_string],
+[Object.get_bytes], [Object.find_string], and [Object.find_bytes]. Streaming
+and custom body workflows use the adapter [Body] and [Reader] modules through
+[Object.put] and [Object.get].
+
+Snippets assume [bucket] is a {!type:Awskit_s3.Bucket_name.t} and [key] is an
+{!type:Awskit_s3.Object_key.t}; construct user input with
+[Bucket_name.of_string] and [Object_key.of_string].
 
 {2 Upload}
 
 {[
-let body = Awskit_s3_eio.Runtime.Request_body.of_string "hello" in
-Awskit_s3_eio.Object.put s3
-  ~bucket:"my-bucket"
-  ~key:"hello.txt"
-  ~body
+module S3 = Awskit_s3_eio
+
+S3.Object.put_string s3 ~bucket ~key
+  ~contents:"hello"
   ()
 ]}
 
-Primitive uploads require a known content length. The runtime records length
-and payload hash in its request-body descriptor before signing. Unknown-length
-SigV4 aws-chunked streaming is not implemented today.
-
-For custom [Runtime.Request_body.of_stream] values, declare the exact [content_length]
-and emit exactly that number of bytes. Producer callback errors are returned as
-request body failures. Prefer [Runtime.Request_body.of_string] or [Runtime.Request_body.of_bytes] when the
-body is already buffered.
+[Object.put_string] and [Object.put_bytes] build replayable request bodies with
+known content lengths, which lets S3 sign and retry the request safely. Use
+[Object.put] with [Body] values when the body is custom or should be streamed.
 
 Options carry object metadata, content type, storage class, tags,
-preconditions, checksum headers, and server-side encryption headers:
+preconditions, checksum headers, and typed destination encryption headers:
 
 {[
 let options =
-  {
-    Awskit_s3.Put_object.default_options with
-    content_type = Some "text/plain";
-    metadata = [ ("origin", "example") ];
-    tags = [ { Awskit_s3.Tag.key = "env"; value = "dev" } ];
-  }
+  Awskit_s3.Object.Put.options_exn
+    ~content_type:(Awskit_s3.Content_type.of_string_exn "text/plain")
+    ~metadata:(Awskit_s3.Metadata.of_list_exn [ ("origin", "example") ])
+    ~tags:
+      (Awskit_s3.Tag.Set.of_list_exn
+         [ Awskit_s3.Tag.create_exn ~key:"env" ~value:"dev" ])
+    ~encryption:Awskit_s3.Encryption.Destination.Sse_s3
+    ()
 in
-Awskit_s3_eio.Object.put s3
-  ~bucket:"my-bucket"
-  ~key:"hello.txt"
+Awskit_s3_eio.Object.put_string s3
+  ~bucket
+  ~key
   ~options
-  ~body:(Awskit_s3_eio.Runtime.Request_body.of_string "hello")
+  ~contents:"hello"
   ()
 ]}
 
@@ -70,27 +77,53 @@ S3 conditional delete headers.
 
 {2 Download}
 
-[Object.get] scopes the response body to the [consume] callback. Do not store
-the reader outside that callback. Buffering helpers such as
-[Object.get_as_string ~max_bytes] keep response-size limits explicit.
+Use [Object.get_string] and [Object.get_bytes] for bounded in-memory downloads.
+The [max_bytes] argument is required so memory use stays explicit.
 
 {[
-let consume reader =
-  let bytes = Bytes.create 8192 in
-  match Awskit_s3_eio.Runtime.Response_body.read reader bytes ~off:0 ~len:8192 with
-  | Error _ as error -> error
-  | Ok n -> Ok (Bytes.sub_string bytes 0 n)
-in
-Awskit_s3_eio.Object.get s3
-  ~bucket:"my-bucket"
-  ~key:"large.bin"
-  ~consume
+module S3 = Awskit_s3_eio
+
+S3.Object.get_string s3 ~bucket ~key
+  ~max_bytes:1_048_576L
   ()
 ]}
 
+[Object.get] scopes the response body to the [consume] callback for streaming
+downloads. Do not store the reader outside that callback. [Reader.to_string
+~max_bytes] and [Reader.to_bytes ~max_bytes] keep response-size limits explicit
+when buffering is intentional.
+
 Use [Object.head] when only metadata is needed. Use [Object.exists] for boolean
-existence checks. Missing-object and missing-bucket behavior is reported as
-structured service errors by primitive operations.
+existence checks. Use [Object.find_metadata] and [Object.find] when a missing
+object should be an optional result. Core operations report missing objects and
+missing buckets as structured service errors. S3 can return status-only
+[HeadObject] 404 responses, so [Object.find_metadata] treats a code-less 404 as
+an absent object; coded [NoSuchBucket] responses remain [Error].
+
+{[
+module S3 = Awskit_s3_eio
+
+match S3.Object.find_metadata s3 ~bucket ~key () with
+| Ok (Some info) ->
+    Fmt.pr "content length: %s@."
+      (Option.fold ~none:"unknown" ~some:Int64.to_string info.content_length)
+| Ok None -> Fmt.pr "object is absent@."
+| Error error when Awskit_s3.Error.is_no_such_bucket error ->
+    Fmt.epr "bucket is absent: %a@." Awskit.Error.pp error
+| Error error ->
+    Fmt.epr "S3 request failed: %a@." Awskit.Error.pp error
+]}
+
+For bounded optional reads, use [Object.find_string] or [Object.find_bytes]:
+
+{[
+module S3 = Awskit_s3_eio
+
+match S3.Object.find_string s3 ~bucket ~key ~max_bytes:1_048_576L () with
+| Ok (Some result) -> use_body result.value
+| Ok None -> handle_absent_object ()
+| Error error -> log_error error
+]}
 
 {2 Copy, Delete, List, Tagging}
 
@@ -99,25 +132,27 @@ The object surface also includes:
 {ul
   {li [Object.delete] and [Object.delete_objects]}
   {li [Object.copy]}
-  {li [Object.list] for rich pages and [Object.list_keys] for key-only pages}
+  {li [Object.list] for one rich [ListObjectsV2] page}
   {li [Object.list_versions] for [ListObjectVersions] pages, including object
     versions and delete markers}
-  {li [Object.List_objects_v2.pages], [objects], and [keys] for following
-    [ListObjectsV2] continuation tokens}
-  {li [Object.List_object_versions.pages], [object_versions], and
+  {li [Object.List.pages], [objects], and [keys] for following
+    [ListObjectsV2] continuation tokens with an explicit [max_pages] bound}
+  {li [Object.Versions.pages], [object_versions], and
     [delete_markers] for following version-listing markers}
   {li [Object.Tagging.get], [put], and [delete]}
 }
 
-Operation pagination helpers preserve the regular [List_objects_v2.options]
-record and update only the continuation token between requests. Use [max_pages]
-to cap traversal:
+Pagination helpers preserve the regular [Object.List.options] record and
+update only the continuation token between requests. Collection helpers require
+an explicit [max_pages] bound and return an error if S3 reports more pages than
+the bound allows:
 
 {[
+let prefix = Awskit_s3.Object_key.Prefix.of_string_exn "logs/" in
 let keys =
-  Awskit_s3_eio.Object.List_objects_v2.keys s3
-    ~bucket:"my-bucket"
-    ~options:{ Awskit_s3.List_objects_v2.default_options with prefix = Some "logs/" }
+  Awskit_s3_eio.Object.List.keys s3
+    ~bucket
+    ~options:(Awskit_s3.Object.List.options_exn ~prefix ())
     ~max_pages:10
     ()
 ]}
@@ -127,97 +162,154 @@ let keys =
 [Bucket.Versioning.put] enables bucket versioning. Object writes, copies, and
 multipart completion return version IDs when the bucket is versioned. Reads,
 heads, and deletes accept a [version_id] option. Copy requests can select a
-source version with [Copy_object.source_version_id].
+source version with [Object.Copy.source_version_id].
 
 Deleting the current object in a versioned bucket creates a delete marker.
 [Object.list_versions] returns object versions and delete markers, and
-[Object.List_object_versions] provides pagination helpers for traversing the
-full history. [List_object_versions] is the public alias for version-listing
-options and page types:
+[Object.Versions] provides pagination helpers for traversing the full history.
+[Object.Versions] contains version-listing options and page types:
 
 {[
 let options =
-  {
-    Awskit_s3.List_object_versions.default_options with
-    prefix = Some "logs/";
-  }
+  Awskit_s3.Object.Versions.options_exn
+    ~prefix:(Awskit_s3.Object_key.Prefix.of_string_exn "logs/")
+    ()
 in
-Awskit_s3_eio.Object.List_object_versions.object_versions s3
-  ~bucket:"my-bucket"
+Awskit_s3_eio.Object.Versions.object_versions s3
+  ~bucket
   ~options
+  ~max_pages:10
   ()
 ]}
 
-{1 In-Memory Object Helpers}
+{1 Body And Reader Helpers}
 
-[Object.put_string], [Object.put_bytes], [Object.get_as_string], and
-[Object.get_as_bytes] are for explicit in-memory use. Download helpers require
-[max_bytes] to avoid accidental unbounded buffering.
+First-class [Object.put_string], [Object.put_bytes], [Object.get_string],
+[Object.get_bytes], [Object.find_string], and [Object.find_bytes] cover
+ordinary bounded in-memory object workflows. Adapter [Body] and [Reader]
+modules remain public when callers need explicit request bodies, scoped
+streaming downloads, or custom producer and consumer callbacks.
+
+Use [Body.of_string] or [Body.of_bytes] when constructing a reusable request
+body separately from the object call. Use [Reader.to_string ~max_bytes] or
+[Reader.to_bytes ~max_bytes] for bounded buffered downloads inside
+[Object.get ~consume].
 
 {[
-Awskit_s3_eio.Object.put_string s3
-  ~bucket:"my-bucket"
-  ~key:"hello.txt"
-  "hello"
-]}
-
-{[
-Awskit_s3_eio.Object.get_as_string s3
-  ~bucket:"my-bucket"
-  ~key:"hello.txt"
-  ~max_bytes:1_048_576L
+Awskit_s3_eio.Object.put s3
+  ~bucket
+  ~key
+  ~body:(Awskit_s3_eio.Body.of_string "hello")
   ()
 ]}
 
-If the response body exceeds [max_bytes], the helper returns
-[Error (Awskit.Error.Body _)].
+{[
+Awskit_s3_eio.Object.get s3
+  ~bucket
+  ~key
+  ~consume:(Awskit_s3_eio.Reader.to_string ~max_bytes:1_048_576L)
+  ()
+]}
 
-{1 Object.Transfer}
+If the response body exceeds [max_bytes], the helper returns a body-classified
+{!type:Awskit.Error.t}. Use {!val:Awskit.Error.pp} or
+{!val:Awskit.Error.to_string_hum} for a human message, and
+{!val:Awskit.Error.kind} when code needs to distinguish body failures from
+other SDK errors.
 
-Unix-capable adapters expose local-path helpers under [Object.Transfer].
-Keeping these helpers at the adapter layer lets the pure [awskit-s3] core stay
-independent of filesystem APIs.
+{2 One-Request File Operations}
 
-[put_file] and [get_file] are one-request [PutObject] and [GetObject] helpers.
-[upload_file] and [download_file] choose an optimized strategy using
+Unix-capable adapters expose local-path helpers under [Body] and [Reader].
+These still use one [PutObject] or [GetObject] request. Use them when the
+application wants direct control instead of a managed transfer strategy.
+
+{[
+module S3 = Awskit_s3_eio
+
+match S3.Body.of_path path with
+| Error error -> Error error
+| Ok body -> S3.Object.put s3 ~bucket ~key ~body ()
+]}
+
+{[
+module S3 = Awskit_s3_eio
+
+S3.Object.get s3 ~bucket ~key
+  ~consume:(S3.Reader.to_path path)
+  ()
+]}
+
+{2 Large Or Streaming Objects}
+
+Custom stream uploads declare an exact content length and whether the producer
+can replay the bytes for retries:
+
+{[
+module S3 = Awskit_s3_eio
+
+match
+  S3.Body.of_stream ~content_length ~replayable:false
+    ~write:(fun writer -> S3.Body.Writer.write_string writer chunk)
+with
+| Error error -> Error error
+| Ok body -> S3.Object.put s3 ~bucket ~key ~body ()
+]}
+
+Large downloads can process chunks incrementally while the reader is in scope:
+
+{[
+module S3 = Awskit_s3_eio
+
+S3.Object.get s3 ~bucket ~key
+  ~consume:(S3.Reader.iter ~f:(fun chunk -> process chunk))
+  ()
+]}
+
+{1 Managed File Transfers}
+
+Unix-capable adapters expose managed local-file helpers under [Object.Transfer].
+Filesystem helpers live at the adapter layer so the runtime-agnostic
+[awskit-s3] core stays independent of filesystem APIs.
+
+[upload_file] and [download_file] choose a transfer strategy from
 {!module:Awskit_s3.Transfer} options: small transfers use one request, while
 larger transfers use multipart upload or ranged [GetObject] requests.
 [multipart_upload_file] and [resume_multipart_upload_file] are explicit
 multipart upload helpers. Filesystem transfer helpers live only in the Eio and
-Lwt Unix adapters; they are not part of the pure [awskit-s3] core.
+Lwt Unix adapters; they are not part of the runtime-agnostic [awskit-s3] core.
+Transfer results include the selected strategy, the underlying S3 result
+metadata, and [bytes_transferred].
+Download helpers write through a private temporary file before publishing the
+target. Set [Transfer.download_options ~overwrite:Error_if_exists] to reject an
+existing local target before issuing S3 requests. Retry and timeout policies are
+configured when the client is created, then applied to the S3 operations the
+transfer helper performs.
+
+Progress callbacks are part of the transfer operation. If a progress callback
+raises or the runtime is cancelled, the helper reports that interruption using
+the selected runtime's normal control flow. Multipart uploads created by Awskit
+are aborted when the helper fails before completion, including callback
+failures. Resumed caller-owned multipart uploads are left open on failure so the
+caller can retry or abort that upload explicitly.
 
 {2 Eio}
 
 {[
 Awskit_s3_eio.Object.Transfer.upload_file s3
-  ~bucket:"my-bucket"
-  ~key:"archive.tar"
-  ~on_progress:(fun bytes -> Fmt.pr "uploaded %Ld bytes@." bytes)
-  ~path
-  ()
-]}
-
-{[
-Awskit_s3_eio.Object.Transfer.put_file s3
-  ~bucket:"my-bucket"
-  ~key:"single-request-upload.tar"
+  ~bucket
+  ~key:(Awskit_s3.Object_key.of_string_exn "archive.tar")
+  ~on_progress:(fun progress ->
+    Fmt.pr "uploaded %Ld bytes@." progress.transferred)
   ~path
   ()
 ]}
 
 {[
 Awskit_s3_eio.Object.Transfer.download_file s3
-  ~bucket:"my-bucket"
-  ~key:"archive.tar"
-  ~on_progress:(fun bytes -> Fmt.pr "downloaded %Ld bytes@." bytes)
-  ~path
-  ()
-]}
-
-{[
-Awskit_s3_eio.Object.Transfer.get_file s3
-  ~bucket:"my-bucket"
-  ~key:"single-request-download.tar"
+  ~bucket
+  ~key:(Awskit_s3.Object_key.of_string_exn "archive.tar")
+  ~on_progress:(fun progress ->
+    Fmt.pr "downloaded %Ld bytes@." progress.transferred)
   ~path
   ()
 ]}
@@ -227,41 +319,49 @@ Awskit_s3_eio.Object.Transfer.get_file s3
 {[
 let* result =
   Awskit_s3_lwt_unix.Object.Transfer.upload_file s3
-    ~bucket:"my-bucket"
-    ~key:"archive.tar"
+    ~bucket
+    ~key:(Awskit_s3.Object_key.of_string_exn "archive.tar")
     ~path:"/tmp/archive.tar"
     ()
 ]}
 
 For explicit multipart upload, use [multipart_upload_file]. It uploads file
 parts with bounded concurrency from [Transfer.upload_options] and aborts the
-multipart upload if a fresh upload fails:
+multipart upload if an Awskit-created upload fails before completion:
 
 {[
 let options =
-  { Awskit_s3.Transfer.default_upload_options with concurrency = 4 }
+  Awskit_s3.Transfer.upload_options_exn ~concurrency:4 ()
 in
 let* result =
   Awskit_s3_lwt_unix.Object.Transfer.multipart_upload_file s3
-    ~bucket:"my-bucket"
-    ~key:"large.tar"
+    ~bucket
+    ~key:(Awskit_s3.Object_key.of_string_exn "large.tar")
     ~options
     ~path:"/tmp/large.tar"
-    ~on_progress:(fun bytes -> Fmt.pr "uploaded %Ld bytes@." bytes)
+    ~on_progress:(fun progress ->
+      Fmt.pr "uploaded %Ld bytes@." progress.transferred)
     ()
 ]}
 
-To resume an interrupted multipart upload, keep the [upload_id]. The resume
-helper lists uploaded parts, skips matching part numbers and sizes, uploads the
-missing parts, and completes the upload. Existing uploads are left open on
-failure, so the same upload ID can be retried:
+To continue a caller-owned multipart upload, persist the bucket, key, and
+[upload_id], then rebuild an upload handle. The resume helper verifies the
+upload with [ListParts], uploads every local part into that upload, and completes
+from the fresh [UploadPart] results. It does not trust [ListParts] output as the
+completion manifest because a local file can change while retaining the same
+part sizes. Caller-owned uploads are left open on failure, so the same upload
+can be retried:
 
 {[
+let upload =
+  Awskit_s3.Multipart.Upload.resume
+    ~bucket
+    ~key:(Awskit_s3.Object_key.of_string_exn "large.tar")
+    ~upload_id
+in
 let* result =
   Awskit_s3_lwt_unix.Object.Transfer.resume_multipart_upload_file s3
-    ~bucket:"my-bucket"
-    ~key:"large.tar"
-    ~upload_id
+    ~upload
     ~path:"/tmp/large.tar"
     ()
 ]}
@@ -272,33 +372,72 @@ S3 endpoint configuration is part of client construction. The defaults use the
 standard regional AWS S3 endpoint for the selected region.
 
 {[
-let s3 =
-  Awskit_s3_eio.create
-    ~sw
-    ~env
-    ~region
-    ~credentials
+module Https = struct
+  let connector () =
+    Mirage_crypto_rng_unix.use_default ();
+    let authenticator =
+      match Ca_certs.authenticator () with
+      | Ok authenticator -> authenticator
+      | Error (`Msg msg) -> invalid_arg ("failed to load CA roots: " ^ msg)
+    in
+    let tls_config =
+      match Tls.Config.client ~authenticator () with
+      | Ok config -> config
+      | Error (`Msg msg) -> invalid_arg ("failed to create TLS config: " ^ msg)
+    in
+    Some
+      (fun uri raw ->
+        let host =
+          match Uri.host uri with
+          | Some host -> Domain_name.host_exn (Domain_name.of_string_exn host)
+          | None -> invalid_arg "HTTPS URI is missing a host"
+        in
+        (Tls_eio.client_of_flow tls_config ~host raw
+          :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Flow.two_way))
+end
+
+let https = Https.connector () in
+let endpoint_config =
+  Awskit_s3.Endpoint_config.aws
     ~endpoint_variant:`Dualstack
     ~addressing_style:`Auto
     ()
-]}
-
-Pass [endpoint] for S3 endpoints that are not the default AWS regional host,
-including local test services:
-
-{[
-let endpoint =
-  Awskit.Endpoint.of_string_exn "http://127.0.0.1:9000"
 in
 let s3 =
   Awskit_s3_eio.create
     ~sw
     ~env
-    ~region
+    ~https
+    ~region:"us-east-1"
     ~credentials
-    ~endpoint
+    ~endpoint_config
+    ()
+  |> Result.get_ok
+]}
+
+Use {!module:Awskit_s3.Endpoint_config} for S3 endpoints that are not the
+default AWS regional host. Plain HTTP is explicit; loopback endpoints use
+[local_plaintext], and non-local HTTP requires [unsafe_plaintext]:
+
+{[
+let endpoint_config =
+  Awskit_s3.Endpoint_config.local_plaintext
+    ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
+    ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
     ~addressing_style:`Path
     ()
+  |> Result.get_ok
+in
+let s3 =
+  Awskit_s3_eio.create
+    ~sw
+    ~env
+    ~https:Awskit_eio.http_only
+    ~region:"us-east-1"
+    ~credentials
+    ~endpoint_config
+    ()
+  |> Result.get_ok
 ]}
 
 Endpoint variants:
@@ -318,7 +457,8 @@ Addressing styles:
   {li [`Virtual_hosted] puts the bucket in the host name.}
   {li [`Path] puts the bucket in the path.}
   {li [`Auto] uses virtual-hosted style when valid and falls back to path-style
-    for dotted bucket names over HTTPS.}
+    for dotted bucket names over HTTPS, except for Transfer Acceleration where
+    path-style requests are not valid.}
 }
 
 Transfer Acceleration requires virtual-hosted-style-compatible bucket names and
@@ -326,8 +466,8 @@ must be enabled on the bucket in AWS.
 
 {1 Bucket Operations}
 
-[Bucket] covers general-purpose bucket basics and the first configuration
-subresources:
+[Bucket] covers general-purpose bucket basics and selected modeled
+configuration subresources:
 
 {ul
   {li [Bucket.create], [delete], [head], [exists], [list], [get_location]}
@@ -344,11 +484,17 @@ subresources:
 access configuration. Applications can construct those documents with their own
 policy model and pass the serialized JSON to the client.
 
-Retained bucket operations that target an existing bucket accept
-[expected_bucket_owner]. Awskit sends it as [x-amz-expected-bucket-owner] so AWS
-can reject calls that resolve to a bucket owned by a different account.
+Relevant bucket operations that target an existing bucket accept an operation
+[options] value with [expected_bucket_owner]. Awskit sends it as
+[x-amz-expected-bucket-owner] so AWS can reject calls that resolve to a bucket
+owned by a different account.
 
 {[
+let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
+let owner = Awskit_s3.Account_id.of_string_exn "123456789012" in
+let options = Awskit_s3.Bucket.Encryption.options_exn
+    ~expected_bucket_owner:owner ()
+in
 let encryption =
   {
     Awskit_s3.Bucket.Encryption.rules =
@@ -364,17 +510,18 @@ let encryption =
   }
 in
 Awskit_s3_eio.Bucket.Encryption.put s3
-  ~bucket:"my-bucket"
-  ~expected_bucket_owner:"123456789012"
-  encryption
+  ~bucket
+  ~options
+  ~config:encryption
+  ()
 ]}
 
 {1 Multipart Uploads}
 
-[Multipart] exposes the primitive AWS multipart flow:
+[Multipart] exposes the AWS multipart flow:
 
 {ol
-  {li [Multipart.create_upload] starts an upload and returns an upload ID.}
+  {li [Multipart.create_upload] starts an upload and returns an upload handle.}
   {li [Multipart.upload_part] uploads a known-length part.}
   {li [Multipart.complete_upload] completes the upload with ordered parts.}
   {li [Multipart.abort_upload] cancels an upload.}
@@ -387,76 +534,131 @@ Awskit_s3_eio.Bucket.Encryption.put s3
 parts require a known exact length, and custom stream producer errors are part
 of the upload result.
 
-{1 Presigned URLs}
+{1 Advanced Direct Runtime Access}
 
-Use adapter-level [Presigned] modules when a connection already exists, or use
-standalone {!module:Awskit_s3.Presigned} helpers when generating URLs without
-an adapter connection.
+Most callers should use adapter [Body] and [Reader] helpers. Direct [Runtime]
+access is the raw layer for custom streaming integrations and runtime authors.
+The {!module-type:Awskit_s3.RUNTIME} contract is public: custom runtimes can
+instantiate {!module:Awskit_s3.Make} when they provide the grouped core runtime
+capabilities plus [S3_endpoint.s3_endpoint_config].
+
+Custom request bodies use [Runtime.Request_body.of_stream] with an explicit
+descriptor. Declare the exact [content_length] when S3 requires one, emit
+exactly that number of bytes, and mark the body [replayable] only if retrying
+can recreate the same bytes from the beginning.
+
+{[
+S3.Runtime.Request_body.of_stream descriptor ~write
+]}
+
+Raw response readers can be consumed with [Runtime.Response_body.read] while
+the reader is in scope:
+
+{[
+S3.Runtime.Response_body.read reader bytes ~off ~len
+]}
+
+For custom S3 callers, prefer [Body.of_stream] and [Reader.read] so code stays
+within the S3 adapter API.
+
+Runtime authors should also run [opam exec -- dune build @runtime-http]
+alongside the S3 tests. The runtime workload captures shared HTTP expectations
+for bodiless responses, framing, body-reader, and error-path behavior.
+
+{1 Presigned Request Artifacts}
+
+Use adapter-level [Presigned] modules when a connection already exists. Use
+standalone {!module:Awskit_s3.Presigned} helpers when generating presigned
+request artifacts without an adapter connection.
 
 {[
 Awskit_s3_eio.Presigned.get_object s3
-  ~bucket:"my-bucket"
-  ~key:"public.txt"
+  ~bucket
+  ~key:(Awskit_s3.Object_key.of_string_exn "public.txt")
   ()
 ]}
 
 {[
-Awskit_s3.Presigned.put_object
-  ~region
+let endpoint_config =
+  Awskit_s3.Endpoint_config.local_plaintext
+    ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
+    ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
+    ~addressing_style:`Path
+    ()
+  |> Result.get_ok
+in
+Awskit_s3.Presigned.put_object_with_endpoint_config
+  ~region:(Awskit.Region.of_string_exn "us-east-1")
   ~credentials
   ~now
-  ~endpoint
-  ~addressing_style:`Path
-  ~bucket:"my-bucket"
-  ~key:"upload.txt"
+  ~endpoint_config
+  ~bucket
+  ~key:(Awskit_s3.Object_key.of_string_exn "upload.txt")
   ()
 ]}
 
 Multipart direct-upload flows can presign individual [UploadPart] requests
-after [Multipart.create_upload] has produced an upload ID:
+after [Multipart.create_upload] has produced an upload handle. Persisted upload
+state can be rebuilt with [Multipart.Upload.resume]:
 
 {[
+let upload =
+  Awskit_s3.Multipart.Upload.resume
+    ~bucket
+    ~key:(Awskit_s3.Object_key.of_string_exn "large.bin")
+    ~upload_id
+in
 Awskit_s3.Presigned.upload_part
-  ~region
+  ~region:"us-east-1"
   ~credentials
   ~now
-  ~bucket:"my-bucket"
-  ~key:"large.bin"
-  ~upload_id
-  ~part_number:1
+  ~upload
+  ~part_number:(Awskit_s3.Multipart.Part_number.of_int_exn 1)
   ()
 ]}
 
-Presigned URLs use [UNSIGNED-PAYLOAD] and the same endpoint/addressing options
-as normal operations. Returned [result.signed_headers] are the non-host headers
-that the caller must send with the URL. Use [extra_signed_headers] only for
-additional headers that must be included in the signature. Presigned [PUT] and
-[UploadPart] helpers sign explicit checksum value headers when configured, and
-object presigning options support [expected_bucket_owner] guard rails.
+Presigned request artifacts use [UNSIGNED-PAYLOAD] and the same
+endpoint/addressing options as regular operations. Use
+[Awskit_s3.Presigned.method_], [Awskit_s3.Presigned.safe_uri],
+[Awskit_s3.Presigned.signed_headers], [Awskit_s3.Presigned.request_headers],
+and the expiry accessors for diagnostics and user-facing output.
+[Awskit_s3.Presigned.signed_headers] includes the canonical [host] header;
+[Awskit_s3.Presigned.request_headers] contains the non-host headers to pass
+explicitly when executing the request. [Awskit_s3.Presigned.reveal_url] is the
+explicit bearer-token handoff boundary for the component that will execute the
+request. Use [extra_signed_headers] only for additional headers that must be
+included in the signature. Presigned [PUT] and [UploadPart] helpers sign
+explicit checksum value headers when configured. Presigned [GET] and [HEAD]
+sign SSE-C source headers, presigned [PUT] signs typed destination encryption
+headers, presigned [UploadPart] signs SSE-C customer-key headers, and object
+presigning options support [expected_bucket_owner] guard rails.
 
 A typical direct-upload multipart flow is:
 
 {ol
   {li Start the upload with [Multipart.create_upload].}
-  {li Presign one [UploadPart] URL per part number with
+  {li Presign one [UploadPart] request artifact per part number with
     [Presigned.upload_part].}
-  {li The uploader sends each part to the corresponding URL.}
+  {li The uploader sends each part using the revealed bearer URL, method, and
+    signed headers.}
   {li Complete the upload with the returned part ETags.}
 }
 
 {1 Credentials}
 
-Eio S3 connections require explicit [region] and [credentials].
+Eio S3 connections require explicit [region], [credentials], and [https]. This
+example reuses the [Https] helper from the endpoint configuration example
+above and [Awskit_unix.Credentials.default_chain] from the [awskit-unix]
+package for Unix credential loading.
 
 {[
 let credentials =
-  Awskit.Credentials.create_exn
-    ~access_key_id:"AKIAIOSFODNN7EXAMPLE"
-    ~secret_access_key:"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-    ()
+  Awskit_unix.Credentials.default_chain ()
+  |> Result.get_ok
 in
-let region = Awskit.Region.of_string_exn "us-east-1" in
-Awskit_s3_eio.create ~sw ~env ~region ~credentials ()
+let https = Https.connector () in
+Awskit_s3_eio.create ~sw ~env ~https ~region:"us-east-1" ~credentials ()
+|> Result.get_ok
 ]}
 
 [awskit-s3-lwt-unix] can use explicit values or load the standard environment
@@ -491,8 +693,16 @@ Lwt-Unix runtime credential source and refreshed before expiration.
 S3 operations return [(value, Awskit_s3.Error.t) result] or that result inside
 the selected runtime monad.
 
-[Awskit_s3.Error.t] is {!type:Awskit.Error.t}. It preserves validation,
-signing, transport, service, decode, and body-consumption failures.
+[Awskit_s3.Error.t] is [Awskit.Error.t]. It is opaque and preserves validation,
+signing, transport, service, decode, and body-consumption failures with
+structured context. Use [Awskit.Error.pp] or [Awskit.Error.to_string_hum] for
+human-readable logs, and [Awskit.Error.sexp_of_t] for structured diagnostics
+and tests. Raw service diagnostics are available only through
+[Awskit.Error.Unsafe_diagnostics].
+
+Functions ending in [_exn] raise [Awskit.Error.Awskit_error] on SDK validation
+or construction failure. Prefer the result-returning form in libraries and
+long-running services.
 
 Use S3 classifiers for service-specific checks:
 
@@ -507,18 +717,36 @@ match result with
 For service failures, [Awskit_s3.Error.service_code] exposes the AWS error
 code when present.
 
+Optional lookup helpers keep common not-found handling out of error branches.
+[Object.find] and [Object.find_metadata] return [Ok None] for absent objects
+and preserve missing buckets, authorization failures, transport errors, decode
+errors, and body errors as structured [Awskit.Error.t] values. S3 can return
+status-only [HeadObject] 404 responses, so [Object.find_metadata] treats a
+code-less 404 as an absent object; coded [NoSuchBucket] responses remain
+[Error]:
+
+{[
+module S3 = Awskit_s3_eio
+
+match S3.Object.find_metadata s3 ~bucket ~key () with
+| Ok (Some info) -> use_metadata info
+| Ok None -> handle_absent_object ()
+| Error err when Awskit_s3.Error.is_no_such_bucket err -> handle_absent_bucket ()
+| Error err -> log_error err
+]}
+
 {1 Retries}
 
-Runtime-backed S3 clients use {!val:Awskit.Retry.default} unless a runtime
+Runtime-backed S3 clients use [Awskit.Retry.default] unless a runtime
 adapter receives a custom [retry_policy]. Retries are centralized around the
 signed S3 request, so retryable service responses are classified before being
 returned to callers.
 
 Only replayable request bodies are retried. In-memory bodies created with
-[Runtime.Request_body.of_string] and [Runtime.Request_body.of_bytes] are replayable. Custom stream
-bodies are retried only when their {!type:Awskit.Body.Request.descriptor}
-marks them replayable. Do not mark a stream replayable unless retrying can
-recreate the same bytes from the beginning.
+[Body.of_string] and [Body.of_bytes] are replayable. Custom stream bodies are
+retried only when their {!type:Awskit.Body.Request.descriptor} marks them
+replayable. Do not mark a stream replayable unless retrying can recreate the
+same bytes from the beginning.
 
 Configure retry attempts, capped exponential backoff, and jitter explicitly:
 
@@ -534,20 +762,25 @@ in
 Awskit_s3_lwt_unix.create ~retry_policy ()
 ]}
 
-[jitter] is in the range [[0, 1]]. The default [0] keeps deterministic delays.
-Values greater than zero spread retry waits below the capped exponential delay.
+[jitter] is in the range [[0, 1]]. A custom value of [0] keeps deterministic
+delays. Values greater than zero spread retry waits below the capped
+exponential delay; the default policy uses jitter.
 
-{1 Local MinIO Contract Testing}
+{1 Local MinIO Integration Testing}
 
-Normal tests do not require a network service. For local wire-level checks
-against MinIO, start the included Compose stack and run the opt-in alias:
+Most tests do not require a network service. The simulator is deterministic
+application-level evidence, not live AWS coverage. MinIO is used here as a
+local S3-compatible development and testing double for adapter interoperability,
+not as a provider support guarantee. For local checks against the named MinIO
+integration target, start the included Compose stack and run the opt-in alias:
 
 {[
 docker compose up -d
-dune build @minio-contract
+opam exec -- dune build --force @s3-minio
 ]}
 
-The contract runner defaults to [http://127.0.0.1:9000] with the
+The integration runner defaults to [http://127.0.0.1:9000] with the
 [minioadmin]/[minioadmin] credentials from [docker-compose.yml]. Override with
 [AWSKIT_S3_MINIO_ENDPOINT], [AWSKIT_S3_MINIO_ACCESS_KEY_ID],
-[AWSKIT_S3_MINIO_SECRET_ACCESS_KEY], and [AWSKIT_S3_MINIO_REGION].
+[AWSKIT_S3_MINIO_SECRET_ACCESS_KEY], and [AWSKIT_S3_MINIO_REGION]. Non-local
+HTTP endpoints require [AWSKIT_S3_MINIO_UNSAFE_HTTP=1].

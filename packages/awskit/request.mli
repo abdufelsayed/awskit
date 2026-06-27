@@ -1,7 +1,7 @@
 (** Body-free HTTP request metadata.
 
     Runtime adapters receive request bodies separately through
-    {!Runtime.S.with_response}. *)
+    {!Runtime.Transport.with_response}. *)
 
 module Method : sig
   type t = [ `GET | `PUT | `POST | `DELETE | `HEAD | `PATCH ]
@@ -14,6 +14,8 @@ module Method : sig
   (** Parse a supported HTTP method name case-insensitively. *)
 
   val of_string_exn : string -> t
+  (** Like {!val:of_string}, but raises [Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
 end
 
 module Target : sig
@@ -36,8 +38,9 @@ module Target : sig
     ?query:(string * string list) list ->
     unit ->
     (t, Error.t) result
-  (** Create a target. [path] must be absolute and [query] is not encoded until
-      signing or request serialization. *)
+  (** Create a target. [path] must be absolute and already encoded for
+      transport. [query] is kept structured and encoded during signing or
+      request serialization. *)
 
   val create_exn :
     scheme:Endpoint.Scheme.t ->
@@ -47,14 +50,15 @@ module Target : sig
     ?query:(string * string list) list ->
     unit ->
     t
-  (** Like {!val:create}, but raises [Invalid_argument] on validation failure.
-  *)
+  (** Like {!val:create}, but raises [Error.Awskit_error] carrying the
+      structured validation error on validation failure. *)
 
   val authority : t -> string
   (** Host plus optional port. *)
 
   val path_and_query : t -> string
-  (** Render the path and canonical query string for transport. *)
+  (** Render the encoded path and structured query string for transport. Query
+      order is preserved; signing applies SigV4 canonical sorting separately. *)
 end
 
 type t = private {
@@ -83,7 +87,8 @@ val create_exn :
   ?headers:(string * string) list ->
   unit ->
   t
-(** Like {!val:create}, but raises [Invalid_argument] on validation failure. *)
+(** Like {!val:create}, but raises [Error.Awskit_error] carrying the structured
+    validation error on validation failure. *)
 
 val with_headers : t -> (string * string) list -> (t, Error.t) result
 (** Replace all headers after validating them. *)

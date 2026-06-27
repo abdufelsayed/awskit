@@ -1,4 +1,3 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_state
 open Simulator_error
@@ -7,6 +6,8 @@ open Simulator_checksum
 open Simulator_runtime
 open Simulator_inspect
 open Simulator_object_body
+module Error = Awskit_s3.Error
+module Object = Awskit_s3.Object
 
 let object_read_info (obj : stored_object) ~status ~content_length
     ~range_headers =
@@ -23,69 +24,137 @@ let object_read_info (obj : stored_object) ~status ~content_length
   in
   info_of_object ~content_length response obj
 
+let get_result (info : Object.Get.info) value : _ Object.Get.result =
+  {
+    Object.Get.value;
+    etag = info.etag;
+    content_type = info.content_type;
+    content_length = info.content_length;
+    content_range = info.content_range;
+    last_modified = info.last_modified;
+    metadata = info.metadata;
+    storage_class = info.storage_class;
+    version_id = info.version_id;
+    checksum = info.checksum;
+    encryption = info.encryption;
+    response = info.response;
+  }
+
 let read_object ?read_fault obj options ~consume =
-  let* () = ensure_read_preconditions obj options.Get_object.preconditions in
+  let* () = ensure_read_preconditions obj options.Object.Get.preconditions in
   let* body, status, range_headers = ranged_body obj.body options.range in
   let info =
     object_read_info obj ~status ~content_length:(String.length body)
       ~range_headers
   in
-  Result.map
-    (fun value -> (info, value))
+  Result.map (get_result info)
     (Runtime.Response_body.with_reader
        (Runtime.response_body ?read_fault body)
        ~consume)
 
 let get conn ~bucket ~key ?options ~consume () =
-  let options = Option.value ~default:Get_object.default_options options in
+  let options = Option.value ~default:Object.Get.default_options options in
+  let return_error error =
+    Error (with_operation `Get_object ~bucket ~key error)
+  in
   match validate_bucket_key bucket key with
-  | Error error -> Error error
+  | Error error -> return_error error
   | Ok () -> (
       match require_bucket conn bucket with
-      | Error error -> Error error
+      | Error error -> return_error error
       | Ok bucket_state -> (
           match current_or_version bucket_state key options.version_id with
-          | None -> Error (no_such_key ())
+          | None -> return_error (no_such_key ())
           | Some (Stored_delete_marker marker) ->
-              Error
+              return_error
                 (delete_marker_error
                    ~current:(Option.is_none options.version_id)
                    marker)
           | Some (Stored_object obj) -> (
               match take_fault conn with
-              | Some Response_lost ->
+              | Some Response_lost -> (
                   record ~faulted:true conn `Get_object bucket (Some key);
-                  read_object obj options
-                    ~read_fault:(fault_error Response_lost)
-                    ~consume
+                  match
+                    read_object obj options
+                      ~read_fault:(fault_error Response_lost)
+                      ~consume
+                  with
+                  | Error error -> return_error error
+                  | Ok _ as ok -> ok)
               | Some fault ->
                   record ~faulted:true conn `Get_object bucket (Some key);
-                  Error (fault_error fault)
-              | None ->
+                  return_error (fault_error fault)
+              | None -> (
                   record conn `Get_object bucket (Some key);
-                  read_object obj options ~consume)))
+                  match read_object obj options ~consume with
+                  | Error error -> return_error error
+                  | Ok _ as ok -> ok))))
 
-let head conn ~bucket ~key ?options () =
-  let options = Option.value ~default:Head_object.default_options options in
+let find conn ~bucket ~key ?options ~consume () =
+  let options = Option.value ~default:Object.Get.default_options options in
+  let return_error error =
+    Error (with_operation `Get_object ~bucket ~key error)
+  in
+  let lookup_error error =
+    if Error.is_no_such_key error then Ok None else return_error error
+  in
   match validate_bucket_key bucket key with
-  | Error error -> Error error
+  | Error error -> return_error error
   | Ok () -> (
       match require_bucket conn bucket with
-      | Error error -> Error error
+      | Error error -> return_error error
       | Ok bucket_state -> (
           match current_or_version bucket_state key options.version_id with
-          | None -> Error (no_such_key ())
+          | None -> Ok None
           | Some (Stored_delete_marker marker) ->
-              Error
+              lookup_error
+                (delete_marker_error
+                   ~current:(Option.is_none options.version_id)
+                   marker)
+          | Some (Stored_object obj) -> (
+              match take_fault conn with
+              | Some Response_lost -> (
+                  record ~faulted:true conn `Get_object bucket (Some key);
+                  match
+                    read_object obj options
+                      ~read_fault:(fault_error Response_lost)
+                      ~consume
+                  with
+                  | Error error -> return_error error
+                  | Ok result -> Ok (Some result))
+              | Some fault ->
+                  record ~faulted:true conn `Get_object bucket (Some key);
+                  return_error (fault_error fault)
+              | None -> (
+                  record conn `Get_object bucket (Some key);
+                  match read_object obj options ~consume with
+                  | Error error -> return_error error
+                  | Ok result -> Ok (Some result)))))
+
+let head conn ~bucket ~key ?options () =
+  let options = Option.value ~default:Object.Head.default_options options in
+  let return_error error =
+    Error (with_operation `Head_object ~bucket ~key error)
+  in
+  match validate_bucket_key bucket key with
+  | Error error -> return_error error
+  | Ok () -> (
+      match require_bucket conn bucket with
+      | Error error -> return_error error
+      | Ok bucket_state -> (
+          match current_or_version bucket_state key options.version_id with
+          | None -> return_error (no_such_key ())
+          | Some (Stored_delete_marker marker) ->
+              return_error
                 (delete_marker_error
                    ~current:(Option.is_none options.version_id)
                    marker)
           | Some (Stored_object obj) -> (
               match operation_fault conn `Head_object bucket (Some key) with
-              | Some error -> Error error
+              | Some error -> return_error error
               | None -> (
                   match ensure_read_preconditions obj options.preconditions with
-                  | Error error -> Error error
+                  | Error error -> return_error error
                   | Ok () ->
                       let response =
                         response 200
@@ -100,16 +169,8 @@ let head conn ~bucket ~key ?options () =
                       in
                       Ok (info_of_object response obj)))))
 
-let exists conn ~bucket ~key =
-  match head conn ~bucket ~key () with
+let exists conn ~bucket ~key ?options () =
+  match head conn ~bucket ~key ?options () with
   | Ok _ -> Ok true
-  | Error error when Error.is_not_found error -> Ok false
+  | Error error when Error.is_no_such_key error -> Ok false
   | Error error -> Error error
-
-let get_as_string conn ~bucket ~key ~max_bytes ?options () =
-  get conn ~bucket ~key ?options ~consume:(consume_string ~max_bytes) ()
-
-let get_as_bytes conn ~bucket ~key ~max_bytes ?options () =
-  Result.map
-    (fun (info, body) -> (info, Bytes.of_string body))
-    (get_as_string conn ~bucket ~key ~max_bytes ?options ())

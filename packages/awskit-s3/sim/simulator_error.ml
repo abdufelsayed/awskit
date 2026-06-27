@@ -1,18 +1,8 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_state
 
 let service ?message ?(headers = []) ~status ~code () =
-  Awskit.Error.service
-    {
-      status;
-      code = Some code;
-      message;
-      request_id = None;
-      host_id = None;
-      headers;
-      body = None;
-    }
+  Awskit.Error.Producer.service ~status ~code ?message ~headers ()
 
 let no_such_bucket () = service ~status:404 ~code:"NoSuchBucket" ()
 let no_such_key () = service ~status:404 ~code:"NoSuchKey" ()
@@ -25,6 +15,25 @@ let precondition_failed () = service ~status:412 ~code:"PreconditionFailed" ()
 let not_modified () = service ~status:304 ~code:"NotModified" ()
 let response ?headers status = Awskit.Response.create_exn ~status ?headers ()
 
+let operation_name = function
+  | `Put_object -> "PutObject"
+  | `Get_object -> "GetObject"
+  | `Head_object -> "HeadObject"
+  | `Delete_object -> "DeleteObject"
+  | `List_objects_v2 -> "ListObjectsV2"
+  | `List_object_versions -> "ListObjectVersions"
+  | `Copy_object -> "CopyObject"
+  | `Delete_objects -> "DeleteObjects"
+  | `Create_multipart_upload -> "CreateMultipartUpload"
+  | `Upload_part -> "UploadPart"
+  | `Complete_multipart_upload -> "CompleteMultipartUpload"
+  | `Abort_multipart_upload -> "AbortMultipartUpload"
+  | `List_parts -> "ListParts"
+
+let with_operation op ~bucket ?key error =
+  let operation = operation_name op in
+  S3_error_context.with_s3_operation ~operation ~bucket ?key error
+
 let record ?(faulted = false) t op bucket key =
   record_operation ~faulted t op bucket key
 
@@ -32,8 +41,9 @@ let fault_error = function
   | Slow_down -> service ~status:503 ~code:"SlowDown" ()
   | Internal_error -> service ~status:500 ~code:"InternalError" ()
   | Connection_reset ->
-      Awskit.Error.transport ~retryable:true "simulated connection reset"
-  | Response_lost -> Awskit.Error.body "simulated response body loss"
+      Awskit.Error.Producer.transport ~retryable:true
+        "simulated connection reset"
+  | Response_lost -> Awskit.Error.Producer.body "simulated response body loss"
 
 let take_fault t = Simulator_state.take_fault t
 

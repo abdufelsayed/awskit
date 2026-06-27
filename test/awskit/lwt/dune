@@ -1,4 +1,40 @@
 (test
- (name test_awskit_lwt)
+ (name test_runtime_http_workload_lwt)
  (package awskit-lwt)
- (libraries awskit awskit-lwt cohttp-lwt-unix ptime alcotest))
+ (libraries
+  awskit
+  awskit-lwt
+  awskit_runtime_http_workload
+  base
+  cohttp-lwt-unix
+  lwt
+  lwt.unix
+  ptime
+  alcotest
+  qcheck-core
+  qcheck-alcotest)
+ (deps
+  (source_tree ../../fixtures/runtime-http-replay)))
+
+(rule
+ (alias runtime-http)
+ (package awskit-lwt)
+ (deps
+  test_runtime_http_workload_lwt.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED)
+  (source_tree ../../fixtures/runtime-http-replay))
+ (action
+  (setenv
+   AWSKIT_RUNTIME_HTTP_REQUIRE_LOOPBACK
+   1
+   (run
+    ./test_runtime_http_workload_lwt.exe
+    test
+    "workload:awskit-lwt:runtime-http"))))
+
+(alias
+ (name discovery)
+ (package awskit-lwt)
+ (deps
+  (alias runtime-http)))

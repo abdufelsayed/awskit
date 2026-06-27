@@ -1,4 +1,7 @@
-open Common
+module Xml = S3_xml
+
+let ( let* ) = S3_result.( let* )
+
 open Headers
 open Bucket_xml_support
 
@@ -10,13 +13,13 @@ let validate_rule (rule : Bucket.Encryption.Rule.t) =
     | Some Aws_kms_dsse ->
         Ok ()
     | Some (Unknown _) ->
-        invalid ~field:"sse_algorithm"
+        S3_error_context.invalid ~field:"sse_algorithm"
           "unknown encryption algorithms cannot be written"
   in
   let validate_blocked_encryption_type = function
     | Bucket.Encryption.Blocked_encryption_type.Sse_c | No_block -> Ok ()
     | Unknown _ ->
-        invalid ~field:"blocked_encryption_types"
+        S3_error_context.invalid ~field:"blocked_encryption_types"
           "unknown blocked encryption types cannot be written"
   in
   let validate_kms_usage () =
@@ -24,16 +27,19 @@ let validate_rule (rule : Bucket.Encryption.Rule.t) =
     | (Some Aws_kms | Some Aws_kms_dsse), Some _ -> Ok ()
     | _, None -> Ok ()
     | _ ->
-        invalid ~field:"kms_master_key_id"
+        S3_error_context.invalid ~field:"kms_master_key_id"
           "kms_master_key_id requires aws:kms or aws:kms:dsse"
   in
   let validate_bucket_key_usage () =
     match (rule.sse_algorithm, rule.bucket_key_enabled) with
-    | (Some Aws_kms | Some Aws_kms_dsse), Some _ -> Ok ()
+    | Some Aws_kms_dsse, Some _ ->
+        S3_error_context.invalid ~field:"bucket_key_enabled"
+          "bucket_key_enabled is not supported for aws:kms:dsse"
+    | Some Aws_kms, Some _ -> Ok ()
     | _, None -> Ok ()
     | _ ->
-        invalid ~field:"bucket_key_enabled"
-          "bucket_key_enabled requires aws:kms or aws:kms:dsse"
+        S3_error_context.invalid ~field:"bucket_key_enabled"
+          "bucket_key_enabled requires aws:kms"
   in
   let rec validate_blocked = function
     | [] -> Ok ()
@@ -49,7 +55,9 @@ let validate_rule (rule : Bucket.Encryption.Rule.t) =
 
 let validate_config (config : Bucket.Encryption.config) =
   match config.rules with
-  | [] -> invalid ~field:"encryption" "encryption config must include a rule"
+  | [] ->
+      S3_error_context.invalid ~field:"encryption"
+        "encryption config must include a rule"
   | rules ->
       let rec loop = function
         | [] -> Ok ()
@@ -111,7 +119,15 @@ let parse body response =
         (sse_algorithm, kms_master_key_id)
   in
   let parse_bucket_key nodes =
-    Option.bind (Xml.child_text "BucketKeyEnabled" nodes) Response.parse_bool
+    match Xml.child_text "BucketKeyEnabled" nodes with
+    | None -> Ok None
+    | Some value -> (
+        match Response.parse_bool value with
+        | Some value -> Ok (Some value)
+        | None ->
+            Xml.decode_field_error
+              ~path:"ServerSideEncryptionConfiguration.Rule"
+              "<BucketKeyEnabled> has invalid value %S" value)
   in
   let parse_blocked nodes =
     Xml.child "BlockedEncryptionTypes" nodes
@@ -123,11 +139,12 @@ let parse body response =
     | [] -> Ok { Bucket.Encryption.config = { rules = List.rev acc }; response }
     | nodes :: rest ->
         let sse_algorithm, kms_master_key_id = parse_apply nodes in
+        let* bucket_key_enabled = parse_bucket_key nodes in
         let rule =
           {
             Bucket.Encryption.Rule.sse_algorithm;
             kms_master_key_id;
-            bucket_key_enabled = parse_bucket_key nodes;
+            bucket_key_enabled;
             blocked_encryption_types = parse_blocked nodes;
           }
         in

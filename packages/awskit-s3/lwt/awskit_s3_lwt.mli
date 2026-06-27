@@ -8,36 +8,61 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
   type t
   (** S3 connection handle for the supplied Cohttp client. *)
 
+  (** Lwt S3 runtime used by [Awskit_s3.Make]. *)
   module Runtime :
     Awskit_s3.RUNTIME with type 'a t = 'a Lwt.t and type connection = t
 
   val create :
     ?ctx:Client.ctx ->
-    ?endpoint:Awskit.Endpoint.t ->
-    ?addressing_style:Awskit_s3.addressing_style ->
-    ?endpoint_variant:Awskit_s3.endpoint_variant ->
-    ?scheme:Awskit.Endpoint.Scheme.t ->
-    region:Awskit.Region.t ->
+    ?endpoint_config:Awskit_s3.Endpoint_config.t ->
+    region:string ->
     credentials:Awskit.Credentials.t ->
     clock:(unit -> Ptime.t) ->
     ?retry_policy:Awskit.Retry.t ->
     ?sleep:(Ptime.Span.t -> unit Lwt.t) ->
+    ?random_float:(upper_bound:float -> float) ->
+    ?timeout_policy:Awskit.Timeout.policy ->
+    ?max_response_drain_bytes:int ->
     unit ->
-    t
+    (t, Awskit.Error.t) result
   (** Create a generic Lwt S3 client.
 
       Use this when the application owns the Cohttp client module/context. The
-      ready-to-use Unix variant is [awskit-s3-lwt-unix]. [sleep] defaults to a
-      no-op unless supplied, so production callers that want retry backoff
-      should pass a real sleep function. *)
+      ready-to-use Unix variant is [awskit-s3-lwt-unix]. When retries are
+      enabled, custom Lwt backends must pass real [sleep] and [random_float]
+      capabilities or use [Awskit.Retry.disabled]. Explicit timeout policies
+      with configured spans also require [sleep]. Use [endpoint_config] for AWS
+      endpoint variants, local S3-compatible tests, or explicit endpoints that
+      use S3-compatible signing/addressing rules. [max_response_drain_bytes]
+      controls how much response body the runtime drains after successful
+      consumers. *)
+
+  module Body : sig
+    include
+      Awskit_s3.BODY
+        with type 'a io := 'a Lwt.t
+         and type t = Runtime.request_body
+
+    val of_lwt_stream :
+      content_length:int64 -> string Lwt_stream.t -> (t, Awskit.Error.t) result
+    (** Build a non-replayable request body from an existing Lwt stream.
+
+        [content_length] must match the bytes yielded by the stream, and the
+        stream must remain valid until the request finishes. *)
+  end
+
+  module Reader :
+    Awskit_s3.READER
+      with type 'a io := 'a Lwt.t
+       and type t = Runtime.response_body_reader
 
   (** Object operations returning [Lwt.t]. *)
   module Object :
     Awskit_s3.OBJECT
       with type connection := t
        and type 'a io := 'a Lwt.t
-       and type request_body := Runtime.request_body
-       and type response_body_reader := Runtime.response_body_reader
+       and type request_body := Body.t
+       and type response_body_reader := Reader.t
 
   (** Bucket operations returning [Lwt.t]. *)
   module Bucket :
@@ -48,9 +73,9 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     Awskit_s3.MULTIPART
       with type connection := t
        and type 'a io := 'a Lwt.t
-       and type request_body := Runtime.request_body
+       and type request_body := Body.t
 
-  (** Presigned URL helpers returning [Lwt.t]. *)
+  (** Presigned request artifact helpers returning [Lwt.t]. *)
   module Presigned :
     Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a Lwt.t
 end

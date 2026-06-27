@@ -1,7 +1,17 @@
-open Common
+module Error = S3_error
+
+module type RUNTIME = sig
+  include Awskit.Runtime.S
+
+  module S3_endpoint : sig
+    type nonrec connection = connection
+
+    val s3_endpoint_config : connection -> Endpoint_resolver.t
+  end
+end
 
 module type S = sig
-  module R : Awskit_s3_intf.RUNTIME
+  module R : RUNTIME
 
   type connection = R.connection
   type 'a io = 'a R.t
@@ -13,6 +23,9 @@ module type S = sig
   val return_ok : 'a -> ('a, Error.t) result io
   val return_error : Error.t -> ('a, Error.t) result io
   val endpoint_config : connection -> Endpoint_resolver.t
+  val region : connection -> Awskit.Region.t
+  val now : connection -> Ptime.t
+  val credentials : connection -> (Awskit.Credentials.t, Error.t) result io
 
   val object_request :
     connection ->
@@ -31,6 +44,9 @@ module type S = sig
 
   val read_body :
     response_body_reader -> max_size:int64 -> (string, Error.t) result io
+
+  val read_body_bytes :
+    response_body_reader -> max_size:int64 -> (bytes, Error.t) result io
 
   val read_response_body :
     R.response_body -> max_size:int64 -> (string, Error.t) result io
@@ -54,6 +70,17 @@ module type S = sig
     request:Endpoint_resolver.Request.t ->
     query:(string * string list) list ->
     headers:(string * string) list ->
+    f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
+    ('a, Error.t) result io
+
+  val with_retryable_embedded_response :
+    connection ->
+    method_:Awskit.Request.Method.t ->
+    request:Endpoint_resolver.Request.t ->
+    query:(string * string list) list ->
+    headers:(string * string) list ->
+    payload_hash:Awskit.Body.Payload_hash.t ->
+    request_body ->
     f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
     ('a, Error.t) result io
 

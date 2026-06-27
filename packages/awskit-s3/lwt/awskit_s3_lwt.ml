@@ -2,44 +2,112 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
   module Aws = Awskit_lwt.Make (Client)
 
   type t = { aws : Aws.t; endpoint_config : Awskit_s3.endpoint_config }
+  type runtime_connection = t
 
   module Runtime = struct
-    type connection = t
+    type connection = runtime_connection
     type 'a t = 'a Lwt.t
     type request_body = Aws.Runtime.request_body
     type response_body = Aws.Runtime.response_body
     type request_body_writer = Aws.Runtime.request_body_writer
     type response_body_reader = Aws.Runtime.response_body_reader
 
-    let return = Aws.Runtime.return
-    let bind = Aws.Runtime.bind
-    let now t = Aws.Runtime.now t.aws
-    let region t = Aws.Runtime.region t.aws
-    let credentials t = Aws.Runtime.credentials t.aws
-    let retry_policy t = Aws.Runtime.retry_policy t.aws
-    let sleep t = Aws.Runtime.sleep t.aws
-    let s3_endpoint_config t = t.endpoint_config
-    let endpoint _ = None
-
+    module IO = Aws.Runtime.IO
     module Request_body = Aws.Runtime.Request_body
     module Response_body = Aws.Runtime.Response_body
 
-    let with_response t request body ~f =
-      Aws.Runtime.with_response t.aws request body ~f
+    module Transport = struct
+      type 'a io = 'a Lwt.t
+      type connection = runtime_connection
+      type request_body = Aws.Runtime.request_body
+      type response_body = Aws.Runtime.response_body
+
+      let with_response t request ~body ~consume =
+        Aws.Runtime.Transport.with_response t.aws request ~body ~consume
+    end
+
+    module Clock = struct
+      type connection = runtime_connection
+
+      let now t = Aws.Runtime.Clock.now t.aws
+    end
+
+    module Sleeper = struct
+      type 'a io = 'a Lwt.t
+      type connection = runtime_connection
+
+      let sleep t span = Aws.Runtime.Sleeper.sleep t.aws span
+    end
+
+    module Random = struct
+      type connection = runtime_connection
+
+      let float t ~upper_bound = Aws.Runtime.Random.float t.aws ~upper_bound
+    end
+
+    module Credentials = struct
+      type 'a io = 'a Lwt.t
+      type connection = runtime_connection
+
+      let resolve t = Aws.Runtime.Credentials.resolve t.aws
+    end
+
+    module Endpoint = struct
+      type connection = runtime_connection
+
+      let region t = Aws.Runtime.Endpoint.region t.aws
+      let endpoint t = Aws.Runtime.Endpoint.endpoint t.aws
+    end
+
+    module Retry = struct
+      type connection = runtime_connection
+
+      let policy t = Aws.Runtime.Retry.policy t.aws
+    end
+
+    module Timeout = struct
+      type connection = runtime_connection
+
+      let policy t = Aws.Runtime.Timeout.policy t.aws
+    end
+
+    module S3_endpoint = struct
+      type connection = runtime_connection
+
+      let s3_endpoint_config t = t.endpoint_config
+    end
   end
 
   module S3 = Awskit_s3.Make (Runtime)
 
-  let create ?ctx ?endpoint ?addressing_style ?endpoint_variant ?scheme ~region
-      ~credentials ~clock ?retry_policy ?sleep () =
-    let aws =
-      Aws.create ?ctx ~region ~credentials ~clock ?retry_policy ?sleep ()
-    in
-    let endpoint_config =
-      Awskit_s3.endpoint_config ?addressing_style ?endpoint_variant ?scheme
-        ?endpoint ()
-    in
-    { aws; endpoint_config }
+  module Body = struct
+    include S3.Body
+
+    let of_lwt_stream ~content_length stream =
+      let open Lwt.Infix in
+      of_stream ~content_length ~replayable:false ~write:(fun writer ->
+          let rec loop () =
+            Lwt_stream.get stream >>= function
+            | None -> Lwt.return_ok ()
+            | Some chunk -> (
+                Writer.write_string writer chunk >>= function
+                | Ok () -> loop ()
+                | Error _ as error -> Lwt.return error)
+          in
+          loop ())
+  end
+
+  module Reader = S3.Reader
+
+  let create ?ctx ?(endpoint_config = Awskit_s3.default_endpoint_config) ~region
+      ~credentials ~clock ?retry_policy ?sleep ?random_float ?timeout_policy
+      ?max_response_drain_bytes () =
+    match
+      Aws.create ?ctx ~region ~credentials ~clock ?retry_policy ?sleep
+        ?random_float ?timeout_policy ?max_response_drain_bytes ()
+    with
+    | Error _ as error -> error
+    | Ok aws -> Ok { aws; endpoint_config }
 
   module Object = S3.Object
   module Bucket = S3.Bucket

@@ -1,0 +1,19 @@
+(executables
+ (names put_get list_prefix object_metadata presign_summary)
+ (libraries awskit awskit-s3 awskit-s3-sim ptime uri))
+
+(alias
+ (name examples)
+ (package awskit-s3-sim)
+ (deps put_get.exe list_prefix.exe object_metadata.exe presign_summary.exe))
+
+(rule
+ (alias simulator-contract)
+ (package awskit-s3-sim)
+ (deps put_get.exe list_prefix.exe object_metadata.exe presign_summary.exe)
+ (action
+  (progn
+   (run ./put_get.exe)
+   (run ./list_prefix.exe)
+   (run ./object_metadata.exe)
+   (run ./presign_summary.exe))))

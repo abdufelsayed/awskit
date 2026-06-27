@@ -1,7 +1,9 @@
-(** Pure AWS infrastructure: signing, credentials, endpoints, structured errors,
-    body metadata, HTTP metadata, and the {!Runtime} module type.
+(** Runtime-agnostic AWS infrastructure: signing, credentials, endpoints,
+    structured errors, body metadata, HTTP metadata, and the {!Runtime} module
+    type.
 
-    No IO. Concurrency/platform code lives in sub-libraries:
+    The core package performs no IO. Concurrency and platform-specific code live
+    in sub-libraries:
     - [awskit-eio] — Eio runtime adapter
     - [awskit-lwt] — generic Lwt runtime functor
     - [awskit-lwt-unix] — ready-to-use Lwt + Unix backend
@@ -20,10 +22,13 @@ module Error = Error
 (** Structured core error type. *)
 
 module Body = Body
-(** Runtime-neutral body metadata. *)
+(** Runtime-agnostic body metadata. *)
 
 module Retry = Retry
 (** Shared retry policy for AWS service packages. *)
+
+module Timeout = Timeout
+(** Runtime timeout policy. *)
 
 module Signing = Signing
 (** AWS Signature Version 4 signing. *)

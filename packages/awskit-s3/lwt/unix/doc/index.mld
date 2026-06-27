@@ -1,0 +1,34 @@
+{0 awskit-s3-lwt-unix}
+
+Ready-to-use Lwt + Unix S3 client.
+
+The public entrypoint is {!module:Awskit_s3_lwt_unix}. This package combines the
+S3 operation surface with the ready Awskit Lwt Unix runtime.
+
+It can resolve credentials and region from the standard Unix sources exposed by
+[awskit-lwt-unix], and it also owns S3 local-file body, reader, upload, and
+download helpers.
+
+{1 Client Surface}
+
+{!val:Awskit_s3_lwt_unix.create} accepts explicit credentials, region, retry,
+timeout, and endpoint configuration. When credentials or region are omitted,
+the underlying [awskit-lwt-unix] runtime reads the standard environment,
+profile, ECS/container, and EC2 metadata sources it supports.
+
+The package exposes:
+
+{ul
+  {li [Body.of_lwt_stream], [Body.of_channel], and [Body.of_path] for request
+    bodies with known content lengths.}
+  {li [Reader.to_channel] and [Reader.to_path] for scoped response-body
+    consumers.}
+  {li [Object.Transfer.upload_file], [download_file],
+    [multipart_upload_file], and [resume_multipart_upload_file] for managed
+    local-file workflows.}
+}
+
+Managed uploads abort multipart uploads that Awskit created when the helper
+fails before completion. Resumed caller-owned uploads are left open on failure
+so the caller can retry or abort explicitly. Managed downloads write through a
+private temporary file before publishing the target path.

@@ -1,0 +1,28 @@
+{0 awskit-eio}
+
+Direct-style Eio runtime adapter for Awskit.
+
+The public entrypoint is {!module:Awskit_eio}. Operations use plain result
+values in direct style, while response bodies remain scoped to the runtime
+callback.
+
+Applications own HTTPS transport policy, TLS configuration, CA roots, RNG
+initialization, and platform policy. Pass an explicit HTTPS connector for normal
+AWS endpoints, and use the plaintext helpers only for intentional local tests.
+
+{1 Runtime Shape}
+
+{!val:Awskit_eio.create} requires an Eio environment, switch, HTTPS policy,
+region, and credentials. The adapter does not provide a ready Eio Unix
+aggregate package; applications compose this runtime with their own credential
+loading and TLS setup at the application edge.
+
+Use {!val:Awskit_eio.http_only} only for plain HTTP endpoints such as loopback
+test services. HTTPS AWS endpoints need an application-supplied connector
+compatible with [Cohttp_eio.Client.make].
+
+The runtime keeps response readers scoped to the operation callback. If a
+consumer succeeds, remaining response bytes are drained up to
+[max_response_drain_bytes]; if the consumer returns an SDK error, that error
+wins over cleanup failures. Native Eio cancellation and user exceptions are not
+converted into ordinary SDK errors.

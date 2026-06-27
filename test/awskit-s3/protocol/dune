@@ -1,0 +1,122 @@
+(library
+ (name awskit_s3_protocol_test_support)
+ (modules
+  protocol_fixture_diff
+  protocol_generators
+  protocol_mutation
+  protocol_recording_runtime
+  protocol_replay
+  protocol_support
+  protocol_wire_model)
+ (wrapped false)
+ (libraries
+  awskit
+  awskit-s3
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  ptime
+  fmt
+  uri))
+
+(test
+ (name test_protocol_pbt)
+ (package awskit-s3)
+ (modules test_protocol_pbt)
+ (libraries
+  awskit
+  awskit-s3
+  awskit_s3_protocol_test_support
+  awskit_test_coverage
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  ptime
+  fmt))
+
+(test
+ (name test_domain_pbt)
+ (package awskit-s3)
+ (modules test_domain_pbt)
+ (libraries
+  awskit
+  awskit-s3
+  awskit_s3_protocol_test_support
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  fmt))
+
+(rule
+ (alias wire)
+ (package awskit-s3)
+ (deps
+  test_protocol_pbt.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED))
+ (action
+  (run ./test_protocol_pbt.exe test "workload:awskit-s3:protocol-wire")))
+
+(rule
+ (alias domain)
+ (package awskit-s3)
+ (deps
+  test_domain_pbt.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED))
+ (action
+  (run ./test_domain_pbt.exe)))
+
+(test
+ (name test_protocol_fixtures)
+ (package awskit-s3)
+ (modules test_protocol_fixtures)
+ (deps
+  (source_tree ../fixtures/protocol))
+ (libraries
+  awskit
+  awskit-s3
+  awskit_s3_protocol_test_support
+  alcotest
+  ptime
+  fmt
+  uri))
+
+(rule
+ (alias fixtures)
+ (package awskit-s3)
+ (deps
+  test_protocol_fixtures.exe
+  (source_tree ../fixtures/protocol))
+ (action
+  (run ./test_protocol_fixtures.exe test "fixture:awskit-s3:protocol-wire")))
+
+(test
+ (name test_fuzz_replay)
+ (package awskit-s3)
+ (modules test_fuzz_replay)
+ (deps
+  (source_tree ../fixtures/protocol/fuzz-replay))
+ (libraries
+  awskit
+  awskit-s3
+  awskit_s3_protocol_test_support
+  alcotest
+  ptime
+  fmt))
+
+(rule
+ (alias replay)
+ (package awskit-s3)
+ (deps
+  test_fuzz_replay.exe
+  (source_tree ../fixtures/protocol/fuzz-replay))
+ (action
+  (run ./test_fuzz_replay.exe test "replay:awskit-s3:protocol-wire")))
+
+(alias
+ (name discovery)
+ (package awskit-s3)
+ (deps
+  (alias wire)
+  (alias replay)))

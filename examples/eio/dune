@@ -1,0 +1,26 @@
+(executables
+ (names put_get list_prefix presign transfer_file object_metadata)
+ (libraries
+  awskit
+  awskit-unix
+  awskit-eio
+  awskit-s3
+  awskit-s3-eio
+  eio
+  eio_main
+  tls
+  tls-eio
+  ca-certs
+  domain-name
+  mirage-crypto-rng.unix
+  ptime
+  uri))
+
+(alias
+ (name examples)
+ (deps
+  put_get.exe
+  list_prefix.exe
+  presign.exe
+  transfer_file.exe
+  object_metadata.exe))

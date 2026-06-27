@@ -1,2 +1,3 @@
 (documentation
- (package awskit))
+ (package awskit)
+ (mld_files index guides))

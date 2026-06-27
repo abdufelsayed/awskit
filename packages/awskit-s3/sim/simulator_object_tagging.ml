@@ -1,7 +1,8 @@
-open Awskit_s3
 open Simulator_support
 open Simulator_error
 open Simulator_store
+module Object = Awskit_s3.Object
+module Tag = Awskit_s3.Tag
 
 module Tagging = struct
   let get conn ~bucket ~key ?options:_ () =
@@ -9,7 +10,7 @@ module Tagging = struct
     | Error error -> Error error
     | Ok obj -> Ok { Object.Tagging.tags = obj.tags; response = response 200 }
 
-  let put conn ~bucket ~key ?options:_ tags =
+  let put conn ~bucket ~key ?options:_ ~tags () =
     match require_object conn bucket key with
     | Error error -> Error error
     | Ok obj -> (
@@ -23,6 +24,6 @@ module Tagging = struct
     match require_object conn bucket key with
     | Error error -> Error error
     | Ok obj ->
-        obj.tags <- [];
+        obj.tags <- Tag.Set.empty;
         Ok (response 204)
 end

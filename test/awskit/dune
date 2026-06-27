@@ -1,4 +1,14 @@
 (test
- (name test_awskit)
+ (name test_core_contracts)
  (package awskit)
- (libraries awskit ptime alcotest qcheck-core qcheck-alcotest))
+ (libraries awskit base ptime alcotest qcheck-core qcheck-alcotest))
+
+(rule
+ (alias awskit-core-contracts)
+ (package awskit)
+ (deps
+  test_core_contracts.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED))
+ (action
+  (run ./test_core_contracts.exe)))

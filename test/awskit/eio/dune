@@ -1,4 +1,41 @@
 (test
- (name test_awskit_eio)
+ (name test_runtime_http_workload_eio)
  (package awskit-eio)
- (libraries awskit awskit-eio cohttp-eio eio eio_main ptime alcotest unix))
+ (libraries
+  awskit
+  awskit-eio
+  awskit_runtime_http_workload
+  base
+  cohttp-eio
+  eio
+  eio_main
+  ptime
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  unix)
+ (deps
+  (source_tree ../../fixtures/runtime-http-replay)))
+
+(rule
+ (alias runtime-http)
+ (package awskit-eio)
+ (deps
+  test_runtime_http_workload_eio.exe
+  (env_var AWSKIT_QCHECK_COUNT)
+  (env_var QCHECK_SEED)
+  (source_tree ../../fixtures/runtime-http-replay))
+ (action
+  (setenv
+   AWSKIT_RUNTIME_HTTP_REQUIRE_LOOPBACK
+   1
+   (run
+    ./test_runtime_http_workload_eio.exe
+    test
+    "workload:awskit-eio:runtime-http"))))
+
+(alias
+ (name discovery)
+ (package awskit-eio)
+ (deps
+  (alias runtime-http)))

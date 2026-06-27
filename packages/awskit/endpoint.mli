@@ -16,39 +16,56 @@ type t
     paths and query strings. *)
 
 val pp : Format.formatter -> t -> unit
+(** Pretty-print an endpoint as [scheme://authority]. *)
+
 val equal : t -> t -> bool
+(** Compare endpoint values structurally. *)
 
 val create :
   scheme:Scheme.t -> host:string -> ?port:int -> unit -> (t, Error.t) result
 (** Create an endpoint from structured parts. [host] must be non-empty and must
-    not include a scheme, path, or port. *)
+    not include a scheme, path, port, or IPv6 brackets. IPv6 literals are
+    rendered with brackets when used as a URL authority. *)
 
 val create_exn : scheme:Scheme.t -> host:string -> ?port:int -> unit -> t
-(** Like {!val:create}, but raises [Invalid_argument] on validation failure. *)
+(** Like {!val:create}, but raises [Error.Awskit_error] carrying the structured
+    validation error on validation failure. *)
 
 val of_string : string -> (t, Error.t) result
 (** Parse an [http://] or [https://] endpoint URL. Paths and queries are not
-    accepted because service packages construct those per request. *)
+    accepted because service packages construct those per request. IPv6 literals
+    must use URL brackets, for example ["http://[::1]:9000"]. *)
 
 val of_string_exn : string -> t
-(** Like {!val:of_string}, but raises [Invalid_argument] on validation failure.
-*)
+(** Like {!val:of_string}, but raises [Error.Awskit_error] carrying the
+    structured validation error on validation failure. *)
 
 val http : host:string -> ?port:int -> unit -> (t, Error.t) result
 (** Create an HTTP endpoint. *)
 
 val http_exn : host:string -> ?port:int -> unit -> t
+(** Like {!val:http}, but raises [Error.Awskit_error] carrying the structured
+    validation error on validation failure. *)
 
 val https : host:string -> ?port:int -> unit -> (t, Error.t) result
 (** Create an HTTPS endpoint. *)
 
 val https_exn : host:string -> ?port:int -> unit -> t
+(** Like {!val:https}, but raises [Error.Awskit_error] carrying the structured
+    validation error on validation failure. *)
+
 val scheme : t -> Scheme.t
+(** Return the endpoint scheme. *)
+
 val host : t -> string
+(** Return the host without scheme, path, query, or port. *)
+
 val port : t -> int option
+(** Return the explicit port, if one was configured. *)
 
 val authority : t -> string
-(** Host plus optional port, suitable for the HTTP [Host] header. *)
+(** Host plus optional port, suitable for the HTTP [Host] header. IPv6 literal
+    hosts are bracketed. *)
 
 val to_url_prefix : t -> string
 (** Render [scheme://authority] without a trailing slash. *)

@@ -1,4 +1,5 @@
 (library
  (name awskit_unix)
  (public_name awskit-unix)
+ (private_modules clock credentials region)
  (libraries base awskit ptime ptime.clock.os fmt))

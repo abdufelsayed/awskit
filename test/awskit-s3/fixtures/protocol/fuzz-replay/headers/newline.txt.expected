@@ -1,0 +1,8 @@
+fixture-path=headers/newline.txt
+operation=request-validate-headers
+input-kind=bytes-hex
+input=736166652d7072656669780a756e736166652d7375666669780a
+expected-error:
+kind=validation
+field=header
+retry-class=fatal
