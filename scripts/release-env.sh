@@ -27,6 +27,20 @@ awskit_require_release_version() {
     esac
   fi
 
+  if [ -z "$AWSKIT_RELEASE_VERSION" ] && [ -f dune-project ]; then
+    AWSKIT_RELEASE_VERSION=$(
+      awk '
+        $1 == "(version" {
+          version = $2
+          gsub(/\)/, "", version)
+          sub(/^v/, "", version)
+          print version
+          exit
+        }
+      ' dune-project
+    )
+  fi
+
   if [ -z "$AWSKIT_RELEASE_VERSION" ]; then
     echo "Unable to determine release version; set AWSKIT_RELEASE_VERSION." >&2
     exit 1

@@ -8,7 +8,7 @@ on:
         required: false
         type: string
   push:
-    branches: [release/**]
+    branches: [main, release/**]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
