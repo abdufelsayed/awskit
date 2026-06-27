@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: Release version to validate when running release archive checks
+        description: Release version to validate when checking the source distribution
         required: false
         type: string
   pull_request:
   push:
     branches: [main, release/**]
+    tags: ['v*']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' || github.sha }}
@@ -206,12 +207,9 @@ jobs:
           path: .logs/
           if-no-files-found: ignore
 
-  release-archive:
-    name: Release archive
-    if: |
-      github.event_name != 'pull_request' &&
-      (startsWith(github.ref, 'refs/heads/release/') ||
-       (github.event_name == 'workflow_dispatch' && inputs.release_version != ''))
+  source-distribution:
+    name: Source distribution
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -229,7 +227,7 @@ jobs:
           opam-local-packages: |
             *.opam
 
-      - name: Run release archive check
+      - name: Check source distribution
         env:
           AWSKIT_RELEASE_REF_NAME: ${{ github.ref_name }}
         run: |
@@ -241,10 +239,13 @@ jobs:
               release/*)
                 AWSKIT_RELEASE_VERSION=${AWSKIT_RELEASE_REF_NAME#release/}
                 ;;
+              v*)
+                AWSKIT_RELEASE_VERSION=${AWSKIT_RELEASE_REF_NAME#v}
+                ;;
             esac
             export AWSKIT_RELEASE_VERSION
           fi
-          scripts/check.sh release-archive
+          scripts/check.sh source-distribution
 
   ci-required:
     name: Required CI
@@ -256,6 +257,7 @@ jobs:
       - docs-examples
       - no-network-correctness
       - s3-minio-integration
+      - source-distribution
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -268,6 +270,7 @@ jobs:
           DOCS_EXAMPLES: ${{ needs.docs-examples.result }}
           NO_NETWORK_CORRECTNESS: ${{ needs.no-network-correctness.result }}
           S3_MINIO_INTEGRATION: ${{ needs.s3-minio-integration.result }}
+          SOURCE_DISTRIBUTION: ${{ needs.source-distribution.result }}
         run: |
           failed=0
 
@@ -292,5 +295,6 @@ jobs:
           check_result "Documentation and examples" "$DOCS_EXAMPLES"
           check_result "No-network correctness" "$NO_NETWORK_CORRECTNESS"
           check_result "S3 MinIO integration" "$S3_MINIO_INTEGRATION"
+          check_result "Source distribution" "$SOURCE_DISTRIBUTION"
 
           exit "$failed"

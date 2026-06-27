@@ -14,7 +14,8 @@ Checks:
   no-network         Reported no-network correctness evidence.
   minio              Reported bounded MinIO integration evidence.
   stress             Reported high-cost discovery evidence.
-  release-archive    Release archive and archive documentation checks.
+  source-distribution
+                     Source distribution and extracted documentation checks.
   release            Composed local release gate.
 
 Options:
@@ -48,7 +49,7 @@ label=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     package | package-metadata | package-isolation | \
-    docs-examples | no-network | minio | stress | release-archive | release)
+    docs-examples | no-network | minio | stress | source-distribution | release)
       if [ -n "$check" ]; then
         echo "Only one CHECK may be provided." >&2
         exit 2
@@ -181,6 +182,29 @@ run_checked() {
   if [ "$status" -ne 0 ]; then
     exit "$status"
   fi
+}
+
+run_checked_retry() {
+  max_attempts=$1
+  shift
+  attempt=1
+
+  while :; do
+    print_command "$@"
+    "$@"
+    status=$?
+    if [ "$status" -eq 0 ]; then
+      return 0
+    fi
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      exit "$status"
+    fi
+
+    echo "Command failed with status $status; retrying attempt $((attempt + 1))" \
+      "of $max_attempts." >&2
+    sleep $((attempt * 5))
+    attempt=$((attempt + 1))
+  done
 }
 
 alcotest_output_has_failure_marker() {
@@ -565,13 +589,14 @@ check_clean_worktree() {
   git diff --check
   if ! git diff --quiet || ! git diff --cached --quiet ||
      [ -n "$(git ls-files --others --exclude-standard)" ]; then
-    echo "Release checks require a clean git worktree before building the archive." >&2
+    echo "Source distribution checks require a clean git worktree." >&2
     exit 1
   fi
 }
 
 check_package_metadata() {
-  run_checked opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
+  run_checked_retry 3 opam install --yes --with-test --with-doc \
+    --with-dev-setup --deps-only .
   run_checked opam exec -- dune build @opam
   run_checked opam lint ./*.opam
   run_checked opam exec -- dune fmt
@@ -589,35 +614,38 @@ check_package() {
     exit 2
   fi
 
-  run_checked opam install --yes --with-test --deps-only "$package"
+  run_checked_retry 3 opam install --yes --with-test --deps-only "$package"
   run_checked opam exec -- dune build -p "$package" @install @runtest
 }
 
 check_docs_examples() {
-  run_checked opam install --yes --with-test --with-doc --deps-only .
+  run_checked_retry 3 opam install --yes --with-test --with-doc --deps-only .
   if [ -n "$AWSKIT_EXAMPLE_OPAM_PACKAGES" ]; then
-    run_checked opam install --yes $AWSKIT_EXAMPLE_OPAM_PACKAGES
+    run_checked_retry 3 opam install --yes $AWSKIT_EXAMPLE_OPAM_PACKAGES
   fi
   run_checked opam exec -- dune build @examples @doc
 }
 
 check_no_network() {
-  run_checked opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
+  run_checked_retry 3 opam install --yes --with-test --with-doc \
+    --with-dev-setup --deps-only .
   report_no_network
   finish_report
 }
 
 check_minio() {
-  run_checked opam install --yes --with-test --deps-only $AWSKIT_MINIO_OPAM_PACKAGES
+  run_checked_retry 3 opam install --yes --with-test --deps-only \
+    $AWSKIT_MINIO_OPAM_PACKAGES
   start_report
   run_minio no
   finish_report
 }
 
 check_stress() {
-  run_checked opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
+  run_checked_retry 3 opam install --yes --with-test --with-doc \
+    --with-dev-setup --deps-only .
   if [ -n "$AWSKIT_EXAMPLE_OPAM_PACKAGES" ]; then
-    run_checked opam install --yes $AWSKIT_EXAMPLE_OPAM_PACKAGES
+    run_checked_retry 3 opam install --yes $AWSKIT_EXAMPLE_OPAM_PACKAGES
   fi
   report_stress
   finish_report
@@ -671,8 +699,8 @@ check_package_isolation() {
   for package in $(release_packages); do
     cleanup_isolation_packages
     echo "Checking isolated opam metadata for $package with $isolation_compiler"
-    run_checked opam install --switch="$isolation_switch" --yes --deps-only \
-      --with-test "$package"
+    run_checked_retry 3 opam install --switch="$isolation_switch" --yes \
+      --deps-only --with-test "$package"
     run_checked opam exec --switch="$isolation_switch" -- dune build -p "$package" \
       @install @runtest
   done
@@ -696,11 +724,13 @@ check_current_doc_warnings() {
   rm -f "$doc_log"
 }
 
-check_release_archive() {
+check_source_distribution() {
   awskit_require_release_version
   release_opam_switch=$(opam switch show)
 
   check_clean_worktree
+  run_checked_retry 3 opam install --yes --with-test --with-doc \
+    --with-dev-setup --deps-only .
   check_current_doc_warnings
   run_checked opam exec -- dune-release check -V "$AWSKIT_RELEASE_VERSION"
   run_checked opam exec -- dune-release distrib -V "$AWSKIT_RELEASE_VERSION"
@@ -718,7 +748,7 @@ check_release_archive() {
     exit 1
   fi
   if grep -E "Warning|Error|Failed to resolve" "$dist_log"; then
-    echo "Distribution archive documentation emitted warnings or unresolved references." >&2
+    echo "Source distribution documentation emitted warnings or unresolved references." >&2
     rm -rf "$dist_dir" "$dist_log"
     exit 1
   fi
@@ -729,11 +759,12 @@ check_release() {
   check_package_metadata
   check_package_isolation
   check_docs_examples
-  check_release_archive
+  check_source_distribution
 
   start_report
   report_no_network
-  run_checked opam install --yes --with-test --deps-only $AWSKIT_MINIO_OPAM_PACKAGES
+  run_checked_retry 3 opam install --yes --with-test --deps-only \
+    $AWSKIT_MINIO_OPAM_PACKAGES
   run_minio no
   finish_report
 }
@@ -778,8 +809,8 @@ case "$check" in
   stress)
     check_stress
     ;;
-  release-archive)
-    check_release_archive
+  source-distribution)
+    check_source_distribution
     ;;
   release)
     check_release

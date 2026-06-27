@@ -6,8 +6,8 @@ production-ready for the scope in `SUPPORT.md`.
 Related maintainer docs:
 
 - `docs/release.md` is the step-by-step release playbook.
-- `docs/ci.md` explains the `Required CI` package matrix and release archive
-  job.
+- `docs/ci.md` explains the `Required CI` package matrix and source
+  distribution job.
 - `docs/testing.md` explains the local evidence included in release gates.
 - `docs/security-threat-model.md` names security-sensitive contracts that need
   review before support claims expand.
@@ -20,7 +20,7 @@ Record each item in the release PR before merge:
 | --- | --- |
 | Release branch identity | Release branch head SHA used for validation. |
 | Required CI | `gh pr checks <pr-number> --watch=false` result showing `Required CI` green. |
-| Release archive CI | `Release archive` job result from `.github/workflows/ci.yml` on the release branch, or the matching manual dispatch result. |
+| Source distribution CI | `Source distribution` job result from `.github/workflows/ci.yml`. |
 | Local release gate | `scripts/check.sh release` result from the release branch. |
 | Package isolation | `scripts/check.sh package-isolation` result showing each released package passed isolated `opam install --with-test --deps-only <package>` and `dune build -p <package> @install @runtest`. |
 | Public API review | Status of `.mli` files, package docs, examples, and focused behavior tests. |
@@ -39,7 +39,7 @@ The script validates generated opam metadata, package-isolated opam
 install/test metadata, formatting, tests, no-network correctness evidence,
 examples, odoc output, install artifacts, distribution archive documentation,
 and MinIO integration evidence. It requires a clean worktree before building
-the release archive.
+the source distribution.
 
 ## CI Gates
 
@@ -48,10 +48,10 @@ evidence is:
 
 - `Required CI` from `.github/workflows/ci.yml`, covering package metadata,
   per-package opam install/test matrices on Linux and macOS, docs/examples,
-  no-network correctness evidence, and MinIO S3 integration evidence;
-- `Release archive` from `.github/workflows/ci.yml` on release branch pushes
-  or manual dispatch, covering distribution archive generation and archive
-  documentation checks.
+  no-network correctness evidence, MinIO S3 integration evidence, and release
+  source distribution validation;
+- `Source distribution` from `.github/workflows/ci.yml`, covering source
+  distribution generation and extracted documentation checks.
 
 Check PR state with:
 

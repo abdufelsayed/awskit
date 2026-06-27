@@ -33,7 +33,7 @@ surfaces, and publication targets. -->
 
 - Branch head:
 - Required CI:
-- Release archive:
+- Source distribution:
 - Local release check:
 - Opam preflight:
 - Public API review:

@@ -111,11 +111,11 @@ Required release-branch checks:
 
 - `Required CI` from `.github/workflows/ci.yml`, which aggregates package
   metadata, per-package opam install/test matrices,
-  documentation/examples, no-network correctness evidence, and MinIO S3
-  integration evidence.
-- `Release archive` from `.github/workflows/ci.yml`, which runs
-  `scripts/check.sh release-archive` for release branch pushes and manual
-  dispatch with a release version.
+  documentation/examples, no-network correctness evidence, MinIO S3
+  integration evidence, and source distribution validation.
+- `Source distribution` from `.github/workflows/ci.yml`, which runs as part of
+  `Required CI` on pull requests, `main`, release branches, `v*` tags, and
+  manual dispatch.
 
 The `Publish docs` workflow is expected to skip on release branches because it
 only runs after `CI` succeeds on `main`.
@@ -136,7 +136,7 @@ Record:
 
 - the release branch head SHA used for validation;
 - the `gh pr checks` result;
-- the `Release archive` result;
+- the `Source distribution` result;
 - the local `scripts/check.sh release` result;
 - public API review status;
 - support/security docs status;
@@ -156,7 +156,8 @@ opam-ci-style packaging failures that are practical to detect locally:
 - generated opam metadata from `dune-project`;
 - package-isolated `opam install --with-test --deps-only <package>`;
 - package-isolated `dune build -p <package> @install @runtest`;
-- release archive creation and documentation build from the archive.
+- source distribution creation and documentation build from the extracted
+  archive.
 
 ## Merge, Tag, And Publish
 
