@@ -50,7 +50,7 @@ jobs:
             *.opam
 
       - name: Install documentation dependencies
-        run: opam install --with-doc --deps-only .
+        run: opam install --yes --with-doc --deps-only .
 
       - name: Build documentation
         run: opam exec -- dune build @doc

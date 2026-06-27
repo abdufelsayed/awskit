@@ -407,15 +407,15 @@ opam exec -- dune test
 opam exec -- dune build @examples @doc
 ```
 
-Optional MinIO integration tests:
+Optional local-service integration tests:
 
 ```sh
 docker compose up -d
-opam exec -- dune build --force @s3-minio
+opam exec -- dune build --force @s3-local-service
 docker compose down -v
 ```
 
-The MinIO integration runner defaults to `http://127.0.0.1:9000` with the
+The local-service integration runner defaults to `http://127.0.0.1:9000` with the
 `minioadmin` credentials from `docker-compose.yml`. Override with:
 
 ```text

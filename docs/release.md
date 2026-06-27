@@ -36,9 +36,12 @@ git pull --ff-only
 git checkout -b release/vX.Y.Z
 ```
 
-The release version is inferred by `scripts/release-env.sh` from a branch named
-`release/vX.Y.Z` or from an exact `vX.Y.Z` tag. Set `AWSKIT_RELEASE_VERSION`
-only when running release checks outside that shape.
+Use the branch name as the release version source for commands below. When a
+command needs the version, set it explicitly:
+
+```sh
+version=X.Y.Z
+```
 
 ## Build The Release Ledger
 
@@ -110,30 +113,39 @@ gh pr checks <pr-number> --watch=false
 Required release-branch checks:
 
 - `Required CI` from `.github/workflows/ci.yml`, which aggregates package
-  metadata, per-package opam install/test matrices,
-  documentation/examples, no-network correctness evidence, and MinIO S3
-  integration evidence.
+  metadata, no-service correctness, documentation/examples, local-service
+  integration, and per-package install/build/test matrices.
 
 The `Publish docs` workflow is expected to skip on release branches because it
 only runs after `CI` succeeds on `main`.
 
-Before marking the release PR ready to merge, run:
+Before marking the release PR ready to merge, run the local release evidence
+from `docs/release-gates.md`, including:
 
 ```sh
-scripts/check.sh release
+opam exec -- dune build @opam
+opam lint ./*.opam
+opam exec -- dune fmt
+git diff --check
+git diff --exit-code
+scripts/test.sh quick --label release-correctness
+opam install --yes eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
+opam exec -- dune build @examples @doc
+scripts/test.sh integration --label release-integration
 ```
 
-This validates package metadata, package-isolated opam installs and tests,
-formatting, tests, examples, no-network correctness evidence, generated
-documentation, distribution archives, and MinIO integration evidence. The
-script requires a clean worktree before building the distribution archive.
+This validates package metadata, formatting, drift, no-service correctness,
+generated documentation, examples, and local-service integration. Also run the
+direct `dune-release check` and `dune-release distrib` archive checks from
+`docs/release-gates.md`. The worktree must be clean before building the
+distribution archive.
 
 Follow `docs/release-gates.md` before merging a production-ready release PR.
 Record:
 
 - the release branch head SHA used for validation;
 - the `gh pr checks` result;
-- the local `scripts/check.sh release` result;
+- the local release-gate command transcript;
 - public API review status;
 - support/security docs status;
 - whether live AWS tests are outside the support promise.
@@ -146,12 +158,14 @@ release, then opens an opam-repository PR through `opam publish`.
 Pre-merge validation is local
 evidence that the tagged release should publish cleanly.
 
-Before merging the release PR, `scripts/check.sh release` must catch the
-opam-ci-style packaging failures that are practical to detect locally:
+Before merging the release PR, the direct release commands and Required CI must
+catch the opam-ci-style packaging failures that are practical to detect before
+publication:
 
 - generated opam metadata from `dune-project`;
 - package-isolated `opam install --with-test --deps-only <package>`;
-- package-isolated `dune build -p <package> @install @runtest`;
+- package-isolated package build and test with
+  `dune build -p <package> @install @runtest`;
 - source distribution creation and documentation build from the extracted
   archive.
 

@@ -19,25 +19,47 @@ Record each item in the release PR before merge:
 | --- | --- |
 | Release branch identity | Release branch head SHA used for validation. |
 | Required CI | `gh pr checks <pr-number> --watch=false` result showing `Required CI` green. |
-| Local release gate | `scripts/check.sh release` result from the release branch. |
-| Package isolation | `scripts/check.sh package-isolation` result showing each released package passed isolated `opam install --with-test --deps-only <package>` and `dune build -p <package> @install @runtest`. |
+| Local release gate | Transcript of the direct local release commands below from the release branch. |
+| Package install/build/test | Required CI package matrix result, or local fresh-switch evidence showing each released package passed `opam install --with-test --deps-only <package>` plus `dune build -p <package> @install @runtest`. |
 | Public API review | Status of `.mli` files, package docs, examples, and focused behavior tests. |
 | Support/security scope | Status of `SUPPORT.md` and `SECURITY.md` against the release scope. |
 | Live AWS scope | Statement that live AWS is outside the gate unless `SUPPORT.md` promises live AWS coverage. |
 
 ## Local Gate
 
-Run the complete local release gate with:
+Run local release checks with direct tool commands from the release branch:
 
 ```sh
-scripts/check.sh release
+opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
+opam exec -- dune build @opam
+opam lint ./*.opam
+opam exec -- dune fmt
+git diff --check
+git diff --exit-code
+scripts/test.sh quick --label release-correctness
+opam install --yes eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
+opam exec -- dune build @examples @doc
+scripts/test.sh integration --label release-integration
 ```
 
-The script validates generated opam metadata, package-isolated opam
-install/test metadata, formatting, tests, no-network correctness evidence,
-examples, odoc output, install artifacts, distribution archive documentation,
-and MinIO integration evidence. It requires a clean worktree before building
-the source distribution.
+This validates generated opam metadata, opam lint, formatting, drift, examples,
+documentation, no-service test evidence, and MinIO-backed evidence. The test
+commands record durable reports under `.logs/`.
+
+Before building the source distribution, the worktree must be clean, including
+untracked files. Then run the archive checks with the release version:
+
+```sh
+version=X.Y.Z
+opam exec -- dune-release check -V "$version"
+opam exec -- dune-release distrib -V "$version"
+dist_dir=$(mktemp -d)
+tar -xjf "_build/awskit-$version.tbz" -C "$dist_dir"
+(cd "$dist_dir/awskit-$version" && opam exec -- dune build @doc)
+```
+
+Review documentation build output for warnings, errors, or unresolved
+references before recording the gate as passed.
 
 ## CI Gates
 
@@ -45,8 +67,8 @@ Release branch CI must be green before merging the release PR. The required CI
 evidence is:
 
 - `Required CI` from `.github/workflows/ci.yml`, covering package metadata,
-  per-package opam install/test matrices on Linux and macOS, docs/examples,
-  no-network correctness evidence, and MinIO S3 integration evidence.
+  no-service correctness, documentation/examples, local-service integration, and
+  per-package install/build/test matrices on Linux and macOS.
 
 Check PR state with:
 

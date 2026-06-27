@@ -40,7 +40,7 @@ package-scoped `test/*/support` library and remain private unless a later
 design intentionally publishes a conformance contract.
 
 Protocol fixtures belong under `test/*/fixtures`. Property tests, fuzz replay,
-simulator workloads, runtime workloads, and MinIO integration tests belong
+simulator workloads, runtime workloads, and local-service integration tests belong
 under named test directories with Dune aliases documented in `docs/testing.md`.
 
 Package boundaries are public design. Add a dependency only when it improves

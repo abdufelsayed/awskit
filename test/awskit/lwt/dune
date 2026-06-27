@@ -17,7 +17,7 @@
   (source_tree ../../fixtures/runtime-http-replay)))
 
 (rule
- (alias runtime-http)
+ (alias runtime-http-contracts)
  (package awskit-lwt)
  (deps
   test_runtime_http_workload_lwt.exe
@@ -37,4 +37,4 @@
  (name discovery)
  (package awskit-lwt)
  (deps
-  (alias runtime-http)))
+  (alias runtime-http-contracts)))

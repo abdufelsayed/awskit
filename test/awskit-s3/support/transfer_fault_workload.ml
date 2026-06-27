@@ -490,7 +490,7 @@ let test_generator_coverage () =
   let label =
     Printf.sprintf
       "S3 transfer fault generator (seed=%d; reproduce with QCHECK_SEED=%d \
-       opam exec -- dune build @s3-transfer)"
+       opam exec -- dune build @s3-transfer-faults)"
       seed seed
   in
   Workload_coverage.require_all ~label

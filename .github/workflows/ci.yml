@@ -8,7 +8,7 @@ on:
     tags: ['v*']
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -18,8 +18,8 @@ env:
   OCAML_LATEST: "5"
 
 jobs:
-  package-metadata:
-    name: Package metadata
+  hygiene:
+    name: Hygiene
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -36,11 +36,113 @@ jobs:
           opam-local-packages: |
             *.opam
 
-      - name: Run package metadata check
-        run: scripts/check.sh package-metadata
+      - name: Install project dependencies
+        run: opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
 
-  package-test-default:
-    name: Default package install/test (${{ matrix.package }}, ${{ matrix.os }}, OCaml ${{ matrix.ocaml-compiler }})
+      - name: Check generated package metadata
+        run: |
+          opam exec -- dune build @opam
+          opam lint ./*.opam
+
+      - name: Check formatting and drift
+        run: |
+          opam exec -- dune fmt
+          git diff --check
+          git diff --exit-code
+
+  no-service-correctness:
+    name: No-service correctness tests
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v6
+
+      - name: Set-up OCaml ${{ env.OCAML_LATEST }}
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ env.OCAML_LATEST }}
+          dune-cache: true
+          opam-local-packages: |
+            *.opam
+
+      - name: Install test dependencies
+        run: opam install --yes --with-test --deps-only .
+
+      - name: Run no-service correctness tests
+        run: scripts/test.sh quick --label no-service-correctness
+
+      - name: Upload no-service test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: no-service-correctness-report
+          path: .logs/
+          if-no-files-found: ignore
+
+  docs-examples:
+    name: Documentation and example build
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v6
+
+      - name: Set-up OCaml ${{ env.OCAML_LATEST }}
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ env.OCAML_LATEST }}
+          dune-cache: true
+          opam-local-packages: |
+            *.opam
+
+      - name: Install project dependencies
+        run: opam install --yes --with-test --with-doc --with-dev-setup --deps-only .
+
+      - name: Install example dependencies
+        run: opam install --yes eio_main tls-eio tls ca-certs domain-name mirage-crypto-rng
+
+      - name: Build documentation and example targets
+        run: opam exec -- dune build @examples @doc
+
+  s3-local-service-integration:
+    name: S3 local-service integration tests
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v6
+
+      - name: Set-up OCaml ${{ env.OCAML_LATEST }}
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ env.OCAML_LATEST }}
+          dune-cache: true
+          opam-local-packages: |
+            *.opam
+
+      - name: Install integration test dependencies
+        run: opam install --yes --with-test --deps-only .
+
+      - name: Run local-service integration tests
+        run: scripts/test.sh integration --label s3-local-service-integration
+
+      - name: Upload local-service test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-local-service-integration-report
+          path: .logs/
+          if-no-files-found: ignore
+
+  package-install-build-test-default:
+    name: Default package install/build/test (${{ matrix.package }}, ${{ matrix.os }}, OCaml ${{ matrix.ocaml-compiler }})
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
@@ -78,11 +180,14 @@ jobs:
             !awskit-eio.opam
             !awskit-s3-eio.opam
 
-      - name: Run package install/test check
-        run: scripts/check.sh package --package "${{ matrix.package }}"
+      - name: Install package test dependencies
+        run: opam install --yes --with-test --deps-only "${{ matrix.package }}"
 
-  package-test-eio:
-    name: Eio package install/test (${{ matrix.package }}, ${{ matrix.os }}, OCaml ${{ matrix.ocaml-compiler }})
+      - name: Build package install and test targets
+        run: opam exec -- dune build -p "${{ matrix.package }}" @install @runtest
+
+  package-install-build-test-eio:
+    name: Eio package install/build/test (${{ matrix.package }}, ${{ matrix.os }}, OCaml ${{ matrix.ocaml-compiler }})
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
@@ -119,110 +224,34 @@ jobs:
             awskit-s3.opam
             awskit-s3-eio.opam
 
-      - name: Run package install/test check
-        run: scripts/check.sh package --package "${{ matrix.package }}"
+      - name: Install package test dependencies
+        run: opam install --yes --with-test --deps-only "${{ matrix.package }}"
 
-  docs-examples:
-    name: Documentation and examples
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout tree
-        uses: actions/checkout@v6
-
-      - name: Set-up OCaml ${{ env.OCAML_LATEST }}
-        uses: ocaml/setup-ocaml@v3
-        with:
-          ocaml-compiler: ${{ env.OCAML_LATEST }}
-          dune-cache: true
-          opam-local-packages: |
-            *.opam
-
-      - name: Run documentation and example checks
-        run: scripts/check.sh docs-examples
-
-  no-network-correctness:
-    name: No-network correctness
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout tree
-        uses: actions/checkout@v6
-
-      - name: Set-up OCaml ${{ env.OCAML_LATEST }}
-        uses: ocaml/setup-ocaml@v3
-        with:
-          ocaml-compiler: ${{ env.OCAML_LATEST }}
-          dune-cache: true
-          opam-local-packages: |
-            *.opam
-
-      - name: Build no-network correctness evidence
-        run: scripts/check.sh no-network --label no-network-correctness
-
-      - name: Upload no-network correctness report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: no-network-correctness-report
-          path: .logs/
-          if-no-files-found: ignore
-
-  s3-minio-integration:
-    name: S3 MinIO integration
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout tree
-        uses: actions/checkout@v6
-
-      - name: Set-up OCaml ${{ env.OCAML_LATEST }}
-        uses: ocaml/setup-ocaml@v3
-        with:
-          ocaml-compiler: ${{ env.OCAML_LATEST }}
-          dune-cache: true
-          opam-local-packages: |
-            *.opam
-
-      - name: Run MinIO integration checks
-        run: scripts/check.sh minio --label s3-minio-integration
-
-      - name: Upload MinIO integration report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: s3-minio-integration-report
-          path: .logs/
-          if-no-files-found: ignore
+      - name: Build package install and test targets
+        run: opam exec -- dune build -p "${{ matrix.package }}" @install @runtest
 
   ci-required:
     name: Required CI
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     needs:
-      - package-metadata
-      - package-test-default
-      - package-test-eio
+      - hygiene
+      - no-service-correctness
       - docs-examples
-      - no-network-correctness
-      - s3-minio-integration
+      - s3-local-service-integration
+      - package-install-build-test-default
+      - package-install-build-test-eio
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
       - name: Summarize required checks
         env:
-          PACKAGE_METADATA: ${{ needs.package-metadata.result }}
-          PACKAGE_TEST_DEFAULT: ${{ needs.package-test-default.result }}
-          PACKAGE_TEST_EIO: ${{ needs.package-test-eio.result }}
+          HYGIENE: ${{ needs.hygiene.result }}
+          NO_SERVICE_CORRECTNESS: ${{ needs.no-service-correctness.result }}
           DOCS_EXAMPLES: ${{ needs.docs-examples.result }}
-          NO_NETWORK_CORRECTNESS: ${{ needs.no-network-correctness.result }}
-          S3_MINIO_INTEGRATION: ${{ needs.s3-minio-integration.result }}
+          S3_LOCAL_SERVICE_INTEGRATION: ${{ needs.s3-local-service-integration.result }}
+          PACKAGE_INSTALL_BUILD_TEST_DEFAULT: ${{ needs.package-install-build-test-default.result }}
+          PACKAGE_INSTALL_BUILD_TEST_EIO: ${{ needs.package-install-build-test-eio.result }}
         run: |
           failed=0
 
@@ -241,11 +270,11 @@ jobs:
           }
 
           echo "### Required CI" >> "$GITHUB_STEP_SUMMARY"
-          check_result "Package metadata" "$PACKAGE_METADATA"
-          check_result "Default package install/test matrix" "$PACKAGE_TEST_DEFAULT"
-          check_result "Eio package install/test matrix" "$PACKAGE_TEST_EIO"
-          check_result "Documentation and examples" "$DOCS_EXAMPLES"
-          check_result "No-network correctness" "$NO_NETWORK_CORRECTNESS"
-          check_result "S3 MinIO integration" "$S3_MINIO_INTEGRATION"
+          check_result "Hygiene" "$HYGIENE"
+          check_result "No-service correctness tests" "$NO_SERVICE_CORRECTNESS"
+          check_result "Documentation and example build" "$DOCS_EXAMPLES"
+          check_result "S3 local-service integration tests" "$S3_LOCAL_SERVICE_INTEGRATION"
+          check_result "Default package install/build/test matrix" "$PACKAGE_INSTALL_BUILD_TEST_DEFAULT"
+          check_result "Eio package install/build/test matrix" "$PACKAGE_INSTALL_BUILD_TEST_EIO"
 
           exit "$failed"

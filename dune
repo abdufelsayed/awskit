@@ -1,38 +1,29 @@
 (alias
- (name check-quick)
+ (name correctness)
  (deps
   dune-project
   (alias awskit-test-contracts)
   (alias awskit-core-contracts)
   (alias awskit-runtime-contracts)
-  (alias runtime-http)
-  (alias s3-sim)
-  (alias s3-transfer)
-  (alias s3-domain)
-  (alias s3-protocol)
+  (alias runtime-http-contracts)
+  (alias s3-simulator)
+  (alias s3-transfer-faults)
+  (alias s3-domain-laws)
+  (alias s3-protocol-laws)
   (alias s3-protocol-fixtures)
   (alias s3-protocol-replay)))
 
 (alias
- (name check-integration)
+ (name integration)
  (deps
   dune-project
-  (alias s3-minio)))
+  (alias s3-local-service)))
 
 (alias
- (name check-full)
+ (name stress)
  (deps
   dune-project
-  (alias check-quick)
-  (alias_rec examples)
-  (alias_rec doc)
-  (alias check-integration)))
-
-(alias
- (name check-stress)
- (deps
-  dune-project
-  (alias check-quick)
+  (alias correctness)
   (alias_rec discovery)))
 
 (alias
@@ -41,10 +32,10 @@
   (alias test/support/runtest)))
 
 (alias
- (name runtime-http)
+ (name runtime-http-contracts)
  (deps
-  (alias test/awskit/eio/runtime-http)
-  (alias test/awskit/lwt/runtime-http)))
+  (alias test/awskit/eio/runtime-http-contracts)
+  (alias test/awskit/lwt/runtime-http-contracts)))
 
 (alias
  (name awskit-core-contracts)
@@ -57,25 +48,25 @@
   (alias test/awskit/runtime/awskit-runtime-contracts)))
 
 (alias
- (name s3-sim)
+ (name s3-simulator)
  (deps
   (alias test/awskit-s3/support/s3-model-contracts)
-  (alias test/awskit-s3/sim/s3-state)))
+  (alias test/awskit-s3/sim/simulator-state)))
 
 (alias
- (name s3-transfer)
+ (name s3-transfer-faults)
  (deps
-  (alias test/awskit-s3/sim/s3-transfer)))
+  (alias test/awskit-s3/sim/transfer-faults)))
 
 (alias
- (name s3-domain)
+ (name s3-domain-laws)
  (deps
-  (alias test/awskit-s3/protocol/domain)))
+  (alias test/awskit-s3/protocol/domain-laws)))
 
 (alias
- (name s3-protocol)
+ (name s3-protocol-laws)
  (deps
-  (alias test/awskit-s3/protocol/wire)))
+  (alias test/awskit-s3/protocol/protocol-laws)))
 
 (alias
  (name s3-protocol-fixtures)
@@ -88,6 +79,6 @@
   (alias test/awskit-s3/protocol/replay)))
 
 (alias
- (name s3-minio)
+ (name s3-local-service)
  (deps
-  (alias test/awskit-s3/lwt/unix/s3-minio)))
+  (alias test/awskit-s3/lwt/unix/local-service)))

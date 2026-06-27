@@ -35,7 +35,7 @@ The `Publish docs` workflow in `.github/workflows/docs.yml`:
 - checks out the exact commit whose `CI` workflow completed when triggered by
   `workflow_run`;
 - installs documentation dependencies with
-  `opam install --with-doc --deps-only .`;
+  `opam install --yes --with-doc --deps-only .`;
 - builds docs with `opam exec -- dune build @doc`;
 - uploads `_build/default/_doc/_html`;
 - deploys with `actions/deploy-pages`.
@@ -60,9 +60,9 @@ Run:
 opam exec -- dune build @examples @doc
 ```
 
-For release gates, `scripts/check.sh release` also checks documentation
-build output, example executables, generated documentation warnings, and
-documentation generation from the distribution archive.
+For release gates, also build examples, review generated documentation output
+for warnings or unresolved references, and build documentation from the
+distribution archive as described in `docs/release-gates.md`.
 
 ## Publication Check
 

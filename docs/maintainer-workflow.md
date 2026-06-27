@@ -42,7 +42,8 @@ contributors who need durable project policy in one place.
 - Maintainer workflows live in `docs`.
 - CI, stress evidence, release gates, and documentation publishing live in
   `.github/workflows/*.yml`.
-- Local and CI validation entrypoints live in `scripts/check.sh`.
+- Reported local test runs live in `scripts/test.sh`; other validation should
+  use the documented `opam`, `dune`, and `dune-release` commands directly.
 
 ## Working In The Tree
 

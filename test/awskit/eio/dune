@@ -18,7 +18,7 @@
   (source_tree ../../fixtures/runtime-http-replay)))
 
 (rule
- (alias runtime-http)
+ (alias runtime-http-contracts)
  (package awskit-eio)
  (deps
   test_runtime_http_workload_eio.exe
@@ -38,4 +38,4 @@
  (name discovery)
  (package awskit-eio)
  (deps
-  (alias runtime-http)))
+  (alias runtime-http-contracts)))

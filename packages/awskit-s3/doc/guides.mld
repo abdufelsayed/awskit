@@ -561,7 +561,7 @@ S3.Runtime.Response_body.read reader bytes ~off ~len
 For custom S3 callers, prefer [Body.of_stream] and [Reader.read] so code stays
 within the S3 adapter API.
 
-Runtime authors should also run [opam exec -- dune build @runtime-http]
+Runtime authors should also run [opam exec -- dune build @runtime-http-contracts]
 alongside the S3 tests. The runtime workload captures shared HTTP expectations
 for bodiless responses, framing, body-reader, and error-path behavior.
 
@@ -776,7 +776,7 @@ integration target, start the included Compose stack and run the opt-in alias:
 
 {[
 docker compose up -d
-opam exec -- dune build --force @s3-minio
+opam exec -- dune build --force @s3-local-service
 ]}
 
 The integration runner defaults to [http://127.0.0.1:9000] with the
