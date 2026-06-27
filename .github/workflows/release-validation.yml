@@ -7,6 +7,7 @@ on:
         description: Release version to validate when not running from release/vX.Y.Z
         required: false
         type: string
+  pull_request:
   push:
     branches: [main, release/**]
 

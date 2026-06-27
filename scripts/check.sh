@@ -634,10 +634,14 @@ check_package_isolation() {
       --kind=path "$pinned_package" .
   done
 
-  isolation_base_packages=$(opam list --switch="$isolation_switch" --installed --short)
+  isolation_base_packages=$(
+    OPAMCOLOR=never opam list --switch="$isolation_switch" --installed --short
+  )
 
   cleanup_isolation_packages() {
-    installed_packages=$(opam list --switch="$isolation_switch" --installed --short)
+    installed_packages=$(
+      OPAMCOLOR=never opam list --switch="$isolation_switch" --installed --short
+    )
     remove_packages=""
     for installed_package in $installed_packages; do
       keep_package=0

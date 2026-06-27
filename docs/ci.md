@@ -16,7 +16,7 @@ Related maintainer docs:
 | `CI` | `.github/workflows/ci.yml` | Required build, test, docs/examples, no-network correctness, and MinIO evidence. Ends with the stable aggregate check named `Required CI`. | Pull requests, pushes to `main`, pushes to `release/**`, and manual dispatch. Draft pull requests are skipped. |
 | `Publish docs` | `.github/workflows/docs.yml` | Publishes generated odoc documentation to GitHub Pages. | Successful `CI` workflow runs on `main`, and manual dispatch from `main`. |
 | `Stress evidence` | `.github/workflows/stress.yml` | Runs high-cost discovery evidence outside required PR CI. | Weekly schedule and manual dispatch. |
-| `Release validation` | `.github/workflows/release-validation.yml` | Mirrors `scripts/check.sh release` in CI, including package-isolated opam install/test validation. | Pushes to `main`, pushes to `release/**`, and manual dispatch. |
+| `Release validation` | `.github/workflows/release-validation.yml` | Mirrors `scripts/check.sh release` in CI, including package-isolated opam install/test validation. | Pull requests, pushes to `main`, pushes to `release/**`, and manual dispatch. |
 
 ## Required CI
 
@@ -55,8 +55,8 @@ normal PR feedback so expensive exploration does not slow every change.
 
 ## Release Validation
 
-Pushes to `main` and release branches run both required CI and the release
-validation workflow. Before merging a release PR, record:
+Pull requests and pushes to `main` or release branches run both required CI and
+the release validation workflow. Before merging a release PR, record:
 
 - the `Required CI` result;
 - the `Release check` result from `.github/workflows/release-validation.yml`;
