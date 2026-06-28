@@ -6,11 +6,13 @@
 
 (test
  (name test_workload_coverage)
+ (package awskit)
  (modules test_workload_coverage)
  (libraries awskit_test_coverage alcotest))
 
 (test
  (name test_runtime_http_loopback_policy)
+ (package awskit)
  (modules test_runtime_http_loopback_policy)
  (libraries awskit_runtime_http_workload alcotest))
 

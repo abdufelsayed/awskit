@@ -23,9 +23,9 @@ depends: [
   "logs"
   "ppx_deriving"
   "cohttp-lwt-unix" {with-test & >= "6.2.1"}
-  "alcotest" {with-test}
-  "qcheck-core" {with-test}
-  "qcheck-alcotest" {with-test}
+  "alcotest" {with-test & >= "1.9.1"}
+  "qcheck-core" {with-test & >= "0.91"}
+  "qcheck-alcotest" {with-test & >= "0.91"}
   "odoc" {with-doc}
 ]
 build: [

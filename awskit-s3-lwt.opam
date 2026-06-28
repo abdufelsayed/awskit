@@ -17,10 +17,6 @@ depends: [
   "cohttp-lwt" {>= "6.2.1"}
   "lwt"
   "ptime"
-  "cohttp-lwt-unix" {with-test & >= "6.2.1"}
-  "alcotest" {with-test}
-  "qcheck-core" {with-test}
-  "qcheck-alcotest" {with-test}
   "odoc" {with-doc}
 ]
 build: [

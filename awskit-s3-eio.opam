@@ -18,12 +18,6 @@ depends: [
   "fmt" {>= "0.11.0"}
   "eio" {>= "1.3"}
   "ptime"
-  "awskit-unix" {with-test & = version}
-  "eio_main" {with-test & >= "1.3"}
-  "digestif" {with-test & >= "1.3.0"}
-  "alcotest" {with-test}
-  "qcheck-core" {with-test}
-  "qcheck-alcotest" {with-test}
   "odoc" {with-doc}
 ]
 build: [
