@@ -24,9 +24,9 @@ depends: [
   "ppx_protocol_conv_xmlm"
   "ppx_deriving"
   "ppx_yojson_conv"
-  "alcotest" {with-test}
-  "qcheck-core" {with-test}
-  "qcheck-alcotest" {with-test}
+  "alcotest" {with-test & >= "1.9.1"}
+  "qcheck-core" {with-test & >= "0.91"}
+  "qcheck-alcotest" {with-test & >= "0.91"}
   "odoc" {with-doc}
 ]
 build: [

@@ -39,9 +39,18 @@
    (and
     :with-dev-setup
     (= 0.29.0)))
-  (alcotest :with-test)
-  (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)))
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))
+  (qcheck-core
+   (and
+    :with-test
+    (>= 0.91)))
+  (qcheck-alcotest
+   (and
+    :with-test
+    (>= 0.91)))))
 
 (package
  (name awskit-unix)
@@ -57,10 +66,7 @@
    (>= v0.16.3))
   ptime
   (fmt
-   (>= 0.11.0))
-  (alcotest :with-test)
-  (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)))
+   (>= 0.11.0))))
 
 (package
  (name awskit-lwt)
@@ -89,9 +95,18 @@
    (and
     :with-test
     (>= 6.2.1)))
-  (alcotest :with-test)
-  (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)))
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))
+  (qcheck-core
+   (and
+    :with-test
+    (>= 0.91)))
+  (qcheck-alcotest
+   (and
+    :with-test
+    (>= 0.91)))))
 
 (package
  (name awskit-lwt-unix)
@@ -116,10 +131,7 @@
   lwt
   uri
   ptime
-  yojson
-  (alcotest :with-test)
-  (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)))
+  yojson))
 
 (package
  (name awskit-eio)
@@ -149,14 +161,22 @@
    (and
     :with-test
     (>= 1.3)))
-  (alcotest :with-test)
-  (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)))
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))
+  (qcheck-core
+   (and
+    :with-test
+    (>= 0.91)))
+  (qcheck-alcotest
+   (and
+    :with-test
+    (>= 0.91)))))
 
 (package
  (name awskit-s3)
- (synopsis
-  "S3 client core — objects, buckets, multipart, and policies")
+ (synopsis "S3 client core — objects, buckets, multipart, and policies")
  (description
   "S3 operations, bucket configuration, multipart uploads, presigned URLs, policies, and XML wire types. Runtime adapters are available as separate packages.")
  (depends
@@ -178,9 +198,18 @@
   ppx_protocol_conv_xmlm
   ppx_deriving
   ppx_yojson_conv
-  (alcotest :with-test)
-  (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)))
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))
+  (qcheck-core
+   (and
+    :with-test
+    (>= 0.91)))
+  (qcheck-alcotest
+   (and
+    :with-test
+    (>= 0.91)))))
 
 (package
  (name awskit-s3-sim)
@@ -202,9 +231,18 @@
   (base64
    (>= 3.5.2))
   uri
-  (alcotest :with-test)
-  (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)))
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))
+  (qcheck-core
+   (and
+    :with-test
+    (>= 0.91)))
+  (qcheck-alcotest
+   (and
+    :with-test
+    (>= 0.91)))))
 
 (package
  (name awskit-s3-lwt)
@@ -222,14 +260,7 @@
   (cohttp-lwt
    (>= 6.2.1))
   lwt
-  ptime
-  (cohttp-lwt-unix
-   (and
-    :with-test
-    (>= 6.2.1)))
-  (alcotest :with-test)
-  (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)))
+  ptime))
 
 (package
  (name awskit-s3-lwt-unix)
@@ -252,10 +283,7 @@
   lwt
   (fmt
    (>= 0.11.0))
-  ptime
-  (alcotest :with-test)
-  (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)))
+  ptime))
 
 (package
  (name awskit-s3-eio)
@@ -275,19 +303,4 @@
    (>= 0.11.0))
   (eio
    (>= 1.3))
-  ptime
-  (awskit-unix
-   (and
-    :with-test
-    (= :version)))
-  (eio_main
-   (and
-    :with-test
-    (>= 1.3)))
-  (digestif
-   (and
-    :with-test
-    (>= 1.3.0)))
-  (alcotest :with-test)
-  (qcheck-core :with-test)
-  (qcheck-alcotest :with-test)))
+  ptime))

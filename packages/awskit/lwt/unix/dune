@@ -2,6 +2,7 @@
  (name awskit_lwt_unix)
  (public_name awskit-lwt-unix)
  (libraries
+  awskit
   awskit-lwt
   awskit-unix
   cohttp
