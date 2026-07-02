@@ -110,6 +110,21 @@ let test_get_string_max_bytes_preserves_object () =
   in
   Alcotest.(check string) "body" "abcdef" result.value
 
+let test_invalid_string_inputs_do_not_record_history () =
+  let conn = make_simulator () in
+  let store = Simulator.store conn in
+  Simulator.clear_history store;
+  expect_validation_field "invalid put bucket" "bucket"
+    (Simulator.Object.put_string conn ~bucket:"Invalid" ~key:"file.txt"
+       ~contents:"body" ());
+  expect_validation_field "invalid create upload key" "key"
+    (Simulator.Multipart.create_upload conn ~bucket:"test-bucket" ~key:"" ());
+  expect_validation_field "invalid bucket create" "bucket"
+    (Simulator.Bucket.create conn ~bucket:"Invalid" ());
+  Alcotest.(check int)
+    "recorded operations" 0
+    (List.length (Simulator.history store))
+
 let test_response_reader_cannot_escape_scope () =
   let conn = make_simulator () in
   ignore (put_string conn "reader" "abc");
@@ -144,6 +159,8 @@ let suite =
           test_stream_error_does_not_store_object;
         Alcotest.test_case "max-bytes failure preserves object" `Quick
           test_get_string_max_bytes_preserves_object;
+        Alcotest.test_case "invalid strings record no history" `Quick
+          test_invalid_string_inputs_do_not_record_history;
         Alcotest.test_case "reader scope closes" `Quick
           test_response_reader_cannot_escape_scope;
       ] );

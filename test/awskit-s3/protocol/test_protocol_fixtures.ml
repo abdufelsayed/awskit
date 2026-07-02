@@ -407,13 +407,311 @@ let test_range_get_fixture () =
   in
   check_fixture "range GET response" [ "object"; "range-get.expected" ] ~actual
 
-let expect_validation_field field = function
-  | Ok _ -> Alcotest.failf "expected validation error for %s" field
+let expect_validation_field ?(label = "validation") field = function
+  | Ok _ -> Alcotest.failf "%s: expected validation error for %s" label field
   | Error error ->
+      Alcotest.(check bool)
+        (label ^ " kind") true
+        (Awskit.Error.is_validation error);
       Alcotest.(check (option string))
-        ("validation field " ^ field)
-        (Some field)
+        (label ^ " field") (Some field)
         (Awskit.Error.validation_field error)
+
+let recorded_request_count conn =
+  List.length conn.Protocol_recording_runtime.Runtime.calls
+
+let expect_no_request label field f =
+  let conn = Protocol_recording_runtime.connect [] in
+  expect_validation_field ~label field (f conn);
+  Alcotest.(check int)
+    (label ^ " request count") 0
+    (recorded_request_count conn)
+
+let method_to_string = function
+  | `GET -> "GET"
+  | `PUT -> "PUT"
+  | `HEAD -> "HEAD"
+  | `DELETE -> "DELETE"
+
+let request_body () = Protocol_recording_runtime.S3.Body.of_string "body"
+
+let test_public_operation_validation_sends_no_request () =
+  expect_no_request "object put invalid bucket" "bucket" (fun conn ->
+      Protocol_recording_runtime.S3.Object.put_string conn ~bucket:"Invalid"
+        ~key:"file.txt" ~contents:"body" ());
+  expect_no_request "object get invalid key" "key" (fun conn ->
+      Protocol_recording_runtime.S3.Object.get_string conn
+        ~bucket:"valid-bucket" ~key:"" ~max_bytes:16L ());
+  expect_no_request "object get invalid max bytes" "max_bytes" (fun conn ->
+      Protocol_recording_runtime.S3.Object.get_string conn
+        ~bucket:"valid-bucket" ~key:"file.txt" ~max_bytes:(-1L) ());
+  expect_no_request "object head invalid key" "key" (fun conn ->
+      Protocol_recording_runtime.S3.Object.head conn ~bucket:"valid-bucket"
+        ~key:"" ());
+  expect_no_request "object delete invalid bucket" "bucket" (fun conn ->
+      Protocol_recording_runtime.S3.Object.delete conn ~bucket:"Invalid"
+        ~key:"file.txt" ());
+  let delete_member = Object.Delete_objects.object_exn ~key:"file.txt" () in
+  expect_no_request "delete objects invalid bucket" "bucket" (fun conn ->
+      Protocol_recording_runtime.S3.Object.delete_objects conn ~bucket:"Invalid"
+        ~objects:[ delete_member ] ());
+  expect_no_request "copy invalid source bucket" "bucket" (fun conn ->
+      Protocol_recording_runtime.S3.Object.copy conn ~source_bucket:"Invalid"
+        ~source_key:"source.txt" ~destination_bucket:"dest-bucket"
+        ~destination_key:"copy.txt" ());
+  expect_no_request "copy invalid source key" "key" (fun conn ->
+      Protocol_recording_runtime.S3.Object.copy conn
+        ~source_bucket:"source-bucket" ~source_key:""
+        ~destination_bucket:"dest-bucket" ~destination_key:"copy.txt" ());
+  expect_no_request "copy invalid destination bucket" "bucket" (fun conn ->
+      Protocol_recording_runtime.S3.Object.copy conn
+        ~source_bucket:"source-bucket" ~source_key:"source.txt"
+        ~destination_bucket:"Invalid" ~destination_key:"copy.txt" ());
+  expect_no_request "copy invalid destination key" "key" (fun conn ->
+      Protocol_recording_runtime.S3.Object.copy conn
+        ~source_bucket:"source-bucket" ~source_key:"source.txt"
+        ~destination_bucket:"dest-bucket" ~destination_key:"" ());
+  expect_no_request "bucket create invalid bucket" "bucket" (fun conn ->
+      Protocol_recording_runtime.S3.Bucket.create conn ~bucket:"Invalid" ());
+  expect_no_request "bucket policy invalid bucket" "bucket" (fun conn ->
+      Protocol_recording_runtime.S3.Bucket.Policy.get conn ~bucket:"ab" ());
+  expect_no_request "list invalid bucket" "bucket" (fun conn ->
+      Protocol_recording_runtime.S3.Object.list conn ~bucket:"Invalid" ());
+  expect_no_request "list pages invalid max pages" "max_pages" (fun conn ->
+      Protocol_recording_runtime.S3.Object.List.pages conn
+        ~bucket:"valid-bucket" ~max_pages:0 ());
+  expect_no_request "version pages invalid max pages" "max_pages" (fun conn ->
+      Protocol_recording_runtime.S3.Object.Versions.pages conn
+        ~bucket:"valid-bucket" ~max_pages:0 ());
+  expect_no_request "multipart create invalid bucket" "bucket" (fun conn ->
+      Protocol_recording_runtime.S3.Multipart.create_upload conn
+        ~bucket:"Invalid" ~key:"large.bin" ());
+  expect_no_request "multipart create invalid key" "key" (fun conn ->
+      Protocol_recording_runtime.S3.Multipart.create_upload conn
+        ~bucket:"valid-bucket" ~key:"" ());
+  let upload =
+    Multipart.Upload.resume_exn ~bucket:"valid-bucket" ~key:"large.bin"
+      ~upload_id:"upload-1"
+  in
+  expect_no_request "upload part invalid part number" "part_number" (fun conn ->
+      Protocol_recording_runtime.S3.Multipart.upload_part conn ~upload
+        ~part_number:0 ~body:(request_body ()) ());
+  expect_no_request "complete upload empty parts" "parts" (fun conn ->
+      Protocol_recording_runtime.S3.Multipart.complete_upload conn ~upload
+        ~parts:[] ());
+  expect_no_request "list parts invalid max pages" "max_pages" (fun conn ->
+      Protocol_recording_runtime.S3.Multipart.List_parts.parts conn ~upload
+        ~max_pages:0 ())
+
+let test_public_option_builder_validation () =
+  let create_options =
+    Bucket.Create.options ~region:"eu-west-1" ()
+    |> Protocol_support.ok_or_fail "create options region"
+  in
+  Alcotest.(check (option string))
+    "create region" (Some "eu-west-1")
+    (Option.map Region.to_string create_options.Bucket.Create.region);
+  expect_validation_field ~label:"create options region" "region"
+    (Bucket.Create.options ~region:"" ());
+  expect_validation_field ~label:"put content type" "content_type"
+    (Object.Put.options ~content_type:"" ());
+  expect_validation_field ~label:"put header value" "cache_control"
+    (Object.Put.options ~cache_control:"" ());
+  expect_validation_field ~label:"put expected owner" "account_id"
+    (Object.Put.options ~expected_bucket_owner:"123" ());
+  expect_validation_field ~label:"get version id" "version_id"
+    (Object.Get.options ~version_id:"" ());
+  expect_validation_field ~label:"head expected owner" "account_id"
+    (Object.Head.options ~expected_bucket_owner:"123" ());
+  expect_validation_field ~label:"delete version id" "version_id"
+    (Object.Delete.options ~version_id:"bad\nversion" ());
+  expect_validation_field ~label:"delete object key" "key"
+    (Object.Delete_objects.object_ ~key:"" ());
+  expect_validation_field ~label:"delete object version" "version_id"
+    (Object.Delete_objects.object_ ~key:"file.txt" ~version_id:"" ());
+  expect_validation_field ~label:"delete object etag" "etag"
+    (Object.Delete_objects.object_ ~key:"file.txt" ~etag:"" ());
+  expect_validation_field ~label:"copy source version" "version_id"
+    (Object.Copy.options ~source_version_id:"" ());
+  expect_validation_field ~label:"copy expected owner" "account_id"
+    (Object.Copy.options ~expected_bucket_owner:"123" ());
+  expect_validation_field ~label:"list prefix" "prefix"
+    (Object.List.options ~prefix:"" ());
+  expect_validation_field ~label:"list delimiter" "delimiter"
+    (Object.List.options ~delimiter:"" ());
+  expect_validation_field ~label:"list max keys" "max_keys"
+    (Object.List.options ~max_keys:0 ());
+  expect_validation_field ~label:"list start after" "key"
+    (Object.List.options ~start_after:"" ());
+  expect_validation_field ~label:"list continuation token" "<redacted>"
+    (Object.List.options ~continuation_token:"" ());
+  expect_validation_field ~label:"list expected owner" "account_id"
+    (Object.List.options ~expected_bucket_owner:"123" ());
+  expect_validation_field ~label:"versions prefix" "prefix"
+    (Object.Versions.options ~prefix:"" ());
+  expect_validation_field ~label:"versions delimiter" "delimiter"
+    (Object.Versions.options ~delimiter:"" ());
+  expect_validation_field ~label:"versions max keys" "max_keys"
+    (Object.Versions.options ~max_keys:1001 ());
+  expect_validation_field ~label:"versions key marker" "key"
+    (Object.Versions.options ~key_marker:"" ());
+  expect_validation_field ~label:"versions id marker" "version_id"
+    (Object.Versions.options ~version_id_marker:"" ());
+  expect_validation_field ~label:"upload resume id" "upload_id"
+    (Multipart.Upload.resume ~bucket:"valid-bucket" ~key:"large.bin"
+       ~upload_id:"");
+  expect_validation_field ~label:"create multipart content type" "content_type"
+    (Multipart.Create.options ~content_type:"" ());
+  expect_validation_field ~label:"create multipart owner" "account_id"
+    (Multipart.Create.options ~expected_bucket_owner:"123" ());
+  expect_validation_field ~label:"upload part owner" "account_id"
+    (Multipart.Upload_part.options ~expected_bucket_owner:"123" ());
+  expect_validation_field ~label:"complete object size" "multipart_object_size"
+    (Multipart.Complete.options ~multipart_object_size:(-1L) ());
+  expect_validation_field ~label:"list parts max parts" "max_parts"
+    (Multipart.List_parts.options ~max_parts:0 ());
+  expect_validation_field ~label:"list parts marker" "part_number_marker"
+    (Multipart.List_parts.options ~part_number_marker:(-1) ());
+  expect_validation_field ~label:"list parts owner" "account_id"
+    (Multipart.List_parts.options ~expected_bucket_owner:"123" ())
+
+let endpoint_scheme_to_string = function `Http -> "http" | `Https -> "https"
+
+let check_endpoint_config label config ~scheme ~host ~signing_region =
+  let client_region = Region.of_string_exn "us-east-1" in
+  let endpoint =
+    Endpoint_config.endpoint config ~region:client_region
+    |> Protocol_support.ok_or_fail (label ^ " endpoint")
+  in
+  Alcotest.(check string)
+    (label ^ " scheme") scheme
+    (endpoint_scheme_to_string (Awskit.Endpoint.scheme endpoint));
+  Alcotest.(check string) (label ^ " host") host (Awskit.Endpoint.host endpoint);
+  Alcotest.(check string)
+    (label ^ " signing region")
+    signing_region
+    (Endpoint_config.signing_region config ~client_region |> Region.to_string)
+
+let test_endpoint_config_public_seams () =
+  let https_config =
+    Endpoint_config.s3_compatible ~endpoint:"https://minio.example.com"
+      ~signing_region:"us-west-2" ~addressing_style:`Path
+      ~tls_policy:`Https_required ~feature_policy:`S3_compatible ()
+    |> Protocol_support.ok_or_fail "https endpoint config"
+  in
+  check_endpoint_config "https endpoint" https_config ~scheme:"https"
+    ~host:"minio.example.com" ~signing_region:"us-west-2";
+  let local_config =
+    Endpoint_config.local_plaintext ~endpoint:"http://127.0.0.1:9000"
+      ~signing_region:"us-east-1" ~addressing_style:`Path ()
+    |> Protocol_support.ok_or_fail "local plaintext endpoint config"
+  in
+  check_endpoint_config "local plaintext endpoint" local_config ~scheme:"http"
+    ~host:"127.0.0.1" ~signing_region:"us-east-1";
+  expect_validation_field ~label:"endpoint path rejected" "endpoint"
+    (Endpoint_config.s3_compatible ~endpoint:"https://minio.example.com/bucket"
+       ~signing_region:"us-east-1" ~addressing_style:`Path
+       ~tls_policy:`Https_required ~feature_policy:`S3_compatible ());
+  expect_validation_field ~label:"endpoint signing region rejected" "region"
+    (Endpoint_config.s3_compatible ~endpoint:"https://minio.example.com"
+       ~signing_region:"" ~addressing_style:`Path ~tls_policy:`Https_required
+       ~feature_policy:`S3_compatible ());
+  expect_validation_field ~label:"https required rejects http" "tls_policy"
+    (Endpoint_config.s3_compatible ~endpoint:"http://minio.example.com"
+       ~signing_region:"us-east-1" ~addressing_style:`Path
+       ~tls_policy:`Https_required ~feature_policy:`S3_compatible ());
+  expect_validation_field ~label:"local plaintext rejects remote" "endpoint"
+    (Endpoint_config.local_plaintext ~endpoint:"http://minio.example.com"
+       ~signing_region:"us-east-1" ~addressing_style:`Path ());
+  let unsafe_config =
+    Endpoint_config.unsafe_plaintext ~endpoint:"http://minio.example.com:9000"
+      ~signing_region:"us-west-2" ~addressing_style:`Path ()
+    |> Protocol_support.ok_or_fail "unsafe plaintext endpoint config"
+  in
+  check_endpoint_config "unsafe plaintext endpoint" unsafe_config ~scheme:"http"
+    ~host:"minio.example.com" ~signing_region:"us-west-2";
+  Alcotest.(check bool)
+    "unsafe feature policy" true
+    (Endpoint_config.feature_policy unsafe_config = `S3_compatible);
+  expect_validation_field ~label:"unsafe signing region rejected" "region"
+    (Endpoint_config.unsafe_plaintext ~endpoint:"http://minio.example.com"
+       ~signing_region:"" ~addressing_style:`Path ())
+
+let test_presigned_public_seams () =
+  let put_options =
+    Presigned.Put_object.options_exn ~content_type:"text/plain"
+      ~expected_bucket_owner:"123456789012"
+      ~extra_signed_headers:[ ("x-amz-meta-trace", "abc") ]
+      ()
+  in
+  let presigned =
+    Presigned.put_object ~region:"us-east-1"
+      ~credentials:Protocol_support.credentials ~now:Protocol_support.test_time
+      ~bucket:"bucket" ~key:"file.txt" ~options:put_options ()
+    |> Protocol_support.ok_or_fail "presigned put success"
+  in
+  Alcotest.(check string)
+    "presigned method" "PUT"
+    (method_to_string (Presigned.method_ presigned));
+  Alcotest.(check string)
+    "presigned content type" "text/plain"
+    (header_or_empty "content-type" (Presigned.request_headers presigned));
+  Alcotest.(check string)
+    "presigned extra header" "abc"
+    (header_or_empty "x-amz-meta-trace" (Presigned.request_headers presigned));
+  Alcotest.(check bool)
+    "host is signed" true
+    (List.mem_assoc "host" (Presigned.signed_headers presigned));
+  expect_validation_field ~label:"presign region" "region"
+    (Presigned.get_object ~region:"" ~credentials:Protocol_support.credentials
+       ~now:Protocol_support.test_time ~bucket:"bucket" ~key:"file.txt" ());
+  expect_validation_field ~label:"presign bucket" "bucket"
+    (Presigned.get_object ~region:"us-east-1"
+       ~credentials:Protocol_support.credentials ~now:Protocol_support.test_time
+       ~bucket:"Invalid" ~key:"file.txt" ());
+  expect_validation_field ~label:"presign key" "key"
+    (Presigned.get_object ~region:"us-east-1"
+       ~credentials:Protocol_support.credentials ~now:Protocol_support.test_time
+       ~bucket:"bucket" ~key:"" ());
+  expect_validation_field ~label:"presign content type" "content_type"
+    (Presigned.Put_object.options ~content_type:"" ());
+  expect_validation_field ~label:"presign response content type" "content_type"
+    (Presigned.Get_object.options ~response_content_type:"" ());
+  expect_validation_field ~label:"presign response disposition"
+    "response_content_disposition"
+    (Presigned.Get_object.options ~response_content_disposition:"" ());
+  expect_validation_field ~label:"presign version id" "version_id"
+    (Presigned.Get_object.options ~version_id:"" ());
+  expect_validation_field ~label:"presign owner" "account_id"
+    (Presigned.Delete_object.options ~expected_bucket_owner:"123" ());
+  expect_validation_field ~label:"presign bad header name" "header"
+    (Presigned.Get_object.options
+       ~extra_signed_headers:[ ("bad\nname", "value") ]
+       ());
+  expect_validation_field ~label:"presign bad header value" "header"
+    (Presigned.Get_object.options
+       ~extra_signed_headers:[ ("x-test", "bad\nvalue") ]
+       ());
+  expect_validation_field ~label:"presign duplicate header" "header"
+    (Presigned.Get_object.options
+       ~extra_signed_headers:[ ("x-test", "one"); ("x-test", "two") ]
+       ());
+  expect_validation_field ~label:"presign duplicate case header" "header"
+    (Presigned.Get_object.options
+       ~extra_signed_headers:[ ("x-test", "one"); ("X-Test", "two") ]
+       ());
+  expect_validation_field ~label:"presign duplicate content type" "header"
+    (Presigned.Put_object.options ~content_type:"text/plain"
+       ~extra_signed_headers:[ ("Content-Type", "text/plain") ]
+       ());
+  let upload =
+    Multipart.Upload.resume_exn ~bucket:"bucket" ~key:"large.bin"
+      ~upload_id:"upload-1"
+  in
+  expect_validation_field ~label:"presign upload part number" "part_number"
+    (Presigned.upload_part ~region:"us-east-1"
+       ~credentials:Protocol_support.credentials ~now:Protocol_support.test_time
+       ~upload ~part_number:0 ())
 
 let describe_request (call : Protocol_recording_runtime.call) =
   let request = call.request in
@@ -691,6 +989,14 @@ let suite =
         Alcotest.test_case "Object tagging XML" `Quick
           test_object_tagging_xml_fixture;
         Alcotest.test_case "range GET response" `Quick test_range_get_fixture;
+        Alcotest.test_case "public operation validation sends no request" `Quick
+          test_public_operation_validation_sends_no_request;
+        Alcotest.test_case "public option builder validation" `Quick
+          test_public_option_builder_validation;
+        Alcotest.test_case "endpoint config public seams" `Quick
+          test_endpoint_config_public_seams;
+        Alcotest.test_case "presigned public seams" `Quick
+          test_presigned_public_seams;
         Alcotest.test_case "signing canonical artifact" `Quick
           test_signing_artifact_fixture;
         Alcotest.test_case "bucket versioning XML" `Quick
