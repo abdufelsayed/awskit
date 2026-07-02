@@ -125,6 +125,48 @@ let test_invalid_string_inputs_do_not_record_history () =
     "recorded operations" 0
     (List.length (Simulator.history store))
 
+let delete_object key = Object.Delete_objects.object_exn ~key ()
+
+let expect_only_object conn label =
+  Alcotest.(check (list (pair string string)))
+    label
+    [ ("kept.txt", "body") ]
+    (Simulator.objects_as_strings (Simulator.store conn)
+       ~bucket:(bucket_name "test-bucket"))
+
+let oversized_delete_objects () =
+  delete_object "kept.txt"
+  :: List.init Object.Delete_objects.max_objects (fun index ->
+      delete_object (Fmt.str "too-many-%04d" index))
+
+let test_delete_objects_count_validation_preserves_state () =
+  let conn = make_simulator () in
+  let store = Simulator.store conn in
+  ignore (put_string conn "kept.txt" "body");
+  Simulator.clear_history store;
+  Simulator.inject_fault conn Simulator.Internal_error;
+  expect_validation_field "empty delete objects" "objects"
+    (Simulator.Object.delete_objects conn ~bucket:"Invalid" ~objects:[] ());
+  expect_only_object conn "after empty batch";
+  Alcotest.(check int)
+    "empty batch recorded operations" 0
+    (List.length (Simulator.history store));
+  expect_validation_field "oversized delete objects" "objects"
+    (Simulator.Object.delete_objects conn
+       ~bucket:(bucket_name "test-bucket")
+       ~objects:(oversized_delete_objects ())
+       ());
+  expect_only_object conn "after oversized batch";
+  Alcotest.(check int)
+    "oversized batch recorded operations" 0
+    (List.length (Simulator.history store));
+  expect_service_code "fault still queued" "InternalError"
+    (Simulator.Object.delete_objects conn
+       ~bucket:(bucket_name "test-bucket")
+       ~objects:[ delete_object "kept.txt" ]
+       ());
+  expect_only_object conn "after queued fault"
+
 let test_response_reader_cannot_escape_scope () =
   let conn = make_simulator () in
   ignore (put_string conn "reader" "abc");
@@ -161,6 +203,8 @@ let suite =
           test_get_string_max_bytes_preserves_object;
         Alcotest.test_case "invalid strings record no history" `Quick
           test_invalid_string_inputs_do_not_record_history;
+        Alcotest.test_case "delete objects count validation preserves state"
+          `Quick test_delete_objects_count_validation_preserves_state;
         Alcotest.test_case "reader scope closes" `Quick
           test_response_reader_cannot_escape_scope;
       ] );
