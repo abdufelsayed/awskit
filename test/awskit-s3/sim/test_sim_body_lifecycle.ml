@@ -110,17 +110,142 @@ let test_get_string_max_bytes_preserves_object () =
   in
   Alcotest.(check string) "body" "abcdef" result.value
 
+let tag_set = Tag.Set.of_list_exn [ Tag.create_exn ~key:"env" ~value:"test" ]
+
+let bucket_policy =
+  Policy.of_json {|{"Version":"2012-10-17","Statement":[]}|}
+  |> ok_or_fail "bucket policy"
+
+let bucket_encryption =
+  {
+    Bucket.Encryption.rules =
+      [
+        {
+          sse_algorithm = Some Bucket.Encryption.Algorithm.Aes256;
+          kms_master_key_id = None;
+          bucket_key_enabled = None;
+          blocked_encryption_types = [];
+        };
+      ];
+  }
+
+let bucket_cors =
+  {
+    Bucket.Cors.rules =
+      [
+        {
+          id = None;
+          allowed_origins = [ "https://example.com" ];
+          allowed_methods = [ Bucket.Cors.Method.Get ];
+          allowed_headers = [];
+          expose_headers = [];
+          max_age_seconds = None;
+        };
+      ];
+  }
+
+let bucket_ownership_controls =
+  {
+    Bucket.Ownership_controls.object_ownership =
+      Bucket.Ownership_controls.Object_ownership.Bucket_owner_enforced;
+  }
+
 let test_invalid_string_inputs_do_not_record_history () =
   let conn = make_simulator () in
   let store = Simulator.store conn in
+  ignore (put_string conn "tagged.txt" "body");
   Simulator.clear_history store;
   expect_validation_field "invalid put bucket" "bucket"
     (Simulator.Object.put_string conn ~bucket:"Invalid" ~key:"file.txt"
        ~contents:"body" ());
   expect_validation_field "invalid create upload key" "key"
     (Simulator.Multipart.create_upload conn ~bucket:"test-bucket" ~key:"" ());
-  expect_validation_field "invalid bucket create" "bucket"
+  expect_validation_field ~operation:"CreateBucket" "invalid bucket create"
+    "bucket"
     (Simulator.Bucket.create conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"GetObjectTagging"
+    "invalid object tagging bucket" "bucket"
+    (Simulator.Object.Tagging.get conn ~bucket:"Invalid" ~key:"tagged.txt" ());
+  expect_validation_field ~operation:"PutObjectTagging"
+    "invalid object tagging key" "key"
+    (Simulator.Object.Tagging.put conn ~bucket:"test-bucket" ~key:""
+       ~tags:tag_set ());
+  expect_validation_field ~operation:"DeleteObjectTagging"
+    "invalid delete object tagging key" "key"
+    (Simulator.Object.Tagging.delete conn ~bucket:"test-bucket" ~key:"" ());
+  expect_validation_field ~operation:"HeadBucket" "invalid bucket head" "bucket"
+    (Simulator.Bucket.head conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"DeleteBucket" "invalid bucket delete"
+    "bucket"
+    (Simulator.Bucket.delete conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"HeadBucket" "invalid bucket exists"
+    "bucket"
+    (Simulator.Bucket.exists conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"GetBucketLocation"
+    "invalid bucket location" "bucket"
+    (Simulator.Bucket.get_location conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"GetBucketPolicy" "invalid policy get"
+    "bucket"
+    (Simulator.Bucket.Policy.get conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"PutBucketPolicy" "invalid policy put"
+    "bucket"
+    (Simulator.Bucket.Policy.put conn ~bucket:"Invalid" ~policy:bucket_policy ());
+  expect_validation_field ~operation:"DeleteBucketPolicy"
+    "invalid policy delete" "bucket"
+    (Simulator.Bucket.Policy.delete conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"GetBucketVersioning"
+    "invalid versioning get" "bucket"
+    (Simulator.Bucket.Versioning.get conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"PutBucketVersioning"
+    "invalid versioning put" "bucket"
+    (Simulator.Bucket.Versioning.put conn ~bucket:"Invalid"
+       ~status:Bucket.Versioning.Status.Enabled ());
+  expect_validation_field ~operation:"GetBucketTagging"
+    "invalid bucket tagging get" "bucket"
+    (Simulator.Bucket.Tagging.get conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"PutBucketTagging"
+    "invalid bucket tagging put" "bucket"
+    (Simulator.Bucket.Tagging.put conn ~bucket:"Invalid" ~tags:tag_set ());
+  expect_validation_field ~operation:"DeleteBucketTagging"
+    "invalid bucket tagging delete" "bucket"
+    (Simulator.Bucket.Tagging.delete conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"GetBucketEncryption"
+    "invalid encryption get" "bucket"
+    (Simulator.Bucket.Encryption.get conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"PutBucketEncryption"
+    "invalid encryption put" "bucket"
+    (Simulator.Bucket.Encryption.put conn ~bucket:"Invalid"
+       ~config:bucket_encryption ());
+  expect_validation_field ~operation:"DeleteBucketEncryption"
+    "invalid encryption delete" "bucket"
+    (Simulator.Bucket.Encryption.delete conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"GetBucketCors" "invalid cors get" "bucket"
+    (Simulator.Bucket.Cors.get conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"PutBucketCors" "invalid cors put" "bucket"
+    (Simulator.Bucket.Cors.put conn ~bucket:"Invalid" ~config:bucket_cors ());
+  expect_validation_field ~operation:"DeleteBucketCors" "invalid cors delete"
+    "bucket"
+    (Simulator.Bucket.Cors.delete conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"GetPublicAccessBlock"
+    "invalid access block get" "bucket"
+    (Simulator.Bucket.Public_access_block.get conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"PutPublicAccessBlock"
+    "invalid access block put" "bucket"
+    (Simulator.Bucket.Public_access_block.put conn ~bucket:"Invalid"
+       ~config:Bucket.Public_access_block.all_false ());
+  expect_validation_field ~operation:"DeletePublicAccessBlock"
+    "invalid access block delete" "bucket"
+    (Simulator.Bucket.Public_access_block.delete conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"GetBucketOwnershipControls"
+    "invalid ownership controls get" "bucket"
+    (Simulator.Bucket.Ownership_controls.get conn ~bucket:"Invalid" ());
+  expect_validation_field ~operation:"PutBucketOwnershipControls"
+    "invalid ownership controls put" "bucket"
+    (Simulator.Bucket.Ownership_controls.put conn ~bucket:"Invalid"
+       ~config:bucket_ownership_controls ());
+  expect_validation_field ~operation:"DeleteBucketOwnershipControls"
+    "invalid ownership controls delete" "bucket"
+    (Simulator.Bucket.Ownership_controls.delete conn ~bucket:"Invalid" ());
   Alcotest.(check int)
     "recorded operations" 0
     (List.length (Simulator.history store))

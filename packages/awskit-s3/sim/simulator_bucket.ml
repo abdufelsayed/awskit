@@ -12,13 +12,34 @@ module Bucket = struct
   type connection = t
   type 'a io = 'a
 
-  let create conn ~bucket ?options:_ () =
+  let bucket_error ~operation ~bucket error =
+    Error (S3_error_context.with_s3_operation ~operation ~bucket error)
+
+  let require_bucket_for_operation conn ~operation ~bucket =
     match validate_bucket bucket with
-    | Error error -> Error error
+    | Error error -> bucket_error ~operation ~bucket error
+    | Ok () -> (
+        match require_bucket conn bucket with
+        | Error error -> bucket_error ~operation ~bucket error
+        | Ok state -> Ok state)
+
+  let with_bucket_state conn ~operation ~bucket f =
+    match require_bucket_for_operation conn ~operation ~bucket with
+    | Error _ as error -> error
+    | Ok state -> (
+        match f state with
+        | Ok _ as ok -> ok
+        | Error error -> bucket_error ~operation ~bucket error)
+
+  let create conn ~bucket ?options:_ () =
+    let operation = "CreateBucket" in
+    match validate_bucket bucket with
+    | Error error -> bucket_error ~operation ~bucket error
     | Ok () ->
         let state_store = store conn in
         if bucket_exists state_store bucket then
-          Error (service ~status:409 ~code:"BucketAlreadyOwnedByYou" ())
+          bucket_error ~operation ~bucket
+            (service ~status:409 ~code:"BucketAlreadyOwnedByYou" ())
         else begin
           add_bucket state_store bucket
             {
@@ -38,19 +59,21 @@ module Bucket = struct
         end
 
   let delete conn ~bucket ?options:_ () =
-    match require_bucket conn bucket with
-    | Error error -> Error error
+    let operation = "DeleteBucket" in
+    match require_bucket_for_operation conn ~operation ~bucket with
+    | Error _ as error -> error
     | Ok state ->
         if Hashtbl.length state.objects > 0 then
-          Error (service ~status:409 ~code:"BucketNotEmpty" ())
+          bucket_error ~operation ~bucket
+            (service ~status:409 ~code:"BucketNotEmpty" ())
         else begin
           remove_bucket (store conn) bucket;
           Ok { Bucket_model.Delete.response = response 204 }
         end
 
   let head conn ~bucket ?options:_ () =
-    match require_bucket conn bucket with
-    | Error error -> Error error
+    match require_bucket_for_operation conn ~operation:"HeadBucket" ~bucket with
+    | Error _ as error -> error
     | Ok _ ->
         Ok
           {
@@ -77,8 +100,10 @@ module Bucket = struct
     Ok { Bucket_model.List_buckets.buckets; response = response 200 }
 
   let get_location conn ~bucket ?options:_ () =
-    match require_bucket conn bucket with
-    | Error error -> Error error
+    match
+      require_bucket_for_operation conn ~operation:"GetBucketLocation" ~bucket
+    with
+    | Error _ as error -> error
     | Ok _ ->
         Ok
           {
@@ -88,26 +113,21 @@ module Bucket = struct
 
   module Policy = struct
     let get conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state -> (
+      with_bucket_state conn ~operation:"GetBucketPolicy" ~bucket (fun state ->
           match state.policy with
           | Some p -> Ok p
           | None -> Error (no_such_key ()))
 
     let put conn ~bucket ?options:_ ~policy () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state ->
+      with_bucket_state conn ~operation:"PutBucketPolicy" ~bucket (fun state ->
           state.policy <- Some policy;
-          Ok (response 200)
+          Ok (response 200))
 
     let delete conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state ->
+      with_bucket_state conn ~operation:"DeleteBucketPolicy" ~bucket
+        (fun state ->
           state.policy <- None;
-          Ok (response 204)
+          Ok (response 204))
   end
 
   module Versioning = struct
@@ -118,19 +138,17 @@ module Bucket = struct
             "unknown bucket versioning status %S cannot be sent" value
 
     let get conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state ->
+      with_bucket_state conn ~operation:"GetBucketVersioning" ~bucket
+        (fun state ->
           Ok
             {
               Bucket_model.Versioning.status = state.versioning;
               response = response 200;
-            }
+            })
 
     let put conn ~bucket ?options:_ ~status () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state -> (
+      with_bucket_state conn ~operation:"PutBucketVersioning" ~bucket
+        (fun state ->
           match validate_status status with
           | Error error -> Error error
           | Ok () ->
@@ -140,19 +158,15 @@ module Bucket = struct
 
   module Tagging = struct
     let get conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state ->
+      with_bucket_state conn ~operation:"GetBucketTagging" ~bucket (fun state ->
           Ok
             {
               Bucket_model.Tagging.tags = state.bucket_tags;
               response = response 200;
-            }
+            })
 
     let put conn ~bucket ?options:_ ~tags () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state -> (
+      with_bucket_state conn ~operation:"PutBucketTagging" ~bucket (fun state ->
           match validate_tags tags with
           | Error error -> Error error
           | Ok () ->
@@ -160,18 +174,16 @@ module Bucket = struct
               Ok (response 200))
 
     let delete conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state ->
+      with_bucket_state conn ~operation:"DeleteBucketTagging" ~bucket
+        (fun state ->
           state.bucket_tags <- Tag.Set.empty;
-          Ok (response 204)
+          Ok (response 204))
   end
 
   module Encryption = struct
     let get conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state -> (
+      with_bucket_state conn ~operation:"GetBucketEncryption" ~bucket
+        (fun state ->
           match state.encryption with
           | None ->
               Error
@@ -181,50 +193,41 @@ module Bucket = struct
               Ok { Bucket_model.Encryption.config; response = response 200 })
 
     let put conn ~bucket ?options:_ ~config () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state ->
+      with_bucket_state conn ~operation:"PutBucketEncryption" ~bucket
+        (fun state ->
           state.encryption <- Some config;
-          Ok (response 200)
+          Ok (response 200))
 
     let delete conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state ->
+      with_bucket_state conn ~operation:"DeleteBucketEncryption" ~bucket
+        (fun state ->
           state.encryption <- None;
-          Ok (response 204)
+          Ok (response 204))
   end
 
   module Cors = struct
     let get conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state -> (
+      with_bucket_state conn ~operation:"GetBucketCors" ~bucket (fun state ->
           match state.cors with
           | None -> Error (no_such_key ())
           | Some config ->
               Ok { Bucket_model.Cors.config; response = response 200 })
 
     let put conn ~bucket ?options:_ ~config () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state ->
+      with_bucket_state conn ~operation:"PutBucketCors" ~bucket (fun state ->
           state.cors <- Some config;
-          Ok (response 200)
+          Ok (response 200))
 
     let delete conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state ->
+      with_bucket_state conn ~operation:"DeleteBucketCors" ~bucket (fun state ->
           state.cors <- None;
-          Ok (response 204)
+          Ok (response 204))
   end
 
   module Public_access_block = struct
     let get conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state -> (
+      with_bucket_state conn ~operation:"GetPublicAccessBlock" ~bucket
+        (fun state ->
           match state.public_access_block with
           | None -> Error (no_such_key ())
           | Some config ->
@@ -235,18 +238,16 @@ module Bucket = struct
                 })
 
     let put conn ~bucket ?options:_ ~config () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state ->
+      with_bucket_state conn ~operation:"PutPublicAccessBlock" ~bucket
+        (fun state ->
           state.public_access_block <- Some config;
-          Ok (response 200)
+          Ok (response 200))
 
     let delete conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state ->
+      with_bucket_state conn ~operation:"DeletePublicAccessBlock" ~bucket
+        (fun state ->
           state.public_access_block <- None;
-          Ok (response 204)
+          Ok (response 204))
   end
 
   module Ownership_controls = struct
@@ -258,9 +259,8 @@ module Bucket = struct
             "unknown object ownership %S cannot be sent" value
 
     let get conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state -> (
+      with_bucket_state conn ~operation:"GetBucketOwnershipControls" ~bucket
+        (fun state ->
           match state.ownership_controls with
           | None -> Error (no_such_key ())
           | Some config ->
@@ -271,9 +271,8 @@ module Bucket = struct
                 })
 
     let put conn ~bucket ?options:_ ~config () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state -> (
+      with_bucket_state conn ~operation:"PutBucketOwnershipControls" ~bucket
+        (fun state ->
           match validate_config config with
           | Error error -> Error error
           | Ok () ->
@@ -281,10 +280,9 @@ module Bucket = struct
               Ok (response 200))
 
     let delete conn ~bucket ?options:_ () =
-      match require_bucket conn bucket with
-      | Error error -> Error error
-      | Ok state ->
+      with_bucket_state conn ~operation:"DeleteBucketOwnershipControls" ~bucket
+        (fun state ->
           state.ownership_controls <- None;
-          Ok (response 204)
+          Ok (response 204))
   end
 end

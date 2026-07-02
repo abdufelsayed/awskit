@@ -30,13 +30,26 @@ let is_validation_field field error =
   Awskit.Error.is_validation error
   && Awskit.Error.validation_field error = Some field
 
+let has_operation_context operation error =
+  List.exists
+    (function
+      | Awskit.Error.Operation { service = Some "S3"; name; _ } ->
+          String.equal name operation
+      | _ -> false)
+    (Awskit.Error.context error)
+
 let expect_body_error label = function
   | Error error when is_body_error error -> ()
   | Error error -> Alcotest.failf "%s: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected body error" label
 
-let expect_validation_field label field = function
-  | Error error when is_validation_field field error -> ()
+let expect_validation_field ?operation label field = function
+  | Error error
+    when is_validation_field field error
+         && Option.fold ~none:true
+              ~some:(fun operation -> has_operation_context operation error)
+              operation ->
+      ()
   | Error error -> Alcotest.failf "%s: %a" label Awskit.Error.pp error
   | Ok _ -> Alcotest.failf "%s: expected validation field %s" label field
 
