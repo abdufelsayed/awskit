@@ -16,12 +16,12 @@ let delete_result ?delete_marker ?version_id () =
   }
 
 let delete_objects_error key ?version_id code message =
-  { Object.Delete_many.key; version_id; code; message = Some message }
+  { Object.Delete_objects.key; version_id; code; message = Some message }
 
 let delete_objects_conditions_match object_ = function
   | Some (Stored_object obj) ->
       let etag_matches =
-        match object_.Object.Delete_many.etag with
+        match object_.Object.Delete_objects.etag with
         | None -> true
         | Some etag -> Object.Etag.equal obj.etag etag
       in
@@ -112,8 +112,8 @@ let delete_objects conn ~bucket ~objects ?options:_ () =
           | None ->
               let deleted, errors =
                 List.fold_right
-                  (fun (object_ : Object.Delete_many.object_) (deleted, errors)
-                     ->
+                  (fun (object_ : Object.Delete_objects.object_)
+                       (deleted, errors) ->
                     let key = key_string object_.key in
                     let target =
                       match object_.version_id with
@@ -148,7 +148,7 @@ let delete_objects conn ~bucket ~objects ?options:_ () =
                             (None, None)
                       in
                       ( {
-                          Object.Delete_many.key = object_.key;
+                          Object.Delete_objects.key = object_.key;
                           version_id;
                           delete_marker;
                           delete_marker_version_id =
@@ -160,5 +160,9 @@ let delete_objects conn ~bucket ~objects ?options:_ () =
                         errors ))
                   objects ([], [])
               in
-              Ok { Object.Delete_many.deleted; errors; response = response 200 }
-          ))
+              Ok
+                {
+                  Object.Delete_objects.deleted;
+                  errors;
+                  response = response 200;
+                }))

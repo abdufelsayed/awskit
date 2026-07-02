@@ -20,13 +20,12 @@ let unwrap label = function
   | Ok value -> value
   | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
-let bucket_name value = Awskit_s3.Bucket_name.of_string_exn value
-let object_key value = Awskit_s3.Object_key.of_string_exn value
+let bucket_name value = value
+let object_key value = value
 let create_s3 () = S3.create () |> unwrap "create S3 client"
 
 let put_options =
-  Awskit_s3.Object.Put.options_exn
-    ~content_type:(Awskit_s3.Content_type.of_string_exn "text/plain")
+  Awskit_s3.Object.Put.options_exn ~content_type:"text/plain"
     ~metadata:
       (Awskit_s3.Metadata.of_list_exn
          [ ("source", "awskit-example"); ("kind", "metadata-demo") ])
@@ -51,8 +50,7 @@ let run () =
   ignore (unwrap "put object" put);
   let* head = S3.Object.head s3 ~bucket ~key () in
   let head = unwrap "head object" head in
-  Format.printf "s3://%a/%a@." Awskit_s3.Bucket_name.pp bucket
-    Awskit_s3.Object_key.pp key;
+  Format.printf "s3://%s/%s@." bucket key;
   Format.printf "content-type: %a@."
     (Format.pp_print_option Format.pp_print_string)
     (Option.map Awskit_s3.Content_type.to_string head.content_type);

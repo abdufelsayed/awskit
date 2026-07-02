@@ -19,8 +19,8 @@ let unwrap label = function
   | Ok value -> value
   | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
-let bucket_name value = Awskit_s3.Bucket_name.of_string_exn value
-let object_key value = Awskit_s3.Object_key.of_string_exn value
+let bucket_name value = value
+let object_key value = value
 
 let or_fail_msg label = function
   | Ok value -> value
@@ -68,8 +68,7 @@ let run stdenv =
     S3.Object.put_string s3 ~bucket ~key ~contents:body ()
     |> unwrap "put object"
   in
-  Format.printf "uploaded s3://%a/%a@." Awskit_s3.Bucket_name.pp bucket
-    Awskit_s3.Object_key.pp key;
+  Format.printf "uploaded s3://%s/%s@." bucket key;
   Format.printf "etag: %a@."
     (Format.pp_print_option Awskit_s3.Object.Etag.pp)
     put.etag;

@@ -254,6 +254,40 @@ module Put = struct
       ?(tags = Tag.Set.empty) ?cache_control ?content_encoding
       ?content_disposition ?(preconditions = Preconditions.Write.none) ?checksum
       ?encryption ?expected_bucket_owner () =
+    let* content_type =
+      match content_type with
+      | None -> Ok None
+      | Some content_type ->
+          Result.map Option.some (Content_type.of_string content_type)
+    in
+    let* cache_control =
+      match cache_control with
+      | None -> Ok None
+      | Some cache_control ->
+          Result.map Option.some
+            (Header_value.of_string ~field:"cache_control" cache_control)
+    in
+    let* content_encoding =
+      match content_encoding with
+      | None -> Ok None
+      | Some content_encoding ->
+          Result.map Option.some
+            (Header_value.of_string ~field:"content_encoding" content_encoding)
+    in
+    let* content_disposition =
+      match content_disposition with
+      | None -> Ok None
+      | Some content_disposition ->
+          Result.map Option.some
+            (Header_value.of_string ~field:"content_disposition"
+               content_disposition)
+    in
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
     let* () = validate_storage_class storage_class in
     let* () = validate_checksum_value checksum in
     Ok
@@ -331,6 +365,18 @@ module Get = struct
 
   let options ?range ?(preconditions = Preconditions.Read.none) ?version_id
       ?checksum_mode ?source_encryption ?expected_bucket_owner () =
+    let* version_id =
+      match version_id with
+      | None -> Ok None
+      | Some version_id ->
+          Result.map Option.some (Version_id.of_string version_id)
+    in
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
     Ok
       {
         range;
@@ -346,6 +392,30 @@ module Get = struct
     Awskit.Error.Producer.get_ok_exn
       (options ?range ?preconditions ?version_id ?checksum_mode
          ?source_encryption ?expected_bucket_owner ())
+
+  let ranged_download_options (options : options) ~(head : info) ~range =
+    let version_id =
+      match head.version_id with
+      | None -> options.version_id
+      | Some version_id -> Some version_id
+    in
+    let preconditions =
+      match (head.version_id, head.etag) with
+      | Some _, _ | _, None -> options.preconditions
+      | None, Some etag ->
+          {
+            options.preconditions with
+            if_match = Some (Etag_condition.Etag etag);
+          }
+    in
+    {
+      range = Some range;
+      preconditions;
+      version_id;
+      checksum_mode = options.checksum_mode;
+      source_encryption = options.source_encryption;
+      expected_bucket_owner = options.expected_bucket_owner;
+    }
 end
 
 module Head = struct
@@ -370,6 +440,18 @@ module Head = struct
 
   let options ?(preconditions = Preconditions.Read.none) ?version_id
       ?checksum_mode ?source_encryption ?expected_bucket_owner () =
+    let* version_id =
+      match version_id with
+      | None -> Ok None
+      | Some version_id ->
+          Result.map Option.some (Version_id.of_string version_id)
+    in
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
     Ok
       {
         preconditions;
@@ -384,6 +466,15 @@ module Head = struct
     Awskit.Error.Producer.get_ok_exn
       (options ?preconditions ?version_id ?checksum_mode ?expected_bucket_owner
          ?source_encryption ())
+
+  let of_get_options (options : Get.options) =
+    {
+      preconditions = options.preconditions;
+      version_id = options.version_id;
+      checksum_mode = options.checksum_mode;
+      source_encryption = options.source_encryption;
+      expected_bucket_owner = options.expected_bucket_owner;
+    }
 end
 
 module Delete = struct
@@ -408,6 +499,18 @@ module Delete = struct
 
   let options ?(preconditions = Preconditions.Delete.none) ?version_id
       ?expected_bucket_owner () =
+    let* version_id =
+      match version_id with
+      | None -> Ok None
+      | Some version_id ->
+          Result.map Option.some (Version_id.of_string version_id)
+    in
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
     Ok { preconditions; version_id; expected_bucket_owner }
 
   let options_exn ?preconditions ?version_id ?expected_bucket_owner () =
@@ -415,7 +518,7 @@ module Delete = struct
       (options ?preconditions ?version_id ?expected_bucket_owner ())
 end
 
-module Delete_many = struct
+module Delete_objects = struct
   let max_objects = 1000
 
   type object_ = {
@@ -424,7 +527,23 @@ module Delete_many = struct
     etag : Etag.t option;
   }
 
-  let object_ ~key ?version_id ?etag () = { key; version_id; etag }
+  let object_ ~key ?version_id ?etag () =
+    let* key = Object_key.of_string key in
+    let* version_id =
+      match version_id with
+      | None -> Ok None
+      | Some version_id ->
+          Result.map Option.some (Version_id.of_string version_id)
+    in
+    let* etag =
+      match etag with
+      | None -> Ok None
+      | Some etag -> Result.map Option.some (Etag.of_string etag)
+    in
+    Ok { key; version_id; etag }
+
+  let object_exn ~key ?version_id ?etag () =
+    Awskit.Error.Producer.get_ok_exn (object_ ~key ?version_id ?etag ())
 
   type deleted = {
     key : Object_key.t;
@@ -449,7 +568,15 @@ module Delete_many = struct
   type options = { expected_bucket_owner : Account_id.t option }
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
@@ -508,6 +635,25 @@ module Copy = struct
       ?metadata_directive ?storage_class ?checksum_algorithm
       ?destination_encryption ?source_encryption ?expected_bucket_owner
       ?source_expected_bucket_owner () =
+    let* source_version_id =
+      match source_version_id with
+      | None -> Ok None
+      | Some source_version_id ->
+          Result.map Option.some (Version_id.of_string source_version_id)
+    in
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    let* source_expected_bucket_owner =
+      match source_expected_bucket_owner with
+      | None -> Ok None
+      | Some source_expected_bucket_owner ->
+          Result.map Option.some
+            (Account_id.of_string source_expected_bucket_owner)
+    in
     let* () = validate_storage_class storage_class in
     let* () = validate_checksum_algorithm checksum_algorithm in
     Ok
@@ -604,6 +750,35 @@ module Versions = struct
 
   let options ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
       ?expected_bucket_owner () =
+    let* prefix =
+      match prefix with
+      | None -> Ok None
+      | Some prefix ->
+          Result.map Option.some (Object_key.Prefix.of_string prefix)
+    in
+    let* delimiter =
+      match delimiter with
+      | None -> Ok None
+      | Some delimiter -> Result.map Option.some (Delimiter.of_string delimiter)
+    in
+    let* key_marker =
+      match key_marker with
+      | None -> Ok None
+      | Some key_marker ->
+          Result.map Option.some (Object_key.of_string key_marker)
+    in
+    let* version_id_marker =
+      match version_id_marker with
+      | None -> Ok None
+      | Some version_id_marker ->
+          Result.map Option.some (Version_id.of_string version_id_marker)
+    in
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
     let* () = validate_max_keys max_keys in
     Ok
       {
@@ -620,6 +795,20 @@ module Versions = struct
     Awskit.Error.Producer.get_ok_exn
       (options ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
          ?expected_bucket_owner ())
+
+  let next_page_options (options : options) (page : page) =
+    match page.next_key_marker with
+    | None -> None
+    | Some _ ->
+        Some
+          {
+            prefix = options.prefix;
+            delimiter = options.delimiter;
+            max_keys = options.max_keys;
+            key_marker = page.next_key_marker;
+            version_id_marker = page.next_version_id_marker;
+            expected_bucket_owner = options.expected_bucket_owner;
+          }
 end
 
 module List = struct
@@ -697,6 +886,36 @@ module List = struct
 
   let options ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
       ?expected_bucket_owner () =
+    let* prefix =
+      match prefix with
+      | None -> Ok None
+      | Some prefix ->
+          Result.map Option.some (Object_key.Prefix.of_string prefix)
+    in
+    let* delimiter =
+      match delimiter with
+      | None -> Ok None
+      | Some delimiter -> Result.map Option.some (Delimiter.of_string delimiter)
+    in
+    let* start_after =
+      match start_after with
+      | None -> Ok None
+      | Some start_after ->
+          Result.map Option.some (Object_key.of_string start_after)
+    in
+    let* continuation_token =
+      match continuation_token with
+      | None -> Ok None
+      | Some continuation_token ->
+          Result.map Option.some
+            (Continuation_token.of_string continuation_token)
+    in
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
     let* () = validate_max_keys max_keys in
     Ok
       {
@@ -713,6 +932,33 @@ module List = struct
     Awskit.Error.Producer.get_ok_exn
       (options ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
          ?expected_bucket_owner ())
+
+  let first_page_options (options : options) =
+    match options.continuation_token with
+    | None -> options
+    | Some continuation_token ->
+        {
+          prefix = options.prefix;
+          delimiter = options.delimiter;
+          max_keys = options.max_keys;
+          start_after = None;
+          continuation_token = Some continuation_token;
+          expected_bucket_owner = options.expected_bucket_owner;
+        }
+
+  let next_page_options (options : options) (page : page) =
+    match page.next_continuation_token with
+    | None -> None
+    | Some token ->
+        Some
+          {
+            prefix = options.prefix;
+            delimiter = options.delimiter;
+            max_keys = options.max_keys;
+            continuation_token = Some token;
+            start_after = None;
+            expected_bucket_owner = options.expected_bucket_owner;
+          }
 end
 
 module Tagging = struct
@@ -720,7 +966,15 @@ module Tagging = struct
   type result = { tags : Tag.Set.t; response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())

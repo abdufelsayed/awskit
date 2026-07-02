@@ -7,8 +7,8 @@ let credentials =
   Awskit.Credentials.create_exn ~access_key_id:"AKID"
     ~secret_access_key:"SECRET" ()
 
-let bucket_name value = Bucket_name.of_string_exn value
-let object_key value = Object_key.of_string_exn value
+let bucket_name value = value
+let object_key value = value
 
 let ok_or_fail label = function
   | Ok value -> value

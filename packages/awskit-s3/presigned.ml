@@ -7,7 +7,7 @@ let ( let* ) = S3_result.( let* )
 
 type addressing_style = Endpoint_config.addressing_style
 type endpoint_variant = Endpoint_config.endpoint_variant
-type endpoint_config = Endpoint_resolver.t
+type endpoint_config = Endpoint_config.t
 type method_ = [ `GET | `PUT | `HEAD | `DELETE ]
 
 type result = {
@@ -389,56 +389,70 @@ let head_query (options : Head_object.options) =
 
 let get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
-  let options = Option.value ~default:Get_object.default_options options in
-  let* () = Headers.validate_source_encryption options.source_encryption in
-  let signed_headers =
-    Headers.source_encryption_headers options.source_encryption
-    @ expected_owner_header options.expected_bucket_owner
-    @ options.extra_signed_headers
-  in
-  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_:`GET ~signed_headers ~query:(get_query options)
-    ?expires_in:options.expires_in ()
+  match (Bucket_name.of_string bucket, Object_key.of_string key) with
+  | Error error, _ | _, Error error -> Error error
+  | Ok bucket, Ok key ->
+      let options = Option.value ~default:Get_object.default_options options in
+      let* () = Headers.validate_source_encryption options.source_encryption in
+      let signed_headers =
+        Headers.source_encryption_headers options.source_encryption
+        @ expected_owner_header options.expected_bucket_owner
+        @ options.extra_signed_headers
+      in
+      generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+        ~bucket ~key ~method_:`GET ~signed_headers ~query:(get_query options)
+        ?expires_in:options.expires_in ()
 
 let head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
-  let options = Option.value ~default:Head_object.default_options options in
-  let* () = Headers.validate_source_encryption options.source_encryption in
-  let signed_headers =
-    Headers.source_encryption_headers options.source_encryption
-    @ expected_owner_header options.expected_bucket_owner
-    @ options.extra_signed_headers
-  in
-  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_:`HEAD ~signed_headers ~query:(head_query options)
-    ?expires_in:options.expires_in ()
+  match (Bucket_name.of_string bucket, Object_key.of_string key) with
+  | Error error, _ | _, Error error -> Error error
+  | Ok bucket, Ok key ->
+      let options = Option.value ~default:Head_object.default_options options in
+      let* () = Headers.validate_source_encryption options.source_encryption in
+      let signed_headers =
+        Headers.source_encryption_headers options.source_encryption
+        @ expected_owner_header options.expected_bucket_owner
+        @ options.extra_signed_headers
+      in
+      generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+        ~bucket ~key ~method_:`HEAD ~signed_headers ~query:(head_query options)
+        ?expires_in:options.expires_in ()
 
 let put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
-  let options = Option.value ~default:Put_object.default_options options in
-  let* () = validate_opt Headers.validate_checksum_value options.checksum in
-  let* () = Headers.validate_destination_encryption options.encryption in
-  let headers =
-    option_content_type_header "content-type" options.content_type
-    @ Headers.checksum_value_headers options.checksum
-    @ Headers.destination_encryption_headers options.encryption
-    @ expected_owner_header options.expected_bucket_owner
-    @ options.extra_signed_headers
-  in
-  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_:`PUT ~signed_headers:headers ~query:[]
-    ?expires_in:options.expires_in ()
+  match (Bucket_name.of_string bucket, Object_key.of_string key) with
+  | Error error, _ | _, Error error -> Error error
+  | Ok bucket, Ok key ->
+      let options = Option.value ~default:Put_object.default_options options in
+      let* () = validate_opt Headers.validate_checksum_value options.checksum in
+      let* () = Headers.validate_destination_encryption options.encryption in
+      let headers =
+        option_content_type_header "content-type" options.content_type
+        @ Headers.checksum_value_headers options.checksum
+        @ Headers.destination_encryption_headers options.encryption
+        @ expected_owner_header options.expected_bucket_owner
+        @ options.extra_signed_headers
+      in
+      generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+        ~bucket ~key ~method_:`PUT ~signed_headers:headers ~query:[]
+        ?expires_in:options.expires_in ()
 
 let delete_object_with_endpoint_config ~region ~credentials ~now
     ~endpoint_config ~bucket ~key ?options () =
-  let options = Option.value ~default:Delete_object.default_options options in
-  let signed_headers =
-    expected_owner_header options.expected_bucket_owner
-    @ options.extra_signed_headers
-  in
-  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_:`DELETE ~signed_headers ~query:[]
-    ?expires_in:options.expires_in ()
+  match (Bucket_name.of_string bucket, Object_key.of_string key) with
+  | Error error, _ | _, Error error -> Error error
+  | Ok bucket, Ok key ->
+      let options =
+        Option.value ~default:Delete_object.default_options options
+      in
+      let signed_headers =
+        expected_owner_header options.expected_bucket_owner
+        @ options.extra_signed_headers
+      in
+      generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+        ~bucket ~key ~method_:`DELETE ~signed_headers ~query:[]
+        ?expires_in:options.expires_in ()
 
 let upload_part_query ~upload_id ~part_number =
   [
@@ -454,16 +468,19 @@ let upload_part_headers (options : Upload_part.options) =
 
 let upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~upload ~part_number ?options () =
-  let options = Option.value ~default:Upload_part.default_options options in
-  let* () = validate_opt Headers.validate_checksum_value options.checksum in
-  let bucket = Multipart.Upload.bucket upload in
-  let key = Multipart.Upload.key upload in
-  let upload_id = Multipart.Upload.upload_id upload in
-  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_:`PUT
-    ~signed_headers:(upload_part_headers options)
-    ~query:(upload_part_query ~upload_id ~part_number)
-    ?expires_in:options.expires_in ()
+  match Multipart.Part_number.of_int part_number with
+  | Error error -> Error error
+  | Ok part_number ->
+      let options = Option.value ~default:Upload_part.default_options options in
+      let* () = validate_opt Headers.validate_checksum_value options.checksum in
+      let bucket = Multipart.Upload.bucket upload in
+      let key = Multipart.Upload.key upload in
+      let upload_id = Multipart.Upload.upload_id upload in
+      generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+        ~bucket ~key ~method_:`PUT
+        ~signed_headers:(upload_part_headers options)
+        ~query:(upload_part_query ~upload_id ~part_number)
+        ?expires_in:options.expires_in ()
 
 let get_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
     ~bucket ~key ?options () =

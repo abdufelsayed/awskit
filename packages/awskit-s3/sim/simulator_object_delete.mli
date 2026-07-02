@@ -9,10 +9,10 @@ val delete_objects_error :
   ?version_id:Awskit_s3.Object.Version_id.t ->
   string ->
   string ->
-  Awskit_s3.Object.Delete_many.item_error
+  Awskit_s3.Object.Delete_objects.item_error
 
 val delete_objects_conditions_match :
-  Awskit_s3.Object.Delete_many.object_ ->
+  Awskit_s3.Object.Delete_objects.object_ ->
   Simulator_state.stored_version option ->
   bool
 
@@ -27,7 +27,7 @@ val delete :
 val delete_objects :
   Simulator_state.t ->
   bucket:string ->
-  objects:Awskit_s3.Object.Delete_many.object_ list ->
-  ?options:Awskit_s3.Object.Delete_many.options ->
+  objects:Awskit_s3.Object.Delete_objects.object_ list ->
+  ?options:Awskit_s3.Object.Delete_objects.options ->
   unit ->
-  (Awskit_s3.Object.Delete_many.result, Awskit.Error.t) result
+  (Awskit_s3.Object.Delete_objects.result, Awskit.Error.t) result

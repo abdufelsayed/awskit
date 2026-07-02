@@ -2,7 +2,7 @@ module Xml = S3_xml
 
 let ( let* ) = S3_result.( let* )
 
-module Delete_objects = Object.Delete_many
+module Delete_objects = Object.Delete_objects
 
 let validate_objects objects =
   let count = List.length objects in

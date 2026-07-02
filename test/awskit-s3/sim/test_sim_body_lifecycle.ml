@@ -27,8 +27,7 @@ let test_request_body_requires_known_length () =
     |> ok_or_fail "create upload"
   in
   expect_validation_field "unknown length part" "content_length"
-    (Simulator.Multipart.upload_part conn ~upload:created.upload
-       ~part_number:(Multipart.Part_number.of_int_exn 1)
+    (Simulator.Multipart.upload_part conn ~upload:created.upload ~part_number:1
        ~body ())
 
 let test_request_body_rejects_length_mismatch () =
@@ -69,8 +68,7 @@ let test_stream_error_does_not_store_part () =
         | Ok () -> Error stream_error)
   in
   expect_body_error "part stream error"
-    (Simulator.Multipart.upload_part conn ~upload:created.upload
-       ~part_number:(Multipart.Part_number.of_int_exn 1)
+    (Simulator.Multipart.upload_part conn ~upload:created.upload ~part_number:1
        ~body ());
   let listed =
     Simulator.Multipart.list_parts conn ~upload:created.upload ()

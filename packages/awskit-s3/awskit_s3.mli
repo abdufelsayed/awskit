@@ -17,7 +17,7 @@ module type RUNTIME = sig
   module S3_endpoint : sig
     type nonrec connection = connection
 
-    val s3_endpoint_config : connection -> Endpoint_resolver.t
+    val s3_endpoint_config : connection -> Endpoint_config.t
     (** Return S3 addressing/endpoint configuration for this connection. *)
   end
 end
@@ -145,8 +145,8 @@ module type OBJECT = sig
 
   val put :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Put.options ->
     body:request_body ->
     unit ->
@@ -159,8 +159,8 @@ module type OBJECT = sig
 
   val put_string :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Put.options ->
     contents:string ->
     unit ->
@@ -170,8 +170,8 @@ module type OBJECT = sig
 
   val put_bytes :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Put.options ->
     contents:bytes ->
     unit ->
@@ -181,8 +181,8 @@ module type OBJECT = sig
 
   val get :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Get.options ->
     consume:(response_body_reader -> ('a, Awskit.Error.t) result io) ->
     unit ->
@@ -194,8 +194,8 @@ module type OBJECT = sig
 
   val get_string :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Get.options ->
     max_bytes:int64 ->
     unit ->
@@ -207,8 +207,8 @@ module type OBJECT = sig
 
   val get_bytes :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Get.options ->
     max_bytes:int64 ->
     unit ->
@@ -217,8 +217,8 @@ module type OBJECT = sig
 
   val find :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Get.options ->
     consume:(response_body_reader -> ('a, Awskit.Error.t) result io) ->
     unit ->
@@ -232,8 +232,8 @@ module type OBJECT = sig
 
   val find_string :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Get.options ->
     max_bytes:int64 ->
     unit ->
@@ -243,8 +243,8 @@ module type OBJECT = sig
 
   val find_bytes :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Get.options ->
     max_bytes:int64 ->
     unit ->
@@ -254,8 +254,8 @@ module type OBJECT = sig
 
   val head :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Head.options ->
     unit ->
     (Object.Head.result, Awskit.Error.t) result io
@@ -263,8 +263,8 @@ module type OBJECT = sig
 
   val find_metadata :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Head.options ->
     unit ->
     (Object.Head.result option, Awskit.Error.t) result io
@@ -279,8 +279,8 @@ module type OBJECT = sig
 
   val exists :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Head.options ->
     unit ->
     (bool, Awskit.Error.t) result io
@@ -294,8 +294,8 @@ module type OBJECT = sig
 
   val delete :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Object.Delete.options ->
     unit ->
     (Object.Delete.result, Awskit.Error.t) result io
@@ -303,22 +303,23 @@ module type OBJECT = sig
 
   val delete_objects :
     connection ->
-    bucket:Bucket_name.t ->
-    objects:Object.Delete_many.object_ list ->
-    ?options:Object.Delete_many.options ->
+    bucket:string ->
+    objects:Object.Delete_objects.object_ list ->
+    ?options:Object.Delete_objects.options ->
     unit ->
-    (Object.Delete_many.result, Awskit.Error.t) result io
+    (Object.Delete_objects.result, Awskit.Error.t) result io
   (** Delete multiple objects with [DeleteObjects].
 
-      Per-object failures are represented in [Object.Delete_many.result.errors]
-      even when the operation itself returns [Ok]. *)
+      Per-object failures are represented in
+      [Object.Delete_objects.result.errors] even when the operation itself
+      returns [Ok]. *)
 
   val copy :
     connection ->
-    source_bucket:Bucket_name.t ->
-    source_key:Object_key.t ->
-    destination_bucket:Bucket_name.t ->
-    destination_key:Object_key.t ->
+    source_bucket:string ->
+    source_key:string ->
+    destination_bucket:string ->
+    destination_key:string ->
     ?options:Object.Copy.options ->
     unit ->
     (Object.Copy.result, Awskit.Error.t) result io
@@ -326,7 +327,7 @@ module type OBJECT = sig
 
   val list_versions :
     connection ->
-    bucket:Bucket_name.t ->
+    bucket:string ->
     ?options:Object.Versions.options ->
     unit ->
     (Object.Versions.page, Awskit.Error.t) result io
@@ -335,7 +336,7 @@ module type OBJECT = sig
 
   val list :
     connection ->
-    bucket:Bucket_name.t ->
+    bucket:string ->
     ?options:Object.List.options ->
     unit ->
     (Object.List.page, Awskit.Error.t) result io
@@ -353,7 +354,7 @@ module type OBJECT = sig
 
     val fold_pages :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Object.List.options ->
       ?max_pages:int ->
       init:'acc ->
@@ -365,7 +366,7 @@ module type OBJECT = sig
 
     val fold_pages_until :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Object.List.options ->
       ?max_pages:int ->
       init:'acc ->
@@ -377,7 +378,7 @@ module type OBJECT = sig
 
     val pages :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Object.List.options ->
       max_pages:int ->
       unit ->
@@ -388,7 +389,7 @@ module type OBJECT = sig
 
     val objects :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Object.List.options ->
       max_pages:int ->
       unit ->
@@ -397,7 +398,7 @@ module type OBJECT = sig
 
     val keys :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Object.List.options ->
       max_pages:int ->
       unit ->
@@ -416,7 +417,7 @@ module type OBJECT = sig
 
     val fold_pages :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Object.Versions.options ->
       ?max_pages:int ->
       init:'acc ->
@@ -428,7 +429,7 @@ module type OBJECT = sig
 
     val fold_pages_until :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Object.Versions.options ->
       ?max_pages:int ->
       init:'acc ->
@@ -443,7 +444,7 @@ module type OBJECT = sig
 
     val pages :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Object.Versions.options ->
       max_pages:int ->
       unit ->
@@ -454,7 +455,7 @@ module type OBJECT = sig
 
     val object_versions :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Object.Versions.options ->
       max_pages:int ->
       unit ->
@@ -463,7 +464,7 @@ module type OBJECT = sig
 
     val delete_markers :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Object.Versions.options ->
       max_pages:int ->
       unit ->
@@ -476,8 +477,8 @@ module type OBJECT = sig
 
     val get :
       connection ->
-      bucket:Bucket_name.t ->
-      key:Object_key.t ->
+      bucket:string ->
+      key:string ->
       ?options:Object.Tagging.options ->
       unit ->
       (Object.Tagging.result, Awskit.Error.t) result io
@@ -485,8 +486,8 @@ module type OBJECT = sig
 
     val put :
       connection ->
-      bucket:Bucket_name.t ->
-      key:Object_key.t ->
+      bucket:string ->
+      key:string ->
       ?options:Object.Tagging.options ->
       tags:Tag.Set.t ->
       unit ->
@@ -495,8 +496,8 @@ module type OBJECT = sig
 
     val delete :
       connection ->
-      bucket:Bucket_name.t ->
-      key:Object_key.t ->
+      bucket:string ->
+      key:string ->
       ?options:Object.Tagging.options ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -515,7 +516,7 @@ module type BUCKET = sig
 
   val create :
     connection ->
-    bucket:Bucket_name.t ->
+    bucket:string ->
     ?options:Bucket.Create.options ->
     unit ->
     (Bucket.Create.result, Awskit.Error.t) result io
@@ -523,7 +524,7 @@ module type BUCKET = sig
 
   val delete :
     connection ->
-    bucket:Bucket_name.t ->
+    bucket:string ->
     ?options:Bucket.Delete.options ->
     unit ->
     (Bucket.Delete.result, Awskit.Error.t) result io
@@ -531,7 +532,7 @@ module type BUCKET = sig
 
   val head :
     connection ->
-    bucket:Bucket_name.t ->
+    bucket:string ->
     ?options:Bucket.Head.options ->
     unit ->
     (Bucket.Head.result, Awskit.Error.t) result io
@@ -539,7 +540,7 @@ module type BUCKET = sig
 
   val exists :
     connection ->
-    bucket:Bucket_name.t ->
+    bucket:string ->
     ?options:Bucket.Head.options ->
     unit ->
     (bool, Awskit.Error.t) result io
@@ -551,7 +552,7 @@ module type BUCKET = sig
 
   val get_location :
     connection ->
-    bucket:Bucket_name.t ->
+    bucket:string ->
     ?options:Bucket.Get_location.options ->
     unit ->
     (Bucket.Get_location.result, Awskit.Error.t) result io
@@ -562,7 +563,7 @@ module type BUCKET = sig
 
     val get :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Policy.options ->
       unit ->
       (Policy.t, Awskit.Error.t) result io
@@ -570,7 +571,7 @@ module type BUCKET = sig
 
     val put :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Policy.options ->
       policy:Policy.t ->
       unit ->
@@ -579,7 +580,7 @@ module type BUCKET = sig
 
     val delete :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Policy.options ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -591,7 +592,7 @@ module type BUCKET = sig
 
     val get :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Versioning.options ->
       unit ->
       (Bucket.Versioning.result, Awskit.Error.t) result io
@@ -599,7 +600,7 @@ module type BUCKET = sig
 
     val put :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Versioning.options ->
       status:Bucket.Versioning.Status.t ->
       unit ->
@@ -612,7 +613,7 @@ module type BUCKET = sig
 
     val get :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Tagging.options ->
       unit ->
       (Bucket.Tagging.result, Awskit.Error.t) result io
@@ -620,7 +621,7 @@ module type BUCKET = sig
 
     val put :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Tagging.options ->
       tags:Tag.Set.t ->
       unit ->
@@ -629,7 +630,7 @@ module type BUCKET = sig
 
     val delete :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Tagging.options ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -641,7 +642,7 @@ module type BUCKET = sig
 
     val get :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Encryption.options ->
       unit ->
       (Bucket.Encryption.result, Awskit.Error.t) result io
@@ -649,7 +650,7 @@ module type BUCKET = sig
 
     val put :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Encryption.options ->
       config:Bucket.Encryption.config ->
       unit ->
@@ -658,7 +659,7 @@ module type BUCKET = sig
 
     val delete :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Encryption.options ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -670,7 +671,7 @@ module type BUCKET = sig
 
     val get :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Cors.options ->
       unit ->
       (Bucket.Cors.result, Awskit.Error.t) result io
@@ -678,7 +679,7 @@ module type BUCKET = sig
 
     val put :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Cors.options ->
       config:Bucket.Cors.config ->
       unit ->
@@ -687,7 +688,7 @@ module type BUCKET = sig
 
     val delete :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Cors.options ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -699,7 +700,7 @@ module type BUCKET = sig
 
     val get :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Public_access_block.options ->
       unit ->
       (Bucket.Public_access_block.result, Awskit.Error.t) result io
@@ -707,7 +708,7 @@ module type BUCKET = sig
 
     val put :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Public_access_block.options ->
       config:Bucket.Public_access_block.config ->
       unit ->
@@ -716,7 +717,7 @@ module type BUCKET = sig
 
     val delete :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Public_access_block.options ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -728,7 +729,7 @@ module type BUCKET = sig
 
     val get :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Ownership_controls.options ->
       unit ->
       (Bucket.Ownership_controls.result, Awskit.Error.t) result io
@@ -736,7 +737,7 @@ module type BUCKET = sig
 
     val put :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Ownership_controls.options ->
       config:Bucket.Ownership_controls.config ->
       unit ->
@@ -745,7 +746,7 @@ module type BUCKET = sig
 
     val delete :
       connection ->
-      bucket:Bucket_name.t ->
+      bucket:string ->
       ?options:Bucket.Ownership_controls.options ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -767,8 +768,8 @@ module type MULTIPART = sig
 
   val create_upload :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Multipart.Create.options ->
     unit ->
     (Multipart.Create.result, Awskit.Error.t) result io
@@ -777,7 +778,7 @@ module type MULTIPART = sig
   val upload_part :
     connection ->
     upload:_ Multipart.Upload.t ->
-    part_number:Multipart.Part_number.t ->
+    part_number:int ->
     body:request_body ->
     ?options:Multipart.Upload_part.options ->
     unit ->
@@ -865,8 +866,8 @@ module type PRESIGNED = sig
 
   val get_object :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Presigned.Get_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
@@ -874,8 +875,8 @@ module type PRESIGNED = sig
 
   val put_object :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Presigned.Put_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
@@ -884,8 +885,8 @@ module type PRESIGNED = sig
 
   val head_object :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Presigned.Head_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
@@ -893,8 +894,8 @@ module type PRESIGNED = sig
 
   val delete_object :
     connection ->
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
+    bucket:string ->
+    key:string ->
     ?options:Presigned.Delete_object.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
@@ -903,7 +904,7 @@ module type PRESIGNED = sig
   val upload_part :
     connection ->
     upload:_ Multipart.Upload.t ->
-    part_number:Multipart.Part_number.t ->
+    part_number:int ->
     ?options:Presigned.Upload_part.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
@@ -1015,14 +1016,14 @@ module Endpoint_resolver = Endpoint_resolver
 
 type addressing_style = Endpoint_config.addressing_style
 type endpoint_variant = Endpoint_config.endpoint_variant
-type endpoint_config = Endpoint_resolver.t
+type endpoint_config = Endpoint_config.t
 
 val endpoint_config :
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
   unit ->
   endpoint_config
-(** Build an AWS S3 endpoint resolver from addressing and endpoint variant
+(** Build an AWS S3 endpoint configuration from addressing and endpoint variant
     preferences.
 
     Use {!Awskit_s3.Endpoint_config.s3_compatible},
@@ -1032,7 +1033,7 @@ val endpoint_config :
     endpoint. *)
 
 val default_endpoint_config : endpoint_config
-(** Default AWS S3 regional HTTPS endpoint resolver. *)
+(** Default AWS S3 regional HTTPS endpoint configuration. *)
 
 module Object = Object
 module Bucket = Bucket

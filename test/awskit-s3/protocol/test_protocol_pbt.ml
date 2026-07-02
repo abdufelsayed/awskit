@@ -483,14 +483,7 @@ let prop_presigned_upload_part_safe_uri_keeps_operation_query =
            Protocol_generators.protocol_object_key Protocol_generators.upload_id
            (int_range 1 10_000)))
     (fun (bucket, key, upload_id, part_number) ->
-      let upload_id = Multipart.Upload_id.of_string_exn upload_id in
-      let upload =
-        Multipart.Upload.resume
-          ~bucket:(Bucket_name.of_string_exn bucket)
-          ~key:(Object_key.of_string_exn key)
-          ~upload_id
-      in
-      let part_number = Multipart.Part_number.of_int_exn part_number in
+      let upload = Multipart.Upload.resume_exn ~bucket ~key ~upload_id in
       match
         Presigned.upload_part ~region:"us-east-1"
           ~credentials:Protocol_support.credentials
@@ -501,10 +494,8 @@ let prop_presigned_upload_part_safe_uri_keeps_operation_query =
           let safe_uri = Presigned.safe_uri presigned in
           Presigned.method_ presigned = `PUT
           && has_no_sigv4_query_params safe_uri
-          && query_values "partNumber" safe_uri
-             = [ Multipart.Part_number.to_int part_number |> string_of_int ]
-          && query_values "uploadId" safe_uri
-             = [ Multipart.Upload_id.to_string upload_id ]
+          && query_values "partNumber" safe_uri = [ string_of_int part_number ]
+          && query_values "uploadId" safe_uri = [ upload_id ]
           && List.mem_assoc "host" (Presigned.signed_headers presigned)
           && not (List.mem_assoc "host" (Presigned.request_headers presigned)))
 
@@ -522,9 +513,7 @@ let prop_presigned_rejects_invalid_extra_signed_headers =
       Result.is_error
         (Presigned.get_object ~region:"us-east-1"
            ~credentials:Protocol_support.credentials
-           ~now:Protocol_support.test_time
-           ~bucket:(Protocol_support.bucket_name "bucket")
-           ~key:(Protocol_support.object_key "file.txt")
+           ~now:Protocol_support.test_time ~bucket:"bucket" ~key:"file.txt"
            ~options ()))
 
 let prop_presigned_rejects_invalid_expiration_bounds =
@@ -541,9 +530,7 @@ let prop_presigned_rejects_invalid_expiration_bounds =
       match
         Presigned.get_object ~region:"us-east-1"
           ~credentials:Protocol_support.credentials
-          ~now:Protocol_support.test_time
-          ~bucket:(Protocol_support.bucket_name "bucket")
-          ~key:(Protocol_support.object_key "file.txt")
+          ~now:Protocol_support.test_time ~bucket:"bucket" ~key:"file.txt"
           ~options ()
       with
       | Error error -> Awskit.Error.validation_field error = Some "expires_in"
@@ -554,9 +541,7 @@ let tagging_result_from_xml body =
     Protocol_recording_runtime.connect
       [ Protocol_recording_runtime.response 200 body ]
   in
-  Protocol_recording_runtime.S3.Bucket.Tagging.get conn
-    ~bucket:(Protocol_support.bucket_name "bucket")
-    ()
+  Protocol_recording_runtime.S3.Bucket.Tagging.get conn ~bucket:"bucket" ()
 
 let tag_pairs_to_string tags =
   tags
@@ -730,10 +715,8 @@ let prop_get_request_emits_range_header =
           ]
       in
       match
-        Protocol_recording_runtime.S3.Object.get conn
-          ~bucket:(Protocol_support.bucket_name "bucket")
-          ~key:(Protocol_support.object_key "file.txt")
-          ~options
+        Protocol_recording_runtime.S3.Object.get conn ~bucket:"bucket"
+          ~key:"file.txt" ~options
           ~consume:
             (Protocol_recording_runtime.S3.Reader.to_string ~max_bytes:1L)
           ()
@@ -762,10 +745,8 @@ let multipart_checksum_part_exn number =
 
 let complete_upload_result parts =
   let upload =
-    Multipart.Upload.resume
-      ~bucket:(Protocol_support.bucket_name "bucket")
-      ~key:(Protocol_support.object_key "large.bin")
-      ~upload_id:(Multipart.Upload_id.of_string_exn "upload-1")
+    Multipart.Upload.resume_exn ~bucket:"bucket" ~key:"large.bin"
+      ~upload_id:"upload-1"
   in
   let conn =
     Protocol_recording_runtime.connect

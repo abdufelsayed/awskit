@@ -6,7 +6,7 @@ module type RUNTIME = sig
   module S3_endpoint : sig
     type nonrec connection = connection
 
-    val s3_endpoint_config : connection -> Endpoint_resolver.t
+    val s3_endpoint_config : connection -> Endpoint_config.t
   end
 end
 
@@ -22,7 +22,7 @@ module type S = sig
   val return : 'a -> 'a io
   val return_ok : 'a -> ('a, Error.t) result io
   val return_error : Error.t -> ('a, Error.t) result io
-  val endpoint_config : connection -> Endpoint_resolver.t
+  val endpoint_config : connection -> Endpoint_config.t
   val region : connection -> Awskit.Region.t
   val now : connection -> Ptime.t
   val credentials : connection -> (Awskit.Credentials.t, Error.t) result io

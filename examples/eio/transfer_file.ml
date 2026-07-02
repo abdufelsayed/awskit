@@ -21,8 +21,8 @@ let unwrap label = function
   | Ok value -> value
   | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
-let bucket_name value = Awskit_s3.Bucket_name.of_string_exn value
-let object_key value = Awskit_s3.Object_key.of_string_exn value
+let bucket_name value = value
+let object_key value = value
 
 let or_fail_msg label = function
   | Ok value -> value
@@ -97,8 +97,7 @@ let run stdenv =
       ~on_progress:(progress "uploaded") ()
     |> unwrap "upload file"
   in
-  Format.printf "uploaded %s to s3://%a/%a with %s@." upload_path
-    Awskit_s3.Bucket_name.pp bucket Awskit_s3.Object_key.pp key
+  Format.printf "uploaded %s to s3://%s/%s with %s@." upload_path bucket key
     (Awskit_s3.Transfer.upload_strategy uploaded |> strategy_to_string);
   let downloaded =
     S3.Object.Transfer.download_file s3 ~bucket ~key ~path:download_file

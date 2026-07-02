@@ -492,7 +492,7 @@ let prop_part_number_markers_round_trip =
       | Ok marker -> value = Multipart.Part_number_marker.to_int marker
       | Error _ -> false)
 
-let prop_upload_of_strings_preserves_valid_identifiers =
+let prop_upload_resume_preserves_valid_identifiers =
   QCheck.Test.make ~count:default_count
     ~name:"multipart upload raw-string constructor validates and preserves ids"
     (QCheck.make
@@ -500,16 +500,16 @@ let prop_upload_of_strings_preserves_valid_identifiers =
          Fmt.str "%s/%s/%s" bucket key upload_id)
        QCheck.Gen.(triple valid_bucket_name valid_object_token valid_upload_id))
     (fun (bucket, key, upload_id) ->
-      let upload_id = Multipart.Upload_id.of_string_exn upload_id in
-      match Multipart.Upload.of_strings ~bucket ~key ~upload_id with
+      match Multipart.Upload.resume ~bucket ~key ~upload_id with
       | Error _ -> false
       | Ok upload ->
           String.equal bucket
             (Multipart.Upload.bucket upload |> Bucket_name.to_string)
           && String.equal key
                (Multipart.Upload.key upload |> Object_key.to_string)
-          && Multipart.Upload_id.equal upload_id
-               (Multipart.Upload.upload_id upload))
+          && String.equal upload_id
+               (Multipart.Upload.upload_id upload
+               |> Multipart.Upload_id.to_string))
 
 let prop_multipart_parts_preserve_known_checksum_and_size =
   QCheck.Test.make ~count:default_count
@@ -778,12 +778,18 @@ let test_multipart_boundaries () =
     (Multipart.Part_number_marker.of_int (-1));
   expect_error_field "part_number_marker"
     (Multipart.Part_number_marker.of_int 10_001);
-  let resumed = Multipart.Upload.resume ~bucket ~key ~upload_id in
+  let resumed =
+    Multipart.Upload.resume_exn ~bucket:"multipart-bucket" ~key:"large.bin"
+      ~upload_id:"upload-1"
+  in
   Alcotest.(check string)
     "resume upload id" "upload-1"
     (Multipart.Upload.upload_id resumed |> Multipart.Upload_id.to_string);
   let caller_owned =
-    Multipart.Upload.created ~bucket ~key ~upload_id
+    Multipart.Upload.created_exn
+      ~bucket:(Bucket_name.to_string bucket)
+      ~key:(Object_key.to_string key)
+      ~upload_id:(Multipart.Upload_id.to_string upload_id)
     |> Multipart.Upload.as_caller_owned
   in
   Alcotest.(check string)
@@ -802,19 +808,20 @@ let test_multipart_boundaries () =
     (Multipart.List_parts.options ~max_parts:1001 ())
 
 let test_multipart_option_boundaries () =
-  let upload_id = Multipart.Upload_id.of_string_exn "upload-1" in
   let upload =
     expect_ok "raw upload"
-      (Multipart.Upload.of_strings ~bucket:"valid-bucket" ~key:"file.bin"
-         ~upload_id)
+      (Multipart.Upload.resume ~bucket:"valid-bucket" ~key:"file.bin"
+         ~upload_id:"upload-1")
   in
   Alcotest.(check string)
     "raw upload bucket" "valid-bucket"
     (Multipart.Upload.bucket upload |> Bucket_name.to_string);
   expect_error_field "bucket"
-    (Multipart.Upload.of_strings ~bucket:"Invalid" ~key:"file.bin" ~upload_id);
+    (Multipart.Upload.resume ~bucket:"Invalid" ~key:"file.bin"
+       ~upload_id:"upload-1");
   expect_error_field "key"
-    (Multipart.Upload.of_strings ~bucket:"valid-bucket" ~key:"" ~upload_id);
+    (Multipart.Upload.resume ~bucket:"valid-bucket" ~key:""
+       ~upload_id:"upload-1");
   let part_number = Multipart.Part_number.of_int_exn 1 in
   let etag = Object.Etag.of_string_exn "\"part\"" in
   let unknown_checksum =
@@ -901,7 +908,7 @@ let suite =
           prop_upload_ids_round_trip;
           prop_part_numbers_round_trip;
           prop_part_number_markers_round_trip;
-          prop_upload_of_strings_preserves_valid_identifiers;
+          prop_upload_resume_preserves_valid_identifiers;
           prop_multipart_parts_preserve_known_checksum_and_size;
           prop_complete_options_accept_non_negative_object_size;
         ] );

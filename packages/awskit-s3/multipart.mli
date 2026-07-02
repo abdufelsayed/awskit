@@ -82,32 +82,26 @@ module Upload : sig
   *)
 
   val created :
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
-    upload_id:Upload_id.t ->
-    created t
+    bucket:string ->
+    key:string ->
+    upload_id:string ->
+    (created t, Awskit.Error.t) result
   (** Create an Awskit-owned handle after a successful [CreateMultipartUpload]
       response. This is primarily for runtime and simulator implementations. *)
 
-  val resume :
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
-    upload_id:Upload_id.t ->
-    caller_owned t
-  (** Rebuild a caller-owned upload handle from persisted multipart state. *)
+  val created_exn : bucket:string -> key:string -> upload_id:string -> created t
+  (** Like {!val:created}, but raises on validation failure. *)
 
-  val of_strings :
+  val resume :
     bucket:string ->
     key:string ->
-    upload_id:Upload_id.t ->
+    upload_id:string ->
     (caller_owned t, Awskit.Error.t) result
-  (** Validate raw bucket/key strings and create a caller-owned upload handle.
-      Raw string construction is only an edge convenience; standard operations
-      use typed bucket and key values. *)
+  (** Rebuild a caller-owned upload handle from persisted multipart state. *)
 
-  val of_strings_exn :
-    bucket:string -> key:string -> upload_id:Upload_id.t -> caller_owned t
-  (** Like {!val:of_strings}, but raises on validation failure. *)
+  val resume_exn :
+    bucket:string -> key:string -> upload_id:string -> caller_owned t
+  (** Like {!val:resume}, but raises on validation failure. *)
 
   val bucket : _ t -> Bucket_name.t
   (** Return the upload bucket. *)
@@ -167,7 +161,7 @@ module Part : sig
 end
 
 module Create : sig
-  type options = {
+  type options = private {
     content_type : Content_type.t option;  (** Final object's [Content-Type]. *)
     metadata : Metadata.t;  (** User metadata for the final object. *)
     storage_class : Storage_class.t option;
@@ -182,7 +176,8 @@ module Create : sig
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [CreateMultipartUpload] request options. *)
+  (** Private [CreateMultipartUpload] request options. Build with {!val:options}
+      or {!val:options_exn}. *)
 
   type result = {
     upload : Upload.created Upload.t;
@@ -194,34 +189,34 @@ module Create : sig
   val default_options : options
 
   val options :
-    ?content_type:Content_type.t ->
+    ?content_type:string ->
     ?metadata:Metadata.t ->
     ?storage_class:Storage_class.t ->
     ?tags:Tag.Set.t ->
     ?checksum_algorithm:Object.Checksum.Algorithm.t ->
     ?checksum_type:Object.Checksum.Type.t ->
     ?encryption:Encryption.Destination.t ->
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build [CreateMultipartUpload] options. *)
 
   val options_exn :
-    ?content_type:Content_type.t ->
+    ?content_type:string ->
     ?metadata:Metadata.t ->
     ?storage_class:Storage_class.t ->
     ?tags:Tag.Set.t ->
     ?checksum_algorithm:Object.Checksum.Algorithm.t ->
     ?checksum_type:Object.Checksum.Type.t ->
     ?encryption:Encryption.Destination.t ->
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Upload_part : sig
-  type options = {
+  type options = private {
     checksum : Object.Checksum.value option;
         (** Explicit checksum for this part body. *)
     customer_key : Encryption.Customer_key.t option;
@@ -229,7 +224,8 @@ module Upload_part : sig
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [UploadPart] request options. *)
+  (** Private [UploadPart] request options. Build with {!val:options} or
+      {!val:options_exn}. *)
 
   type result = {
     part : Part.t;
@@ -245,7 +241,7 @@ module Upload_part : sig
   val options :
     ?checksum:Object.Checksum.value ->
     ?customer_key:Encryption.Customer_key.t ->
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build [UploadPart] options. *)
@@ -253,14 +249,14 @@ module Upload_part : sig
   val options_exn :
     ?checksum:Object.Checksum.value ->
     ?customer_key:Encryption.Customer_key.t ->
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Complete : sig
-  type options = {
+  type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
     checksum : Object.Checksum.value option;
@@ -273,7 +269,8 @@ module Complete : sig
     multipart_object_size : int64 option;
         (** Expected final object size sent as [x-amz-mp-object-size]. *)
   }
-  (** [CompleteMultipartUpload] request options. *)
+  (** Private [CompleteMultipartUpload] request options. Build with
+      {!val:options} or {!val:options_exn}. *)
 
   type result = {
     etag : Object.Etag.t option;  (** Final object ETag. *)
@@ -288,7 +285,7 @@ module Complete : sig
   val default_options : options
 
   val options :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     ?checksum:Object.Checksum.value ->
     ?checksum_type:Object.Checksum.Type.t ->
     ?customer_key:Encryption.Customer_key.t ->
@@ -298,7 +295,7 @@ module Complete : sig
   (** Build [CompleteMultipartUpload] options. *)
 
   val options_exn :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     ?checksum:Object.Checksum.value ->
     ?checksum_type:Object.Checksum.Type.t ->
     ?customer_key:Encryption.Customer_key.t ->
@@ -309,8 +306,9 @@ module Complete : sig
 end
 
 module Abort : sig
-  type options = { expected_bucket_owner : Account_id.t option }
-  (** [AbortMultipartUpload] request options. *)
+  type options = private { expected_bucket_owner : Account_id.t option }
+  (** Private [AbortMultipartUpload] request options. Build with {!val:options}
+      or {!val:options_exn}. *)
 
   type result = { response : Awskit.Response.t }
   (** [AbortMultipartUpload] result metadata. *)
@@ -318,17 +316,17 @@ module Abort : sig
   val default_options : options
 
   val options :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build [AbortMultipartUpload] options. *)
 
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  val options_exn : ?expected_bucket_owner:string -> unit -> options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module List_parts : sig
-  type options = {
+  type options = private {
     max_parts : int option;
         (** Maximum number of parts S3 should return in one page. *)
     part_number_marker : Part_number_marker.t option;
@@ -337,7 +335,8 @@ module List_parts : sig
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [ListParts] request options. *)
+  (** Private [ListParts] request options. Build with {!val:options} or
+      {!val:options_exn}; use {!val:next_page_options} for pagination. *)
 
   type part_info = {
     part_number : Part_number.t;  (** Uploaded part number. *)
@@ -363,8 +362,8 @@ module List_parts : sig
 
   val options :
     ?max_parts:int ->
-    ?part_number_marker:Part_number_marker.t ->
-    ?expected_bucket_owner:Account_id.t ->
+    ?part_number_marker:int ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build [ListParts] options. [max_parts], when present, must be in S3's
@@ -372,9 +371,13 @@ module List_parts : sig
 
   val options_exn :
     ?max_parts:int ->
-    ?part_number_marker:Part_number_marker.t ->
-    ?expected_bucket_owner:Account_id.t ->
+    ?part_number_marker:int ->
+    ?expected_bucket_owner:string ->
     unit ->
     options
   (** Like {!val:options}, but raises on validation failure. *)
+
+  val next_page_options : options -> page -> options option
+  (** Return options for the next [ListParts] page using this page's next
+      marker, or [None] when the response did not include one. *)
 end

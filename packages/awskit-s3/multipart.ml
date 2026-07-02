@@ -65,16 +65,23 @@ module Upload = struct
     upload_id : Upload_id.t;
   }
 
-  let created ~bucket ~key ~upload_id = { bucket; key; upload_id }
-  let resume ~bucket ~key ~upload_id = { bucket; key; upload_id }
+  let of_validated ~bucket ~key ~upload_id = { bucket; key; upload_id }
 
-  let of_strings ~bucket ~key ~upload_id =
+  let parse ~bucket ~key ~upload_id =
     let* bucket = Bucket_name.of_string bucket in
     let* key = Object_key.of_string key in
-    Ok (resume ~bucket ~key ~upload_id)
+    let* upload_id = Upload_id.of_string upload_id in
+    Ok (of_validated ~bucket ~key ~upload_id)
 
-  let of_strings_exn ~bucket ~key ~upload_id =
-    S3_result.result_exn (of_strings ~bucket ~key ~upload_id)
+  let created ~bucket ~key ~upload_id = parse ~bucket ~key ~upload_id
+
+  let created_exn ~bucket ~key ~upload_id =
+    S3_result.result_exn (created ~bucket ~key ~upload_id)
+
+  let resume ~bucket ~key ~upload_id = parse ~bucket ~key ~upload_id
+
+  let resume_exn ~bucket ~key ~upload_id =
+    S3_result.result_exn (resume ~bucket ~key ~upload_id)
 
   let bucket upload = upload.bucket
   let key upload = upload.key
@@ -167,6 +174,18 @@ module Create = struct
   let options ?content_type ?(metadata = Metadata.empty) ?storage_class
       ?(tags = Tag.Set.empty) ?checksum_algorithm ?checksum_type ?encryption
       ?expected_bucket_owner () =
+    let* content_type =
+      match content_type with
+      | None -> Ok None
+      | Some content_type ->
+          Result.map Option.some (Content_type.of_string content_type)
+    in
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
     let* () = S3_validation.validate_metadata metadata in
     let* () = S3_validation.validate_tags tags in
     let* () = validate_storage_class storage_class in
@@ -216,6 +235,12 @@ module Upload_part = struct
     | _ -> Ok ()
 
   let options ?checksum ?customer_key ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
     let* () = validate_checksum checksum in
     Ok { checksum; customer_key; expected_bucket_owner }
 
@@ -265,6 +290,12 @@ module Complete = struct
 
   let options ?expected_bucket_owner ?checksum ?checksum_type ?customer_key
       ?multipart_object_size () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
     let* () = validate_checksum checksum in
     let* () = validate_checksum_type checksum_type in
     let* () =
@@ -295,7 +326,15 @@ module Abort = struct
   type result = { response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     S3_result.result_exn (options ?expected_bucket_owner ())
@@ -339,10 +378,33 @@ module List_parts = struct
           "max_parts must be between 1 and 1000"
 
   let options ?max_parts ?part_number_marker ?expected_bucket_owner () =
+    let* part_number_marker =
+      match part_number_marker with
+      | None -> Ok None
+      | Some part_number_marker ->
+          Result.map Option.some (Part_number_marker.of_int part_number_marker)
+    in
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
     let* () = validate_max_parts max_parts in
     Ok { max_parts; part_number_marker; expected_bucket_owner }
 
   let options_exn ?max_parts ?part_number_marker ?expected_bucket_owner () =
     S3_result.result_exn
       (options ?max_parts ?part_number_marker ?expected_bucket_owner ())
+
+  let next_page_options (options : options) (page : page) =
+    match page.next_part_number_marker with
+    | None -> None
+    | Some part_number_marker ->
+        Some
+          {
+            max_parts = options.max_parts;
+            part_number_marker = Some part_number_marker;
+            expected_bucket_owner = options.expected_bucket_owner;
+          }
 end

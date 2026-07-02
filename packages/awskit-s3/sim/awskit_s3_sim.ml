@@ -48,18 +48,14 @@ type object_metadata = Simulator_inspect.object_metadata = {
 
 let history = Simulator_inspect.history
 let clear_history = Simulator_inspect.clear_history
-let bucket_to_string = Awskit_s3.Bucket_name.to_string
-let key_to_string = Awskit_s3.Object_key.to_string
 
 let object_metadata store ~bucket ~key =
-  Simulator_inspect.object_metadata store ~bucket:(bucket_to_string bucket)
-    ~key:(key_to_string key)
+  Simulator_inspect.object_metadata store ~bucket ~key
 
-let keys store ~bucket =
-  Simulator_inspect.keys store ~bucket:(bucket_to_string bucket)
+let keys store ~bucket = Simulator_inspect.keys store ~bucket
 
 let objects_as_strings store ~bucket =
-  Simulator_inspect.objects_as_strings store ~bucket:(bucket_to_string bucket)
+  Simulator_inspect.objects_as_strings store ~bucket
 
 module Object = struct
   type connection = t
@@ -70,8 +66,7 @@ module Object = struct
   module Raw = Simulator_object.Object
 
   let put conn ~bucket ~key ?options ~body () =
-    Raw.put conn ~bucket:(bucket_to_string bucket) ~key:(key_to_string key)
-      ?options ~body ()
+    Raw.put conn ~bucket ~key ?options ~body ()
 
   let put_string conn ~bucket ~key ?options ~contents () =
     put conn ~bucket ~key ?options ~body:(Body.of_string contents) ()
@@ -80,8 +75,7 @@ module Object = struct
     put conn ~bucket ~key ?options ~body:(Body.of_bytes contents) ()
 
   let get conn ~bucket ~key ?options ~consume () =
-    Raw.get conn ~bucket:(bucket_to_string bucket) ~key:(key_to_string key)
-      ?options ~consume ()
+    Raw.get conn ~bucket ~key ?options ~consume ()
 
   let validate_max_bytes max_bytes =
     if Int64.compare max_bytes 0L < 0 then
@@ -103,8 +97,7 @@ module Object = struct
         get conn ~bucket ~key ?options ~consume:(Reader.to_bytes ~max_bytes) ()
 
   let find conn ~bucket ~key ?options ~consume () =
-    Raw.find conn ~bucket:(bucket_to_string bucket) ~key:(key_to_string key)
-      ?options ~consume ()
+    Raw.find conn ~bucket ~key ?options ~consume ()
 
   let find_string conn ~bucket ~key ?options ~max_bytes () =
     match validate_max_bytes max_bytes with
@@ -121,39 +114,29 @@ module Object = struct
         find conn ~bucket ~key ?options ~consume:(Reader.to_bytes ~max_bytes) ()
 
   let head conn ~bucket ~key ?options () =
-    Raw.head conn ~bucket:(bucket_to_string bucket) ~key:(key_to_string key)
-      ?options ()
+    Raw.head conn ~bucket ~key ?options ()
 
   let find_metadata conn ~bucket ~key ?options () =
-    Raw.find_metadata conn ~bucket:(bucket_to_string bucket)
-      ~key:(key_to_string key) ?options ()
+    Raw.find_metadata conn ~bucket ~key ?options ()
 
   let exists conn ~bucket ~key ?options () =
-    Raw.exists conn ~bucket:(bucket_to_string bucket) ~key:(key_to_string key)
-      ?options ()
+    Raw.exists conn ~bucket ~key ?options ()
 
   let delete conn ~bucket ~key ?options () =
-    Raw.delete conn ~bucket:(bucket_to_string bucket) ~key:(key_to_string key)
-      ?options ()
+    Raw.delete conn ~bucket ~key ?options ()
 
   let delete_objects conn ~bucket ~objects ?options () =
-    Raw.delete_objects conn ~bucket:(bucket_to_string bucket) ~objects ?options
-      ()
+    Raw.delete_objects conn ~bucket ~objects ?options ()
 
   let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
       ?options () =
-    Raw.copy conn
-      ~source_bucket:(bucket_to_string source_bucket)
-      ~source_key:(key_to_string source_key)
-      ~destination_bucket:(bucket_to_string destination_bucket)
-      ~destination_key:(key_to_string destination_key)
-      ?options ()
+    Raw.copy conn ~source_bucket ~source_key ~destination_bucket
+      ~destination_key ?options ()
 
   let list_versions conn ~bucket ?options () =
-    Raw.list_versions conn ~bucket:(bucket_to_string bucket) ?options ()
+    Raw.list_versions conn ~bucket ?options ()
 
-  let list conn ~bucket ?options () =
-    Raw.list conn ~bucket:(bucket_to_string bucket) ?options ()
+  let list conn ~bucket ?options () = Raw.list conn ~bucket ?options ()
 
   module List = struct
     type 'acc fold_step = 'acc Raw.List.fold_step =
@@ -161,24 +144,19 @@ module Object = struct
       | Stop of 'acc
 
     let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
-      Raw.List.fold_pages conn ~bucket:(bucket_to_string bucket) ?options
-        ?max_pages ~init ~f ()
+      Raw.List.fold_pages conn ~bucket ?options ?max_pages ~init ~f ()
 
     let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
-      Raw.List.fold_pages_until conn ~bucket:(bucket_to_string bucket) ?options
-        ?max_pages ~init ~f ()
+      Raw.List.fold_pages_until conn ~bucket ?options ?max_pages ~init ~f ()
 
     let pages conn ~bucket ?options ~max_pages () =
-      Raw.List.pages conn ~bucket:(bucket_to_string bucket) ?options ~max_pages
-        ()
+      Raw.List.pages conn ~bucket ?options ~max_pages ()
 
     let objects conn ~bucket ?options ~max_pages () =
-      Raw.List.objects conn ~bucket:(bucket_to_string bucket) ?options
-        ~max_pages ()
+      Raw.List.objects conn ~bucket ?options ~max_pages ()
 
     let keys conn ~bucket ?options ~max_pages () =
-      Raw.List.keys conn ~bucket:(bucket_to_string bucket) ?options ~max_pages
-        ()
+      Raw.List.keys conn ~bucket ?options ~max_pages ()
   end
 
   module Versions = struct
@@ -187,38 +165,30 @@ module Object = struct
       | Stop of 'acc
 
     let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
-      Raw.Versions.fold_pages conn ~bucket:(bucket_to_string bucket) ?options
-        ?max_pages ~init ~f ()
+      Raw.Versions.fold_pages conn ~bucket ?options ?max_pages ~init ~f ()
 
     let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
-      Raw.Versions.fold_pages_until conn ~bucket:(bucket_to_string bucket)
-        ?options ?max_pages ~init ~f ()
+      Raw.Versions.fold_pages_until conn ~bucket ?options ?max_pages ~init ~f ()
 
     let pages conn ~bucket ?options ~max_pages () =
-      Raw.Versions.pages conn ~bucket:(bucket_to_string bucket) ?options
-        ~max_pages ()
+      Raw.Versions.pages conn ~bucket ?options ~max_pages ()
 
     let object_versions conn ~bucket ?options ~max_pages () =
-      Raw.Versions.object_versions conn ~bucket:(bucket_to_string bucket)
-        ?options ~max_pages ()
+      Raw.Versions.object_versions conn ~bucket ?options ~max_pages ()
 
     let delete_markers conn ~bucket ?options ~max_pages () =
-      Raw.Versions.delete_markers conn ~bucket:(bucket_to_string bucket)
-        ?options ~max_pages ()
+      Raw.Versions.delete_markers conn ~bucket ?options ~max_pages ()
   end
 
   module Tagging = struct
     let get conn ~bucket ~key ?options () =
-      Raw.Tagging.get conn ~bucket:(bucket_to_string bucket)
-        ~key:(key_to_string key) ?options ()
+      Raw.Tagging.get conn ~bucket ~key ?options ()
 
     let put conn ~bucket ~key ?options ~tags () =
-      Raw.Tagging.put conn ~bucket:(bucket_to_string bucket)
-        ~key:(key_to_string key) ?options ~tags ()
+      Raw.Tagging.put conn ~bucket ~key ?options ~tags ()
 
     let delete conn ~bucket ~key ?options () =
-      Raw.Tagging.delete conn ~bucket:(bucket_to_string bucket)
-        ~key:(key_to_string key) ?options ()
+      Raw.Tagging.delete conn ~bucket ~key ?options ()
   end
 end
 
@@ -228,103 +198,84 @@ module Bucket = struct
 
   module Raw = Simulator_bucket.Bucket
 
-  let create conn ~bucket ?options () =
-    Raw.create conn ~bucket:(bucket_to_string bucket) ?options ()
-
-  let delete conn ~bucket ?options () =
-    Raw.delete conn ~bucket:(bucket_to_string bucket) ?options ()
-
-  let head conn ~bucket ?options () =
-    Raw.head conn ~bucket:(bucket_to_string bucket) ?options ()
-
-  let exists conn ~bucket ?options () =
-    Raw.exists conn ~bucket:(bucket_to_string bucket) ?options ()
-
+  let create conn ~bucket ?options () = Raw.create conn ~bucket ?options ()
+  let delete conn ~bucket ?options () = Raw.delete conn ~bucket ?options ()
+  let head conn ~bucket ?options () = Raw.head conn ~bucket ?options ()
+  let exists conn ~bucket ?options () = Raw.exists conn ~bucket ?options ()
   let list = Raw.list
 
   let get_location conn ~bucket ?options () =
-    Raw.get_location conn ~bucket:(bucket_to_string bucket) ?options ()
+    Raw.get_location conn ~bucket ?options ()
 
   module Policy = struct
-    let get conn ~bucket ?options () =
-      Raw.Policy.get conn ~bucket:(bucket_to_string bucket) ?options ()
+    let get conn ~bucket ?options () = Raw.Policy.get conn ~bucket ?options ()
 
     let put conn ~bucket ?options ~policy () =
-      Raw.Policy.put conn ~bucket:(bucket_to_string bucket) ?options ~policy ()
+      Raw.Policy.put conn ~bucket ?options ~policy ()
 
     let delete conn ~bucket ?options () =
-      Raw.Policy.delete conn ~bucket:(bucket_to_string bucket) ?options ()
+      Raw.Policy.delete conn ~bucket ?options ()
   end
 
   module Versioning = struct
     let get conn ~bucket ?options () =
-      Raw.Versioning.get conn ~bucket:(bucket_to_string bucket) ?options ()
+      Raw.Versioning.get conn ~bucket ?options ()
 
     let put conn ~bucket ?options ~status () =
-      Raw.Versioning.put conn ~bucket:(bucket_to_string bucket) ?options ~status
-        ()
+      Raw.Versioning.put conn ~bucket ?options ~status ()
   end
 
   module Tagging = struct
-    let get conn ~bucket ?options () =
-      Raw.Tagging.get conn ~bucket:(bucket_to_string bucket) ?options ()
+    let get conn ~bucket ?options () = Raw.Tagging.get conn ~bucket ?options ()
 
     let put conn ~bucket ?options ~tags () =
-      Raw.Tagging.put conn ~bucket:(bucket_to_string bucket) ?options ~tags ()
+      Raw.Tagging.put conn ~bucket ?options ~tags ()
 
     let delete conn ~bucket ?options () =
-      Raw.Tagging.delete conn ~bucket:(bucket_to_string bucket) ?options ()
+      Raw.Tagging.delete conn ~bucket ?options ()
   end
 
   module Encryption = struct
     let get conn ~bucket ?options () =
-      Raw.Encryption.get conn ~bucket:(bucket_to_string bucket) ?options ()
+      Raw.Encryption.get conn ~bucket ?options ()
 
     let put conn ~bucket ?options ~config () =
-      Raw.Encryption.put conn ~bucket:(bucket_to_string bucket) ?options ~config
-        ()
+      Raw.Encryption.put conn ~bucket ?options ~config ()
 
     let delete conn ~bucket ?options () =
-      Raw.Encryption.delete conn ~bucket:(bucket_to_string bucket) ?options ()
+      Raw.Encryption.delete conn ~bucket ?options ()
   end
 
   module Cors = struct
-    let get conn ~bucket ?options () =
-      Raw.Cors.get conn ~bucket:(bucket_to_string bucket) ?options ()
+    let get conn ~bucket ?options () = Raw.Cors.get conn ~bucket ?options ()
 
     let put conn ~bucket ?options ~config () =
-      Raw.Cors.put conn ~bucket:(bucket_to_string bucket) ?options ~config ()
+      Raw.Cors.put conn ~bucket ?options ~config ()
 
     let delete conn ~bucket ?options () =
-      Raw.Cors.delete conn ~bucket:(bucket_to_string bucket) ?options ()
+      Raw.Cors.delete conn ~bucket ?options ()
   end
 
   module Public_access_block = struct
     let get conn ~bucket ?options () =
-      Raw.Public_access_block.get conn ~bucket:(bucket_to_string bucket)
-        ?options ()
+      Raw.Public_access_block.get conn ~bucket ?options ()
 
     let put conn ~bucket ?options ~config () =
-      Raw.Public_access_block.put conn ~bucket:(bucket_to_string bucket)
-        ?options ~config ()
+      Raw.Public_access_block.put conn ~bucket ?options ~config ()
 
     let delete conn ~bucket ?options () =
-      Raw.Public_access_block.delete conn ~bucket:(bucket_to_string bucket)
-        ?options ()
+      Raw.Public_access_block.delete conn ~bucket ?options ()
   end
 
   module Ownership_controls = struct
     let get conn ~bucket ?options () =
-      Raw.Ownership_controls.get conn ~bucket:(bucket_to_string bucket) ?options
-        ()
+      Raw.Ownership_controls.get conn ~bucket ?options ()
 
     let put conn ~bucket ?options ~config () =
-      Raw.Ownership_controls.put conn ~bucket:(bucket_to_string bucket) ?options
-        ~config ()
+      Raw.Ownership_controls.put conn ~bucket ?options ~config ()
 
     let delete conn ~bucket ?options () =
-      Raw.Ownership_controls.delete conn ~bucket:(bucket_to_string bucket)
-        ?options ()
+      Raw.Ownership_controls.delete conn ~bucket ?options ()
   end
 end
 
@@ -336,11 +287,13 @@ module Multipart = struct
   module Raw = Simulator_multipart.Multipart
 
   let create_upload conn ~bucket ~key ?options () =
-    Raw.create_upload conn ~bucket:(bucket_to_string bucket)
-      ~key:(key_to_string key) ?options ()
+    Raw.create_upload conn ~bucket ~key ?options ()
 
   let upload_part conn ~upload ~part_number ~body ?options () =
-    Raw.upload_part conn ~upload ~part_number ~body ?options ()
+    match Awskit_s3.Multipart.Part_number.of_int part_number with
+    | Error _ as error -> error
+    | Ok part_number ->
+        Raw.upload_part conn ~upload ~part_number ~body ?options ()
 
   let complete_upload conn ~upload ?options ~parts () =
     Raw.complete_upload conn ~upload ?options ~parts ()

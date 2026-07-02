@@ -14,17 +14,12 @@ module Make (C : Request_context.S) = struct
 
   let with_credentials conn ~operation ~bucket ~key f =
     let* credentials = credentials conn in
-    let bucket_context = Bucket_name.to_string bucket in
-    let key_context = Object_key.to_string key in
     match credentials with
     | Error error ->
         return_error
-          (S3_error_context.with_s3_operation ~operation ~bucket:bucket_context
-             ~key:key_context error)
+          (S3_error_context.with_s3_operation ~operation ~bucket ~key error)
     | Ok credentials ->
-        return
-          (return_result ~operation ~bucket:bucket_context ~key:key_context
-             (f credentials))
+        return (return_result ~operation ~bucket ~key (f credentials))
 
   let get_object conn ~bucket ~key ?options () =
     with_credentials conn ~operation:"GetObject" ~bucket ~key
@@ -55,8 +50,8 @@ module Make (C : Request_context.S) = struct
           ~bucket ~key ?options ())
 
   let upload_part conn ~upload ~part_number ?options () =
-    let bucket = Multipart.Upload.bucket upload in
-    let key = Multipart.Upload.key upload in
+    let bucket = Multipart.Upload.bucket upload |> Bucket_name.to_string in
+    let key = Multipart.Upload.key upload |> Object_key.to_string in
     with_credentials conn ~operation:"UploadPart" ~bucket ~key
       (fun credentials ->
         Presigned.upload_part_with_endpoint_config ~region:(region conn)

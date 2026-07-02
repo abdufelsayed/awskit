@@ -1,6 +1,8 @@
 let buffer_size = 128 * 1024
 let temp_counter = Atomic.make 0
 
+module Object_head = Awskit_s3.Object.Head
+
 let ( let* ) result f =
   match result with Ok value -> f value | Error _ as error -> error
 
@@ -300,8 +302,8 @@ module Make
       module Object : sig
         val put :
           Runtime.connection ->
-          bucket:Awskit_s3.Bucket_name.t ->
-          key:Awskit_s3.Object_key.t ->
+          bucket:string ->
+          key:string ->
           ?options:Awskit_s3.Object.Put.options ->
           body:Runtime.request_body ->
           unit ->
@@ -309,8 +311,8 @@ module Make
 
         val get :
           Runtime.connection ->
-          bucket:Awskit_s3.Bucket_name.t ->
-          key:Awskit_s3.Object_key.t ->
+          bucket:string ->
+          key:string ->
           ?options:Awskit_s3.Object.Get.options ->
           consume:
             (Runtime.response_body_reader -> ('a, Awskit_s3.Error.t) result) ->
@@ -319,11 +321,11 @@ module Make
 
         val head :
           Runtime.connection ->
-          bucket:Awskit_s3.Bucket_name.t ->
-          key:Awskit_s3.Object_key.t ->
-          ?options:Awskit_s3.Object.Head.options ->
+          bucket:string ->
+          key:string ->
+          ?options:Object_head.options ->
           unit ->
-          (Awskit_s3.Object.Head.result, Awskit_s3.Error.t) result
+          (Object_head.result, Awskit_s3.Error.t) result
       end
 
       module Multipart :
@@ -488,8 +490,9 @@ struct
       (spec : Plan.upload_part) =
     let body = range_body_of_path path spec in
     match
-      S3.Multipart.upload_part conn ~upload ~part_number:spec.part_number ~body
-        ~options:options.Awskit_s3.Transfer.upload_part_options ()
+      S3.Multipart.upload_part conn ~upload
+        ~part_number:(Awskit_s3.Multipart.Part_number.to_int spec.part_number)
+        ~body ~options:options.Awskit_s3.Transfer.upload_part_options ()
     with
     | Error _ as error -> error
     | Ok uploaded -> Ok uploaded.part
@@ -665,16 +668,6 @@ struct
       in
       Ok (Awskit_s3.Transfer.Multipart result)
 
-  let head_options_of_get_options (options : Awskit_s3.Object.Get.options) :
-      Awskit_s3.Object.Head.options =
-    {
-      preconditions = options.preconditions;
-      version_id = options.version_id;
-      checksum_mode = options.checksum_mode;
-      source_encryption = options.source_encryption;
-      expected_bucket_owner = options.expected_bucket_owner;
-    }
-
   let get_info (result : _ Awskit_s3.Object.Get.result) :
       Awskit_s3.Object.Get.info =
     {
@@ -691,27 +684,13 @@ struct
       response = result.response;
     }
 
-  let ranged_get_options_of_head (info : Awskit_s3.Object.Head.result)
-      (get_options : Awskit_s3.Object.Get.options) :
-      Awskit_s3.Object.Get.options =
-    match info.version_id with
-    | Some version_id -> { get_options with version_id = Some version_id }
-    | None -> (
-        match info.etag with
-        | None -> get_options
-        | Some etag ->
-            let preconditions =
-              {
-                get_options.preconditions with
-                if_match = Some (Awskit_s3.Object.Etag_condition.Etag etag);
-              }
-            in
-            { get_options with preconditions })
-
-  let download_range_to_file conn ~bucket ~key
+  let download_range_to_file conn ~bucket ~key ~(head : Object_head.result)
       ~(get_options : Awskit_s3.Object.Get.options) ~path ~file ~completed
       ~content_length ?on_progress (spec : Plan.download_range) =
-    let get_options = { get_options with range = Some spec.range } in
+    let get_options =
+      Awskit_s3.Object.Get.ranged_download_options get_options ~head
+        ~range:spec.range
+    in
     let consume reader =
       try
         let bytes = Bytes.create buffer_size in
@@ -746,11 +725,11 @@ struct
 
   let ranged_download_to_file conn ~bucket ~key
       ~(options : Awskit_s3.Transfer.download_options)
-      ~(get_options : Awskit_s3.Object.Get.options) ?on_progress ~path ~file
-      ~content_length ranges =
+      ~(head : Object_head.result) ~(get_options : Awskit_s3.Object.Get.options)
+      ?on_progress ~path ~file ~content_length ranges =
     let completed = ref 0L in
     let download_one spec =
-      download_range_to_file conn ~bucket ~key ~get_options ~path ~file
+      download_range_to_file conn ~bucket ~key ~head ~get_options ~path ~file
         ~completed ~content_length ?on_progress spec
     in
     let rec loop parts ranges =
@@ -787,7 +766,7 @@ struct
         (Awskit_s3.Transfer.Get
            { info = get_info result; bytes_transferred = !bytes_transferred })
     in
-    let head_options = head_options_of_get_options options.get_options in
+    let head_options = Object_head.of_get_options options.get_options in
     let* info = S3.Object.head conn ~bucket ~key ~options:head_options () in
     match info.content_length with
     | None -> download_with_get ()
@@ -799,11 +778,11 @@ struct
         let* ranges =
           Plan.download_range_seq ~content_length ~part_size:options.part_size
         in
-        let get_options = ranged_get_options_of_head info options.get_options in
         with_temp_download path (fun temp_path file ->
             let* parts =
-              ranged_download_to_file conn ~bucket ~key ~options ~get_options
-                ?on_progress ~path:temp_path ~file ~content_length ranges
+              ranged_download_to_file conn ~bucket ~key ~options ~head:info
+                ~get_options:options.get_options ?on_progress ~path:temp_path
+                ~file ~content_length ranges
             in
             Ok
               (Awskit_s3.Transfer.Ranged

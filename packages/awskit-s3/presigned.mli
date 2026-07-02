@@ -171,7 +171,7 @@ module Delete_object : sig
   (** Default presigned [DELETE Object] options. *)
 end
 
-type endpoint_config = Endpoint_resolver.t
+type endpoint_config = Endpoint_config.t
 (** Reusable endpoint configuration for callers generating many URLs. *)
 
 val endpoint_config :
@@ -192,8 +192,8 @@ val get_object :
   now:Ptime.t ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
+  bucket:string ->
+  key:string ->
   ?options:Get_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -205,8 +205,8 @@ val put_object :
   now:Ptime.t ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
+  bucket:string ->
+  key:string ->
   ?options:Put_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -220,8 +220,8 @@ val head_object :
   now:Ptime.t ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
+  bucket:string ->
+  key:string ->
   ?options:Head_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -233,8 +233,8 @@ val delete_object :
   now:Ptime.t ->
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
+  bucket:string ->
+  key:string ->
   ?options:Delete_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -247,7 +247,7 @@ val upload_part :
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
   upload:_ Multipart.Upload.t ->
-  part_number:Multipart.Part_number.t ->
+  part_number:int ->
   ?options:Upload_part.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -259,8 +259,8 @@ val get_object_with_endpoint_config :
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
+  bucket:string ->
+  key:string ->
   ?options:Get_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -271,8 +271,8 @@ val put_object_with_endpoint_config :
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
+  bucket:string ->
+  key:string ->
   ?options:Put_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -283,8 +283,8 @@ val head_object_with_endpoint_config :
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
+  bucket:string ->
+  key:string ->
   ?options:Head_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -295,8 +295,8 @@ val delete_object_with_endpoint_config :
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
+  bucket:string ->
+  key:string ->
   ?options:Delete_object.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result
@@ -308,7 +308,7 @@ val upload_part_with_endpoint_config :
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
   upload:_ Multipart.Upload.t ->
-  part_number:Multipart.Part_number.t ->
+  part_number:int ->
   ?options:Upload_part.options ->
   unit ->
   (result, Awskit.Error.t) Stdlib.result

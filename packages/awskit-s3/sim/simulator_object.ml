@@ -160,16 +160,6 @@ module Object = struct
         (Fmt.str "ListObjectsV2 collection exceeded max_pages bound (%d)"
            max_pages)
 
-    let options_for_page (base : Object_model.List.options) continuation_token =
-      {
-        base with
-        Object_model.List.continuation_token;
-        start_after =
-          (match continuation_token with
-          | None -> base.start_after
-          | Some _ -> None);
-      }
-
     let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
       match validate_max_pages max_pages with
       | Error error -> Error error
@@ -177,8 +167,7 @@ module Object = struct
           let base =
             Option.value ~default:Object_model.List.default_options options
           in
-          let rec loop continuation_token page_count acc =
-            let options = options_for_page base continuation_token in
+          let rec loop options page_count acc =
             match list conn ~bucket ~options () with
             | Error error -> Error error
             | Ok page -> (
@@ -192,15 +181,17 @@ module Object = struct
                       match max_pages with
                       | Some max_pages when page_count >= max_pages -> Ok acc
                       | _ -> (
-                          match page.next_continuation_token with
-                          | Some token -> loop (Some token) page_count acc
+                          match
+                            Object_model.List.next_page_options base page
+                          with
+                          | Some options -> loop options page_count acc
                           | None ->
                               Error
                                 (decode
                                    "truncated list response missing \
                                     NextContinuationToken"))))
           in
-          loop base.continuation_token 0 init
+          loop (Object_model.List.first_page_options base) 0 init
 
     let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
       fold_pages_until conn ~bucket ?options ?max_pages ~init
@@ -212,8 +203,7 @@ module Object = struct
       let base =
         Option.value ~default:Object_model.List.default_options options
       in
-      let rec loop continuation_token page_count acc =
-        let options = options_for_page base continuation_token in
+      let rec loop options page_count acc =
         match list conn ~bucket ~options () with
         | Error error -> Error error
         | Ok page -> (
@@ -225,15 +215,15 @@ module Object = struct
                 else if page_count >= max_pages then
                   Error (max_pages_exceeded max_pages)
                 else
-                  match page.next_continuation_token with
-                  | Some token -> loop (Some token) page_count acc
+                  match Object_model.List.next_page_options base page with
+                  | Some options -> loop options page_count acc
                   | None ->
                       Error
                         (decode
                            "truncated list response missing \
                             NextContinuationToken")))
       in
-      loop base.continuation_token 0 init
+      loop (Object_model.List.first_page_options base) 0 init
 
     let pages conn ~bucket ?options ~max_pages () =
       Result.map Stdlib.List.rev
@@ -280,14 +270,6 @@ module Object = struct
         (Fmt.str "ListObjectVersions collection exceeded max_pages bound (%d)"
            max_pages)
 
-    let options_for_page (base : Object_model.Versions.options)
-        (page : Object_model.Versions.page) =
-      {
-        base with
-        Object_model.Versions.key_marker = page.next_key_marker;
-        version_id_marker = page.next_version_id_marker;
-      }
-
     let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
       match validate_max_pages max_pages with
       | Error error -> Error error
@@ -309,10 +291,10 @@ module Object = struct
                       match max_pages with
                       | Some max_pages when page_count >= max_pages -> Ok acc
                       | _ -> (
-                          match page.next_key_marker with
-                          | Some _ ->
-                              let options = options_for_page base page in
-                              loop options page_count acc
+                          match
+                            Object_model.Versions.next_page_options base page
+                          with
+                          | Some options -> loop options page_count acc
                           | None ->
                               Error
                                 (decode
@@ -343,10 +325,8 @@ module Object = struct
                 else if page_count >= max_pages then
                   Error (max_pages_exceeded max_pages)
                 else
-                  match page.next_key_marker with
-                  | Some _ ->
-                      let options = options_for_page base page in
-                      loop options page_count acc
+                  match Object_model.Versions.next_page_options base page with
+                  | Some options -> loop options page_count acc
                   | None ->
                       Error
                         (decode

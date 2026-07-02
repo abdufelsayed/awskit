@@ -9,8 +9,7 @@ let create_upload conn key =
   |> ok_or_fail "create upload"
 
 let upload_part conn upload part_number body =
-  Simulator.Multipart.upload_part conn ~upload
-    ~part_number:(Multipart.Part_number.of_int_exn part_number)
+  Simulator.Multipart.upload_part conn ~upload ~part_number
     ~body:(Simulator.Body.of_string body)
     ()
   |> ok_or_fail ("upload part " ^ string_of_int part_number)
@@ -72,8 +71,7 @@ let test_upload_part_rejects_bad_checksum () =
       ()
   in
   expect_service_code "upload part bad checksum" "BadDigest"
-    (Simulator.Multipart.upload_part conn ~upload:created.upload
-       ~part_number:(Multipart.Part_number.of_int_exn 1)
+    (Simulator.Multipart.upload_part conn ~upload:created.upload ~part_number:1
        ~body:(Simulator.Body.of_string "part")
        ~options ());
   let options =
@@ -82,8 +80,7 @@ let test_upload_part_rejects_bad_checksum () =
       ()
   in
   let uploaded =
-    Simulator.Multipart.upload_part conn ~upload:created.upload
-      ~part_number:(Multipart.Part_number.of_int_exn 1)
+    Simulator.Multipart.upload_part conn ~upload:created.upload ~part_number:1
       ~body:(Simulator.Body.of_string "part")
       ~options ()
     |> ok_or_fail "upload part good checksum"
@@ -170,8 +167,7 @@ let test_checksum_algorithms_are_computed_or_rejected () =
        completed.checksum);
   let created = create_upload conn "md5-part.bin" in
   let uploaded =
-    Simulator.Multipart.upload_part conn ~upload:created.upload
-      ~part_number:(Multipart.Part_number.of_int_exn 1)
+    Simulator.Multipart.upload_part conn ~upload:created.upload ~part_number:1
       ~body:(Simulator.Body.of_string "part")
       ~options:
         (Multipart.Upload_part.options_exn
@@ -251,9 +247,7 @@ let test_complete_rejects_undersized_nonfinal_part () =
     upload_part conn created.upload 1 (String.make Transfer.min_part_size 'x')
   in
   let final = upload_part conn created.upload 2 "z" in
-  let options =
-    { Multipart.Complete.default_options with multipart_object_size = Some 1L }
-  in
+  let options = Multipart.Complete.options_exn ~multipart_object_size:1L () in
   expect_validation_field "object size mismatch" "multipart_object_size"
     (Simulator.Multipart.complete_upload conn ~upload:created.upload ~options
        ~parts:[ large.part; final.part ] ())
@@ -263,8 +257,7 @@ let test_complete_rejects_part_checksum_mismatch () =
   let created = create_upload conn "checksummed.bin" in
   let checksum = sha256 "N6aAEzvQk0L5NK+43Sx9nhtiTaXzXjo4rbED43wFXtE=" in
   let uploaded =
-    Simulator.Multipart.upload_part conn ~upload:created.upload
-      ~part_number:(Multipart.Part_number.of_int_exn 1)
+    Simulator.Multipart.upload_part conn ~upload:created.upload ~part_number:1
       ~body:(Simulator.Body.of_string "part")
       ~options:(Multipart.Upload_part.options_exn ~checksum ())
       ()

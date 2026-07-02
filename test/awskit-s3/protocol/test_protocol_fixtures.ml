@@ -29,9 +29,7 @@ let test_presigned_get_fixture () =
   let request =
     Presigned.get_object ~region:"us-east-1"
       ~credentials:Protocol_support.credentials ~now:Protocol_support.test_time
-      ~bucket:(Protocol_support.bucket_name "bucket")
-      ~key:(Protocol_support.object_key "file.txt")
-      ~options ()
+      ~bucket:"bucket" ~key:"file.txt" ~options ()
     |> Protocol_support.ok_or_fail "presigned get fixture"
   in
   let redacted_url =
@@ -211,8 +209,7 @@ let test_endpoint_style_matrix_fixture () =
 
 let test_put_object_metadata_tags_fixture () =
   let options =
-    Object.Put.options_exn
-      ~content_type:(Protocol_support.content_type "text/plain")
+    Object.Put.options_exn ~content_type:"text/plain"
       ~metadata:
         (Metadata.of_list_exn [ ("origin", "fixture"); ("trace", "abc-123") ])
       ~tags:
@@ -228,10 +225,8 @@ let test_put_object_metadata_tags_fixture () =
       [ Protocol_recording_runtime.response 200 "" ]
   in
   ignore
-    (Protocol_recording_runtime.S3.Object.put conn
-       ~bucket:(Protocol_support.bucket_name "bucket")
-       ~key:(Protocol_support.object_key "file.txt")
-       ~options
+    (Protocol_recording_runtime.S3.Object.put conn ~bucket:"bucket"
+       ~key:"file.txt" ~options
        ~body:(Protocol_recording_runtime.S3.Body.of_string "body")
        ()
     |> Protocol_support.ok_or_fail "put object metadata fixture");
@@ -263,14 +258,12 @@ let test_put_object_metadata_tags_fixture () =
 
 let test_copy_object_headers_fixture () =
   let options =
-    Object.Copy.options_exn
-      ~source_version_id:(Object.Version_id.of_string_exn "version 1/2")
+    Object.Copy.options_exn ~source_version_id:"version 1/2"
       ~metadata_directive:
         (`Replace (Metadata.of_list_exn [ ("origin", "copy fixture") ]))
       ~checksum_algorithm:Object.Checksum.Algorithm.Sha256
-      ~expected_bucket_owner:(Protocol_support.account_id "123456789012")
-      ~source_expected_bucket_owner:(Protocol_support.account_id "210987654321")
-      ()
+      ~expected_bucket_owner:"123456789012"
+      ~source_expected_bucket_owner:"210987654321" ()
   in
   let conn =
     Protocol_recording_runtime.connect
@@ -281,10 +274,8 @@ let test_copy_object_headers_fixture () =
   in
   ignore
     (Protocol_recording_runtime.S3.Object.copy conn
-       ~source_bucket:(Protocol_support.bucket_name "source-bucket")
-       ~source_key:(Protocol_support.object_key "photos/cat space+plus.txt")
-       ~destination_bucket:(Protocol_support.bucket_name "dest-bucket")
-       ~destination_key:(Protocol_support.object_key "archive/copy.txt")
+       ~source_bucket:"source-bucket" ~source_key:"photos/cat space+plus.txt"
+       ~destination_bucket:"dest-bucket" ~destination_key:"archive/copy.txt"
        ~options ()
     |> Protocol_support.ok_or_fail "copy object fixture");
   let call = Protocol_recording_runtime.last_call conn in
@@ -319,19 +310,15 @@ let test_copy_object_headers_fixture () =
 
 let test_object_tagging_xml_fixture () =
   let options =
-    Object.Tagging.options_exn
-      ~expected_bucket_owner:(Protocol_support.account_id "123456789012")
-      ()
+    Object.Tagging.options_exn ~expected_bucket_owner:"123456789012" ()
   in
   let conn =
     Protocol_recording_runtime.connect
       [ Protocol_recording_runtime.response 200 "" ]
   in
   ignore
-    (Protocol_recording_runtime.S3.Object.Tagging.put conn
-       ~bucket:(Protocol_support.bucket_name "bucket")
-       ~key:(Protocol_support.object_key "file.txt")
-       ~options
+    (Protocol_recording_runtime.S3.Object.Tagging.put conn ~bucket:"bucket"
+       ~key:"file.txt" ~options
        ~tags:
          (Protocol_support.tag_set
             [
@@ -385,10 +372,8 @@ let test_range_get_fixture () =
       [ Protocol_recording_runtime.response ~headers 206 "cdef" ]
   in
   let result =
-    Protocol_recording_runtime.S3.Object.get conn
-      ~bucket:(Protocol_support.bucket_name "bucket")
-      ~key:(Protocol_support.object_key "file.txt")
-      ~options
+    Protocol_recording_runtime.S3.Object.get conn ~bucket:"bucket"
+      ~key:"file.txt" ~options
       ~consume:(Protocol_recording_runtime.S3.Reader.to_string ~max_bytes:16L)
       ()
     |> Protocol_support.ok_or_fail "range get fixture"
@@ -455,9 +440,7 @@ let describe_request (call : Protocol_recording_runtime.call) =
 
 let test_bucket_versioning_xml_fixture () =
   let options =
-    Bucket.Versioning.options_exn
-      ~expected_bucket_owner:(Protocol_support.account_id "123456789012")
-      ()
+    Bucket.Versioning.options_exn ~expected_bucket_owner:"123456789012" ()
   in
   let conn =
     Protocol_recording_runtime.connect
@@ -465,8 +448,7 @@ let test_bucket_versioning_xml_fixture () =
   in
   ignore
     (Protocol_recording_runtime.S3.Bucket.Versioning.put conn
-       ~bucket:(Protocol_support.bucket_name "my-bucket")
-       ~options ~status:Bucket.Versioning.Status.Enabled ()
+       ~bucket:"my-bucket" ~options ~status:Bucket.Versioning.Status.Enabled ()
     |> Protocol_support.ok_or_fail "bucket versioning XML fixture");
   check_fixture "bucket versioning XML"
     [ "bucket"; "versioning-put.expected" ]
@@ -490,9 +472,7 @@ let test_bucket_encryption_xml_fixture () =
     }
   in
   let options =
-    Bucket.Encryption.options_exn
-      ~expected_bucket_owner:(Protocol_support.account_id "123456789012")
-      ()
+    Bucket.Encryption.options_exn ~expected_bucket_owner:"123456789012" ()
   in
   let conn =
     Protocol_recording_runtime.connect
@@ -500,8 +480,7 @@ let test_bucket_encryption_xml_fixture () =
   in
   ignore
     (Protocol_recording_runtime.S3.Bucket.Encryption.put conn
-       ~bucket:(Protocol_support.bucket_name "my-bucket")
-       ~options ~config ()
+       ~bucket:"my-bucket" ~options ~config ()
     |> Protocol_support.ok_or_fail "bucket encryption XML fixture");
   check_fixture "bucket encryption XML"
     [ "bucket"; "encryption-put.expected" ]
@@ -528,8 +507,7 @@ let test_bucket_encryption_rejects_dsse_bucket_key () =
       [ Protocol_recording_runtime.response 200 "" ]
   in
   let result =
-    Protocol_recording_runtime.S3.Bucket.Encryption.put conn
-      ~bucket:(Protocol_support.bucket_name "my-bucket")
+    Protocol_recording_runtime.S3.Bucket.Encryption.put conn ~bucket:"my-bucket"
       ~config ()
   in
   expect_validation_field "bucket_key_enabled" result;
@@ -582,9 +560,7 @@ let test_list_objects_v2_fixture () =
       [ Protocol_recording_runtime.response 200 body ]
   in
   let page =
-    Protocol_recording_runtime.S3.Object.list conn
-      ~bucket:(Protocol_support.bucket_name "my-bucket")
-      ()
+    Protocol_recording_runtime.S3.Object.list conn ~bucket:"my-bucket" ()
     |> Protocol_support.ok_or_fail "list objects fixture"
   in
   check_fixture "list objects v2 summary"
@@ -601,9 +577,8 @@ let test_service_error_fixture () =
       [ Protocol_recording_runtime.response 503 body ]
   in
   match
-    Protocol_recording_runtime.S3.Object.put conn
-      ~bucket:(Protocol_support.bucket_name "my-bucket")
-      ~key:(Protocol_support.object_key "file.txt")
+    Protocol_recording_runtime.S3.Object.put conn ~bucket:"my-bucket"
+      ~key:"file.txt"
       ~body:(Protocol_recording_runtime.S3.Body.of_string "body")
       ()
   with
@@ -624,9 +599,8 @@ let test_service_error_fixture () =
 let test_delete_objects_cr_xml_fixture () =
   let objects =
     [
-      Object.Delete_many.object_
-        ~key:(Protocol_support.object_key "line\rbreak")
-        ();
+      Object.Delete_objects.object_ ~key:"line\rbreak" ()
+      |> Protocol_support.ok_or_fail "delete object";
     ]
   in
   let conn =
@@ -634,8 +608,7 @@ let test_delete_objects_cr_xml_fixture () =
       [ Protocol_recording_runtime.response 200 "<DeleteResult />" ]
   in
   ignore
-    (Protocol_recording_runtime.S3.Object.delete_objects conn
-       ~bucket:(Protocol_support.bucket_name "bucket")
+    (Protocol_recording_runtime.S3.Object.delete_objects conn ~bucket:"bucket"
        ~objects ()
     |> Protocol_support.ok_or_fail "delete objects CR fixture");
   check_fixture "DeleteObjects CR XML"
@@ -648,9 +621,8 @@ let test_delete_objects_error_preserves_version_id () =
   in
   let objects =
     [
-      Object.Delete_many.object_
-        ~key:(Protocol_support.object_key "locked.txt")
-        ();
+      Object.Delete_objects.object_ ~key:"locked.txt" ()
+      |> Protocol_support.ok_or_fail "delete object";
     ]
   in
   let conn =
@@ -658,8 +630,7 @@ let test_delete_objects_error_preserves_version_id () =
       [ Protocol_recording_runtime.response 200 body ]
   in
   let result =
-    Protocol_recording_runtime.S3.Object.delete_objects conn
-      ~bucket:(Protocol_support.bucket_name "bucket")
+    Protocol_recording_runtime.S3.Object.delete_objects conn ~bucket:"bucket"
       ~objects ()
     |> Protocol_support.ok_or_fail "delete objects error version"
   in
@@ -682,10 +653,8 @@ let checksum value : Object.Checksum.value =
 
 let test_multipart_complete_xml_fixture () =
   let upload =
-    Multipart.Upload.resume
-      ~bucket:(Protocol_support.bucket_name "my-bucket")
-      ~key:(Protocol_support.object_key "large.bin")
-      ~upload_id:(Multipart.Upload_id.of_string_exn "upload-1")
+    Multipart.Upload.resume_exn ~bucket:"my-bucket" ~key:"large.bin"
+      ~upload_id:"upload-1"
   in
   let part number checksum_value =
     Multipart.Part.create_exn

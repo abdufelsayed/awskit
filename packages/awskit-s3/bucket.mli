@@ -7,9 +7,10 @@ type info = { name : Bucket_name.t; creation_date : Ptime.t option }
 
 module Create : sig
   (** [CreateBucket] options and result metadata. *)
-  type options = { region : Awskit.Region.t option }
-  (** Optional location constraint. Some regions, notably [us-east-1], have
-      special AWS behavior and may omit an explicit constraint. *)
+  type options = private { region : Awskit.Region.t option }
+  (** Private [CreateBucket] options. Build with {!val:options} or
+      {!val:options_exn}. Some regions, notably [us-east-1], have special AWS
+      behavior and may omit an explicit constraint. *)
 
   type result = { response : Awskit.Response.t }
   (** [CreateBucket] result metadata. *)
@@ -18,20 +19,21 @@ module Create : sig
   (** Default [CreateBucket] options: no explicit location constraint. *)
 
   val options :
-    ?region:Awskit.Region.t -> unit -> (options, Awskit.Error.t) Stdlib.result
+    ?region:string -> unit -> (options, Awskit.Error.t) Stdlib.result
   (** Build [CreateBucket] options. *)
 
-  val options_exn : ?region:Awskit.Region.t -> unit -> options
+  val options_exn : ?region:string -> unit -> options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Delete : sig
-  type options = {
+  type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner], used to guard against bucket-owner
             confusion. *)
   }
-  (** [DeleteBucket] request options. *)
+  (** Private [DeleteBucket] request options. Build with {!val:options} or
+      {!val:options_exn}. *)
 
   type result = { response : Awskit.Response.t }
   (** [DeleteBucket] result metadata. *)
@@ -40,21 +42,22 @@ module Delete : sig
   (** Default [DeleteBucket] options: no owner guard. *)
 
   val options :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build [DeleteBucket] options. *)
 
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  val options_exn : ?expected_bucket_owner:string -> unit -> options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Head : sig
-  type options = {
+  type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [HeadBucket] request options. *)
+  (** Private [HeadBucket] request options. Build with {!val:options} or
+      {!val:options_exn}. *)
 
   type result = {
     name : Bucket_name.t;  (** Bucket name that was checked. *)
@@ -70,12 +73,12 @@ module Head : sig
   (** Default [HeadBucket] options: no owner guard. *)
 
   val options :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build [HeadBucket] options. *)
 
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  val options_exn : ?expected_bucket_owner:string -> unit -> options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
@@ -85,11 +88,12 @@ module List_buckets : sig
 end
 
 module Get_location : sig
-  type options = {
+  type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
-  (** [GetBucketLocation] request options. *)
+  (** Private [GetBucketLocation] request options. Build with {!val:options} or
+      {!val:options_exn}. *)
 
   type result = {
     region : Awskit.Region.t;
@@ -103,41 +107,43 @@ module Get_location : sig
   (** Default [GetBucketLocation] options: no owner guard. *)
 
   val options :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build [GetBucketLocation] options. *)
 
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  val options_exn : ?expected_bucket_owner:string -> unit -> options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Policy : sig
-  type options = {
+  type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
-  (** Bucket policy request options. *)
+  (** Private bucket policy request options. Build with {!val:options} or
+      {!val:options_exn}. *)
 
   val default_options : options
   (** Default bucket policy options: no owner guard. *)
 
   val options :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build bucket policy request options. *)
 
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  val options_exn : ?expected_bucket_owner:string -> unit -> options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Versioning : sig
-  type options = {
+  type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
-  (** Bucket versioning request options. *)
+  (** Private bucket versioning request options. Build with {!val:options} or
+      {!val:options_exn}. *)
 
   module Status : sig
     (** Bucket versioning state. Absence in a result means versioning was never
@@ -157,21 +163,22 @@ module Versioning : sig
   (** Default bucket versioning options: no owner guard. *)
 
   val options :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build bucket versioning request options. *)
 
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  val options_exn : ?expected_bucket_owner:string -> unit -> options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Tagging : sig
-  type options = {
+  type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
-  (** Bucket tagging request options. *)
+  (** Private bucket tagging request options. Build with {!val:options} or
+      {!val:options_exn}. *)
 
   type result = { tags : Tag.Set.t; response : Awskit.Response.t }
   (** Bucket tagging result metadata. *)
@@ -180,21 +187,22 @@ module Tagging : sig
   (** Default bucket tagging options: no owner guard. *)
 
   val options :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build bucket tagging request options. *)
 
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  val options_exn : ?expected_bucket_owner:string -> unit -> options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Encryption : sig
-  type options = {
+  type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
-  (** Bucket encryption request options. *)
+  (** Private bucket encryption request options. Build with {!val:options} or
+      {!val:options_exn}. *)
 
   (** Bucket default encryption configuration. *)
   module Algorithm : sig
@@ -240,21 +248,22 @@ module Encryption : sig
   (** Default bucket encryption options: no owner guard. *)
 
   val options :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build bucket encryption request options. *)
 
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  val options_exn : ?expected_bucket_owner:string -> unit -> options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Cors : sig
-  type options = {
+  type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
-  (** Bucket CORS request options. *)
+  (** Private bucket CORS request options. Build with {!val:options} or
+      {!val:options_exn}. *)
 
   (** Bucket CORS configuration. *)
   module Method : sig
@@ -286,21 +295,22 @@ module Cors : sig
   (** Default bucket CORS options: no owner guard. *)
 
   val options :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build bucket CORS request options. *)
 
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  val options_exn : ?expected_bucket_owner:string -> unit -> options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Public_access_block : sig
-  type options = {
+  type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
-  (** Bucket public-access-block request options. *)
+  (** Private bucket public-access-block request options. Build with
+      {!val:options} or {!val:options_exn}. *)
 
   type config = {
     block_public_acls : bool;
@@ -323,21 +333,22 @@ module Public_access_block : sig
   (** Default bucket public-access-block options: no owner guard. *)
 
   val options :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build bucket public-access-block request options. *)
 
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  val options_exn : ?expected_bucket_owner:string -> unit -> options
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Ownership_controls : sig
-  type options = {
+  type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
   }
-  (** Bucket ownership-controls request options. *)
+  (** Private bucket ownership-controls request options. Build with
+      {!val:options} or {!val:options_exn}. *)
 
   (** S3 object ownership controls. *)
   module Object_ownership : sig
@@ -363,11 +374,11 @@ module Ownership_controls : sig
   (** Default bucket ownership-controls options: no owner guard. *)
 
   val options :
-    ?expected_bucket_owner:Account_id.t ->
+    ?expected_bucket_owner:string ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
   (** Build bucket ownership-controls request options. *)
 
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
+  val options_exn : ?expected_bucket_owner:string -> unit -> options
   (** Like {!val:options}, but raises on validation failure. *)
 end

@@ -52,8 +52,7 @@ let run_replay path =
           ]
       in
       match
-        Protocol_recording_runtime.S3.Bucket.Tagging.get conn
-          ~bucket:(Protocol_support.bucket_name "bucket")
+        Protocol_recording_runtime.S3.Bucket.Tagging.get conn ~bucket:"bucket"
           ()
       with
       | Error error when Protocol_support.is_decode_error error ->

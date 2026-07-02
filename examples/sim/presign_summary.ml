@@ -36,8 +36,8 @@ let print_presigned label result =
   Format.printf "@."
 
 let () =
-  let bucket = Awskit_s3.Bucket_name.of_string_exn "docs-bucket" in
-  let key = Awskit_s3.Object_key.of_string_exn "upload.txt" in
+  let bucket = "docs-bucket" in
+  let key = "upload.txt" in
   let clock = S3.Clock.create () in
   let store = S3.create_store ~clock () in
   let s3 = S3.connect store ~credentials in

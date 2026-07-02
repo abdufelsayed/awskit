@@ -49,11 +49,7 @@ let test_delimiter_common_prefixes () =
   ignore (put_string conn "logs/a" "a");
   ignore (put_string conn "logs/2026/a" "nested");
   ignore (put_string conn "reports/a" "report");
-  let options =
-    Object.List.options_exn
-      ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-      ~delimiter:Object.List.Delimiter.slash ()
-  in
+  let options = Object.List.options_exn ~prefix:"logs/" ~delimiter:"/" () in
   let page =
     Simulator.Object.list conn ~bucket:(bucket_name "test-bucket") ~options ()
     |> ok_or_fail "list with delimiter"
@@ -82,7 +78,10 @@ let test_start_after_continuation_token () =
   Alcotest.(check bool) "first truncated" true first.is_truncated;
   let options =
     Object.List.options_exn ~start_after:(object_key "a.txt") ~max_keys:1
-      ?continuation_token:first.next_continuation_token ()
+      ?continuation_token:
+        (Option.map Object.List.Continuation_token.to_string
+           first.next_continuation_token)
+      ()
   in
   let second =
     Simulator.Object.list conn ~bucket:(bucket_name "test-bucket") ~options ()
@@ -98,11 +97,7 @@ let test_paginator_keys () =
   ignore (put_string conn "logs/a.txt" "a");
   ignore (put_string conn "logs/b.txt" "b");
   ignore (put_string conn "other.txt" "other");
-  let options =
-    Object.List.options_exn
-      ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-      ~max_keys:1 ()
-  in
+  let options = Object.List.options_exn ~prefix:"logs/" ~max_keys:1 () in
   let keys =
     Simulator.Object.List.keys conn
       ~bucket:(bucket_name "test-bucket")
@@ -116,11 +111,7 @@ let test_control_character_continuation_token () =
   let conn = make_simulator () in
   ignore (put_string conn "logs/a\nx" "a");
   ignore (put_string conn "logs/b" "b");
-  let options =
-    Object.List.options_exn
-      ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-      ~max_keys:1 ()
-  in
+  let options = Object.List.options_exn ~prefix:"logs/" ~max_keys:1 () in
   let keys =
     Simulator.Object.List.keys conn
       ~bucket:(bucket_name "test-bucket")
@@ -180,8 +171,11 @@ let test_version_next_markers_name_first_unreturned_key () =
     (Some (Object.Version_id.to_string b_version))
     (Option.map Object.Version_id.to_string first.next_version_id_marker);
   let options =
-    Object.Versions.options_exn ~max_keys:1 ?key_marker:first.next_key_marker
-      ?version_id_marker:first.next_version_id_marker ()
+    Object.Versions.options_exn ~max_keys:1
+      ?key_marker:(Option.map Object_key.to_string first.next_key_marker)
+      ?version_id_marker:
+        (Option.map Object.Version_id.to_string first.next_version_id_marker)
+      ()
   in
   let second =
     Simulator.Object.list_versions conn
@@ -215,8 +209,11 @@ let test_version_next_markers_name_first_unreturned_version () =
     (Some (Object.Version_id.to_string older_version))
     (Option.map Object.Version_id.to_string first.next_version_id_marker);
   let options =
-    Object.Versions.options_exn ~max_keys:1 ?key_marker:first.next_key_marker
-      ?version_id_marker:first.next_version_id_marker ()
+    Object.Versions.options_exn ~max_keys:1
+      ?key_marker:(Option.map Object_key.to_string first.next_key_marker)
+      ?version_id_marker:
+        (Option.map Object.Version_id.to_string first.next_version_id_marker)
+      ()
   in
   let second =
     Simulator.Object.list_versions conn
@@ -240,11 +237,7 @@ let test_version_delimiter_common_prefixes () =
        ()
     |> ok_or_fail "delete nested");
   ignore (put_string conn "logs/root.txt" "root");
-  let options =
-    Object.Versions.options_exn
-      ~prefix:(Object_key.Prefix.of_string_exn "logs/")
-      ~delimiter:Object.Versions.Delimiter.slash ()
-  in
+  let options = Object.Versions.options_exn ~prefix:"logs/" ~delimiter:"/" () in
   let page =
     Simulator.Object.list_versions conn
       ~bucket:(bucket_name "test-bucket")

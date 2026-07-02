@@ -47,13 +47,13 @@ module Make (C : Request_context.S) = struct
 
   let get_xml ?expected_bucket_owner conn ~bucket ~operation ~subresource
       ~max_size ~parse =
-    let bucket = Bucket_name.to_string bucket in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation ~bucket
     in
-    match S3_validation.validate_bucket bucket with
+    match Bucket_name.of_string bucket with
     | Error error -> return_error error
-    | Ok () -> (
+    | Ok bucket -> (
+        let bucket = Bucket_name.to_string bucket in
         match bucket_root_request conn bucket with
         | Error error -> return_error error
         | Ok request ->
@@ -71,13 +71,13 @@ module Make (C : Request_context.S) = struct
 
   let put_xml ?expected_bucket_owner conn ~bucket ~operation ~subresource ~body
       =
-    let bucket = Bucket_name.to_string bucket in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation ~bucket
     in
-    match S3_validation.validate_bucket bucket with
+    match Bucket_name.of_string bucket with
     | Error error -> return_error error
-    | Ok () -> (
+    | Ok bucket -> (
+        let bucket = Bucket_name.to_string bucket in
         let upload = R.Request_body.of_string body in
         let headers =
           [ content_md5_header body; ("content-type", "application/xml") ]
@@ -101,13 +101,13 @@ module Make (C : Request_context.S) = struct
 
   let delete_subresource ?expected_bucket_owner conn ~bucket ~operation
       ~subresource =
-    let bucket = Bucket_name.to_string bucket in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation ~bucket
     in
-    match S3_validation.validate_bucket bucket with
+    match Bucket_name.of_string bucket with
     | Error error -> return_error error
-    | Ok () -> (
+    | Ok bucket -> (
+        let bucket = Bucket_name.to_string bucket in
         match bucket_root_request conn bucket with
         | Error error -> return_error error
         | Ok request ->
@@ -122,15 +122,15 @@ module Make (C : Request_context.S) = struct
                    | Ok () -> return_ok response)))
 
   let create conn ~bucket ?options () =
-    let bucket = Bucket_name.to_string bucket in
     let options = Option.value ~default:Create_bucket.default_options options in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"CreateBucket"
         ~bucket
     in
-    match S3_validation.validate_bucket bucket with
+    match Bucket_name.of_string bucket with
     | Error error -> return_error error
-    | Ok () -> (
+    | Ok bucket -> (
+        let bucket = Bucket_name.to_string bucket in
         let region = Option.value ~default:(region conn) options.region in
         let body =
           if
@@ -160,14 +160,14 @@ module Make (C : Request_context.S) = struct
         (fun (options : Delete_bucket.options) -> options.expected_bucket_owner)
         options
     in
-    let bucket = Bucket_name.to_string bucket in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"DeleteBucket"
         ~bucket
     in
-    match S3_validation.validate_bucket bucket with
+    match Bucket_name.of_string bucket with
     | Error error -> return_error error
-    | Ok () -> (
+    | Ok bucket -> (
+        let bucket = Bucket_name.to_string bucket in
         match bucket_root_request conn bucket with
         | Error error -> return_error error
         | Ok request ->
@@ -186,15 +186,14 @@ module Make (C : Request_context.S) = struct
         (fun (options : Head_bucket.options) -> options.expected_bucket_owner)
         options
     in
-    let bucket_name = bucket in
-    let bucket = Bucket_name.to_string bucket in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"HeadBucket"
         ~bucket
     in
-    match S3_validation.validate_bucket bucket with
+    match Bucket_name.of_string bucket with
     | Error error -> return_error error
-    | Ok () -> (
+    | Ok bucket_name -> (
+        let bucket = Bucket_name.to_string bucket_name in
         match bucket_root_request conn bucket with
         | Error error -> return_error error
         | Ok request ->
@@ -264,14 +263,14 @@ module Make (C : Request_context.S) = struct
           options.expected_bucket_owner)
         options
     in
-    let bucket = Bucket_name.to_string bucket in
     let return_error =
       S3_error_context.return_s3_error return_error
         ~operation:"GetBucketLocation" ~bucket
     in
-    match S3_validation.validate_bucket bucket with
+    match Bucket_name.of_string bucket with
     | Error error -> return_error error
-    | Ok () -> (
+    | Ok bucket -> (
+        let bucket = Bucket_name.to_string bucket in
         match bucket_root_request conn bucket with
         | Error error -> return_error error
         | Ok request ->
@@ -298,14 +297,14 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket = Bucket_name.to_string bucket in
       let return_error =
         S3_error_context.return_s3_error return_error
           ~operation:"GetBucketPolicy" ~bucket
       in
-      match S3_validation.validate_bucket bucket with
+      match Bucket_name.of_string bucket with
       | Error error -> return_error error
-      | Ok () -> (
+      | Ok bucket -> (
+          let bucket = Bucket_name.to_string bucket in
           match bucket_root_request conn bucket with
           | Error error -> return_error error
           | Ok request ->
@@ -328,14 +327,14 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket = Bucket_name.to_string bucket in
       let return_error =
         S3_error_context.return_s3_error return_error
           ~operation:"PutBucketPolicy" ~bucket
       in
-      match S3_validation.validate_bucket bucket with
+      match Bucket_name.of_string bucket with
       | Error error -> return_error error
-      | Ok () -> (
+      | Ok bucket -> (
+          let bucket = Bucket_name.to_string bucket in
           let body = Policy.to_json policy in
           let upload = R.Request_body.of_string body in
           let headers =
@@ -394,10 +393,9 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
       let return_error =
         S3_error_context.return_s3_error return_error
-          ~operation:"PutBucketVersioning" ~bucket:bucket_context
+          ~operation:"PutBucketVersioning" ~bucket
       in
       match validate_status status with
       | Error error -> return_error error
@@ -430,10 +428,9 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
       let return_error =
         S3_error_context.return_s3_error return_error
-          ~operation:"PutBucketTagging" ~bucket:bucket_context
+          ~operation:"PutBucketTagging" ~bucket
       in
       match S3_validation.validate_tags tags with
       | Error error -> return_error error
@@ -471,10 +468,9 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
       let return_error =
         S3_error_context.return_s3_error return_error
-          ~operation:"PutBucketEncryption" ~bucket:bucket_context
+          ~operation:"PutBucketEncryption" ~bucket
       in
       match Bucket_encryption_xml.validate_config config with
       | Error error -> return_error error
@@ -511,10 +507,9 @@ module Make (C : Request_context.S) = struct
           (fun (options : Bucket_cors.options) -> options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
       let return_error =
         S3_error_context.return_s3_error return_error ~operation:"PutBucketCors"
-          ~bucket:bucket_context
+          ~bucket
       in
       match Bucket_cors_xml.validate_config config with
       | Error error -> return_error error
@@ -595,10 +590,9 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
       let return_error =
         S3_error_context.return_s3_error return_error
-          ~operation:"PutBucketOwnershipControls" ~bucket:bucket_context
+          ~operation:"PutBucketOwnershipControls" ~bucket
       in
       match validate_config config with
       | Error error -> return_error error

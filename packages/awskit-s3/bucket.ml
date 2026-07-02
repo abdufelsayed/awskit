@@ -1,11 +1,20 @@
 type info = { name : Bucket_name.t; creation_date : Ptime.t option }
 
+let ( let* ) = S3_result.( let* )
+
 module Create = struct
   type options = { region : Awskit.Region.t option }
   type result = { response : Awskit.Response.t }
 
   let default_options = { region = None }
-  let options ?region () = Ok { region }
+
+  let options ?region () =
+    let* region =
+      match region with
+      | None -> Ok None
+      | Some region -> Result.map Option.some (Awskit.Region.of_string region)
+    in
+    Ok { region }
 
   let options_exn ?region () =
     Awskit.Error.Producer.get_ok_exn (options ?region ())
@@ -16,7 +25,15 @@ module Delete = struct
   type result = { response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
@@ -34,7 +51,15 @@ module Head = struct
   type info = result
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
@@ -49,7 +74,15 @@ module Get_location = struct
   type result = { region : Awskit.Region.t; response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
@@ -59,7 +92,15 @@ module Policy = struct
   type options = { expected_bucket_owner : Account_id.t option }
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
@@ -85,7 +126,15 @@ module Versioning = struct
   type result = { status : Status.t option; response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
@@ -96,7 +145,15 @@ module Tagging = struct
   type result = { tags : Tag.Set.t; response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
@@ -148,7 +205,15 @@ module Encryption = struct
   type result = { config : config; response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
@@ -189,7 +254,15 @@ module Cors = struct
   type result = { config : config; response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
@@ -216,7 +289,15 @@ module Public_access_block = struct
     }
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
@@ -249,7 +330,15 @@ module Ownership_controls = struct
   type result = { config : config; response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
+
+  let options ?expected_bucket_owner () =
+    let* expected_bucket_owner =
+      match expected_bucket_owner with
+      | None -> Ok None
+      | Some expected_bucket_owner ->
+          Result.map Option.some (Account_id.of_string expected_bucket_owner)
+    in
+    Ok { expected_bucket_owner }
 
   let options_exn ?expected_bucket_owner () =
     Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())

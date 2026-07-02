@@ -19,8 +19,8 @@ let unwrap label = function
   | Ok value -> value
   | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
-let bucket_name value = Awskit_s3.Bucket_name.of_string_exn value
-let object_key value = Awskit_s3.Object_key.of_string_exn value
+let bucket_name value = value
+let object_key value = value
 
 let or_fail_msg label = function
   | Ok value -> value

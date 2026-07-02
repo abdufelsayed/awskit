@@ -11,8 +11,8 @@ let credentials =
     ~access_key_id:"DOCSACCESSKEY" ~secret_access_key:"docs-secret" ()
 
 let () =
-  let bucket = Awskit_s3.Bucket_name.of_string_exn "docs-bucket" in
-  let key = Awskit_s3.Object_key.of_string_exn "notes/today.txt" in
+  let bucket = "docs-bucket" in
+  let key = "notes/today.txt" in
   let clock = S3.Clock.create () in
   let store = S3.create_store ~clock () in
   let s3 = S3.connect store ~credentials in
@@ -25,9 +25,8 @@ let () =
       [ Awskit_s3.Tag.create_exn ~key:"purpose" ~value:"docs" ]
   in
   let options =
-    Awskit_s3.Object.Put.options_exn
-      ~content_type:(Awskit_s3.Content_type.of_string_exn "text/plain")
-      ~metadata ~tags ()
+    Awskit_s3.Object.Put.options_exn ~content_type:"text/plain" ~metadata ~tags
+      ()
   in
   S3.Object.put_string s3 ~bucket ~key ~options ~contents:"remember the docs" ()
   |> unwrap "put object"

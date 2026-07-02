@@ -42,11 +42,6 @@ module Multipart = struct
 
   let complete_min_part_size = 5 * 1024 * 1024
 
-  let created_upload_of_strings ~bucket ~key ~upload_id =
-    let* bucket = Bucket_name.of_string bucket in
-    let* key = Object_key.of_string key in
-    Ok (Multipart_model.Upload.created ~bucket ~key ~upload_id)
-
   let create_upload conn ~bucket ~key ?options () =
     let options =
       Option.value ~default:Multipart_model.Create.default_options options
@@ -70,9 +65,18 @@ module Multipart = struct
                 | Some error -> return_error error
                 | None -> (
                     let upload_id = next_upload_id conn in
-                    match created_upload_of_strings ~bucket ~key ~upload_id with
-                    | Error error -> return_error error
-                    | Ok upload ->
+                    match
+                      (Bucket_name.of_string bucket, Object_key.of_string key)
+                    with
+                    | Error error, _ | _, Error error -> return_error error
+                    | Ok bucket, Ok key ->
+                        let upload =
+                          Multipart_model.Upload.created_exn
+                            ~bucket:(Bucket_name.to_string bucket)
+                            ~key:(Object_key.to_string key)
+                            ~upload_id:
+                              (Multipart_model.Upload_id.to_string upload_id)
+                        in
                         Hashtbl.replace bucket_state.multipart_uploads
                           (upload_key upload_id)
                           {
@@ -162,12 +166,13 @@ module Multipart = struct
                               })))))
 
   let validate_complete_options (options : Multipart_model.Complete.options) =
-    Multipart_model.Complete.options
-      ?expected_bucket_owner:options.expected_bucket_owner
-      ?checksum:options.checksum ?checksum_type:options.checksum_type
-      ?customer_key:options.customer_key
-      ?multipart_object_size:options.multipart_object_size ()
-    |> Result.map ignore
+    let* () = validate_opt validate_checksum_value options.checksum in
+    let* () = validate_opt validate_checksum_type options.checksum_type in
+    match options.multipart_object_size with
+    | Some size when Int64.compare size 0L < 0 ->
+        invalid ~field:"multipart_object_size"
+          "multipart object size must be non-negative"
+    | _ -> Ok ()
 
   let validate_complete_parts upload options parts =
     let invalid_part_size () =
@@ -448,10 +453,6 @@ module Multipart = struct
       | Some _ ->
           invalid ~field:"max_pages" "max_pages must be greater than zero"
 
-    let options_for_page (base : Multipart_model.List_parts.options)
-        part_number_marker =
-      { base with Multipart_model.List_parts.part_number_marker }
-
     let fold_pages conn ~upload ?options ?max_pages ~init ~f () =
       match validate_max_pages max_pages with
       | Error error -> Error error
@@ -460,8 +461,7 @@ module Multipart = struct
             Option.value ~default:Multipart_model.List_parts.default_options
               options
           in
-          let rec loop part_number_marker page_count acc =
-            let options = options_for_page base part_number_marker in
+          let rec loop options page_count acc =
             match list_parts conn ~upload ~options () with
             | Error error -> Error error
             | Ok page -> (
@@ -474,15 +474,18 @@ module Multipart = struct
                       match max_pages with
                       | Some max_pages when page_count >= max_pages -> Ok acc
                       | _ -> (
-                          match page.next_part_number_marker with
-                          | Some marker -> loop (Some marker) page_count acc
+                          match
+                            Multipart_model.List_parts.next_page_options base
+                              page
+                          with
+                          | Some options -> loop options page_count acc
                           | None ->
                               Error
                                 (decode
                                    "truncated list-parts response missing \
                                     NextPartNumberMarker"))))
           in
-          loop base.part_number_marker 0 init
+          loop base 0 init
 
     let pages conn ~upload ?options ?max_pages () =
       fold_pages conn ~upload ?options ?max_pages ~init:[]

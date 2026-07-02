@@ -74,11 +74,8 @@ let credentials =
   Awskit.Credentials.create_exn ~access_key_id:access_key
     ~secret_access_key:secret_key ()
 
-let bucket =
-  Bucket_name.of_string_exn
-    (Printf.sprintf "awskit-minio-%d-workload" (Unix.getpid ()))
-
-let object_key value = Object_key.of_string_exn value
+let bucket = Printf.sprintf "awskit-minio-%d-workload" (Unix.getpid ())
+let object_key value = value
 
 let tags_to_set tags =
   tags
@@ -121,7 +118,7 @@ let fail_unconfigured_minio profile label error =
     label Awskit_s3.Error.pp error
 
 let endpoint_config () =
-  let endpoint =
+  let parsed_endpoint =
     match Awskit.Endpoint.of_string endpoint with
     | Ok endpoint -> endpoint
     | Error error ->
@@ -132,8 +129,8 @@ let endpoint_config () =
     | Error error ->
         Alcotest.failf "minio endpoint policy: %a" Awskit_s3.Error.pp error
   in
-  let signing_region = Awskit.Region.of_string_exn region in
-  match Awskit.Endpoint.scheme endpoint with
+  let signing_region = region in
+  match Awskit.Endpoint.scheme parsed_endpoint with
   | `Https ->
       Awskit_s3.Endpoint_config.s3_compatible ~endpoint ~signing_region
         ~addressing_style:`Path ~tls_policy:`Https_required
@@ -142,6 +139,7 @@ let endpoint_config () =
   | `Http when String.equal unsafe_http "1" ->
       Awskit_s3.Endpoint_config.unsafe_plaintext ~endpoint ~signing_region
         ~addressing_style:`Path ()
+      |> ok_config
   | `Http -> (
       match
         Awskit_s3.Endpoint_config.local_plaintext ~endpoint ~signing_region
@@ -167,7 +165,10 @@ let ok_or_fail label = function
 
 let await_result _label promise = Lwt_main.run promise
 let await_ok label promise = Lwt_main.run promise |> ok_or_fail label
-let delete_object_key key = Object.Delete_many.object_ ~key ()
+
+let delete_object_key key =
+  Object.Delete_objects.object_ ~key:(Object_key.to_string key) ()
+  |> ok_or_fail "delete object"
 
 let write_file path body =
   let channel = open_out_bin path in
@@ -224,11 +225,16 @@ let check_object_absent label conn ~bucket ~key =
     (await_ok (label ^ " exists") (S3.Object.exists conn ~bucket ~key ()))
 
 let delete_object_version key version_id =
+  let key = Object_key.to_string key in
   match version_id with
-  | Some version_id -> Object.Delete_many.object_ ~key ~version_id ()
-  | None -> delete_object_key key
+  | Some version_id ->
+      Object.Delete_objects.object_ ~key
+        ~version_id:(Object.Version_id.to_string version_id)
+        ()
+      |> ok_or_fail "delete object version"
+  | None -> Object.Delete_objects.object_ ~key () |> ok_or_fail "delete object"
 
-let bucket_to_string bucket = Bucket_name.to_string bucket
+let bucket_to_string bucket = bucket
 let key_to_string key = Object_key.to_string key
 
 let version_id_to_string = function
@@ -237,11 +243,11 @@ let version_id_to_string = function
 
 let upload_to_string upload =
   Printf.sprintf "bucket=%s key=%s upload_id=%s"
-    (Multipart.Upload.bucket upload |> bucket_to_string)
+    (Multipart.Upload.bucket upload |> Bucket_name.to_string)
     (Multipart.Upload.key upload |> key_to_string)
     (Multipart.Upload.upload_id upload |> Multipart.Upload_id.to_string)
 
-let cleanup_object_to_string (object_ : Object.Delete_many.object_) =
+let cleanup_object_to_string (object_ : Object.Delete_objects.object_) =
   Printf.sprintf "key=%s version=%s"
     (key_to_string object_.key)
     (version_id_to_string object_.version_id)
@@ -272,7 +278,8 @@ let cleanup_delete_objects_context ~bucket objects =
     (bucket_to_string bucket)
     (preview_list ~to_string:cleanup_object_to_string objects)
 
-let delete_item_cleanup_error ~bucket (error : Object.Delete_many.item_error) =
+let delete_item_cleanup_error ~bucket (error : Object.Delete_objects.item_error)
+    =
   Awskit.Error.Producer.service ~status:200 ~code:error.code
     ?message:error.message ~headers:[] ()
   |> Awskit.Error.Producer.with_context
@@ -289,7 +296,8 @@ let cleanup_delete_objects conn ~bucket objects =
       match result with
       | Error error ->
           Lwt.return_error (Awskit.Error.Producer.with_context context error)
-      | Ok ({ errors = []; _ } : Object.Delete_many.result) -> Lwt.return_ok ()
+      | Ok ({ errors = []; _ } : Object.Delete_objects.result) ->
+          Lwt.return_ok ()
       | Ok result ->
           Lwt.return_error
             (List.map (delete_item_cleanup_error ~bucket) result.errors
@@ -772,9 +780,7 @@ let assert_list_keys command_index command conn model =
     (list_keys command_index command conn ())
 
 let assert_list_prefix command_index command conn prefix model =
-  let options =
-    Object.List.options_exn ~prefix:(Object_key.Prefix.of_string_exn prefix) ()
-  in
+  let options = Object.List.options_exn ~prefix () in
   check_equal command_index command
     Alcotest.(list string)
     "list prefix keys"
@@ -795,10 +801,7 @@ let assert_list_keys_page command_index command conn prefix max_keys model =
   let options =
     match prefix with
     | None -> Object.List.options_exn ~max_keys ()
-    | Some prefix ->
-        Object.List.options_exn
-          ~prefix:(Object_key.Prefix.of_string_exn prefix)
-          ~max_keys ()
+    | Some prefix -> Object.List.options_exn ~prefix ~max_keys ()
   in
   let page =
     expect_ok command_index command "list keys page"
@@ -1048,17 +1051,18 @@ let apply_minio_command command_index conn model command =
 
 module Minio_target : S3_workload.TARGET = struct
   let name = "minio"
-  let bucket = bucket
+  let bucket = Bucket_name.of_string_exn bucket
+  let public_bucket = Bucket_name.to_string bucket
 
   type connection = S3.t
 
   let with_connection f =
     let conn = connect () in
-    cleanup_bucket_or_fail conn ~bucket;
+    cleanup_bucket_or_fail conn ~bucket:public_bucket;
     ignore
-      (await_ok "create bucket" (S3.Bucket.create conn ~bucket ())
+      (await_ok "create bucket" (S3.Bucket.create conn ~bucket:public_bucket ())
         : Bucket.Create.result);
-    protect_with_bucket_cleanup conn ~bucket (fun () -> f conn)
+    protect_with_bucket_cleanup conn ~bucket:public_bucket (fun () -> f conn)
 
   let check_store = check_store
   let run_command = apply_minio_command
@@ -1206,9 +1210,8 @@ let test_object_metadata_tags_and_delete () =
       in
       let tags = [ ("env", "dev"); ("owner", "sdk") ] in
       let options =
-        Object.Put.options_exn
-          ~content_type:(Content_type.of_string_exn "text/plain")
-          ~metadata ~tags:(tags_to_set tags) ()
+        Object.Put.options_exn ~content_type:"text/plain" ~metadata
+          ~tags:(tags_to_set tags) ()
       in
       ignore
         (await_ok "put metadata object"
@@ -1262,11 +1265,7 @@ let test_list_pagination_is_service_backed () =
                   ~contents:key ())
               : Object.Put.result))
         keys;
-      let options =
-        Object.List.options_exn
-          ~prefix:(Object_key.Prefix.of_string_exn "page/")
-          ~max_keys:2 ()
-      in
+      let options = Object.List.options_exn ~prefix:"page/" ~max_keys:2 () in
       let pages =
         await_ok "list paginated keys"
           (S3.Object.List.pages conn ~bucket ~options ~max_pages:4 ())
@@ -1286,8 +1285,7 @@ let test_manual_multipart_lifecycle () =
   with_minio_bucket (fun conn ~bucket ->
       let key = object_key "manual-multipart.bin" in
       let key_context =
-        Printf.sprintf "bucket=%s key=%s" (bucket_to_string bucket)
-          (key_to_string key)
+        Printf.sprintf "bucket=%s key=%s" (bucket_to_string bucket) key
       in
       let metadata = Metadata.of_list_exn [ ("transfer", "manual") ] in
       let create_options =
@@ -1309,8 +1307,7 @@ let test_manual_multipart_lifecycle () =
         await_ok
           (Printf.sprintf "upload manual multipart part %d %s" part_number
              upload_context)
-          (S3.Multipart.upload_part conn ~upload:create.upload
-             ~part_number:(Multipart.Part_number.of_int_exn part_number)
+          (S3.Multipart.upload_part conn ~upload:create.upload ~part_number
              ~body:(S3.Body.of_string contents)
              ())
       in

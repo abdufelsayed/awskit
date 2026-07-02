@@ -58,8 +58,13 @@ let test_delete_marker_specific_version_has_last_modified () =
     | Some version_id -> version_id
     | None -> Alcotest.fail "delete marker did not return a version id"
   in
-  let get_options = Object.Get.options_exn ~version_id:marker_version () in
-  let head_options = Object.Head.options_exn ~version_id:marker_version () in
+  let marker_version_string = Object.Version_id.to_string marker_version in
+  let get_options =
+    Object.Get.options_exn ~version_id:marker_version_string ()
+  in
+  let head_options =
+    Object.Head.options_exn ~version_id:marker_version_string ()
+  in
   let get_service =
     service_error "get delete marker"
       (Simulator.Object.get_string conn

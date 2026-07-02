@@ -1,8 +1,6 @@
 module Model = Transfer_model
 module Simulator = Awskit_s3_sim
-module Bucket_name = Awskit_s3.Bucket_name
 module Multipart = Awskit_s3.Multipart
-module Object_key = Awskit_s3.Object_key
 module Transfer = Awskit_s3.Transfer
 
 let test_time = Ptime.epoch
@@ -11,9 +9,8 @@ let credentials =
   Awskit.Credentials.create_exn ~access_key_id:"AKID"
     ~secret_access_key:"SECRET" ()
 
-let bucket = Bucket_name.of_string_exn "transfer-fault-workload-bucket"
-let key = Object_key.of_string_exn "transfer.bin"
-let key_string = Object_key.to_string key
+let bucket = "transfer-fault-workload-bucket"
+let key = "transfer.bin"
 let chunk_size = Model.chunk_size
 
 exception Progress_callback_failed
@@ -339,7 +336,8 @@ let upload_multipart case counts conn =
             in
             match
               Simulator.Multipart.upload_part conn ~upload:created.upload
-                ~part_number:spec.part_number ~body ()
+                ~part_number:(Multipart.Part_number.to_int spec.part_number)
+                ~body ()
             with
             | Error error -> Error error
             | Ok uploaded ->
@@ -373,7 +371,7 @@ let run_transfer case counts conn =
 let stored_body case store =
   match Simulator.objects_as_strings store ~bucket with
   | [] -> None
-  | [ (stored_key, body) ] when String.equal stored_key key_string -> Some body
+  | [ (stored_key, body) ] when String.equal stored_key key -> Some body
   | objects ->
       failf case "unexpected stored objects count=%d" (List.length objects)
 

@@ -47,8 +47,8 @@ val default : t
 (** Default AWS S3 regional HTTPS endpoint policy. *)
 
 val s3_compatible :
-  endpoint:Awskit.Endpoint.t ->
-  signing_region:Awskit.Region.t ->
+  endpoint:string ->
+  signing_region:string ->
   addressing_style:addressing_style ->
   tls_policy:tls_policy ->
   feature_policy:feature_policy ->
@@ -61,8 +61,8 @@ val s3_compatible :
     virtual-hosted bucket addressing. *)
 
 val local_plaintext :
-  endpoint:Awskit.Endpoint.t ->
-  signing_region:Awskit.Region.t ->
+  endpoint:string ->
+  signing_region:string ->
   addressing_style:[ `Path ] ->
   unit ->
   (t, Awskit.Error.t) result
@@ -70,14 +70,22 @@ val local_plaintext :
     S3-compatible tests. *)
 
 val unsafe_plaintext :
-  endpoint:Awskit.Endpoint.t ->
-  signing_region:Awskit.Region.t ->
+  endpoint:string ->
+  signing_region:string ->
   addressing_style:addressing_style ->
   unit ->
-  t
+  (t, Awskit.Error.t) result
 (** Build a deliberately unsafe plaintext endpoint policy.
 
     Prefer {!val:local_plaintext} for loopback/local tests. *)
+
+val unsafe_plaintext_exn :
+  endpoint:string ->
+  signing_region:string ->
+  addressing_style:addressing_style ->
+  unit ->
+  t
+(** Like {!val:unsafe_plaintext}, but raises on validation failure. *)
 
 val addressing_style : t -> addressing_style
 (** Return the configured addressing-style preference. *)

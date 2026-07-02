@@ -6,7 +6,7 @@ module Put_object = Object.Put
 module Get_object = Object.Get
 module Head_object = Object.Head
 module Delete_object = Object.Delete
-module Delete_objects = Object.Delete_many
+module Delete_objects = Object.Delete_objects
 module Copy_object = Object.Copy
 module List_objects_v2 = Object.List
 module List_object_versions = Object.Versions
@@ -121,16 +121,17 @@ module Make (C : Request_context.S) = struct
     else Ok ()
 
   let put conn ~bucket ~key ?options ~body () =
-    let bucket = Bucket_name.to_string bucket in
-    let key = Object_key.to_string key in
     let options = Option.value ~default:Put_object.default_options options in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"PutObject"
         ~bucket ~key
     in
-    match S3_validation.validate_bucket_key bucket key with
-    | Error error -> return_error error
-    | Ok () -> (
+    match (Bucket_name.of_string bucket, Object_key.of_string key) with
+    | Error error, _ -> return_error error
+    | _, Error error -> return_error error
+    | Ok bucket, Ok key -> (
+        let bucket = Bucket_name.to_string bucket in
+        let key = Object_key.to_string key in
         match validate_put_options options with
         | Error error -> return_error error
         | Ok () -> (
@@ -190,16 +191,17 @@ module Make (C : Request_context.S) = struct
     put conn ~bucket ~key ?options ~body:(R.Request_body.of_bytes contents) ()
 
   let get conn ~bucket ~key ?options ~consume () =
-    let bucket = Bucket_name.to_string bucket in
-    let key = Object_key.to_string key in
     let options = Option.value ~default:Get_object.default_options options in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"GetObject"
         ~bucket ~key
     in
-    match S3_validation.validate_bucket_key bucket key with
-    | Error error -> return_error error
-    | Ok () -> (
+    match (Bucket_name.of_string bucket, Object_key.of_string key) with
+    | Error error, _ -> return_error error
+    | _, Error error -> return_error error
+    | Ok bucket, Ok key -> (
+        let bucket = Bucket_name.to_string bucket in
+        let key = Object_key.to_string key in
         let headers =
           read_precondition_headers options.preconditions
           @ checksum_mode_header options.checksum_mode
@@ -237,8 +239,7 @@ module Make (C : Request_context.S) = struct
   let get_string conn ~bucket ~key ?options ~max_bytes () =
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(Bucket_name.to_string bucket)
-        ~key:(Object_key.to_string key)
+        ~bucket ~key
     in
     match validate_max_bytes max_bytes with
     | Error error -> return_error error
@@ -248,8 +249,7 @@ module Make (C : Request_context.S) = struct
   let get_bytes conn ~bucket ~key ?options ~max_bytes () =
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(Bucket_name.to_string bucket)
-        ~key:(Object_key.to_string key)
+        ~bucket ~key
     in
     match validate_max_bytes max_bytes with
     | Error error -> return_error error
@@ -259,8 +259,7 @@ module Make (C : Request_context.S) = struct
   let find conn ~bucket ~key ?options ~consume () =
     let return_consumer_error =
       S3_error_context.return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(Bucket_name.to_string bucket)
-        ~key:(Object_key.to_string key)
+        ~bucket ~key
     in
     let consume reader =
       let* result = consume reader in
@@ -277,8 +276,7 @@ module Make (C : Request_context.S) = struct
   let find_string conn ~bucket ~key ?options ~max_bytes () =
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(Bucket_name.to_string bucket)
-        ~key:(Object_key.to_string key)
+        ~bucket ~key
     in
     match validate_max_bytes max_bytes with
     | Error error -> return_error error
@@ -288,8 +286,7 @@ module Make (C : Request_context.S) = struct
   let find_bytes conn ~bucket ~key ?options ~max_bytes () =
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(Bucket_name.to_string bucket)
-        ~key:(Object_key.to_string key)
+        ~bucket ~key
     in
     match validate_max_bytes max_bytes with
     | Error error -> return_error error
@@ -297,16 +294,17 @@ module Make (C : Request_context.S) = struct
         find conn ~bucket ~key ?options ~consume:(read_bytes ~max_bytes) ()
 
   let head conn ~bucket ~key ?options () =
-    let bucket = Bucket_name.to_string bucket in
-    let key = Object_key.to_string key in
     let options = Option.value ~default:Head_object.default_options options in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"HeadObject"
         ~bucket ~key
     in
-    match S3_validation.validate_bucket_key bucket key with
-    | Error error -> return_error error
-    | Ok () -> (
+    match (Bucket_name.of_string bucket, Object_key.of_string key) with
+    | Error error, _ -> return_error error
+    | _, Error error -> return_error error
+    | Ok bucket, Ok key -> (
+        let bucket = Bucket_name.to_string bucket in
+        let key = Object_key.to_string key in
         let headers =
           read_precondition_headers options.preconditions
           @ checksum_mode_header options.checksum_mode
@@ -355,16 +353,17 @@ module Make (C : Request_context.S) = struct
     | Error error -> return_error error
 
   let delete conn ~bucket ~key ?options () =
-    let bucket = Bucket_name.to_string bucket in
-    let key = Object_key.to_string key in
     let options = Option.value ~default:Delete_object.default_options options in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"DeleteObject"
         ~bucket ~key
     in
-    match S3_validation.validate_bucket_key bucket key with
-    | Error error -> return_error error
-    | Ok () -> (
+    match (Bucket_name.of_string bucket, Object_key.of_string key) with
+    | Error error, _ -> return_error error
+    | _, Error error -> return_error error
+    | Ok bucket, Ok key -> (
+        let bucket = Bucket_name.to_string bucket in
+        let key = Object_key.to_string key in
         let headers =
           delete_precondition_headers options.preconditions
           |> add_opt_account_id_header "x-amz-expected-bucket-owner"
@@ -392,7 +391,6 @@ module Make (C : Request_context.S) = struct
             return_result return_error return_ok result)
 
   let delete_objects conn ~bucket ~objects ?options () =
-    let bucket = Bucket_name.to_string bucket in
     let options =
       Option.value ~default:Delete_objects.default_options options
     in
@@ -400,9 +398,10 @@ module Make (C : Request_context.S) = struct
       S3_error_context.return_s3_error return_error ~operation:"DeleteObjects"
         ~bucket
     in
-    match S3_validation.validate_bucket bucket with
+    match Bucket_name.of_string bucket with
     | Error error -> return_error error
-    | Ok () -> (
+    | Ok bucket -> (
+        let bucket = Bucket_name.to_string bucket in
         match Object_delete_xml.validate_objects objects with
         | Error error -> return_error error
         | Ok () -> (
@@ -441,10 +440,6 @@ module Make (C : Request_context.S) = struct
 
   let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
       ?options () =
-    let source_bucket = Bucket_name.to_string source_bucket in
-    let source_key = Object_key.to_string source_key in
-    let destination_bucket = Bucket_name.to_string destination_bucket in
-    let destination_key = Object_key.to_string destination_key in
     let options = Option.value ~default:Copy_object.default_options options in
     let source_error =
       S3_error_context.return_s3_error return_error ~operation:"CopyObject"
@@ -454,83 +449,85 @@ module Make (C : Request_context.S) = struct
       S3_error_context.return_s3_error return_error ~operation:"CopyObject"
         ~bucket:destination_bucket ~key:destination_key
     in
-    match S3_validation.validate_bucket_key source_bucket source_key with
-    | Error error -> source_error error
-    | Ok () -> (
-        match
-          S3_validation.validate_bucket_key destination_bucket destination_key
-        with
+    match
+      ( Bucket_name.of_string source_bucket,
+        Object_key.of_string source_key,
+        Bucket_name.of_string destination_bucket,
+        Object_key.of_string destination_key )
+    with
+    | Error error, _, _, _ -> source_error error
+    | _, Error error, _, _ -> source_error error
+    | _, _, Error error, _ -> return_error error
+    | _, _, _, Error error -> return_error error
+    | Ok source_bucket, Ok source_key, Ok destination_bucket, Ok destination_key
+      -> (
+        let source_bucket = Bucket_name.to_string source_bucket in
+        let source_key = Object_key.to_string source_key in
+        let destination_bucket = Bucket_name.to_string destination_bucket in
+        let destination_key = Object_key.to_string destination_key in
+        let copy_source =
+          Awskit.Signing.uri_encode ~encode_slash:false
+            (Fmt.str "/%s/%s" source_bucket source_key)
+        in
+        let copy_source =
+          match options.source_version_id with
+          | None -> copy_source
+          | Some version_id ->
+              Fmt.str "%s?versionId=%s" copy_source
+                (Awskit.Signing.uri_encode ~encode_slash:true
+                   (Object.Version_id.to_string version_id))
+        in
+        match validate_copy_options options with
         | Error error -> return_error error
         | Ok () -> (
-            let copy_source =
-              Awskit.Signing.uri_encode ~encode_slash:false
-                (Fmt.str "/%s/%s" source_bucket source_key)
+            let headers =
+              ("x-amz-copy-source", copy_source)
+              :: copy_source_precondition_headers options.source_preconditions
+              @ checksum_algorithm_header options.checksum_algorithm
+              @ destination_encryption_headers options.destination_encryption
+              @ copy_source_encryption_headers options.source_encryption
             in
-            let copy_source =
-              match options.source_version_id with
-              | None -> copy_source
-              | Some version_id ->
-                  Fmt.str "%s?versionId=%s" copy_source
-                    (Awskit.Signing.uri_encode ~encode_slash:true
-                       (Object.Version_id.to_string version_id))
+            let headers =
+              match options.metadata_directive with
+              | None -> headers
+              | Some `Copy -> ("x-amz-metadata-directive", "COPY") :: headers
+              | Some (`Replace metadata) ->
+                  ("x-amz-metadata-directive", "REPLACE")
+                  :: Metadata_headers.to_headers metadata
+                  @ headers
             in
-            match validate_copy_options options with
+            let headers =
+              headers
+              |> add_opt_header "x-amz-storage-class"
+                   (Option.map Storage_class.to_string options.storage_class)
+              |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+                   options.expected_bucket_owner
+              |> add_opt_account_id_header "x-amz-source-expected-bucket-owner"
+                   options.source_expected_bucket_owner
+            in
+            match
+              object_request conn ~bucket:destination_bucket
+                ~key:destination_key
+            with
             | Error error -> return_error error
-            | Ok () -> (
-                let headers =
-                  ("x-amz-copy-source", copy_source)
-                  :: copy_source_precondition_headers
-                       options.source_preconditions
-                  @ checksum_algorithm_header options.checksum_algorithm
-                  @ destination_encryption_headers
-                      options.destination_encryption
-                  @ copy_source_encryption_headers options.source_encryption
+            | Ok request ->
+                let* result =
+                  with_retryable_embedded_response conn ~method_:`PUT ~request
+                    ~query:[] ~headers
+                    ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string "")
+                    R.Request_body.empty ~f:(fun response body ->
+                      let* body =
+                        read_response_body body ~max_size:1_048_576L
+                      in
+                      match body with
+                      | Error error -> return_error error
+                      | Ok body ->
+                          return_result return_error return_ok
+                            (copy_result response body))
                 in
-                let headers =
-                  match options.metadata_directive with
-                  | None -> headers
-                  | Some `Copy ->
-                      ("x-amz-metadata-directive", "COPY") :: headers
-                  | Some (`Replace metadata) ->
-                      ("x-amz-metadata-directive", "REPLACE")
-                      :: Metadata_headers.to_headers metadata
-                      @ headers
-                in
-                let headers =
-                  headers
-                  |> add_opt_header "x-amz-storage-class"
-                       (Option.map Storage_class.to_string options.storage_class)
-                  |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                       options.expected_bucket_owner
-                  |> add_opt_account_id_header
-                       "x-amz-source-expected-bucket-owner"
-                       options.source_expected_bucket_owner
-                in
-                match
-                  object_request conn ~bucket:destination_bucket
-                    ~key:destination_key
-                with
-                | Error error -> return_error error
-                | Ok request ->
-                    let* result =
-                      with_retryable_embedded_response conn ~method_:`PUT
-                        ~request ~query:[] ~headers
-                        ~payload_hash:
-                          (Awskit.Body.Payload_hash.sha256_of_string "")
-                        R.Request_body.empty ~f:(fun response body ->
-                          let* body =
-                            read_response_body body ~max_size:1_048_576L
-                          in
-                          match body with
-                          | Error error -> return_error error
-                          | Ok body ->
-                              return_result return_error return_ok
-                                (copy_result response body))
-                    in
-                    return_result return_error return_ok result)))
+                return_result return_error return_ok result))
 
   let list_versions conn ~bucket ?options () =
-    let bucket = Bucket_name.to_string bucket in
     let options =
       Option.value ~default:List_object_versions.default_options options
     in
@@ -538,9 +535,10 @@ module Make (C : Request_context.S) = struct
       S3_error_context.return_s3_error return_error
         ~operation:"ListObjectVersions" ~bucket
     in
-    match S3_validation.validate_bucket bucket with
+    match Bucket_name.of_string bucket with
     | Error error -> return_error error
-    | Ok () -> (
+    | Ok bucket -> (
+        let bucket = Bucket_name.to_string bucket in
         match validate_list_versions_options options with
         | Error error -> return_error error
         | Ok () -> (
@@ -587,7 +585,6 @@ module Make (C : Request_context.S) = struct
                 return_result return_error return_ok result))
 
   let list conn ~bucket ?options () =
-    let bucket = Bucket_name.to_string bucket in
     let options =
       Option.value ~default:List_objects_v2.default_options options
     in
@@ -595,9 +592,10 @@ module Make (C : Request_context.S) = struct
       S3_error_context.return_s3_error return_error ~operation:"ListObjectsV2"
         ~bucket
     in
-    match S3_validation.validate_bucket bucket with
+    match Bucket_name.of_string bucket with
     | Error error -> return_error error
-    | Ok () -> (
+    | Ok bucket -> (
+        let bucket = Bucket_name.to_string bucket in
         match validate_list_options options with
         | Error error -> return_error error
         | Ok () -> (
@@ -664,20 +662,10 @@ module Make (C : Request_context.S) = struct
         (Fmt.str "ListObjectsV2 collection exceeded max_pages bound (%d)"
            max_pages)
 
-    let options_for_page (base : List_objects_v2.options) continuation_token =
-      {
-        base with
-        List_objects_v2.continuation_token;
-        start_after =
-          (match continuation_token with
-          | None -> base.start_after
-          | Some _ -> None);
-      }
-
     let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
       let return_context_error =
         S3_error_context.return_s3_error return_error ~operation:"ListObjectsV2"
-          ~bucket:(Bucket_name.to_string bucket)
+          ~bucket
       in
       match validate_max_pages max_pages with
       | Error error -> return_context_error error
@@ -685,8 +673,7 @@ module Make (C : Request_context.S) = struct
           let base =
             Option.value ~default:List_objects_v2.default_options options
           in
-          let rec loop continuation_token page_count acc =
-            let options = options_for_page base continuation_token in
+          let rec loop options page_count acc =
             let* page = list conn ~bucket ~options () in
             match page with
             | Error error -> return_error error
@@ -703,15 +690,15 @@ module Make (C : Request_context.S) = struct
                       | Some max_pages when page_count >= max_pages ->
                           return_ok acc
                       | _ -> (
-                          match page.next_continuation_token with
-                          | Some token -> loop (Some token) page_count acc
+                          match List_objects_v2.next_page_options base page with
+                          | Some options -> loop options page_count acc
                           | None ->
                               return_context_error
                                 (S3_error_context.decode
                                    "truncated list response missing \
                                     NextContinuationToken"))))
           in
-          loop base.continuation_token 0 init
+          loop (List_objects_v2.first_page_options base) 0 init
 
     let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
       let f acc page =
@@ -723,7 +710,7 @@ module Make (C : Request_context.S) = struct
     let collect_pages conn ~bucket ?options ~max_pages ~init ~f () =
       let return_context_error =
         S3_error_context.return_s3_error return_error ~operation:"ListObjectsV2"
-          ~bucket:(Bucket_name.to_string bucket)
+          ~bucket
       in
       match validate_required_max_pages max_pages with
       | Error error -> return_context_error error
@@ -731,8 +718,7 @@ module Make (C : Request_context.S) = struct
           let base =
             Option.value ~default:List_objects_v2.default_options options
           in
-          let rec loop continuation_token page_count acc =
-            let options = options_for_page base continuation_token in
+          let rec loop options page_count acc =
             let* page = list conn ~bucket ~options () in
             match page with
             | Error error -> return_error error
@@ -746,15 +732,15 @@ module Make (C : Request_context.S) = struct
                     else if page_count >= max_pages then
                       return_context_error (max_pages_exceeded max_pages)
                     else
-                      match page.next_continuation_token with
-                      | Some token -> loop (Some token) page_count acc
+                      match List_objects_v2.next_page_options base page with
+                      | Some options -> loop options page_count acc
                       | None ->
                           return_context_error
                             (S3_error_context.decode
                                "truncated list response missing \
                                 NextContinuationToken")))
           in
-          loop base.continuation_token 0 init
+          loop (List_objects_v2.first_page_options base) 0 init
 
     let pages conn ~bucket ?options ~max_pages () =
       let f pages page = return_ok (page :: pages) in
@@ -808,19 +794,10 @@ module Make (C : Request_context.S) = struct
         (Fmt.str "ListObjectVersions collection exceeded max_pages bound (%d)"
            max_pages)
 
-    let options_for_page (base : List_object_versions.options)
-        (page : List_object_versions.page) =
-      {
-        base with
-        List_object_versions.key_marker = page.next_key_marker;
-        version_id_marker = page.next_version_id_marker;
-      }
-
     let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
       let return_context_error =
         S3_error_context.return_s3_error return_error
-          ~operation:"ListObjectVersions"
-          ~bucket:(Bucket_name.to_string bucket)
+          ~operation:"ListObjectVersions" ~bucket
       in
       match validate_max_pages max_pages with
       | Error error -> return_context_error error
@@ -845,10 +822,10 @@ module Make (C : Request_context.S) = struct
                       | Some max_pages when page_count >= max_pages ->
                           return_ok acc
                       | _ -> (
-                          match page.next_key_marker with
-                          | Some _ ->
-                              let options = options_for_page base page in
-                              loop options page_count acc
+                          match
+                            List_object_versions.next_page_options base page
+                          with
+                          | Some options -> loop options page_count acc
                           | None ->
                               return_context_error
                                 (S3_error_context.decode
@@ -867,8 +844,7 @@ module Make (C : Request_context.S) = struct
     let collect_pages conn ~bucket ?options ~max_pages ~init ~f () =
       let return_context_error =
         S3_error_context.return_s3_error return_error
-          ~operation:"ListObjectVersions"
-          ~bucket:(Bucket_name.to_string bucket)
+          ~operation:"ListObjectVersions" ~bucket
       in
       match validate_required_max_pages max_pages with
       | Error error -> return_context_error error
@@ -890,10 +866,10 @@ module Make (C : Request_context.S) = struct
                     else if page_count >= max_pages then
                       return_context_error (max_pages_exceeded max_pages)
                     else
-                      match page.next_key_marker with
-                      | Some _ ->
-                          let options = options_for_page base page in
-                          loop options page_count acc
+                      match
+                        List_object_versions.next_page_options base page
+                      with
+                      | Some options -> loop options page_count acc
                       | None ->
                           return_context_error
                             (S3_error_context.decode

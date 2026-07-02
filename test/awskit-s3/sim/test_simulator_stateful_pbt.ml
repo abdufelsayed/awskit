@@ -11,7 +11,8 @@ let credentials =
     ~secret_access_key:"SECRET" ()
 
 let bucket = Bucket_name.of_string_exn "stateful-pbt-bucket"
-let key_to_object_key key = Object_key.of_string_exn key
+let public_bucket = Bucket_name.to_string bucket
+let key_to_object_key key = key
 
 let tags_to_set tags =
   tags
@@ -296,8 +297,8 @@ let assert_get command_index command conn key expected =
   | Some object_ ->
       let result =
         expect_ok command_index command "get_string"
-          (Simulator.Object.get_string conn ~bucket ~key:(key_to_object_key key)
-             ~max_bytes ())
+          (Simulator.Object.get_string conn ~bucket:public_bucket
+             ~key:(key_to_object_key key) ~max_bytes ())
       in
       check_equal command_index command Alcotest.string "get body" object_.body
         result.value;
@@ -307,8 +308,8 @@ let assert_get command_index command conn key expected =
         object_.has_version_id result.version_id
   | None ->
       expect_no_such_key command_index command "get_string"
-        (Simulator.Object.get_string conn ~bucket ~key:(key_to_object_key key)
-           ~max_bytes ())
+        (Simulator.Object.get_string conn ~bucket:public_bucket
+           ~key:(key_to_object_key key) ~max_bytes ())
 
 let assert_get_range command_index command conn key range model =
   let max_bytes = max_bytes_for_expected (Model.find key model) in
@@ -317,8 +318,8 @@ let assert_get_range command_index command conn key range model =
   | Get_ok summary ->
       let result =
         expect_ok command_index command "get range"
-          (Simulator.Object.get_string conn ~bucket ~key:(key_to_object_key key)
-             ~options ~max_bytes ())
+          (Simulator.Object.get_string conn ~bucket:public_bucket
+             ~key:(key_to_object_key key) ~options ~max_bytes ())
       in
       check_equal command_index command Alcotest.string "get range body"
         summary.read_body result.value;
@@ -337,12 +338,12 @@ let assert_get_range command_index command conn key range model =
         summary.read_has_version_id result.version_id
   | Not_found ->
       expect_no_such_key command_index command "get range"
-        (Simulator.Object.get_string conn ~bucket ~key:(key_to_object_key key)
-           ~options ~max_bytes ())
+        (Simulator.Object.get_string conn ~bucket:public_bucket
+           ~key:(key_to_object_key key) ~options ~max_bytes ())
   | Invalid_range ->
       expect_invalid_range command_index command "get range"
-        (Simulator.Object.get_string conn ~bucket ~key:(key_to_object_key key)
-           ~options ~max_bytes ())
+        (Simulator.Object.get_string conn ~bucket:public_bucket
+           ~key:(key_to_object_key key) ~options ~max_bytes ())
   | result ->
       fail command_index command
         (Printf.sprintf "unexpected model result %s for range get"
@@ -351,8 +352,8 @@ let assert_get_range command_index command conn key range model =
 let assert_find command_index command conn key expected =
   let max_bytes = max_bytes_for_expected expected in
   match
-    Simulator.Object.find_string conn ~bucket ~key:(key_to_object_key key)
-      ~max_bytes ()
+    Simulator.Object.find_string conn ~bucket:public_bucket
+      ~key:(key_to_object_key key) ~max_bytes ()
   with
   | Ok (Some result) -> (
       match expected with
@@ -375,7 +376,8 @@ let assert_head command_index command conn key expected =
   | Some object_ ->
       let result =
         expect_ok command_index command "head"
-          (Simulator.Object.head conn ~bucket ~key:(key_to_object_key key) ())
+          (Simulator.Object.head conn ~bucket:public_bucket
+             ~key:(key_to_object_key key) ())
       in
       check_equal command_index command
         Alcotest.(option int64)
@@ -388,12 +390,14 @@ let assert_head command_index command conn key expected =
         object_.has_version_id result.version_id
   | None ->
       expect_no_such_key command_index command "head"
-        (Simulator.Object.head conn ~bucket ~key:(key_to_object_key key) ())
+        (Simulator.Object.head conn ~bucket:public_bucket
+           ~key:(key_to_object_key key) ())
 
 let assert_exists command_index command conn key expected =
   let result =
     expect_ok command_index command "exists"
-      (Simulator.Object.exists conn ~bucket ~key:(key_to_object_key key) ())
+      (Simulator.Object.exists conn ~bucket:public_bucket
+         ~key:(key_to_object_key key) ())
   in
   check_equal command_index command Alcotest.bool "exists"
     (Option.is_some expected) result
@@ -403,65 +407,66 @@ let assert_object_tags command_index command conn key expected =
   | Some object_ ->
       let result =
         expect_ok command_index command "get object tags"
-          (Simulator.Object.Tagging.get conn ~bucket
+          (Simulator.Object.Tagging.get conn ~bucket:public_bucket
              ~key:(key_to_object_key key) ())
       in
       check_tags command_index command "object tags" object_.tags result.tags
   | None ->
       expect_no_such_key command_index command "get object tags"
-        (Simulator.Object.Tagging.get conn ~bucket ~key:(key_to_object_key key)
-           ())
+        (Simulator.Object.Tagging.get conn ~bucket:public_bucket
+           ~key:(key_to_object_key key) ())
 
 let assert_put_object_tags command_index command conn key tags expected =
   match expected with
   | Some _ ->
       ignore
         (expect_ok command_index command "put object tags"
-           (Simulator.Object.Tagging.put conn ~bucket
+           (Simulator.Object.Tagging.put conn ~bucket:public_bucket
               ~key:(key_to_object_key key) ~tags:(tags_to_set tags) ())
           : Awskit.Response.t)
   | None ->
       expect_no_such_key command_index command "put object tags"
-        (Simulator.Object.Tagging.put conn ~bucket ~key:(key_to_object_key key)
-           ~tags:(tags_to_set tags) ())
+        (Simulator.Object.Tagging.put conn ~bucket:public_bucket
+           ~key:(key_to_object_key key) ~tags:(tags_to_set tags) ())
 
 let assert_delete_object_tags command_index command conn key expected =
   match expected with
   | Some _ ->
       ignore
         (expect_ok command_index command "delete object tags"
-           (Simulator.Object.Tagging.delete conn ~bucket
+           (Simulator.Object.Tagging.delete conn ~bucket:public_bucket
               ~key:(key_to_object_key key) ())
           : Awskit.Response.t)
   | None ->
       expect_no_such_key command_index command "delete object tags"
-        (Simulator.Object.Tagging.delete conn ~bucket
+        (Simulator.Object.Tagging.delete conn ~bucket:public_bucket
            ~key:(key_to_object_key key) ())
 
 let assert_bucket_tags command_index command conn expected =
   let result =
     expect_ok command_index command "get bucket tags"
-      (Simulator.Bucket.Tagging.get conn ~bucket ())
+      (Simulator.Bucket.Tagging.get conn ~bucket:public_bucket ())
   in
   check_tags command_index command "bucket tags" expected result.tags
 
 let assert_put_bucket_tags command_index command conn tags =
   ignore
     (expect_ok command_index command "put bucket tags"
-       (Simulator.Bucket.Tagging.put conn ~bucket ~tags:(tags_to_set tags) ())
+       (Simulator.Bucket.Tagging.put conn ~bucket:public_bucket
+          ~tags:(tags_to_set tags) ())
       : Awskit.Response.t)
 
 let assert_delete_bucket_tags command_index command conn =
   ignore
     (expect_ok command_index command "delete bucket tags"
-       (Simulator.Bucket.Tagging.delete conn ~bucket ())
+       (Simulator.Bucket.Tagging.delete conn ~bucket:public_bucket ())
       : Awskit.Response.t)
 
 let assert_get_versioning command_index command conn expected =
   let status_to_string = Option.map Bucket.Versioning.Status.to_string in
   let result =
     expect_ok command_index command "get versioning"
-      (Simulator.Bucket.Versioning.get conn ~bucket ())
+      (Simulator.Bucket.Versioning.get conn ~bucket:public_bucket ())
   in
   check_equal command_index command
     Alcotest.(option string)
@@ -503,7 +508,7 @@ let assert_version_listing command_index command conn model =
   in
   let pages =
     expect_ok command_index command "list object versions"
-      (Simulator.Object.Versions.pages conn ~bucket ~max_pages ())
+      (Simulator.Object.Versions.pages conn ~bucket:public_bucket ~max_pages ())
   in
   let actual =
     List.concat_map
@@ -529,11 +534,11 @@ let check_store_state command_index command conn model =
     Alcotest.(list (pair string string))
     "objects_as_strings"
     (Model.objects_as_strings model)
-    (Simulator.objects_as_strings store ~bucket);
+    (Simulator.objects_as_strings store ~bucket:public_bucket);
   check_equal command_index command
     Alcotest.(list string)
     "keys" (Model.keys model)
-    (Simulator.keys store ~bucket);
+    (Simulator.keys store ~bucket:public_bucket);
   assert_bucket_tags command_index command conn model.bucket_tags;
   assert_get_versioning command_index command conn model.versioning;
   assert_version_listing command_index command conn model
@@ -557,13 +562,14 @@ let check_store command_index command conn model =
 let assert_put_versioning command_index command conn status =
   ignore
     (expect_ok command_index command "put versioning"
-       (Simulator.Bucket.Versioning.put conn ~bucket ~status ())
+       (Simulator.Bucket.Versioning.put conn ~bucket:public_bucket ~status ())
       : Awskit.Response.t)
 
 let assert_delete command_index command conn key ~keeps_history =
   let result =
     expect_ok command_index command "delete"
-      (Simulator.Object.delete conn ~bucket ~key:(key_to_object_key key) ())
+      (Simulator.Object.delete conn ~bucket:public_bucket
+         ~key:(key_to_object_key key) ())
   in
   check_version_id_presence command_index command "delete version id"
     keeps_history result.version_id;
@@ -574,7 +580,7 @@ let assert_list_keys command_index command conn model =
   let expected = Model.keys model in
   let keys =
     expect_ok command_index command "list keys"
-      (Simulator.Object.List.keys conn ~bucket
+      (Simulator.Object.List.keys conn ~bucket:public_bucket
          ~max_pages:(collection_page_bound (List.length expected))
          ())
     |> List.map Object_key.to_string
@@ -584,13 +590,11 @@ let assert_list_keys command_index command conn model =
     "list keys" expected keys
 
 let assert_list_prefix command_index command conn prefix model =
-  let options =
-    Object.List.options_exn ~prefix:(Object_key.Prefix.of_string_exn prefix) ()
-  in
+  let options = Object.List.options_exn ~prefix () in
   let expected = Model.keys_with_prefix prefix model in
   let keys =
     expect_ok command_index command "list prefix"
-      (Simulator.Object.List.keys conn ~bucket ~options
+      (Simulator.Object.List.keys conn ~bucket:public_bucket ~options
          ~max_pages:(collection_page_bound (List.length expected))
          ())
     |> List.map Object_key.to_string
@@ -612,10 +616,7 @@ let expected_list_keys_page_is_truncated prefix ~max_keys model =
 let list_keys_options prefix ~max_keys =
   match prefix with
   | None -> Object.List.options_exn ~max_keys ()
-  | Some prefix ->
-      Object.List.options_exn
-        ~prefix:(Object_key.Prefix.of_string_exn prefix)
-        ~max_keys ()
+  | Some prefix -> Object.List.options_exn ~prefix ~max_keys ()
 
 let expected_list_keys_all prefix model =
   match prefix with
@@ -626,7 +627,7 @@ let assert_list_keys_page command_index command conn prefix max_keys model =
   let options = list_keys_options prefix ~max_keys in
   let page =
     expect_ok command_index command "list keys page"
-      (Simulator.Object.list conn ~bucket ~options ())
+      (Simulator.Object.list conn ~bucket:public_bucket ~options ())
   in
   let actual =
     List.map
@@ -649,7 +650,7 @@ let assert_list_keys_page command_index command conn prefix max_keys model =
   let expected_all = expected_list_keys_all prefix model in
   let all_keys =
     expect_ok command_index command "list keys all"
-      (Simulator.Object.List.keys conn ~bucket ~options
+      (Simulator.Object.List.keys conn ~bucket:public_bucket ~options
          ~max_pages:(collection_page_bound (List.length expected_all))
          ())
     |> List.map Object_key.to_string
@@ -682,7 +683,7 @@ let assert_list_versions_page command_index command conn max_keys model =
   let options = Object.Versions.options_exn ~max_keys () in
   let page =
     expect_ok command_index command "list object versions page"
-      (Simulator.Object.list_versions conn ~bucket ~options ())
+      (Simulator.Object.list_versions conn ~bucket:public_bucket ~options ())
   in
   let actual_object_versions =
     List.map actual_object_version_to_model page.versions
@@ -738,9 +739,9 @@ let assert_copy command_index command conn ~source_key ~destination_key ?options
   | Some source ->
       let result =
         expect_ok command_index command "copy"
-          (Simulator.Object.copy conn ~source_bucket:bucket
+          (Simulator.Object.copy conn ~source_bucket:public_bucket
              ~source_key:(key_to_object_key source_key)
-             ~destination_bucket:bucket
+             ~destination_bucket:public_bucket
              ~destination_key:(key_to_object_key destination_key)
              ?options ())
       in
@@ -751,9 +752,9 @@ let assert_copy command_index command conn ~source_key ~destination_key ?options
         result.version_id
   | None ->
       expect_no_such_key command_index command "copy"
-        (Simulator.Object.copy conn ~source_bucket:bucket
+        (Simulator.Object.copy conn ~source_bucket:public_bucket
            ~source_key:(key_to_object_key source_key)
-           ~destination_bucket:bucket
+           ~destination_bucket:public_bucket
            ~destination_key:(key_to_object_key destination_key)
            ())
 
@@ -770,7 +771,7 @@ let apply_simulator_command command_index conn model command =
             in
             let result =
               expect_ok command_index command "put_string"
-                (Simulator.Object.put_string conn ~bucket
+                (Simulator.Object.put_string conn ~bucket:public_bucket
                    ~key:(key_to_object_key key) ?options ~contents:body ())
             in
             check_version_id_presence command_index command "put version id"
@@ -788,7 +789,7 @@ let apply_simulator_command command_index conn model command =
             in
             let result =
               expect_ok command_index command "put_string metadata"
-                (Simulator.Object.put_string conn ~bucket
+                (Simulator.Object.put_string conn ~bucket:public_bucket
                    ~key:(key_to_object_key key) ~options ~contents:body ())
             in
             check_version_id_presence command_index command "put version id"
@@ -930,7 +931,7 @@ module Target : S3_workload.TARGET = struct
     let config = Simulator.config_exn ~max_list_keys:1 () in
     let store = Simulator.create_store ~config ~clock () in
     let conn = Simulator.connect store ~credentials in
-    match Simulator.Bucket.create conn ~bucket () with
+    match Simulator.Bucket.create conn ~bucket:public_bucket () with
     | Ok (_ : Bucket.Create.result) -> f conn
     | Error error ->
         Alcotest.failf "simulator setup failed: %s"

@@ -66,8 +66,11 @@ let validate_plaintext_policy ~endpoint ~tls_policy =
       invalid ~field:"tls_policy" "local_plaintext endpoint must use HTTP"
   | `Http, `Http_unsafe | `Https, `Http_unsafe -> Ok ()
 
-let s3_compatible ~endpoint ~signing_region ~addressing_style ~tls_policy
-    ~feature_policy () =
+let parse_endpoint endpoint = Endpoint.of_string endpoint
+let parse_region region = Region.of_string region
+
+let s3_compatible_of_values ~endpoint ~signing_region ~addressing_style
+    ~tls_policy ~feature_policy () =
   let* () = validate_plaintext_policy ~endpoint ~tls_policy in
   let* () =
     match (tls_policy, addressing_style) with
@@ -87,6 +90,13 @@ let s3_compatible ~endpoint ~signing_region ~addressing_style ~tls_policy
          feature_policy;
        })
 
+let s3_compatible ~endpoint ~signing_region ~addressing_style ~tls_policy
+    ~feature_policy () =
+  let* endpoint = parse_endpoint endpoint in
+  let* signing_region = parse_region signing_region in
+  s3_compatible_of_values ~endpoint ~signing_region ~addressing_style
+    ~tls_policy ~feature_policy ()
+
 let local_plaintext ~endpoint ~signing_region ~(addressing_style : [ `Path ]) ()
     =
   let addressing_style = (addressing_style :> addressing_style) in
@@ -94,14 +104,21 @@ let local_plaintext ~endpoint ~signing_region ~(addressing_style : [ `Path ]) ()
     ~tls_policy:`Http_local_only ~feature_policy:`S3_compatible ()
 
 let unsafe_plaintext ~endpoint ~signing_region ~addressing_style () =
-  S3_compatible
-    {
-      endpoint;
-      signing_region;
-      addressing_style;
-      tls_policy = `Http_unsafe;
-      feature_policy = `S3_compatible;
-    }
+  let* endpoint = parse_endpoint endpoint in
+  let* signing_region = parse_region signing_region in
+  Ok
+    (S3_compatible
+       {
+         endpoint;
+         signing_region;
+         addressing_style;
+         tls_policy = `Http_unsafe;
+         feature_policy = `S3_compatible;
+       })
+
+let unsafe_plaintext_exn ~endpoint ~signing_region ~addressing_style () =
+  Awskit.Error.Producer.get_ok_exn
+    (unsafe_plaintext ~endpoint ~signing_region ~addressing_style ())
 
 let addressing_style = function
   | Aws config -> config.addressing_style
