@@ -185,12 +185,10 @@ let () =
   with
   | Error error -> Fmt.epr "S3 error: %a@." Awskit_s3.Error.pp error
   | Ok s3 -> (
-      let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
-      let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
       match
         Awskit_s3_eio.Object.put_string s3
-          ~bucket
-          ~key
+          ~bucket:"my-bucket"
+          ~key:"hello.txt"
           ~contents:"Hello, S3!"
           ()
       with
@@ -225,12 +223,10 @@ let run () =
   match Awskit_s3_lwt_unix.create () with
   | Error error -> Lwt_io.eprintf "S3 error: %a\n" Awskit_s3.Error.pp error
   | Ok s3 ->
-      let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
-      let key = Awskit_s3.Object_key.of_string_exn "hello.txt" in
       let* result =
         Awskit_s3_lwt_unix.Object.get_string s3
-          ~bucket
-          ~key
+          ~bucket:"my-bucket"
+          ~key:"hello.txt"
           ~max_bytes:1_048_576L
           ()
       in
@@ -314,8 +310,8 @@ in
 let clock = Awskit_s3_sim.Clock.create () in
 let store = Awskit_s3_sim.create_store ~clock () in
 let conn = Awskit_s3_sim.connect store ~credentials in
-let bucket = Awskit_s3.Bucket_name.of_string_exn "test" in
-let key = Awskit_s3.Object_key.of_string_exn "hello" in
+let bucket = "test" in
+let key = "hello" in
 
 Awskit_s3_sim.Bucket.create conn ~bucket () |> ignore;
 Awskit_s3_sim.Object.put_string conn
@@ -342,8 +338,8 @@ explicit endpoint policy:
 ```ocaml
 let endpoint_config =
   Awskit_s3.Endpoint_config.local_plaintext
-    ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
-    ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
+    ~endpoint:"http://127.0.0.1:9000"
+    ~signing_region:"us-east-1"
     ~addressing_style:`Path
     ()
   |> Result.get_ok

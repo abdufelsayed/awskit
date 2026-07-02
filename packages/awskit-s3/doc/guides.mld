@@ -15,9 +15,13 @@ Object operations live under [Object]. Small buffered workflows can start with
 and custom body workflows use the adapter [Body] and [Reader] modules through
 [Object.put] and [Object.get].
 
-Snippets assume [bucket] is a {!type:Awskit_s3.Bucket_name.t} and [key] is an
-{!type:Awskit_s3.Object_key.t}; construct user input with
-[Bucket_name.of_string] and [Object_key.of_string].
+Public request inputs are string-facing. Pass bucket names, object keys,
+prefixes, owner account ids, version ids, upload ids, content/header values,
+regions, endpoint URLs, and pagination markers as strings, and pass integer
+request inputs such as part numbers and page bounds as [int]. Awskit validates
+those values in the public request builders before sending requests. Domain
+types still model response facts, internal validation, and advanced support
+APIs that deliberately expose validated S3 values.
 
 {2 Upload}
 
@@ -39,7 +43,9 @@ preconditions, checksum headers, and typed destination encryption headers:
 {[
 let options =
   Awskit_s3.Object.Put.options_exn
-    ~content_type:(Awskit_s3.Content_type.of_string_exn "text/plain")
+    ~content_type:"text/plain"
+    ~cache_control:"max-age=60"
+    ~expected_bucket_owner:"123456789012"
     ~metadata:(Awskit_s3.Metadata.of_list_exn [ ("origin", "example") ])
     ~tags:
       (Awskit_s3.Tag.Set.of_list_exn
@@ -148,11 +154,15 @@ an explicit [max_pages] bound and return an error if S3 reports more pages than
 the bound allows:
 
 {[
-let prefix = Awskit_s3.Object_key.Prefix.of_string_exn "logs/" in
 let keys =
   Awskit_s3_eio.Object.List.keys s3
     ~bucket
-    ~options:(Awskit_s3.Object.List.options_exn ~prefix ())
+    ~options:
+      (Awskit_s3.Object.List.options_exn
+         ~prefix:"logs/"
+         ~start_after:"logs/2026-01-01.json"
+         ~max_keys:100
+         ())
     ~max_pages:10
     ()
 ]}
@@ -172,7 +182,10 @@ Deleting the current object in a versioned bucket creates a delete marker.
 {[
 let options =
   Awskit_s3.Object.Versions.options_exn
-    ~prefix:(Awskit_s3.Object_key.Prefix.of_string_exn "logs/")
+    ~prefix:"logs/"
+    ~key_marker:"logs/2026-01-01.json"
+    ~version_id_marker:"3LgS1TCemW4k02ueUVk3r8g0pC0.example"
+    ~max_keys:100
     ()
 in
 Awskit_s3_eio.Object.Versions.object_versions s3
@@ -297,7 +310,7 @@ caller can retry or abort that upload explicitly.
 {[
 Awskit_s3_eio.Object.Transfer.upload_file s3
   ~bucket
-  ~key:(Awskit_s3.Object_key.of_string_exn "archive.tar")
+  ~key:"archive.tar"
   ~on_progress:(fun progress ->
     Fmt.pr "uploaded %Ld bytes@." progress.transferred)
   ~path
@@ -307,7 +320,7 @@ Awskit_s3_eio.Object.Transfer.upload_file s3
 {[
 Awskit_s3_eio.Object.Transfer.download_file s3
   ~bucket
-  ~key:(Awskit_s3.Object_key.of_string_exn "archive.tar")
+  ~key:"archive.tar"
   ~on_progress:(fun progress ->
     Fmt.pr "downloaded %Ld bytes@." progress.transferred)
   ~path
@@ -320,7 +333,7 @@ Awskit_s3_eio.Object.Transfer.download_file s3
 let* result =
   Awskit_s3_lwt_unix.Object.Transfer.upload_file s3
     ~bucket
-    ~key:(Awskit_s3.Object_key.of_string_exn "archive.tar")
+    ~key:"archive.tar"
     ~path:"/tmp/archive.tar"
     ()
 ]}
@@ -336,7 +349,7 @@ in
 let* result =
   Awskit_s3_lwt_unix.Object.Transfer.multipart_upload_file s3
     ~bucket
-    ~key:(Awskit_s3.Object_key.of_string_exn "large.tar")
+    ~key:"large.tar"
     ~options
     ~path:"/tmp/large.tar"
     ~on_progress:(fun progress ->
@@ -354,9 +367,9 @@ can be retried:
 
 {[
 let upload =
-  Awskit_s3.Multipart.Upload.resume
+  Awskit_s3.Multipart.Upload.resume_exn
     ~bucket
-    ~key:(Awskit_s3.Object_key.of_string_exn "large.tar")
+    ~key:"large.tar"
     ~upload_id
 in
 let* result =
@@ -422,8 +435,8 @@ default AWS regional host. Plain HTTP is explicit; loopback endpoints use
 {[
 let endpoint_config =
   Awskit_s3.Endpoint_config.local_plaintext
-    ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
-    ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
+    ~endpoint:"http://127.0.0.1:9000"
+    ~signing_region:"us-east-1"
     ~addressing_style:`Path
     ()
   |> Result.get_ok
@@ -490,10 +503,11 @@ Relevant bucket operations that target an existing bucket accept an operation
 owned by a different account.
 
 {[
-let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
-let owner = Awskit_s3.Account_id.of_string_exn "123456789012" in
-let options = Awskit_s3.Bucket.Encryption.options_exn
-    ~expected_bucket_owner:owner ()
+let bucket = "my-bucket" in
+let options =
+  Awskit_s3.Bucket.Encryption.options_exn
+    ~expected_bucket_owner:"123456789012"
+    ()
 in
 let encryption =
   {
@@ -574,26 +588,34 @@ request artifacts without an adapter connection.
 {[
 Awskit_s3_eio.Presigned.get_object s3
   ~bucket
-  ~key:(Awskit_s3.Object_key.of_string_exn "public.txt")
+  ~key:"public.txt"
   ()
 ]}
 
 {[
 let endpoint_config =
   Awskit_s3.Endpoint_config.local_plaintext
-    ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
-    ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
+    ~endpoint:"http://127.0.0.1:9000"
+    ~signing_region:"us-east-1"
     ~addressing_style:`Path
     ()
   |> Result.get_ok
 in
+let options =
+  Awskit_s3.Presigned.Put_object.options_exn
+    ~content_type:"text/plain"
+    ~expected_bucket_owner:"123456789012"
+    ~extra_signed_headers:[ ("x-amz-meta-origin", "browser") ]
+    ()
+in
 Awskit_s3.Presigned.put_object_with_endpoint_config
-  ~region:(Awskit.Region.of_string_exn "us-east-1")
+  ~region:"us-east-1"
   ~credentials
   ~now
   ~endpoint_config
   ~bucket
-  ~key:(Awskit_s3.Object_key.of_string_exn "upload.txt")
+  ~key:"upload.txt"
+  ~options
   ()
 ]}
 
@@ -603,17 +625,23 @@ state can be rebuilt with [Multipart.Upload.resume]:
 
 {[
 let upload =
-  Awskit_s3.Multipart.Upload.resume
+  Awskit_s3.Multipart.Upload.resume_exn
     ~bucket
-    ~key:(Awskit_s3.Object_key.of_string_exn "large.bin")
+    ~key:"large.bin"
     ~upload_id
+in
+let options =
+  Awskit_s3.Presigned.Upload_part.options_exn
+    ~expected_bucket_owner:"123456789012"
+    ()
 in
 Awskit_s3.Presigned.upload_part
   ~region:"us-east-1"
   ~credentials
   ~now
   ~upload
-  ~part_number:(Awskit_s3.Multipart.Part_number.of_int_exn 1)
+  ~part_number:1
+  ~options
   ()
 ]}
 
