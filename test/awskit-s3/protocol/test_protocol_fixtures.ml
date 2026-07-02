@@ -417,6 +417,20 @@ let expect_validation_field ?(label = "validation") field = function
         (label ^ " field") (Some field)
         (Awskit.Error.validation_field error)
 
+let expect_validation_exn label field f =
+  match f () with
+  | _ -> Alcotest.failf "%s: expected validation exception for %s" label field
+  | exception Awskit.Error.Awskit_error error ->
+      Alcotest.(check bool)
+        (label ^ " kind") true
+        (Awskit.Error.is_validation error);
+      Alcotest.(check (option string))
+        (label ^ " field") (Some field)
+        (Awskit.Error.validation_field error)
+  | exception exn ->
+      Alcotest.failf "%s: unexpected exception %s" label
+        (Printexc.to_string exn)
+
 let recorded_request_count conn =
   List.length conn.Protocol_recording_runtime.Runtime.calls
 
@@ -530,6 +544,14 @@ let test_public_option_builder_validation () =
     (Object.Put.options ~cache_control:"" ());
   expect_validation_field ~label:"put expected owner" "account_id"
     (Object.Put.options ~expected_bucket_owner:"123" ());
+  let dsse_bucket_key =
+    Encryption.Kms.create_exn ~bucket_key_enabled:true () |> fun kms ->
+    Encryption.Destination.Dsse_kms kms
+  in
+  expect_validation_field ~label:"put dsse bucket key" "sse_bucket_key_enabled"
+    (Object.Put.options ~encryption:dsse_bucket_key ());
+  expect_validation_exn "put dsse bucket key exn" "sse_bucket_key_enabled"
+    (fun () -> Object.Put.options_exn ~encryption:dsse_bucket_key ());
   expect_validation_field ~label:"get version id" "version_id"
     (Object.Get.options ~version_id:"" ());
   expect_validation_field ~label:"head expected owner" "account_id"
@@ -546,6 +568,11 @@ let test_public_option_builder_validation () =
     (Object.Copy.options ~source_version_id:"" ());
   expect_validation_field ~label:"copy expected owner" "account_id"
     (Object.Copy.options ~expected_bucket_owner:"123" ());
+  expect_validation_field ~label:"copy dsse bucket key" "sse_bucket_key_enabled"
+    (Object.Copy.options ~destination_encryption:dsse_bucket_key ());
+  expect_validation_exn "copy dsse bucket key exn" "sse_bucket_key_enabled"
+    (fun () ->
+      Object.Copy.options_exn ~destination_encryption:dsse_bucket_key ());
   expect_validation_field ~label:"list prefix" "prefix"
     (Object.List.options ~prefix:"" ());
   expect_validation_field ~label:"list delimiter" "delimiter"
@@ -575,6 +602,12 @@ let test_public_option_builder_validation () =
     (Multipart.Create.options ~content_type:"" ());
   expect_validation_field ~label:"create multipart owner" "account_id"
     (Multipart.Create.options ~expected_bucket_owner:"123" ());
+  expect_validation_field ~label:"create multipart dsse bucket key"
+    "sse_bucket_key_enabled"
+    (Multipart.Create.options ~encryption:dsse_bucket_key ());
+  expect_validation_exn "create multipart dsse bucket key exn"
+    "sse_bucket_key_enabled" (fun () ->
+      Multipart.Create.options_exn ~encryption:dsse_bucket_key ());
   expect_validation_field ~label:"upload part owner" "account_id"
     (Multipart.Upload_part.options ~expected_bucket_owner:"123" ());
   expect_validation_field ~label:"complete object size" "multipart_object_size"

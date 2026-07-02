@@ -2,6 +2,10 @@ module Object = Object
 
 let ( let* ) = S3_result.( let* )
 
+let validate_destination_encryption = function
+  | None -> Ok ()
+  | Some encryption -> Encryption.Destination.validate_request encryption
+
 module Upload_id = struct
   type t = string
 
@@ -191,6 +195,7 @@ module Create = struct
     let* () = validate_storage_class storage_class in
     let* () = validate_checksum_algorithm checksum_algorithm in
     let* () = validate_checksum_type checksum_type in
+    let* () = validate_destination_encryption encryption in
     Ok
       {
         content_type;

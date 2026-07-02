@@ -67,6 +67,8 @@ module type DOMAIN = sig
         | Sse_kms of Kms.t
         | Dsse_kms of Kms.t
         | Sse_c of Customer_key.t
+
+      val validate_request : t -> (unit, Awskit.Error.t) result
     end
 
     module Source : sig
@@ -270,23 +272,10 @@ module Make (Domain : DOMAIN) (Config : CONFIG) = struct
     Config.validate_header_value ~field:"storage_class"
       (Domain.Storage_class.to_string storage_class)
 
-  let validate_kms ~allow_bucket_key kms =
-    let* () =
-      match Domain.Encryption.Kms.key_id kms with
-      | None -> Ok ()
-      | Some key_id ->
-          Config.validate_header_value ~field:"sse_kms_key_id" key_id
-    in
-    match (allow_bucket_key, Domain.Encryption.Kms.bucket_key_enabled kms) with
-    | false, Some _ ->
-        invalid ~field:"sse_bucket_key_enabled"
-          "bucket keys are not supported for DSSE-KMS request encryption"
-    | _ -> Ok ()
-
   let validate_destination_encryption = function
-    | None | Some Domain.Encryption.Destination.Sse_s3 | Some (Sse_c _) -> Ok ()
-    | Some (Sse_kms kms) -> validate_kms ~allow_bucket_key:true kms
-    | Some (Dsse_kms kms) -> validate_kms ~allow_bucket_key:false kms
+    | None -> Ok ()
+    | Some encryption ->
+        Domain.Encryption.Destination.validate_request encryption
 
   let validate_source_encryption = function
     | None | Some (Domain.Encryption.Source.Sse_c _) -> Ok ()

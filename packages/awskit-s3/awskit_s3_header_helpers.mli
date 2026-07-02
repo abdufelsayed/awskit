@@ -72,6 +72,8 @@ module type DOMAIN = sig
         | Sse_kms of Kms.t
         | Dsse_kms of Kms.t
         | Sse_c of Customer_key.t
+
+      val validate_request : t -> (unit, Awskit.Error.t) result
     end
 
     module Source : sig

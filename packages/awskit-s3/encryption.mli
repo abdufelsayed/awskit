@@ -72,6 +72,10 @@ module Destination : sig
     | Sse_kms of Kms.t
     | Dsse_kms of Kms.t
     | Sse_c of Customer_key.t
+
+  val validate_request : t -> (unit, Awskit.Error.t) result
+  (** Validate that a destination encryption value can be sent in an S3 request.
+  *)
 end
 
 module Source : sig

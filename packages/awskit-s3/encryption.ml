@@ -60,12 +60,30 @@ module Customer_key = struct
   let key_md5_base64 t = t.key_md5_base64
 end
 
+let validate_kms ~allow_bucket_key kms =
+  let* () =
+    match Kms.key_id kms with
+    | None -> Ok ()
+    | Some key_id ->
+        S3_validation.validate_header_value ~field:"sse_kms_key_id" key_id
+  in
+  match (allow_bucket_key, Kms.bucket_key_enabled kms) with
+  | false, Some _ ->
+      S3_error_context.invalid ~field:"sse_bucket_key_enabled"
+        "bucket keys are not supported for DSSE-KMS request encryption"
+  | _ -> Ok ()
+
 module Destination = struct
   type t =
     | Sse_s3
     | Sse_kms of Kms.t
     | Dsse_kms of Kms.t
     | Sse_c of Customer_key.t
+
+  let validate_request = function
+    | Sse_s3 | Sse_c _ -> Ok ()
+    | Sse_kms kms -> validate_kms ~allow_bucket_key:true kms
+    | Dsse_kms kms -> validate_kms ~allow_bucket_key:false kms
 end
 
 module Source = struct
