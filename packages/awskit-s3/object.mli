@@ -457,13 +457,14 @@ module Delete_objects : sig
   val max_objects : int
   (** Maximum number of objects accepted by one [DeleteObjects] request. *)
 
-  type object_ = {
+  type object_ = private {
     key : Object_key.t;  (** Object key to delete. *)
     version_id : Version_id.t option;  (** Optional version id to delete. *)
     etag : Etag.t option;
         (** Optional ETag condition for conditional delete support. *)
   }
-  (** One [DeleteObjects] request member. *)
+  (** One [DeleteObjects] request member. Build with {!val:object_} or
+      {!val:object_exn}. *)
 
   val object_ :
     key:string ->

@@ -477,6 +477,9 @@ let test_public_operation_validation_sends_no_request () =
       Protocol_recording_runtime.S3.Object.delete conn ~bucket:"Invalid"
         ~key:"file.txt" ());
   let delete_member = Object.Delete_objects.object_exn ~key:"file.txt" () in
+  Alcotest.(check string)
+    "delete member key inspectable" "file.txt"
+    (Object_key.to_string delete_member.key);
   expect_no_request "delete objects invalid bucket" "bucket" (fun conn ->
       Protocol_recording_runtime.S3.Object.delete_objects conn ~bucket:"Invalid"
         ~objects:[ delete_member ] ());
