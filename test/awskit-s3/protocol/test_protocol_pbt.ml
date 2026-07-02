@@ -501,40 +501,78 @@ let prop_presigned_upload_part_safe_uri_keeps_operation_query =
 
 let prop_presigned_rejects_invalid_extra_signed_headers =
   QCheck.Test.make ~count:boundary_count
-    ~name:"presigned requests reject invalid extra signed headers"
+    ~name:"presigned option builders reject invalid extra signed headers"
     (QCheck.make ~print:String.escaped Protocol_generators.newline_header_value)
     (fun value ->
-      let options : Presigned.Get_object.options =
-        {
-          Presigned.Get_object.default_options with
-          extra_signed_headers = [ ("x-extra", value) ];
-        }
-      in
-      Result.is_error
-        (Presigned.get_object ~region:"us-east-1"
-           ~credentials:Protocol_support.credentials
-           ~now:Protocol_support.test_time ~bucket:"bucket" ~key:"file.txt"
-           ~options ()))
+      match
+        Presigned.Get_object.options
+          ~extra_signed_headers:[ ("x-extra", value) ]
+          ()
+      with
+      | Error error -> Awskit.Error.validation_field error = Some "header"
+      | Ok _ -> false)
 
 let prop_presigned_rejects_invalid_expiration_bounds =
   QCheck.Test.make ~count:boundary_count
-    ~name:"presigned requests reject invalid expiration bounds"
+    ~name:"presigned option builders reject invalid expiration bounds"
     (QCheck.make ~print:string_of_int
        Protocol_generators.invalid_presign_expires_seconds) (fun seconds ->
-      let options : Presigned.Get_object.options =
-        {
-          Presigned.Get_object.default_options with
-          expires_in = Some (Ptime.Span.of_int_s seconds);
-        }
-      in
       match
-        Presigned.get_object ~region:"us-east-1"
-          ~credentials:Protocol_support.credentials
-          ~now:Protocol_support.test_time ~bucket:"bucket" ~key:"file.txt"
-          ~options ()
+        Presigned.Get_object.options
+          ~expires_in:(Ptime.Span.of_int_s seconds)
+          ()
       with
       | Error error -> Awskit.Error.validation_field error = Some "expires_in"
       | Ok _ -> false)
+
+let prop_presigned_rejects_duplicate_signed_headers =
+  let checksum =
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
+      ~value:"checksum"
+  in
+  let expect_header_error = function
+    | Error error -> Awskit.Error.validation_field error = Some "header"
+    | Ok _ -> false
+  in
+  let cases =
+    [
+      ( "host",
+        fun () ->
+          Presigned.Get_object.options
+            ~extra_signed_headers:[ ("Host", "example.com") ]
+            ()
+          |> expect_header_error );
+      ( "content-type",
+        fun () ->
+          Presigned.Put_object.options ~content_type:"text/plain"
+            ~extra_signed_headers:[ ("Content-Type", "text/plain") ]
+            ()
+          |> expect_header_error );
+      ( "owner",
+        fun () ->
+          Presigned.Delete_object.options ~expected_bucket_owner:"123456789012"
+            ~extra_signed_headers:
+              [ ("X-Amz-Expected-Bucket-Owner", "123456789012") ]
+            ()
+          |> expect_header_error );
+      ( "checksum",
+        fun () ->
+          Presigned.Upload_part.options ~checksum
+            ~extra_signed_headers:[ ("X-Amz-Checksum-SHA256", "checksum") ]
+            ()
+          |> expect_header_error );
+      ( "encryption",
+        fun () ->
+          Presigned.Put_object.options ~encryption:Encryption.Destination.Sse_s3
+            ~extra_signed_headers:[ ("X-Amz-Server-Side-Encryption", "AES256") ]
+            ()
+          |> expect_header_error );
+    ]
+  in
+  QCheck.Test.make ~count:default_count
+    ~name:"presigned option builders reject duplicate signed headers"
+    (QCheck.make ~print:fst (QCheck.Gen.oneof_list cases))
+    (fun (_label, check) -> check ())
 
 let tagging_result_from_xml body =
   let conn =
@@ -1059,6 +1097,7 @@ let remaining_protocol_properties =
     prop_presigned_upload_part_safe_uri_keeps_operation_query;
     prop_presigned_rejects_invalid_extra_signed_headers;
     prop_presigned_rejects_invalid_expiration_bounds;
+    prop_presigned_rejects_duplicate_signed_headers;
     prop_tagging_xml_rejects_duplicate_tag_keys;
     prop_download_ranges_cover_content_length;
     prop_upload_parts_cover_content_length;

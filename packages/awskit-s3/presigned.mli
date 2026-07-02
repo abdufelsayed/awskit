@@ -66,18 +66,18 @@ val pp : Format.formatter -> result -> unit
     signature, session token, and signed header values. *)
 
 module Put_object : sig
-  type options = {
+  type options = private {
     expires_in : Ptime.Span.t option;
         (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
             authentication. *)
-    content_type : Content_type.t option;
+    content_type : string option;
         (** Optional [Content-Type] header to sign. The uploader must send the
             same value. *)
     checksum : Object.Checksum.value option;
         (** Optional checksum header to sign. *)
     encryption : Encryption.Destination.t option;
         (** Optional encryption headers to sign. *)
-    expected_bucket_owner : Account_id.t option;
+    expected_bucket_owner : string option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
         (** Additional headers to include in the signature. Callers must send
@@ -87,21 +87,43 @@ module Put_object : sig
 
   val default_options : options
   (** Default presigned [PUT Object] options. *)
+
+  val options :
+    ?expires_in:Ptime.Span.t ->
+    ?content_type:string ->
+    ?checksum:Object.Checksum.value ->
+    ?encryption:Encryption.Destination.t ->
+    ?expected_bucket_owner:string ->
+    ?extra_signed_headers:(string * string) list ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build presigned [PUT Object] options. *)
+
+  val options_exn :
+    ?expires_in:Ptime.Span.t ->
+    ?content_type:string ->
+    ?checksum:Object.Checksum.value ->
+    ?encryption:Encryption.Destination.t ->
+    ?expected_bucket_owner:string ->
+    ?extra_signed_headers:(string * string) list ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Get_object : sig
-  type options = {
+  type options = private {
     expires_in : Ptime.Span.t option;
         (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
             authentication. *)
-    response_content_type : Content_type.t option;
+    response_content_type : string option;
         (** Optional [response-content-type] query override. *)
-    response_content_disposition : Header_value.t option;
+    response_content_disposition : string option;
         (** Optional [response-content-disposition] query override. *)
-    version_id : Object.Version_id.t option;  (** Object version to presign. *)
+    version_id : string option;  (** Object version to presign. *)
     source_encryption : Encryption.Source.t option;
         (** Optional SSE-C source-object key headers to sign. *)
-    expected_bucket_owner : Account_id.t option;
+    expected_bucket_owner : string option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
         (** Additional headers to include in the signature. *)
@@ -110,21 +132,45 @@ module Get_object : sig
 
   val default_options : options
   (** Default presigned [GET Object] options. *)
+
+  val options :
+    ?expires_in:Ptime.Span.t ->
+    ?response_content_type:string ->
+    ?response_content_disposition:string ->
+    ?version_id:string ->
+    ?source_encryption:Encryption.Source.t ->
+    ?expected_bucket_owner:string ->
+    ?extra_signed_headers:(string * string) list ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build presigned [GET Object] options. *)
+
+  val options_exn :
+    ?expires_in:Ptime.Span.t ->
+    ?response_content_type:string ->
+    ?response_content_disposition:string ->
+    ?version_id:string ->
+    ?source_encryption:Encryption.Source.t ->
+    ?expected_bucket_owner:string ->
+    ?extra_signed_headers:(string * string) list ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Head_object : sig
-  type options = {
+  type options = private {
     expires_in : Ptime.Span.t option;
         (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
             authentication. *)
-    response_content_type : Content_type.t option;
+    response_content_type : string option;
         (** Optional [response-content-type] query override. *)
-    response_content_disposition : Header_value.t option;
+    response_content_disposition : string option;
         (** Optional [response-content-disposition] query override. *)
-    version_id : Object.Version_id.t option;  (** Object version to presign. *)
+    version_id : string option;  (** Object version to presign. *)
     source_encryption : Encryption.Source.t option;
         (** Optional SSE-C source-object key headers to sign. *)
-    expected_bucket_owner : Account_id.t option;
+    expected_bucket_owner : string option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
         (** Additional headers to include in the signature. *)
@@ -133,10 +179,34 @@ module Head_object : sig
 
   val default_options : options
   (** Default presigned [HEAD Object] options. *)
+
+  val options :
+    ?expires_in:Ptime.Span.t ->
+    ?response_content_type:string ->
+    ?response_content_disposition:string ->
+    ?version_id:string ->
+    ?source_encryption:Encryption.Source.t ->
+    ?expected_bucket_owner:string ->
+    ?extra_signed_headers:(string * string) list ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build presigned [HEAD Object] options. *)
+
+  val options_exn :
+    ?expires_in:Ptime.Span.t ->
+    ?response_content_type:string ->
+    ?response_content_disposition:string ->
+    ?version_id:string ->
+    ?source_encryption:Encryption.Source.t ->
+    ?expected_bucket_owner:string ->
+    ?extra_signed_headers:(string * string) list ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Upload_part : sig
-  type options = {
+  type options = private {
     expires_in : Ptime.Span.t option;
         (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
             authentication. *)
@@ -144,7 +214,7 @@ module Upload_part : sig
         (** Optional checksum header to sign for the part body. *)
     customer_key : Encryption.Customer_key.t option;
         (** Optional SSE-C customer key headers to sign for the part upload. *)
-    expected_bucket_owner : Account_id.t option;
+    expected_bucket_owner : string option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
         (** Additional headers to include in the signature. *)
@@ -153,14 +223,34 @@ module Upload_part : sig
 
   val default_options : options
   (** Default presigned [UploadPart] options. *)
+
+  val options :
+    ?expires_in:Ptime.Span.t ->
+    ?checksum:Object.Checksum.value ->
+    ?customer_key:Encryption.Customer_key.t ->
+    ?expected_bucket_owner:string ->
+    ?extra_signed_headers:(string * string) list ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build presigned [UploadPart] options. *)
+
+  val options_exn :
+    ?expires_in:Ptime.Span.t ->
+    ?checksum:Object.Checksum.value ->
+    ?customer_key:Encryption.Customer_key.t ->
+    ?expected_bucket_owner:string ->
+    ?extra_signed_headers:(string * string) list ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Delete_object : sig
-  type options = {
+  type options = private {
     expires_in : Ptime.Span.t option;
         (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
             authentication. *)
-    expected_bucket_owner : Account_id.t option;
+    expected_bucket_owner : string option;
         (** [x-amz-expected-bucket-owner] header to sign. *)
     extra_signed_headers : (string * string) list;
         (** Additional headers to include in the signature. *)
@@ -169,6 +259,22 @@ module Delete_object : sig
 
   val default_options : options
   (** Default presigned [DELETE Object] options. *)
+
+  val options :
+    ?expires_in:Ptime.Span.t ->
+    ?expected_bucket_owner:string ->
+    ?extra_signed_headers:(string * string) list ->
+    unit ->
+    (options, Awskit.Error.t) Stdlib.result
+  (** Build presigned [DELETE Object] options. *)
+
+  val options_exn :
+    ?expires_in:Ptime.Span.t ->
+    ?expected_bucket_owner:string ->
+    ?extra_signed_headers:(string * string) list ->
+    unit ->
+    options
+  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 type endpoint_config = Endpoint_config.t
@@ -255,7 +361,7 @@ val upload_part :
     number. *)
 
 val get_object_with_endpoint_config :
-  region:Awskit.Region.t ->
+  region:string ->
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
@@ -267,7 +373,7 @@ val get_object_with_endpoint_config :
 (** Like {!val:get_object}, using a prebuilt endpoint configuration. *)
 
 val put_object_with_endpoint_config :
-  region:Awskit.Region.t ->
+  region:string ->
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
@@ -279,7 +385,7 @@ val put_object_with_endpoint_config :
 (** Like {!val:put_object}, using a prebuilt endpoint configuration. *)
 
 val head_object_with_endpoint_config :
-  region:Awskit.Region.t ->
+  region:string ->
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
@@ -291,7 +397,7 @@ val head_object_with_endpoint_config :
 (** Like {!val:head_object}, using a prebuilt endpoint configuration. *)
 
 val delete_object_with_endpoint_config :
-  region:Awskit.Region.t ->
+  region:string ->
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->
@@ -303,7 +409,7 @@ val delete_object_with_endpoint_config :
 (** Like {!val:delete_object}, using a prebuilt endpoint configuration. *)
 
 val upload_part_with_endpoint_config :
-  region:Awskit.Region.t ->
+  region:string ->
   credentials:Awskit.Credentials.t ->
   now:Ptime.t ->
   endpoint_config:endpoint_config ->

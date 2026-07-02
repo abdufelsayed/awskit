@@ -18,13 +18,9 @@ let header_or_empty name headers =
   | Some value -> value
 
 let test_presigned_get_fixture () =
-  let options : Presigned.Get_object.options =
-    {
-      Presigned.Get_object.default_options with
-      expires_in = Some (Ptime.Span.of_int_s 900);
-      response_content_type = Some (Protocol_support.content_type "text/plain");
-      version_id = Some (Object.Version_id.of_string_exn "version-1");
-    }
+  let options =
+    Presigned.Get_object.options_exn ~expires_in:(Ptime.Span.of_int_s 900)
+      ~response_content_type:"text/plain" ~version_id:"version-1" ()
   in
   let request =
     Presigned.get_object ~region:"us-east-1"

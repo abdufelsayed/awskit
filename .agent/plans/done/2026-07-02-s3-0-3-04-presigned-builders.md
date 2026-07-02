@@ -1,6 +1,6 @@
 # S3 0.3 Presigned Builders
 
-Status: ready
+Status: done
 Issue: none
 Goal: Make presigned request options builder-only/private and string-facing, including endpoint-config presign functions.
 Risk: high
@@ -51,22 +51,22 @@ construction where possible, before URL generation.
 
 ## Tasks
 
-- [ ] Add `options` and `options_exn` to every presigned operation module.
-- [ ] Use existing content/header/account/version validation helpers inside
+- [x] Add `options` and `options_exn` to every presigned operation module.
+- [x] Use existing content/header/account/version validation helpers inside
   the builders.
-- [ ] Validate `expires_in` in builders.
-- [ ] Move `extra_signed_headers` validation to builder time while keeping URL
+- [x] Validate `expires_in` in builders.
+- [x] Move `extra_signed_headers` validation to builder time while keeping URL
   generation defensive; validate duplicates against all generated signed
   headers, not only within the extra header list.
-- [ ] Change `_with_endpoint_config` region arguments from `Awskit.Region.t` to
+- [x] Change `_with_endpoint_config` region arguments from `Awskit.Region.t` to
   `string`; parse at that public boundary.
-- [ ] Update simulator presign wrappers that currently pass typed runtime
+- [x] Update simulator presign wrappers that currently pass typed runtime
   regions into `_with_endpoint_config`.
-- [ ] Keep a private typed helper only inside `presigned.ml` if the
+- [x] Keep a private typed helper only inside `presigned.ml` if the
   implementation benefits from it.
-- [ ] Make presigned option records private after builders exist.
-- [ ] Update presign examples, fixtures, and property tests to use the builders.
-- [ ] Add or update tests that assert invalid presigned options fail before URL
+- [x] Make presigned option records private after builders exist.
+- [x] Update presign examples, fixtures, and property tests to use the builders.
+- [x] Add or update tests that assert invalid presigned options fail before URL
   generation.
 
 ## Exact Verification Commands
@@ -105,3 +105,17 @@ such as checksum and encryption/customer-key values must be justified.
 - Do not leave presigned records concrete just to keep examples compiling.
 - Do not defer header validation to URL generation if the builder has enough
   information to reject the input.
+
+## Completion Notes
+
+- Added builder-only/private presigned options with string-facing public inputs
+  for raw request string domains.
+- Moved `expires_in`, extra signed header, and duplicate complete signed-header
+  validation into builders while keeping URL generation defensive.
+- Changed public `_with_endpoint_config` region inputs to `string` with private
+  typed helpers inside `presigned.ml`.
+- Updated examples, simulator/runtime wrappers, fixtures, and protocol
+  properties to use builders.
+- Verified with `dune build @packages/awskit-s3/all`,
+  `dune build @s3-protocol-laws @s3-protocol-fixtures`, `dune build @fmt`, and
+  the required `rg` checks.

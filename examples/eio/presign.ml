@@ -101,19 +101,12 @@ let run stdenv =
   in
   let s3 = create_s3 stdenv sw in
   let put_options =
-    {
-      Awskit_s3.Presigned.Put_object.default_options with
-      expires_in = Some expires_in;
-      content_type = Some (Awskit_s3.Content_type.of_string_exn "text/plain");
-    }
+    Awskit_s3.Presigned.Put_object.options_exn ~expires_in
+      ~content_type:"text/plain" ()
   in
   let get_options =
-    {
-      Awskit_s3.Presigned.Get_object.default_options with
-      expires_in = Some expires_in;
-      response_content_type =
-        Some (Awskit_s3.Content_type.of_string_exn "text/plain");
-    }
+    Awskit_s3.Presigned.Get_object.options_exn ~expires_in
+      ~response_content_type:"text/plain" ()
   in
   let put =
     S3.Presigned.put_object s3 ~bucket ~key ~options:put_options ()

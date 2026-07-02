@@ -29,14 +29,77 @@ let requested_expires_in t = t.requested_expires_in
 let effective_expires_in t = t.effective_expires_in
 let expires_at t = t.expires_at
 let reveal_url t = t.url
+let default_expires = Ptime.Span.of_int_s 3600
+let max_expires = 604_800
+let max_expires_span = Ptime.Span.of_int_s max_expires
+
+let expires_seconds span =
+  if Ptime.Span.compare span Ptime.Span.zero <= 0 then
+    S3_error_context.invalid ~field:"expires_in" "expires_in must be positive"
+  else if Ptime.Span.compare span max_expires_span > 0 then
+    S3_error_context.invalid ~field:"expires_in"
+      "expires_in must be <= %d seconds" max_expires
+  else
+    match Ptime.Span.to_int_s span with
+    | None ->
+        S3_error_context.invalid ~field:"expires_in"
+          "expires_in is outside supported range"
+    | Some seconds when seconds <= 0 ->
+        S3_error_context.invalid ~field:"expires_in"
+          "expires_in must be at least 1 second"
+    | Some seconds when seconds > max_expires ->
+        S3_error_context.invalid ~field:"expires_in"
+          "expires_in must be <= %d seconds" max_expires
+    | Some seconds -> Ok seconds
+
+let validate_expires_in = function
+  | None -> Ok ()
+  | Some expires_in ->
+      let* _seconds = expires_seconds expires_in in
+      Ok ()
+
+let validate_unique_header_names headers =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (name, _) :: rest ->
+        let name = String.lowercase_ascii name in
+        if List.exists (String.equal name) seen then
+          S3_error_context.invalid ~field:"header" "duplicate signed header: %s"
+            name
+        else loop (name :: seen) rest
+  in
+  loop [] headers
+
+let validate_signed_headers headers =
+  let* () = Awskit.Request.validate_headers headers in
+  validate_unique_header_names headers
+
+let validate_extra_signed_headers headers = validate_signed_headers headers
+
+let validate_complete_signed_headers headers =
+  validate_signed_headers (("host", "") :: headers)
+
+let option_string_result parse render = function
+  | None -> Ok None
+  | Some value ->
+      let* value = parse value in
+      Ok (Some (render value))
+
+let option_header key = function None -> [] | Some value -> [ (key, value) ]
+
+let expected_owner_header value =
+  option_header "x-amz-expected-bucket-owner" value
+
+let validate_opt f = function None -> Ok () | Some value -> f value
+let options_exn result = Awskit.Error.Producer.get_ok_exn result
 
 module Put_object = struct
   type options = {
     expires_in : Ptime.Span.t option;
-    content_type : Content_type.t option;
+    content_type : string option;
     checksum : Object.Checksum.value option;
     encryption : Encryption.Destination.t option;
-    expected_bucket_owner : Account_id.t option;
+    expected_bucket_owner : string option;
     extra_signed_headers : (string * string) list;
   }
 
@@ -49,16 +112,56 @@ module Put_object = struct
       expected_bucket_owner = None;
       extra_signed_headers = [];
     }
+
+  let signed_headers options =
+    option_header "content-type" options.content_type
+    @ Headers.checksum_value_headers options.checksum
+    @ Headers.destination_encryption_headers options.encryption
+    @ expected_owner_header options.expected_bucket_owner
+    @ options.extra_signed_headers
+
+  let options ?expires_in ?content_type ?checksum ?encryption
+      ?expected_bucket_owner ?(extra_signed_headers = []) () =
+    let* () = validate_expires_in expires_in in
+    let* content_type =
+      option_string_result Content_type.of_string Content_type.to_string
+        content_type
+    in
+    let* expected_bucket_owner =
+      option_string_result Account_id.of_string Account_id.to_string
+        expected_bucket_owner
+    in
+    let candidate =
+      {
+        expires_in;
+        content_type;
+        checksum;
+        encryption;
+        expected_bucket_owner;
+        extra_signed_headers;
+      }
+    in
+    let* () = validate_opt Headers.validate_checksum_value checksum in
+    let* () = Headers.validate_destination_encryption encryption in
+    let* () = validate_extra_signed_headers extra_signed_headers in
+    let* () = validate_complete_signed_headers (signed_headers candidate) in
+    Ok candidate
+
+  let options_exn ?expires_in ?content_type ?checksum ?encryption
+      ?expected_bucket_owner ?extra_signed_headers () =
+    options_exn
+      (options ?expires_in ?content_type ?checksum ?encryption
+         ?expected_bucket_owner ?extra_signed_headers ())
 end
 
 module Get_object = struct
   type options = {
     expires_in : Ptime.Span.t option;
-    response_content_type : Content_type.t option;
-    response_content_disposition : Header_value.t option;
-    version_id : Object.Version_id.t option;
+    response_content_type : string option;
+    response_content_disposition : string option;
+    version_id : string option;
     source_encryption : Encryption.Source.t option;
-    expected_bucket_owner : Account_id.t option;
+    expected_bucket_owner : string option;
     extra_signed_headers : (string * string) list;
   }
 
@@ -72,16 +175,66 @@ module Get_object = struct
       expected_bucket_owner = None;
       extra_signed_headers = [];
     }
+
+  let signed_headers options =
+    Headers.source_encryption_headers options.source_encryption
+    @ expected_owner_header options.expected_bucket_owner
+    @ options.extra_signed_headers
+
+  let options ?expires_in ?response_content_type ?response_content_disposition
+      ?version_id ?source_encryption ?expected_bucket_owner
+      ?(extra_signed_headers = []) () =
+    let* () = validate_expires_in expires_in in
+    let* response_content_type =
+      option_string_result Content_type.of_string Content_type.to_string
+        response_content_type
+    in
+    let* response_content_disposition =
+      option_string_result
+        (Header_value.of_string ~field:"response_content_disposition")
+        Header_value.to_string response_content_disposition
+    in
+    let* version_id =
+      option_string_result Object.Version_id.of_string
+        Object.Version_id.to_string version_id
+    in
+    let* expected_bucket_owner =
+      option_string_result Account_id.of_string Account_id.to_string
+        expected_bucket_owner
+    in
+    let candidate =
+      {
+        expires_in;
+        response_content_type;
+        response_content_disposition;
+        version_id;
+        source_encryption;
+        expected_bucket_owner;
+        extra_signed_headers;
+      }
+    in
+    let* () = Headers.validate_source_encryption source_encryption in
+    let* () = validate_extra_signed_headers extra_signed_headers in
+    let* () = validate_complete_signed_headers (signed_headers candidate) in
+    Ok candidate
+
+  let options_exn ?expires_in ?response_content_type
+      ?response_content_disposition ?version_id ?source_encryption
+      ?expected_bucket_owner ?extra_signed_headers () =
+    options_exn
+      (options ?expires_in ?response_content_type ?response_content_disposition
+         ?version_id ?source_encryption ?expected_bucket_owner
+         ?extra_signed_headers ())
 end
 
 module Head_object = struct
   type options = {
     expires_in : Ptime.Span.t option;
-    response_content_type : Content_type.t option;
-    response_content_disposition : Header_value.t option;
-    version_id : Object.Version_id.t option;
+    response_content_type : string option;
+    response_content_disposition : string option;
+    version_id : string option;
     source_encryption : Encryption.Source.t option;
-    expected_bucket_owner : Account_id.t option;
+    expected_bucket_owner : string option;
     extra_signed_headers : (string * string) list;
   }
 
@@ -95,6 +248,56 @@ module Head_object = struct
       expected_bucket_owner = None;
       extra_signed_headers = [];
     }
+
+  let signed_headers options =
+    Headers.source_encryption_headers options.source_encryption
+    @ expected_owner_header options.expected_bucket_owner
+    @ options.extra_signed_headers
+
+  let options ?expires_in ?response_content_type ?response_content_disposition
+      ?version_id ?source_encryption ?expected_bucket_owner
+      ?(extra_signed_headers = []) () =
+    let* () = validate_expires_in expires_in in
+    let* response_content_type =
+      option_string_result Content_type.of_string Content_type.to_string
+        response_content_type
+    in
+    let* response_content_disposition =
+      option_string_result
+        (Header_value.of_string ~field:"response_content_disposition")
+        Header_value.to_string response_content_disposition
+    in
+    let* version_id =
+      option_string_result Object.Version_id.of_string
+        Object.Version_id.to_string version_id
+    in
+    let* expected_bucket_owner =
+      option_string_result Account_id.of_string Account_id.to_string
+        expected_bucket_owner
+    in
+    let candidate =
+      {
+        expires_in;
+        response_content_type;
+        response_content_disposition;
+        version_id;
+        source_encryption;
+        expected_bucket_owner;
+        extra_signed_headers;
+      }
+    in
+    let* () = Headers.validate_source_encryption source_encryption in
+    let* () = validate_extra_signed_headers extra_signed_headers in
+    let* () = validate_complete_signed_headers (signed_headers candidate) in
+    Ok candidate
+
+  let options_exn ?expires_in ?response_content_type
+      ?response_content_disposition ?version_id ?source_encryption
+      ?expected_bucket_owner ?extra_signed_headers () =
+    options_exn
+      (options ?expires_in ?response_content_type ?response_content_disposition
+         ?version_id ?source_encryption ?expected_bucket_owner
+         ?extra_signed_headers ())
 end
 
 module Upload_part = struct
@@ -102,7 +305,7 @@ module Upload_part = struct
     expires_in : Ptime.Span.t option;
     checksum : Object.Checksum.value option;
     customer_key : Encryption.Customer_key.t option;
-    expected_bucket_owner : Account_id.t option;
+    expected_bucket_owner : string option;
     extra_signed_headers : (string * string) list;
   }
 
@@ -114,12 +317,45 @@ module Upload_part = struct
       expected_bucket_owner = None;
       extra_signed_headers = [];
     }
+
+  let signed_headers options =
+    Headers.checksum_value_headers options.checksum
+    @ Headers.customer_key_headers options.customer_key
+    @ expected_owner_header options.expected_bucket_owner
+    @ options.extra_signed_headers
+
+  let options ?expires_in ?checksum ?customer_key ?expected_bucket_owner
+      ?(extra_signed_headers = []) () =
+    let* () = validate_expires_in expires_in in
+    let* expected_bucket_owner =
+      option_string_result Account_id.of_string Account_id.to_string
+        expected_bucket_owner
+    in
+    let candidate =
+      {
+        expires_in;
+        checksum;
+        customer_key;
+        expected_bucket_owner;
+        extra_signed_headers;
+      }
+    in
+    let* () = validate_opt Headers.validate_checksum_value checksum in
+    let* () = validate_extra_signed_headers extra_signed_headers in
+    let* () = validate_complete_signed_headers (signed_headers candidate) in
+    Ok candidate
+
+  let options_exn ?expires_in ?checksum ?customer_key ?expected_bucket_owner
+      ?extra_signed_headers () =
+    options_exn
+      (options ?expires_in ?checksum ?customer_key ?expected_bucket_owner
+         ?extra_signed_headers ())
 end
 
 module Delete_object = struct
   type options = {
     expires_in : Ptime.Span.t option;
-    expected_bucket_owner : Account_id.t option;
+    expected_bucket_owner : string option;
     extra_signed_headers : (string * string) list;
   }
 
@@ -129,11 +365,29 @@ module Delete_object = struct
       expected_bucket_owner = None;
       extra_signed_headers = [];
     }
-end
 
-let default_expires = Ptime.Span.of_int_s 3600
-let max_expires = 604_800
-let max_expires_span = Ptime.Span.of_int_s max_expires
+  let signed_headers options =
+    expected_owner_header options.expected_bucket_owner
+    @ options.extra_signed_headers
+
+  let options ?expires_in ?expected_bucket_owner ?(extra_signed_headers = []) ()
+      =
+    let* () = validate_expires_in expires_in in
+    let* expected_bucket_owner =
+      option_string_result Account_id.of_string Account_id.to_string
+        expected_bucket_owner
+    in
+    let candidate =
+      { expires_in; expected_bucket_owner; extra_signed_headers }
+    in
+    let* () = validate_extra_signed_headers extra_signed_headers in
+    let* () = validate_complete_signed_headers (signed_headers candidate) in
+    Ok candidate
+
+  let options_exn ?expires_in ?expected_bucket_owner ?extra_signed_headers () =
+    options_exn
+      (options ?expires_in ?expected_bucket_owner ?extra_signed_headers ())
+end
 
 let method_to_string = function
   | `GET -> "GET"
@@ -174,48 +428,6 @@ let pp fmt t =
     t.requested_expires_in pp_span t.effective_expires_in
     (Format.pp_print_option Ptime.pp)
     t.expires_at
-
-let validate_unique_header_names headers =
-  let rec loop seen = function
-    | [] -> Ok ()
-    | (name, _) :: rest ->
-        let name = String.lowercase_ascii name in
-        if List.exists (String.equal name) seen then
-          S3_error_context.invalid ~field:"header" "duplicate signed header: %s"
-            name
-        else loop (name :: seen) rest
-  in
-  loop [] headers
-
-let option_header key = function None -> [] | Some value -> [ (key, value) ]
-
-let option_content_type_header key value =
-  option_header key (Option.map Content_type.to_string value)
-
-let expected_owner_header value =
-  option_header "x-amz-expected-bucket-owner"
-    (Option.map Account_id.to_string value)
-
-let validate_opt f = function None -> Ok () | Some value -> f value
-
-let expires_seconds span =
-  if Ptime.Span.compare span Ptime.Span.zero <= 0 then
-    S3_error_context.invalid ~field:"expires_in" "expires_in must be positive"
-  else if Ptime.Span.compare span max_expires_span > 0 then
-    S3_error_context.invalid ~field:"expires_in"
-      "expires_in must be <= %d seconds" max_expires
-  else
-    match Ptime.Span.to_int_s span with
-    | None ->
-        S3_error_context.invalid ~field:"expires_in"
-          "expires_in is outside supported range"
-    | Some seconds when seconds <= 0 ->
-        S3_error_context.invalid ~field:"expires_in"
-          "expires_in must be at least 1 second"
-    | Some seconds when seconds > max_expires ->
-        S3_error_context.invalid ~field:"expires_in"
-          "expires_in must be <= %d seconds" max_expires
-    | Some seconds -> Ok seconds
 
 let credentials_expire_too_soon credentials =
   Error
@@ -371,11 +583,9 @@ let object_read_query ~response_content_type ~response_content_disposition
     match value with None -> acc | Some v -> (key, [ v ]) :: acc
   in
   []
-  |> add_opt "response-content-type"
-       (Option.map Content_type.to_string response_content_type)
-  |> add_opt "response-content-disposition"
-       (Option.map Header_value.to_string response_content_disposition)
-  |> add_opt "versionId" (Option.map Object.Version_id.to_string version_id)
+  |> add_opt "response-content-type" response_content_type
+  |> add_opt "response-content-disposition" response_content_disposition
+  |> add_opt "versionId" version_id
 
 let get_query (options : Get_object.options) =
   object_read_query ~response_content_type:options.response_content_type
@@ -387,58 +597,44 @@ let head_query (options : Head_object.options) =
     ~response_content_disposition:options.response_content_disposition
     ~version_id:options.version_id
 
-let get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options () =
+let get_object_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?options () =
   match (Bucket_name.of_string bucket, Object_key.of_string key) with
   | Error error, _ | _, Error error -> Error error
   | Ok bucket, Ok key ->
       let options = Option.value ~default:Get_object.default_options options in
       let* () = Headers.validate_source_encryption options.source_encryption in
-      let signed_headers =
-        Headers.source_encryption_headers options.source_encryption
-        @ expected_owner_header options.expected_bucket_owner
-        @ options.extra_signed_headers
-      in
       generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-        ~bucket ~key ~method_:`GET ~signed_headers ~query:(get_query options)
-        ?expires_in:options.expires_in ()
+        ~bucket ~key ~method_:`GET
+        ~signed_headers:(Get_object.signed_headers options)
+        ~query:(get_query options) ?expires_in:options.expires_in ()
 
-let head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options () =
+let head_object_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?options () =
   match (Bucket_name.of_string bucket, Object_key.of_string key) with
   | Error error, _ | _, Error error -> Error error
   | Ok bucket, Ok key ->
       let options = Option.value ~default:Head_object.default_options options in
       let* () = Headers.validate_source_encryption options.source_encryption in
-      let signed_headers =
-        Headers.source_encryption_headers options.source_encryption
-        @ expected_owner_header options.expected_bucket_owner
-        @ options.extra_signed_headers
-      in
       generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-        ~bucket ~key ~method_:`HEAD ~signed_headers ~query:(head_query options)
-        ?expires_in:options.expires_in ()
+        ~bucket ~key ~method_:`HEAD
+        ~signed_headers:(Head_object.signed_headers options)
+        ~query:(head_query options) ?expires_in:options.expires_in ()
 
-let put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options () =
+let put_object_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?options () =
   match (Bucket_name.of_string bucket, Object_key.of_string key) with
   | Error error, _ | _, Error error -> Error error
   | Ok bucket, Ok key ->
       let options = Option.value ~default:Put_object.default_options options in
       let* () = validate_opt Headers.validate_checksum_value options.checksum in
       let* () = Headers.validate_destination_encryption options.encryption in
-      let headers =
-        option_content_type_header "content-type" options.content_type
-        @ Headers.checksum_value_headers options.checksum
-        @ Headers.destination_encryption_headers options.encryption
-        @ expected_owner_header options.expected_bucket_owner
-        @ options.extra_signed_headers
-      in
       generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-        ~bucket ~key ~method_:`PUT ~signed_headers:headers ~query:[]
-        ?expires_in:options.expires_in ()
+        ~bucket ~key ~method_:`PUT
+        ~signed_headers:(Put_object.signed_headers options)
+        ~query:[] ?expires_in:options.expires_in ()
 
-let delete_object_with_endpoint_config ~region ~credentials ~now
+let delete_object_with_endpoint_config_typed ~region ~credentials ~now
     ~endpoint_config ~bucket ~key ?options () =
   match (Bucket_name.of_string bucket, Object_key.of_string key) with
   | Error error, _ | _, Error error -> Error error
@@ -446,13 +642,10 @@ let delete_object_with_endpoint_config ~region ~credentials ~now
       let options =
         Option.value ~default:Delete_object.default_options options
       in
-      let signed_headers =
-        expected_owner_header options.expected_bucket_owner
-        @ options.extra_signed_headers
-      in
       generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-        ~bucket ~key ~method_:`DELETE ~signed_headers ~query:[]
-        ?expires_in:options.expires_in ()
+        ~bucket ~key ~method_:`DELETE
+        ~signed_headers:(Delete_object.signed_headers options)
+        ~query:[] ?expires_in:options.expires_in ()
 
 let upload_part_query ~upload_id ~part_number =
   [
@@ -460,14 +653,8 @@ let upload_part_query ~upload_id ~part_number =
     ("uploadId", [ Multipart.Upload_id.to_string upload_id ]);
   ]
 
-let upload_part_headers (options : Upload_part.options) =
-  Headers.checksum_value_headers options.checksum
-  @ Headers.customer_key_headers options.customer_key
-  @ expected_owner_header options.expected_bucket_owner
-  @ options.extra_signed_headers
-
-let upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~upload ~part_number ?options () =
+let upload_part_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~upload ~part_number ?options () =
   match Multipart.Part_number.of_int part_number with
   | Error error -> Error error
   | Ok part_number ->
@@ -478,9 +665,39 @@ let upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
       let upload_id = Multipart.Upload.upload_id upload in
       generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
         ~bucket ~key ~method_:`PUT
-        ~signed_headers:(upload_part_headers options)
+        ~signed_headers:(Upload_part.signed_headers options)
         ~query:(upload_part_query ~upload_id ~part_number)
         ?expires_in:options.expires_in ()
+
+let get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ?options () =
+  let* region = parse_region region in
+  get_object_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?options ()
+
+let head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ?options () =
+  let* region = parse_region region in
+  head_object_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?options ()
+
+let put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~bucket ~key ?options () =
+  let* region = parse_region region in
+  put_object_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?options ()
+
+let delete_object_with_endpoint_config ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?options () =
+  let* region = parse_region region in
+  delete_object_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?options ()
+
+let upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
+    ~upload ~part_number ?options () =
+  let* region = parse_region region in
+  upload_part_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~upload ~part_number ?options ()
 
 let get_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
     ~bucket ~key ?options () =
@@ -488,8 +705,8 @@ let get_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
   let endpoint_config =
     endpoint_config ?addressing_style ?endpoint_variant ()
   in
-  get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options ()
+  get_object_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?options ()
 
 let head_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
     ~bucket ~key ?options () =
@@ -497,8 +714,8 @@ let head_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
   let endpoint_config =
     endpoint_config ?addressing_style ?endpoint_variant ()
   in
-  head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options ()
+  head_object_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?options ()
 
 let put_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
     ~bucket ~key ?options () =
@@ -506,8 +723,8 @@ let put_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
   let endpoint_config =
     endpoint_config ?addressing_style ?endpoint_variant ()
   in
-  put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options ()
+  put_object_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?options ()
 
 let delete_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
     ~bucket ~key ?options () =
@@ -515,8 +732,8 @@ let delete_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
   let endpoint_config =
     endpoint_config ?addressing_style ?endpoint_variant ()
   in
-  delete_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options ()
+  delete_object_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~bucket ~key ?options ()
 
 let upload_part ~region ~credentials ~now ?addressing_style ?endpoint_variant
     ~upload ~part_number ?options () =
@@ -524,5 +741,5 @@ let upload_part ~region ~credentials ~now ?addressing_style ?endpoint_variant
   let endpoint_config =
     endpoint_config ?addressing_style ?endpoint_variant ()
   in
-  upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~upload ~part_number ?options ()
+  upload_part_with_endpoint_config_typed ~region ~credentials ~now
+    ~endpoint_config ~upload ~part_number ?options ()

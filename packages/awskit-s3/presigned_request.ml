@@ -24,28 +24,32 @@ module Make (C : Request_context.S) = struct
   let get_object conn ~bucket ~key ?options () =
     with_credentials conn ~operation:"GetObject" ~bucket ~key
       (fun credentials ->
-        Presigned.get_object_with_endpoint_config ~region:(region conn)
+        Presigned.get_object_with_endpoint_config
+          ~region:(Awskit.Region.to_string (region conn))
           ~credentials ~now:(now conn) ~endpoint_config:(endpoint_config conn)
           ~bucket ~key ?options ())
 
   let put_object conn ~bucket ~key ?options () =
     with_credentials conn ~operation:"PutObject" ~bucket ~key
       (fun credentials ->
-        Presigned.put_object_with_endpoint_config ~region:(region conn)
+        Presigned.put_object_with_endpoint_config
+          ~region:(Awskit.Region.to_string (region conn))
           ~credentials ~now:(now conn) ~endpoint_config:(endpoint_config conn)
           ~bucket ~key ?options ())
 
   let head_object conn ~bucket ~key ?options () =
     with_credentials conn ~operation:"HeadObject" ~bucket ~key
       (fun credentials ->
-        Presigned.head_object_with_endpoint_config ~region:(region conn)
+        Presigned.head_object_with_endpoint_config
+          ~region:(Awskit.Region.to_string (region conn))
           ~credentials ~now:(now conn) ~endpoint_config:(endpoint_config conn)
           ~bucket ~key ?options ())
 
   let delete_object conn ~bucket ~key ?options () =
     with_credentials conn ~operation:"DeleteObject" ~bucket ~key
       (fun credentials ->
-        Presigned.delete_object_with_endpoint_config ~region:(region conn)
+        Presigned.delete_object_with_endpoint_config
+          ~region:(Awskit.Region.to_string (region conn))
           ~credentials ~now:(now conn) ~endpoint_config:(endpoint_config conn)
           ~bucket ~key ?options ())
 
@@ -54,7 +58,8 @@ module Make (C : Request_context.S) = struct
     let key = Multipart.Upload.key upload |> Object_key.to_string in
     with_credentials conn ~operation:"UploadPart" ~bucket ~key
       (fun credentials ->
-        Presigned.upload_part_with_endpoint_config ~region:(region conn)
+        Presigned.upload_part_with_endpoint_config
+          ~region:(Awskit.Region.to_string (region conn))
           ~credentials ~now:(now conn) ~endpoint_config:(endpoint_config conn)
           ~upload ~part_number ?options ())
 end

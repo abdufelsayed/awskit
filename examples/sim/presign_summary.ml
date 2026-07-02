@@ -43,17 +43,14 @@ let () =
   let s3 = S3.connect store ~credentials in
   S3.Bucket.create s3 ~bucket () |> unwrap "create bucket" |> ignore;
   let put_options =
-    {
-      Awskit_s3.Presigned.Put_object.default_options with
-      expires_in = Some (Ptime.Span.of_int_s (15 * 60));
-      content_type = Some (Awskit_s3.Content_type.of_string_exn "text/plain");
-    }
+    Awskit_s3.Presigned.Put_object.options_exn
+      ~expires_in:(Ptime.Span.of_int_s (15 * 60))
+      ~content_type:"text/plain" ()
   in
   let get_options =
-    {
-      Awskit_s3.Presigned.Get_object.default_options with
-      expires_in = Some (Ptime.Span.of_int_s (15 * 60));
-    }
+    Awskit_s3.Presigned.Get_object.options_exn
+      ~expires_in:(Ptime.Span.of_int_s (15 * 60))
+      ()
   in
   S3.Presigned.put_object s3 ~bucket ~key ~options:put_options ()
   |> unwrap "presign PUT"
