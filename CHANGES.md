@@ -1,3 +1,26 @@
+# 0.3.0
+
+Awskit 0.3.0 is a breaking S3 public API cleanup release. It simplifies
+request inputs around ordinary OCaml values at public call sites, centralizes
+validation in builders, and documents the resulting release surface.
+
+## Breaking
+
+- Changed public S3 request APIs to accept caller strings and ints at request
+  boundaries and moved optional operation fields behind validating builders.
+  Callers should pass strings/ints for request inputs, build request options
+  with operation `options`/`options_exn`, construct custom endpoints with
+  `Awskit_s3.Endpoint_config` string constructors, build presigned options with
+  `Awskit_s3.Presigned.*.options`/`options_exn`, and use
+  `Object.Delete_objects` for multi-object delete requests. (6b65539, bdf4762)
+
+## Documentation, CI, and Release
+
+- Added public validation coverage for the string-facing S3 API, endpoint
+  configuration constructors, presigned builders, and multi-object delete
+  workflows, and updated README and package guides to teach the new public API.
+  (9e78792, 04d3541)
+
 # 0.2.0
 
 Awskit 0.2.0 is a breaking SDK hardening release. It moves the public API
