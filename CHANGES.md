@@ -12,14 +12,26 @@ validation in builders, and documents the resulting release surface.
   with operation `options`/`options_exn`, construct custom endpoints with
   `Awskit_s3.Endpoint_config` string constructors, build presigned options with
   `Awskit_s3.Presigned.*.options`/`options_exn`, and use
-  `Object.Delete_objects` for multi-object delete requests. (6b65539, bdf4762)
+  `Object.Delete_objects.object_`/`object_exn` for validated multi-object
+  delete request members. (#23, 6b65539; #23, bdf4762; #23, 95f972a)
+
+## Fixed
+
+- Tightened S3 validation so runtime presigned helpers reject invalid inputs
+  before credential lookup, destination-encryption builders reject unsupported
+  DSSE-KMS bucket-key combinations, simulator `DeleteObjects` rejects empty or
+  oversized batches before state effects, and simulator object-tagging and
+  bucket subresource calls report validation errors with S3 operation context.
+  (#23, 3f50a7f; #23, f398a5a; #23, 11625ba; #23, 7ef7fda)
 
 ## Documentation, CI, and Release
 
 - Added public validation coverage for the string-facing S3 API, endpoint
   configuration constructors, presigned builders, and multi-object delete
   workflows, and updated README and package guides to teach the new public API.
-  (9e78792, 04d3541)
+  (#23, 9e78792; #23, 04d3541)
+- Added PR CI coverage for draft-to-ready conversions so required checks run
+  when release PRs are marked ready for review. (#23, 0d325c8)
 
 # 0.2.0
 
