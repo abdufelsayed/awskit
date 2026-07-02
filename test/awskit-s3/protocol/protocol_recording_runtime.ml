@@ -17,9 +17,10 @@ module Runtime = struct
 
   type connection = {
     region : Region.t;
-    credentials : Credentials.t;
+    credential_result : (Credentials.t, Awskit.Error.t) result;
     endpoint_config : Awskit_s3.endpoint_config;
     retry_policy : Awskit.Retry.t;
+    mutable credential_resolve_count : int;
     mutable calls : call list;
     mutable responses : response list;
     mutable sleeps : Ptime.Span.t list;
@@ -38,13 +39,19 @@ module Runtime = struct
 
   let connect ?(endpoint_config = Awskit_s3.default_endpoint_config)
       ?(region = Region.of_string_exn "us-east-1")
-      ?(credentials = Protocol_support.credentials)
+      ?(credentials = Protocol_support.credentials) ?credential_error
       ?(retry_policy = Awskit.Retry.default) responses =
+    let credential_result =
+      match credential_error with
+      | None -> Ok credentials
+      | Some error -> Error error
+    in
     {
       region;
-      credentials;
+      credential_result;
       endpoint_config;
       retry_policy;
+      credential_resolve_count = 0;
       calls = [];
       responses;
       sleeps = [];
@@ -252,7 +259,9 @@ module Runtime = struct
     type 'a io = 'a
     type nonrec connection = connection
 
-    let resolve conn = Ok conn.credentials
+    let resolve conn =
+      conn.credential_resolve_count <- conn.credential_resolve_count + 1;
+      conn.credential_result
   end
 
   module Endpoint = struct
@@ -289,6 +298,7 @@ type connection = Runtime.connection
 
 let connect = Runtime.connect
 let last_call = Runtime.last_call
+let credential_resolve_count conn = conn.Runtime.credential_resolve_count
 
 let response ?(headers = []) ?read_error_after status body =
   { Runtime.status; headers; body; read_error_after }

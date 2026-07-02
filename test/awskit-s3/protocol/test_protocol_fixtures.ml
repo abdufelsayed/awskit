@@ -427,6 +427,17 @@ let expect_no_request label field f =
     (label ^ " request count") 0
     (recorded_request_count conn)
 
+let expect_no_credentials label field f =
+  let credential_error =
+    Awskit.Error.Producer.credentials "unexpected credential resolution"
+  in
+  let conn = Protocol_recording_runtime.connect ~credential_error [] in
+  expect_validation_field ~label field (f conn);
+  Alcotest.(check int)
+    (label ^ " credential resolve count")
+    0
+    (Protocol_recording_runtime.credential_resolve_count conn)
+
 let method_to_string = function
   | `GET -> "GET"
   | `PUT -> "PUT"
@@ -713,6 +724,30 @@ let test_presigned_public_seams () =
        ~credentials:Protocol_support.credentials ~now:Protocol_support.test_time
        ~upload ~part_number:0 ())
 
+let test_presigned_runtime_validation_skips_credentials () =
+  expect_no_credentials "runtime presign get invalid bucket" "bucket"
+    (fun conn ->
+      Protocol_recording_runtime.S3.Presigned.get_object conn ~bucket:"Invalid"
+        ~key:"file.txt" ());
+  expect_no_credentials "runtime presign put invalid key" "key" (fun conn ->
+      Protocol_recording_runtime.S3.Presigned.put_object conn
+        ~bucket:"valid-bucket" ~key:"" ());
+  expect_no_credentials "runtime presign head invalid bucket" "bucket"
+    (fun conn ->
+      Protocol_recording_runtime.S3.Presigned.head_object conn ~bucket:"Invalid"
+        ~key:"file.txt" ());
+  expect_no_credentials "runtime presign delete invalid key" "key" (fun conn ->
+      Protocol_recording_runtime.S3.Presigned.delete_object conn
+        ~bucket:"valid-bucket" ~key:"" ());
+  let upload =
+    Multipart.Upload.resume_exn ~bucket:"valid-bucket" ~key:"large.bin"
+      ~upload_id:"upload-1"
+  in
+  expect_no_credentials "runtime presign upload invalid part number"
+    "part_number" (fun conn ->
+      Protocol_recording_runtime.S3.Presigned.upload_part conn ~upload
+        ~part_number:0 ())
+
 let describe_request (call : Protocol_recording_runtime.call) =
   let request = call.request in
   let target = request.Awskit.Request.target in
@@ -997,6 +1032,8 @@ let suite =
           test_endpoint_config_public_seams;
         Alcotest.test_case "presigned public seams" `Quick
           test_presigned_public_seams;
+        Alcotest.test_case "presigned runtime validation skips credentials"
+          `Quick test_presigned_runtime_validation_skips_credentials;
         Alcotest.test_case "signing canonical artifact" `Quick
           test_signing_artifact_fixture;
         Alcotest.test_case "bucket versioning XML" `Quick
