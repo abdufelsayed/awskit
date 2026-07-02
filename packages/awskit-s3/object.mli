@@ -676,11 +676,12 @@ end
 
 module List : sig
   module Continuation_token : sig
-    type t
-    (** Opaque [ListObjectsV2] continuation token returned by S3.
+    type t = string
+    (** [ListObjectsV2] continuation token text returned by S3.
 
         Tokens are service values. Callers may store and pass them back, but
-        should not parse them. *)
+        should not parse them. Constructors and operations reject empty or
+        control-character-bearing tokens. *)
 
     val of_string : string -> (t, Awskit.Error.t) result
     val of_string_exn : string -> t

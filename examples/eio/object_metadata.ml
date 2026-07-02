@@ -19,9 +19,6 @@ let unwrap label = function
   | Ok value -> value
   | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
-let bucket_name value = Awskit_s3.Bucket_name.of_string_exn value
-let object_key value = Awskit_s3.Object_key.of_string_exn value
-
 let or_fail_msg label = function
   | Ok value -> value
   | Error (`Msg message) -> fail "%s: %s" label message
@@ -72,10 +69,8 @@ let put_options =
 
 let run stdenv =
   Eio.Switch.run @@ fun sw ->
-  let bucket = bucket_name (env "AWSKIT_EXAMPLE_BUCKET") in
-  let key =
-    object_key (env_default "AWSKIT_EXAMPLE_KEY" "awskit-examples/metadata.txt")
-  in
+  let bucket = env "AWSKIT_EXAMPLE_BUCKET" in
+  let key = env_default "AWSKIT_EXAMPLE_KEY" "awskit-examples/metadata.txt" in
   let s3 = create_s3 stdenv sw in
   ignore
     (S3.Object.put_string s3 ~bucket ~key ~options:put_options

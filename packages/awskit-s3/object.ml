@@ -1,5 +1,9 @@
 let ( let* ) = S3_result.( let* )
 
+let validate_opt f = function
+  | None -> Ok ()
+  | Some value -> Result.map ignore (f value)
+
 module Etag = struct
   type t = string
 
@@ -605,6 +609,10 @@ module Versions = struct
   let options ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
       ?expected_bucket_owner () =
     let* () = validate_max_keys max_keys in
+    let* () = validate_opt Object_key.Prefix.of_string prefix in
+    let* () = validate_opt Delimiter.of_string delimiter in
+    let* () = validate_opt Object_key.of_string key_marker in
+    let* () = validate_opt Version_id.of_string version_id_marker in
     Ok
       {
         prefix;
@@ -698,6 +706,10 @@ module List = struct
   let options ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
       ?expected_bucket_owner () =
     let* () = validate_max_keys max_keys in
+    let* () = validate_opt Object_key.Prefix.of_string prefix in
+    let* () = validate_opt Delimiter.of_string delimiter in
+    let* () = validate_opt Object_key.of_string start_after in
+    let* () = validate_opt Continuation_token.of_string continuation_token in
     Ok
       {
         prefix;

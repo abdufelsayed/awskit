@@ -80,6 +80,10 @@ let path_style_path bucket suffix = "/" ^ bucket ^ suffix
 
 let resolve_request ?key t ~region ~bucket ~suffix ~signing_suffix =
   let bucket = Bucket_name.to_string bucket in
+  let* () = S3_validation.validate_bucket bucket in
+  let* () =
+    match key with None -> Ok () | Some key -> S3_validation.validate_key key
+  in
   let* endpoint = endpoint t ~region in
   let* style = resolved_style ?key t endpoint bucket in
   let signing_region = Endpoint_config.signing_region t ~client_region:region in

@@ -1,3 +1,12 @@
+# Unreleased
+
+## Changed
+
+- Allow plain strings where S3 bucket names, object keys, listing prefixes,
+  delimiters, and ListObjectsV2 continuation tokens are expected. Constructors
+  remain available for eager validation, and request builders still validate
+  before signing or sending.
+
 # 0.2.0
 
 Awskit 0.2.0 is a breaking SDK hardening release. It moves the public API

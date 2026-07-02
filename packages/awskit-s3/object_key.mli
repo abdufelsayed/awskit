@@ -1,7 +1,11 @@
 (** S3 object key values. *)
 
-type t
-(** Opaque non-empty S3 object key. *)
+type t = string
+(** S3 object key text.
+
+    Constructors validate eagerly. Operation APIs also validate object keys
+    before request construction, so callers may pass plain strings directly to
+    object-key arguments when they prefer deferred error handling. *)
 
 val of_string : string -> (t, Awskit.Error.t) result
 (** Validate a non-empty UTF-8 object key up to S3's 1,024-byte object-key
@@ -22,9 +26,9 @@ val equal : t -> t -> bool
 (** Compare two object keys. *)
 
 module Prefix : sig
-  type t
-  (** Non-empty object listing prefix. Use [None] in operation options and page
-      records for "no prefix" rather than constructing an empty prefix value. *)
+  type t = string
+  (** Object listing prefix text. Use [None] in operation options and page
+      records for "no prefix" rather than passing an empty prefix value. *)
 
   val of_string : string -> (t, Awskit.Error.t) result
   (** Validate a non-empty listing prefix. *)
@@ -44,8 +48,8 @@ module Prefix : sig
 end
 
 module Delimiter : sig
-  type t
-  (** Object listing delimiter. *)
+  type t = string
+  (** Object listing delimiter text. *)
 
   val of_string : string -> (t, Awskit.Error.t) result
   (** Validate a non-empty listing delimiter. *)

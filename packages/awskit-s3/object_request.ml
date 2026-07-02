@@ -101,18 +101,21 @@ module Make (C : Request_context.S) = struct
                 | Ok () -> validate_source_encryption options.source_encryption)
             ))
 
-  let validate_list_max_keys = function
-    | None -> Ok ()
-    | Some value when value >= 1 && value <= 1000 -> Ok ()
-    | Some _ ->
-        S3_error_context.invalid ~field:"max_keys"
-          "max_keys must be between 1 and 1000"
-
   let validate_list_options (options : List_objects_v2.options) =
-    validate_list_max_keys options.max_keys
+    Result.map ignore
+      (List_objects_v2.options ?prefix:options.prefix
+         ?delimiter:options.delimiter ?max_keys:options.max_keys
+         ?start_after:options.start_after
+         ?continuation_token:options.continuation_token
+         ?expected_bucket_owner:options.expected_bucket_owner ())
 
   let validate_list_versions_options (options : List_object_versions.options) =
-    validate_list_max_keys options.max_keys
+    Result.map ignore
+      (List_object_versions.options ?prefix:options.prefix
+         ?delimiter:options.delimiter ?max_keys:options.max_keys
+         ?key_marker:options.key_marker
+         ?version_id_marker:options.version_id_marker
+         ?expected_bucket_owner:options.expected_bucket_owner ())
 
   let validate_max_bytes max_bytes =
     if Int64.compare max_bytes 0L < 0 then

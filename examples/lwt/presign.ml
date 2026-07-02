@@ -20,8 +20,6 @@ let unwrap label = function
   | Ok value -> value
   | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
-let bucket_name value = Awskit_s3.Bucket_name.of_string_exn value
-let object_key value = Awskit_s3.Object_key.of_string_exn value
 let create_s3 () = S3.create () |> unwrap "create S3 client"
 let expires_in = Ptime.Span.of_int_s (15 * 60)
 
@@ -60,11 +58,8 @@ let print_presigned label (result : Awskit_s3.Presigned.result) =
   Format.printf "@."
 
 let run () =
-  let bucket = bucket_name (env "AWSKIT_EXAMPLE_BUCKET") in
-  let key =
-    object_key
-      (env_default "AWSKIT_EXAMPLE_KEY" "awskit-examples/presigned.txt")
-  in
+  let bucket = env "AWSKIT_EXAMPLE_BUCKET" in
+  let key = env_default "AWSKIT_EXAMPLE_KEY" "awskit-examples/presigned.txt" in
   let s3 = create_s3 () in
   let put_options =
     {

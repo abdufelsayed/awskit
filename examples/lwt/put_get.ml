@@ -20,15 +20,11 @@ let unwrap label = function
   | Ok value -> value
   | Error error -> fail "%s: %a" label Awskit_s3.Error.pp error
 
-let bucket_name value = Awskit_s3.Bucket_name.of_string_exn value
-let object_key value = Awskit_s3.Object_key.of_string_exn value
 let create_s3 () = S3.create () |> unwrap "create S3 client"
 
 let run () =
-  let bucket = bucket_name (env "AWSKIT_EXAMPLE_BUCKET") in
-  let key =
-    object_key (env_default "AWSKIT_EXAMPLE_KEY" "awskit-examples/put-get.txt")
-  in
+  let bucket = env "AWSKIT_EXAMPLE_BUCKET" in
+  let key = env_default "AWSKIT_EXAMPLE_KEY" "awskit-examples/put-get.txt" in
   let body = env_default "AWSKIT_EXAMPLE_BODY" "Hello from awskit live S3." in
   let s3 = create_s3 () in
   let* put = S3.Object.put_string s3 ~bucket ~key ~contents:body () in

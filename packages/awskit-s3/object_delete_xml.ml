@@ -4,7 +4,7 @@ let ( let* ) = S3_result.( let* )
 
 module Delete_objects = Object.Delete_many
 
-let validate_objects objects =
+let validate_objects (objects : Delete_objects.object_ list) =
   let count = List.length objects in
   if count = 0 then
     S3_error_context.invalid ~field:"objects"
@@ -13,7 +13,15 @@ let validate_objects objects =
     S3_error_context.invalid ~field:"objects"
       "delete objects request must contain at most %d objects"
       Delete_objects.max_objects
-  else Ok ()
+  else
+    let rec loop = function
+      | [] -> Ok ()
+      | (object_ : Delete_objects.object_) :: rest -> (
+          match Object_key.of_string object_.key with
+          | Ok _ -> loop rest
+          | Error _ as error -> error)
+    in
+    loop objects
 
 let encode_carriage_returns value =
   if not (String.contains value '\r') then value

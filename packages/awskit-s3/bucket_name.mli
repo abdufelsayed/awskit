@@ -1,7 +1,11 @@
 (** S3 bucket name. *)
 
-type t
-(** Opaque S3 bucket name. *)
+type t = string
+(** S3 bucket name text.
+
+    Constructors validate eagerly. Operation APIs also validate bucket names
+    before request construction, so callers may pass plain strings directly to
+    bucket arguments when they prefer deferred error handling. *)
 
 val of_string : string -> (t, Awskit.Error.t) result
 (** Validate an S3 bucket name using Awskit's bucket-name rules. *)

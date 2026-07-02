@@ -597,6 +597,22 @@ let test_object_key_prefix_delimiter_boundaries () =
     (Object_key.Delimiter.to_string delimiter);
   expect_error_field "delimiter" (Object_key.Delimiter.of_string "")
 
+let test_string_backed_listing_options_validate_boundaries () =
+  ignore
+    (expect_ok "list options"
+       (Object.List.options ~prefix:"logs/" ~delimiter:"/"
+          ~start_after:"logs/a.txt" ~continuation_token:"token" ()));
+  expect_error_field "prefix" (Object.List.options ~prefix:"" ());
+  expect_error_field "delimiter" (Object.List.options ~delimiter:"" ());
+  expect_error_field "key" (Object.List.options ~start_after:"" ());
+  if not (is_error (Object.List.options ~continuation_token:"" ())) then
+    Alcotest.fail "expected continuation token validation error";
+  ignore
+    (expect_ok "version list options"
+       (Object.Versions.options ~prefix:"logs/" ~delimiter:"/"
+          ~key_marker:"logs/a.txt" ()));
+  expect_error_field "key" (Object.Versions.options ~key_marker:"" ())
+
 let test_account_header_and_checksum_boundaries () =
   let account = expect_ok "account" (Account_id.of_string "123456789012") in
   Alcotest.(check string)
@@ -910,6 +926,8 @@ let suite =
         Alcotest.test_case "bucket boundaries" `Quick test_bucket_boundaries;
         Alcotest.test_case "object key prefix delimiter boundaries" `Quick
           test_object_key_prefix_delimiter_boundaries;
+        Alcotest.test_case "string backed listing option boundaries" `Quick
+          test_string_backed_listing_options_validate_boundaries;
         Alcotest.test_case "account header checksum boundaries" `Quick
           test_account_header_and_checksum_boundaries;
         Alcotest.test_case "object identity boundaries" `Quick
