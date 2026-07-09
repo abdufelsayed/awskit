@@ -484,17 +484,14 @@ configuration subresources:
 access configuration. Applications can construct those documents with their own
 policy model and pass the serialized JSON to the client.
 
-Relevant bucket operations that target an existing bucket accept an operation
-[options] value with [expected_bucket_owner]. Awskit sends it as
+Relevant bucket operations that target an existing bucket accept an optional
+[expected_bucket_owner] argument directly. Awskit sends it as
 [x-amz-expected-bucket-owner] so AWS can reject calls that resolve to a bucket
 owned by a different account.
 
 {[
 let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket" in
 let owner = Awskit_s3.Account_id.of_string_exn "123456789012" in
-let options = Awskit_s3.Bucket.Encryption.options_exn
-    ~expected_bucket_owner:owner ()
-in
 let encryption =
   Awskit_s3.Bucket.Encryption.Config.singleton
     (Awskit_s3.Bucket.Encryption.Rule.Default
@@ -502,7 +499,7 @@ let encryption =
 in
 Awskit_s3_eio.Bucket.Encryption.put s3
   ~bucket
-  ~options
+  ~expected_bucket_owner:owner
   ~config:encryption
   ()
 ]}

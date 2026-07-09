@@ -12,7 +12,7 @@ module Bucket = struct
   type connection = t
   type 'a io = 'a
 
-  let create conn ~bucket ?options:_ () =
+  let create conn ~bucket ?region:_ () =
     match validate_bucket bucket with
     | Error error -> Error error
     | Ok () ->
@@ -37,7 +37,7 @@ module Bucket = struct
           Ok { Bucket_model.Create.response = response 200 }
         end
 
-  let delete conn ~bucket ?options:_ () =
+  let delete conn ~bucket ?expected_bucket_owner:_ () =
     match require_bucket conn bucket with
     | Error error -> Error error
     | Ok state ->
@@ -48,7 +48,7 @@ module Bucket = struct
           Ok { Bucket_model.Delete.response = response 204 }
         end
 
-  let head conn ~bucket ?options:_ () =
+  let head conn ~bucket ?expected_bucket_owner:_ () =
     match require_bucket conn bucket with
     | Error error -> Error error
     | Ok _ ->
@@ -59,8 +59,8 @@ module Bucket = struct
             response = response 200;
           }
 
-  let exists conn ~bucket ?options () =
-    match head conn ~bucket ?options () with
+  let exists conn ~bucket ?expected_bucket_owner () =
+    match head conn ~bucket ?expected_bucket_owner () with
     | Ok _ -> Ok true
     | Error error when Error.is_not_found error -> Ok false
     | Error error -> Error error
@@ -76,7 +76,7 @@ module Bucket = struct
     in
     Ok { Bucket_model.List_buckets.buckets; response = response 200 }
 
-  let get_location conn ~bucket ?options:_ () =
+  let get_location conn ~bucket ?expected_bucket_owner:_ () =
     match require_bucket conn bucket with
     | Error error -> Error error
     | Ok _ ->
@@ -87,7 +87,7 @@ module Bucket = struct
           }
 
   module Policy = struct
-    let get conn ~bucket ?options:_ () =
+    let get conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state -> (
@@ -95,14 +95,14 @@ module Bucket = struct
           | Some p -> Ok p
           | None -> Error (no_such_key ()))
 
-    let put conn ~bucket ?options:_ ~policy () =
+    let put conn ~bucket ?expected_bucket_owner:_ ~policy () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
           state.policy <- Some policy;
           Ok (response 200)
 
-    let delete conn ~bucket ?options:_ () =
+    let delete conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
@@ -111,7 +111,7 @@ module Bucket = struct
   end
 
   module Versioning = struct
-    let get conn ~bucket ?options:_ () =
+    let get conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
@@ -124,7 +124,7 @@ module Bucket = struct
               response = response 200;
             }
 
-    let put conn ~bucket ?options:_ ~status () =
+    let put conn ~bucket ?expected_bucket_owner:_ ~status () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
@@ -133,7 +133,7 @@ module Bucket = struct
   end
 
   module Tagging = struct
-    let get conn ~bucket ?options:_ () =
+    let get conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
@@ -143,7 +143,7 @@ module Bucket = struct
               response = response 200;
             }
 
-    let put conn ~bucket ?options:_ ~tags () =
+    let put conn ~bucket ?expected_bucket_owner:_ ~tags () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state -> (
@@ -153,7 +153,7 @@ module Bucket = struct
               state.bucket_tags <- tags;
               Ok (response 200))
 
-    let delete conn ~bucket ?options:_ () =
+    let delete conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
@@ -222,7 +222,7 @@ module Bucket = struct
           List.map observe_rule config.rules;
       }
 
-    let get conn ~bucket ?options:_ () =
+    let get conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state -> (
@@ -234,14 +234,14 @@ module Bucket = struct
           | Some config ->
               Ok { Bucket_model.Encryption.config; response = response 200 })
 
-    let put conn ~bucket ?options:_ ~config () =
+    let put conn ~bucket ?expected_bucket_owner:_ ~config () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
           state.encryption <- Some (observe_config config);
           Ok (response 200)
 
-    let delete conn ~bucket ?options:_ () =
+    let delete conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
@@ -266,7 +266,7 @@ module Bucket = struct
     let observe_config (config : Bucket_model.Cors.Config.t) =
       { Bucket_model.Cors.Observed.rules = List.map observe_rule config.rules }
 
-    let get conn ~bucket ?options:_ () =
+    let get conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state -> (
@@ -275,14 +275,14 @@ module Bucket = struct
           | Some config ->
               Ok { Bucket_model.Cors.config; response = response 200 })
 
-    let put conn ~bucket ?options:_ ~config () =
+    let put conn ~bucket ?expected_bucket_owner:_ ~config () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
           state.cors <- Some (observe_config config);
           Ok (response 200)
 
-    let delete conn ~bucket ?options:_ () =
+    let delete conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
@@ -291,7 +291,7 @@ module Bucket = struct
   end
 
   module Public_access_block = struct
-    let get conn ~bucket ?options:_ () =
+    let get conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state -> (
@@ -304,14 +304,14 @@ module Bucket = struct
                   response = response 200;
                 })
 
-    let put conn ~bucket ?options:_ ~config () =
+    let put conn ~bucket ?expected_bucket_owner:_ ~config () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
           state.public_access_block <- Some config;
           Ok (response 200)
 
-    let delete conn ~bucket ?options:_ () =
+    let delete conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
@@ -320,7 +320,7 @@ module Bucket = struct
   end
 
   module Ownership_controls = struct
-    let get conn ~bucket ?options:_ () =
+    let get conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state -> (
@@ -338,14 +338,14 @@ module Bucket = struct
                   response = response 200;
                 })
 
-    let put conn ~bucket ?options:_ ~config () =
+    let put conn ~bucket ?expected_bucket_owner:_ ~config () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
           state.ownership_controls <- Some config;
           Ok (response 200)
 
-    let delete conn ~bucket ?options:_ () =
+    let delete conn ~bucket ?expected_bucket_owner:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->

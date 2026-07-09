@@ -453,12 +453,32 @@ let describe_request (call : Protocol_recording_runtime.call) =
     (header_or_empty "x-amz-expected-bucket-owner" request.headers)
     call.body
 
-let test_bucket_versioning_xml_fixture () =
-  let options =
-    Bucket.Versioning.options_exn
-      ~expected_bucket_owner:(Protocol_support.account_id "123456789012")
-      ()
+let test_bucket_create_region_selection_fixture () =
+  let create ?region configured_region =
+    let conn =
+      Protocol_recording_runtime.connect ~region:configured_region
+        [ Protocol_recording_runtime.response 200 "" ]
+    in
+    ignore
+      (Protocol_recording_runtime.S3.Bucket.create conn
+         ~bucket:(Protocol_support.bucket_name "my-bucket")
+         ?region ()
+      |> Protocol_support.ok_or_fail "bucket create region fixture");
+    describe_request (Protocol_recording_runtime.last_call conn)
   in
+  let actual =
+    Fmt.str "[configured]\n%s\n\n[override]\n%s"
+      (create (Region.of_string_exn "eu-west-1"))
+      (create
+         ~region:(Region.of_string_exn "eu-central-1")
+         (Region.of_string_exn "ap-south-1"))
+  in
+  check_fixture "bucket create region selection"
+    [ "bucket"; "create-regions.expected" ]
+    ~actual
+
+let test_bucket_versioning_xml_fixture () =
+  let expected_bucket_owner = Protocol_support.account_id "123456789012" in
   let conn =
     Protocol_recording_runtime.connect
       [ Protocol_recording_runtime.response 200 "" ]
@@ -466,7 +486,7 @@ let test_bucket_versioning_xml_fixture () =
   ignore
     (Protocol_recording_runtime.S3.Bucket.Versioning.put conn
        ~bucket:(Protocol_support.bucket_name "my-bucket")
-       ~options ~status:Bucket.Versioning.Status.Enabled ()
+       ~expected_bucket_owner ~status:Bucket.Versioning.Status.Enabled ()
     |> Protocol_support.ok_or_fail "bucket versioning XML fixture");
   check_fixture "bucket versioning XML"
     [ "bucket"; "versioning-put.expected" ]
@@ -523,11 +543,7 @@ let test_bucket_encryption_xml_fixture () =
            sse_c_policy = Bucket.Encryption.Sse_c_policy.Block;
          })
   in
-  let options =
-    Bucket.Encryption.options_exn
-      ~expected_bucket_owner:(Protocol_support.account_id "123456789012")
-      ()
-  in
+  let expected_bucket_owner = Protocol_support.account_id "123456789012" in
   let conn =
     Protocol_recording_runtime.connect
       [ Protocol_recording_runtime.response 200 "" ]
@@ -535,7 +551,7 @@ let test_bucket_encryption_xml_fixture () =
   ignore
     (Protocol_recording_runtime.S3.Bucket.Encryption.put conn
        ~bucket:(Protocol_support.bucket_name "my-bucket")
-       ~options ~config ()
+       ~expected_bucket_owner ~config ()
     |> Protocol_support.ok_or_fail "bucket encryption XML fixture");
   check_fixture "bucket encryption XML"
     [ "bucket"; "encryption-put.expected" ]
@@ -874,6 +890,8 @@ let suite =
         Alcotest.test_case "range GET response" `Quick test_range_get_fixture;
         Alcotest.test_case "signing canonical artifact" `Quick
           test_signing_artifact_fixture;
+        Alcotest.test_case "bucket create region selection" `Quick
+          test_bucket_create_region_selection_fixture;
         Alcotest.test_case "bucket versioning XML" `Quick
           test_bucket_versioning_xml_fixture;
         Alcotest.test_case "bucket versioning observed unknown" `Quick

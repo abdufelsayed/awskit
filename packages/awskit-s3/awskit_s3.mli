@@ -490,6 +490,11 @@ end
 module type BUCKET = sig
   (** Bucket lifecycle and bucket-configuration operations. *)
 
+  (** [region] on {!val:create} overrides the configured client region for the
+      bucket location constraint. Operations targeting an existing bucket accept
+      [expected_bucket_owner] directly and send it as
+      [x-amz-expected-bucket-owner]. *)
+
   type client
   (** Configured S3 client. *)
 
@@ -499,15 +504,15 @@ module type BUCKET = sig
   val create :
     client ->
     bucket:Bucket_name.t ->
-    ?options:Bucket.Create.options ->
+    ?region:Awskit.Region.t ->
     unit ->
     (Bucket.Create.result, Awskit.Error.t) result io
-  (** Create a bucket. *)
+  (** Create a bucket. [region] defaults to the configured client region. *)
 
   val delete :
     client ->
     bucket:Bucket_name.t ->
-    ?options:Bucket.Delete.options ->
+    ?expected_bucket_owner:Account_id.t ->
     unit ->
     (Bucket.Delete.result, Awskit.Error.t) result io
   (** Delete an empty bucket. *)
@@ -515,7 +520,7 @@ module type BUCKET = sig
   val head :
     client ->
     bucket:Bucket_name.t ->
-    ?options:Bucket.Head.options ->
+    ?expected_bucket_owner:Account_id.t ->
     unit ->
     (Bucket.Head.result, Awskit.Error.t) result io
   (** Check bucket existence and return metadata such as the region hint. *)
@@ -523,7 +528,7 @@ module type BUCKET = sig
   val exists :
     client ->
     bucket:Bucket_name.t ->
-    ?options:Bucket.Head.options ->
+    ?expected_bucket_owner:Account_id.t ->
     unit ->
     (bool, Awskit.Error.t) result io
   (** Return [false] for S3 not-found responses and [true] for success. *)
@@ -534,7 +539,7 @@ module type BUCKET = sig
   val get_location :
     client ->
     bucket:Bucket_name.t ->
-    ?options:Bucket.Get_location.options ->
+    ?expected_bucket_owner:Account_id.t ->
     unit ->
     (Bucket.Get_location.result, Awskit.Error.t) result io
   (** Fetch the bucket location constraint/region. *)
@@ -545,7 +550,7 @@ module type BUCKET = sig
     val get :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Policy.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Policy.t, Awskit.Error.t) result io
     (** Fetch a bucket policy document. *)
@@ -553,7 +558,7 @@ module type BUCKET = sig
     val put :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Policy.options ->
+      ?expected_bucket_owner:Account_id.t ->
       policy:Policy.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -562,7 +567,7 @@ module type BUCKET = sig
     val delete :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Policy.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Delete the bucket policy. *)
@@ -574,7 +579,7 @@ module type BUCKET = sig
     val get :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Versioning.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Bucket.Versioning.result, Awskit.Error.t) result io
     (** Fetch bucket versioning state. *)
@@ -582,7 +587,7 @@ module type BUCKET = sig
     val put :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Versioning.options ->
+      ?expected_bucket_owner:Account_id.t ->
       status:Bucket.Versioning.Status.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -595,7 +600,7 @@ module type BUCKET = sig
     val get :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Tagging.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Bucket.Tagging.result, Awskit.Error.t) result io
     (** Fetch the bucket tag set. *)
@@ -603,7 +608,7 @@ module type BUCKET = sig
     val put :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Tagging.options ->
+      ?expected_bucket_owner:Account_id.t ->
       tags:Tag.Set.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -612,7 +617,7 @@ module type BUCKET = sig
     val delete :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Tagging.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Remove all bucket tags. *)
@@ -624,7 +629,7 @@ module type BUCKET = sig
     val get :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Encryption.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Bucket.Encryption.result, Awskit.Error.t) result io
     (** Fetch bucket default-encryption configuration. *)
@@ -632,7 +637,7 @@ module type BUCKET = sig
     val put :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Encryption.options ->
+      ?expected_bucket_owner:Account_id.t ->
       config:Bucket.Encryption.Config.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -641,7 +646,7 @@ module type BUCKET = sig
     val delete :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Encryption.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Delete bucket default-encryption configuration. *)
@@ -653,7 +658,7 @@ module type BUCKET = sig
     val get :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Cors.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Bucket.Cors.result, Awskit.Error.t) result io
     (** Fetch bucket CORS configuration. *)
@@ -661,7 +666,7 @@ module type BUCKET = sig
     val put :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Cors.options ->
+      ?expected_bucket_owner:Account_id.t ->
       config:Bucket.Cors.Config.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -670,7 +675,7 @@ module type BUCKET = sig
     val delete :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Cors.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Delete bucket CORS configuration. *)
@@ -682,7 +687,7 @@ module type BUCKET = sig
     val get :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Public_access_block.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Bucket.Public_access_block.result, Awskit.Error.t) result io
     (** Fetch public-access-block configuration. *)
@@ -690,7 +695,7 @@ module type BUCKET = sig
     val put :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Public_access_block.options ->
+      ?expected_bucket_owner:Account_id.t ->
       config:Bucket.Public_access_block.config ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -699,7 +704,7 @@ module type BUCKET = sig
     val delete :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Public_access_block.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Delete public-access-block configuration. *)
@@ -711,7 +716,7 @@ module type BUCKET = sig
     val get :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Ownership_controls.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Bucket.Ownership_controls.result, Awskit.Error.t) result io
     (** Fetch ownership-controls configuration. *)
@@ -719,7 +724,7 @@ module type BUCKET = sig
     val put :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Ownership_controls.options ->
+      ?expected_bucket_owner:Account_id.t ->
       config:Bucket.Ownership_controls.config ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -728,7 +733,7 @@ module type BUCKET = sig
     val delete :
       client ->
       bucket:Bucket_name.t ->
-      ?options:Bucket.Ownership_controls.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Delete ownership-controls configuration. *)

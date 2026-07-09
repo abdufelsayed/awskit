@@ -245,110 +245,119 @@ module Bucket = struct
 
   let raw client = runtime_connection client
 
-  let create conn ~bucket ?options () =
-    Raw.create (raw conn) ~bucket:(bucket_to_string bucket) ?options ()
+  let create conn ~bucket ?region () =
+    Raw.create (raw conn) ~bucket:(bucket_to_string bucket) ?region ()
 
-  let delete conn ~bucket ?options () =
-    Raw.delete (raw conn) ~bucket:(bucket_to_string bucket) ?options ()
+  let delete conn ~bucket ?expected_bucket_owner () =
+    Raw.delete (raw conn) ~bucket:(bucket_to_string bucket)
+      ?expected_bucket_owner ()
 
-  let head conn ~bucket ?options () =
-    Raw.head (raw conn) ~bucket:(bucket_to_string bucket) ?options ()
+  let head conn ~bucket ?expected_bucket_owner () =
+    Raw.head (raw conn) ~bucket:(bucket_to_string bucket) ?expected_bucket_owner
+      ()
 
-  let exists conn ~bucket ?options () =
-    Raw.exists (raw conn) ~bucket:(bucket_to_string bucket) ?options ()
+  let exists conn ~bucket ?expected_bucket_owner () =
+    Raw.exists (raw conn) ~bucket:(bucket_to_string bucket)
+      ?expected_bucket_owner ()
 
   let list conn = Raw.list (raw conn)
 
-  let get_location conn ~bucket ?options () =
-    Raw.get_location (raw conn) ~bucket:(bucket_to_string bucket) ?options ()
+  let get_location conn ~bucket ?expected_bucket_owner () =
+    Raw.get_location (raw conn) ~bucket:(bucket_to_string bucket)
+      ?expected_bucket_owner ()
 
   module Policy = struct
-    let get conn ~bucket ?options () =
-      Raw.Policy.get (raw conn) ~bucket:(bucket_to_string bucket) ?options ()
+    let get conn ~bucket ?expected_bucket_owner () =
+      Raw.Policy.get (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ()
 
-    let put conn ~bucket ?options ~policy () =
-      Raw.Policy.put (raw conn) ~bucket:(bucket_to_string bucket) ?options
-        ~policy ()
+    let put conn ~bucket ?expected_bucket_owner ~policy () =
+      Raw.Policy.put (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ~policy ()
 
-    let delete conn ~bucket ?options () =
-      Raw.Policy.delete (raw conn) ~bucket:(bucket_to_string bucket) ?options ()
+    let delete conn ~bucket ?expected_bucket_owner () =
+      Raw.Policy.delete (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ()
   end
 
   module Versioning = struct
-    let get conn ~bucket ?options () =
-      Raw.Versioning.get (raw conn) ~bucket:(bucket_to_string bucket) ?options
-        ()
+    let get conn ~bucket ?expected_bucket_owner () =
+      Raw.Versioning.get (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ()
 
-    let put conn ~bucket ?options ~status () =
-      Raw.Versioning.put (raw conn) ~bucket:(bucket_to_string bucket) ?options
-        ~status ()
+    let put conn ~bucket ?expected_bucket_owner ~status () =
+      Raw.Versioning.put (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ~status ()
   end
 
   module Tagging = struct
-    let get conn ~bucket ?options () =
-      Raw.Tagging.get (raw conn) ~bucket:(bucket_to_string bucket) ?options ()
+    let get conn ~bucket ?expected_bucket_owner () =
+      Raw.Tagging.get (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ()
 
-    let put conn ~bucket ?options ~tags () =
-      Raw.Tagging.put (raw conn) ~bucket:(bucket_to_string bucket) ?options
-        ~tags ()
+    let put conn ~bucket ?expected_bucket_owner ~tags () =
+      Raw.Tagging.put (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ~tags ()
 
-    let delete conn ~bucket ?options () =
-      Raw.Tagging.delete (raw conn) ~bucket:(bucket_to_string bucket) ?options
-        ()
+    let delete conn ~bucket ?expected_bucket_owner () =
+      Raw.Tagging.delete (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ()
   end
 
   module Encryption = struct
-    let get conn ~bucket ?options () =
-      Raw.Encryption.get (raw conn) ~bucket:(bucket_to_string bucket) ?options
-        ()
+    let get conn ~bucket ?expected_bucket_owner () =
+      Raw.Encryption.get (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ()
 
-    let put conn ~bucket ?options ~config () =
-      Raw.Encryption.put (raw conn) ~bucket:(bucket_to_string bucket) ?options
-        ~config ()
+    let put conn ~bucket ?expected_bucket_owner ~config () =
+      Raw.Encryption.put (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ~config ()
 
-    let delete conn ~bucket ?options () =
+    let delete conn ~bucket ?expected_bucket_owner () =
       Raw.Encryption.delete (raw conn) ~bucket:(bucket_to_string bucket)
-        ?options ()
+        ?expected_bucket_owner ()
   end
 
   module Cors = struct
-    let get conn ~bucket ?options () =
-      Raw.Cors.get (raw conn) ~bucket:(bucket_to_string bucket) ?options ()
+    let get conn ~bucket ?expected_bucket_owner () =
+      Raw.Cors.get (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ()
 
-    let put conn ~bucket ?options ~config () =
-      Raw.Cors.put (raw conn) ~bucket:(bucket_to_string bucket) ?options ~config
-        ()
+    let put conn ~bucket ?expected_bucket_owner ~config () =
+      Raw.Cors.put (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ~config ()
 
-    let delete conn ~bucket ?options () =
-      Raw.Cors.delete (raw conn) ~bucket:(bucket_to_string bucket) ?options ()
+    let delete conn ~bucket ?expected_bucket_owner () =
+      Raw.Cors.delete (raw conn) ~bucket:(bucket_to_string bucket)
+        ?expected_bucket_owner ()
   end
 
   module Public_access_block = struct
-    let get conn ~bucket ?options () =
+    let get conn ~bucket ?expected_bucket_owner () =
       Raw.Public_access_block.get (raw conn) ~bucket:(bucket_to_string bucket)
-        ?options ()
+        ?expected_bucket_owner ()
 
-    let put conn ~bucket ?options ~config () =
+    let put conn ~bucket ?expected_bucket_owner ~config () =
       Raw.Public_access_block.put (raw conn) ~bucket:(bucket_to_string bucket)
-        ?options ~config ()
+        ?expected_bucket_owner ~config ()
 
-    let delete conn ~bucket ?options () =
+    let delete conn ~bucket ?expected_bucket_owner () =
       Raw.Public_access_block.delete (raw conn)
-        ~bucket:(bucket_to_string bucket) ?options ()
+        ~bucket:(bucket_to_string bucket) ?expected_bucket_owner ()
   end
 
   module Ownership_controls = struct
-    let get conn ~bucket ?options () =
+    let get conn ~bucket ?expected_bucket_owner () =
       Raw.Ownership_controls.get (raw conn) ~bucket:(bucket_to_string bucket)
-        ?options ()
+        ?expected_bucket_owner ()
 
-    let put conn ~bucket ?options ~config () =
+    let put conn ~bucket ?expected_bucket_owner ~config () =
       Raw.Ownership_controls.put (raw conn) ~bucket:(bucket_to_string bucket)
-        ?options ~config ()
+        ?expected_bucket_owner ~config ()
 
-    let delete conn ~bucket ?options () =
+    let delete conn ~bucket ?expected_bucket_owner () =
       Raw.Ownership_controls.delete (raw conn) ~bucket:(bucket_to_string bucket)
-        ?options ()
+        ?expected_bucket_owner ()
   end
 end
 

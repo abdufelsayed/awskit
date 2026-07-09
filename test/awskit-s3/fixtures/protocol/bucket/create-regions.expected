@@ -1,0 +1,17 @@
+[configured]
+method=PUT
+path=/
+query=
+content-md5=
+content-type=application/xml
+expected-owner=
+body=<CreateBucketConfiguration><LocationConstraint>eu-west-1</LocationConstraint></CreateBucketConfiguration>
+
+[override]
+method=PUT
+path=/
+query=
+content-md5=
+content-type=application/xml
+expected-owner=
+body=<CreateBucketConfiguration><LocationConstraint>eu-central-1</LocationConstraint></CreateBucketConfiguration>
