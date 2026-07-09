@@ -21,6 +21,6 @@ let parse body response =
       Ok
         {
           Bucket.Versioning.status =
-            Some (Bucket.Versioning.Status.of_string value);
+            Some (Bucket.Versioning.Status.observed_of_string value);
           response;
         }

@@ -75,6 +75,30 @@ let test_cors_put_get_projection () =
       Alcotest.(check (option int)) "max age" (Some 60) observed.max_age_seconds
   | _ -> Alcotest.fail "expected one CORS rule"
 
+let test_ownership_put_get_projection () =
+  let conn = make_simulator () in
+  let config =
+    {
+      Bucket.Ownership_controls.object_ownership =
+        Bucket.Ownership_controls.Object_ownership.Bucket_owner_enforced;
+    }
+  in
+  ignore
+    (Simulator.Bucket.Ownership_controls.put conn
+       ~bucket:(bucket_name "test-bucket")
+       ~config ()
+    |> ok_or_fail "put ownership controls");
+  let result =
+    Simulator.Bucket.Ownership_controls.get conn
+      ~bucket:(bucket_name "test-bucket")
+      ()
+    |> ok_or_fail "get ownership controls"
+  in
+  Alcotest.(check string)
+    "object ownership" "BucketOwnerEnforced"
+    (Bucket.Ownership_controls.Object_ownership.observed_to_string
+       result.config.object_ownership)
+
 let suite =
   [
     ( "contract:awskit-s3-sim:bucket-configurations",
@@ -83,5 +107,7 @@ let suite =
           test_encryption_put_get_projection;
         Alcotest.test_case "CORS put/get projection" `Quick
           test_cors_put_get_projection;
+        Alcotest.test_case "ownership put/get projection" `Quick
+          test_ownership_put_get_projection;
       ] );
   ]

@@ -728,7 +728,10 @@ let assert_delete_bucket_tags command_index command conn =
       : Awskit.Response.t)
 
 let assert_get_versioning command_index command conn expected =
-  let status_to_string = Option.map Bucket.Versioning.Status.to_string in
+  let expected_to_string = Option.map Bucket.Versioning.Status.to_string in
+  let observed_to_string =
+    Option.map Bucket.Versioning.Status.observed_to_string
+  in
   let result =
     expect_ok command_index command "get versioning"
       (await_result "get versioning" (S3.Bucket.Versioning.get conn ~bucket ()))
@@ -736,8 +739,8 @@ let assert_get_versioning command_index command conn expected =
   check_equal command_index command
     Alcotest.(option string)
     "versioning status"
-    (status_to_string expected)
-    (status_to_string result.status)
+    (expected_to_string expected)
+    (observed_to_string result.status)
 
 let assert_put_versioning command_index command conn status =
   ignore

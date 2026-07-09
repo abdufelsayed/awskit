@@ -472,6 +472,43 @@ let test_bucket_versioning_xml_fixture () =
     [ "bucket"; "versioning-put.expected" ]
     ~actual:(describe_request (Protocol_recording_runtime.last_call conn))
 
+let test_bucket_versioning_preserves_unknown_response_token () =
+  let conn =
+    Protocol_recording_runtime.connect
+      [
+        Protocol_recording_runtime.response 200
+          "<VersioningConfiguration><Status>Future</Status></VersioningConfiguration>";
+      ]
+  in
+  let result =
+    Protocol_recording_runtime.S3.Bucket.Versioning.get conn
+      ~bucket:(Protocol_support.bucket_name "my-bucket")
+      ()
+    |> Protocol_support.ok_or_fail "get bucket versioning"
+  in
+  Alcotest.(check (option string))
+    "unknown versioning status" (Some "Future")
+    (Option.map Bucket.Versioning.Status.observed_to_string result.status)
+
+let test_bucket_ownership_preserves_unknown_response_token () =
+  let conn =
+    Protocol_recording_runtime.connect
+      [
+        Protocol_recording_runtime.response 200
+          "<OwnershipControls><Rule><ObjectOwnership>FutureOwner</ObjectOwnership></Rule></OwnershipControls>";
+      ]
+  in
+  let result =
+    Protocol_recording_runtime.S3.Bucket.Ownership_controls.get conn
+      ~bucket:(Protocol_support.bucket_name "my-bucket")
+      ()
+    |> Protocol_support.ok_or_fail "get bucket ownership controls"
+  in
+  Alcotest.(check string)
+    "unknown object ownership" "FutureOwner"
+    (Bucket.Ownership_controls.Object_ownership.observed_to_string
+       result.config.object_ownership)
+
 let test_bucket_encryption_xml_fixture () =
   let default_encryption =
     Bucket.Encryption.Default_encryption.sse_kms_exn
@@ -839,6 +876,10 @@ let suite =
           test_signing_artifact_fixture;
         Alcotest.test_case "bucket versioning XML" `Quick
           test_bucket_versioning_xml_fixture;
+        Alcotest.test_case "bucket versioning observed unknown" `Quick
+          test_bucket_versioning_preserves_unknown_response_token;
+        Alcotest.test_case "bucket ownership observed unknown" `Quick
+          test_bucket_ownership_preserves_unknown_response_token;
         Alcotest.test_case "bucket encryption XML" `Quick
           test_bucket_encryption_xml_fixture;
         Alcotest.test_case "bucket encryption rule shapes" `Quick

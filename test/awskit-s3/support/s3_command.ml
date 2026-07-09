@@ -163,7 +163,6 @@ let command_bin = function
   | Delete_bucket_tags -> "s3.command.delete-bucket-tags"
   | Put_versioning Enabled -> "s3.command.versioning.enabled"
   | Put_versioning Suspended -> "s3.command.versioning.suspended"
-  | Put_versioning (Unknown _) -> "s3.command.versioning.unknown"
   | Get_versioning -> "s3.command.get-versioning"
 
 let put_key = function
@@ -451,7 +450,7 @@ let shrink_copy_metadata = function
 let shrink_versioning_status = function
   | Awskit_s3.Bucket.Versioning.Status.Suspended ->
       QCheck.Iter.return Awskit_s3.Bucket.Versioning.Status.Enabled
-  | Enabled | Unknown _ -> QCheck.Iter.empty
+  | Enabled -> QCheck.Iter.empty
 
 let shrinker = function
   | Put_string (key, body, tags) ->

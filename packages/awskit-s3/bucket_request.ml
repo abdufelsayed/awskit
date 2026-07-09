@@ -370,12 +370,6 @@ module Make (C : Request_context.S) = struct
   end
 
   module Versioning = struct
-    let validate_status = function
-      | Bucket.Versioning.Status.Enabled | Suspended -> Ok ()
-      | Unknown value ->
-          S3_error_context.invalid ~field:"status"
-            "unknown bucket versioning status %S cannot be sent" value
-
     let get conn ~bucket ?options () =
       let expected_bucket_owner =
         owner_from_options Bucket_versioning.default_options
@@ -394,17 +388,9 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
-      let return_error =
-        S3_error_context.return_s3_error return_error
-          ~operation:"PutBucketVersioning" ~bucket:bucket_context
-      in
-      match validate_status status with
-      | Error error -> return_error error
-      | Ok () ->
-          put_xml ?expected_bucket_owner conn ~bucket ~subresource:"versioning"
-            ~operation:"PutBucketVersioning"
-            ~body:(Bucket_versioning_xml.xml (Some status))
+      put_xml ?expected_bucket_owner conn ~bucket ~subresource:"versioning"
+        ~operation:"PutBucketVersioning"
+        ~body:(Bucket_versioning_xml.xml (Some status))
   end
 
   module Tagging = struct
@@ -553,13 +539,6 @@ module Make (C : Request_context.S) = struct
   end
 
   module Ownership_controls = struct
-    let validate_config (config : Bucket.Ownership_controls.config) =
-      match config.object_ownership with
-      | Bucket_owner_enforced | Bucket_owner_preferred | Object_writer -> Ok ()
-      | Unknown value ->
-          S3_error_context.invalid ~field:"object_ownership"
-            "unknown object ownership %S cannot be sent" value
-
     let get conn ~bucket ?options () =
       let expected_bucket_owner =
         owner_from_options Bucket_ownership_controls.default_options
@@ -579,18 +558,9 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
-      let return_error =
-        S3_error_context.return_s3_error return_error
-          ~operation:"PutBucketOwnershipControls" ~bucket:bucket_context
-      in
-      match validate_config config with
-      | Error error -> return_error error
-      | Ok () ->
-          put_xml ?expected_bucket_owner conn ~bucket
-            ~operation:"PutBucketOwnershipControls"
-            ~subresource:"ownershipControls"
-            ~body:(Bucket_access_xml.Ownership_controls.xml config)
+      put_xml ?expected_bucket_owner conn ~bucket
+        ~operation:"PutBucketOwnershipControls" ~subresource:"ownershipControls"
+        ~body:(Bucket_access_xml.Ownership_controls.xml config)
 
     let delete conn ~bucket ?options () =
       let expected_bucket_owner =

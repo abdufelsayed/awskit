@@ -74,11 +74,13 @@ module Ownership_controls = struct
             Xml.decode_field_error ~path "invalid object ownership %S" ""
         | Some value ->
             let object_ownership =
-              Bucket.Ownership_controls.Object_ownership.of_string value
+              Bucket.Ownership_controls.Object_ownership.observed_of_string
+                value
             in
             Ok
               {
-                Bucket.Ownership_controls.config = { object_ownership };
+                Bucket.Ownership_controls.config =
+                  { Bucket.Ownership_controls.Observed.object_ownership };
                 response;
               })
 end

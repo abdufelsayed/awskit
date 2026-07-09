@@ -512,6 +512,10 @@ Validated constructors produce values accepted by [put]; [get] preserves
 unknown future wire tokens in each module's [Observed] result model instead of
 allowing those tokens to flow back into requests accidentally.
 
+Versioning and ownership controls apply the same distinction to their closed
+request vocabularies: [Status.t] and [Object_ownership.t] are sendable, while
+their [observed] companions preserve unknown values returned by a service.
+
 {1 Multipart Uploads}
 
 [Multipart] exposes the AWS multipart flow:

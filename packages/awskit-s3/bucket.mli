@@ -140,16 +140,21 @@ module Versioning : sig
   (** Bucket versioning request options. *)
 
   module Status : sig
-    (** Bucket versioning state. Absence in a result means versioning was never
-        configured for the bucket. Unknown values are preserved on reads for
-        forward compatibility, but rejected by write operations. *)
-    type t = Enabled | Suspended | Unknown of string
+    (** Closed bucket versioning state accepted by [put]. *)
+    type t = Enabled | Suspended
+
+    (** Versioning state observed in a response. *)
+    type observed = Known of t | Unknown of string
 
     val to_string : t -> string
-    val of_string : string -> t
+    val observed_to_string : observed -> string
+    val observed_of_string : string -> observed
   end
 
-  type result = { status : Status.t option; response : Awskit.Response.t }
+  type result = {
+    status : Status.observed option;
+    response : Awskit.Response.t;
+  }
   (** [GetBucketVersioning] result metadata. [None] means S3 did not return a
       versioning status. *)
 
@@ -437,22 +442,26 @@ module Ownership_controls : sig
 
   (** S3 object ownership controls. *)
   module Object_ownership : sig
-    (** Object ownership mode. Unknown values are preserved on reads for forward
-        compatibility, but rejected by write operations. *)
-    type t =
-      | Bucket_owner_enforced
-      | Bucket_owner_preferred
-      | Object_writer
-      | Unknown of string
+    (** Closed object-ownership mode accepted by [put]. *)
+    type t = Bucket_owner_enforced | Bucket_owner_preferred | Object_writer
+
+    (** Object-ownership mode observed in a response. *)
+    type observed = Known of t | Unknown of string
 
     val to_string : t -> string
-    val of_string : string -> t
+    val observed_to_string : observed -> string
+    val observed_of_string : string -> observed
   end
 
   type config = { object_ownership : Object_ownership.t }
   (** Bucket ownership-controls configuration. *)
 
-  type result = { config : config; response : Awskit.Response.t }
+  module Observed : sig
+    type t = { object_ownership : Object_ownership.observed }
+    (** Ownership controls observed in a response. *)
+  end
+
+  type result = { config : Observed.t; response : Awskit.Response.t }
   (** [GetBucketOwnershipControls] result metadata. *)
 
   val default_options : options

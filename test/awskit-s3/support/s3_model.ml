@@ -105,21 +105,20 @@ let empty =
 let versioning_keeps_history model =
   match model.versioning with
   | Some Awskit_s3.Bucket.Versioning.Status.Enabled | Some Suspended -> true
-  | Some (Unknown _) | None -> false
+  | None -> false
 
 let status_keeps_history = function
   | Awskit_s3.Bucket.Versioning.Status.Enabled | Suspended -> true
-  | Unknown _ -> false
 
 let versioning_enabled model =
   match model.versioning with
   | Some Awskit_s3.Bucket.Versioning.Status.Enabled -> true
-  | Some Suspended | Some (Unknown _) | None -> false
+  | Some Suspended | None -> false
 
 let versioning_suspended model =
   match model.versioning with
   | Some Awskit_s3.Bucket.Versioning.Status.Suspended -> true
-  | Some Enabled | Some (Unknown _) | None -> false
+  | Some Enabled | None -> false
 
 let version_id_kind_for_write model =
   if versioning_enabled model then Generated_version

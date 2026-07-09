@@ -23,19 +23,18 @@ let require_object t bucket key =
 let versioning_enabled (bucket : bucket_state) =
   match bucket.versioning with
   | Some Bucket.Versioning.Status.Enabled -> true
-  | Some Suspended | Some (Unknown _) | None -> false
+  | Some Suspended | None -> false
 
 let versioning_suspended (bucket : bucket_state) =
   match bucket.versioning with
   | Some Bucket.Versioning.Status.Suspended -> true
-  | Some Enabled | Some (Unknown _) | None -> false
+  | Some Enabled | None -> false
 
 let versioning_keeps_history bucket =
   versioning_enabled bucket || versioning_suspended bucket
 
 let status_keeps_history = function
   | Bucket.Versioning.Status.Enabled | Suspended -> true
-  | Unknown _ -> false
 
 let next_version_id t = allocate_version_id t
 let null_version_id = Object.Version_id.of_string_exn "null"

@@ -69,20 +69,25 @@ module Versioning = struct
   type options = { expected_bucket_owner : Account_id.t option }
 
   module Status = struct
-    type t = Enabled | Suspended | Unknown of string
+    type t = Enabled | Suspended
+    type observed = Known of t | Unknown of string
 
-    let to_string = function
-      | Enabled -> "Enabled"
-      | Suspended -> "Suspended"
+    let to_string = function Enabled -> "Enabled" | Suspended -> "Suspended"
+
+    let observed_to_string = function
+      | Known status -> to_string status
       | Unknown value -> value
 
-    let of_string = function
-      | "Enabled" -> Enabled
-      | "Suspended" -> Suspended
+    let observed_of_string = function
+      | "Enabled" -> Known Enabled
+      | "Suspended" -> Known Suspended
       | value -> Unknown value
   end
 
-  type result = { status : Status.t option; response : Awskit.Response.t }
+  type result = {
+    status : Status.observed option;
+    response : Awskit.Response.t;
+  }
 
   let default_options = { expected_bucket_owner = None }
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
@@ -398,27 +403,32 @@ module Ownership_controls = struct
   type options = { expected_bucket_owner : Account_id.t option }
 
   module Object_ownership = struct
-    type t =
-      | Bucket_owner_enforced
-      | Bucket_owner_preferred
-      | Object_writer
-      | Unknown of string
+    type t = Bucket_owner_enforced | Bucket_owner_preferred | Object_writer
+    type observed = Known of t | Unknown of string
 
     let to_string = function
       | Bucket_owner_enforced -> "BucketOwnerEnforced"
       | Bucket_owner_preferred -> "BucketOwnerPreferred"
       | Object_writer -> "ObjectWriter"
+
+    let observed_to_string = function
+      | Known ownership -> to_string ownership
       | Unknown value -> value
 
-    let of_string = function
-      | "BucketOwnerEnforced" -> Bucket_owner_enforced
-      | "BucketOwnerPreferred" -> Bucket_owner_preferred
-      | "ObjectWriter" -> Object_writer
+    let observed_of_string = function
+      | "BucketOwnerEnforced" -> Known Bucket_owner_enforced
+      | "BucketOwnerPreferred" -> Known Bucket_owner_preferred
+      | "ObjectWriter" -> Known Object_writer
       | value -> Unknown value
   end
 
   type config = { object_ownership : Object_ownership.t }
-  type result = { config : config; response : Awskit.Response.t }
+
+  module Observed = struct
+    type t = { object_ownership : Object_ownership.observed }
+  end
+
+  type result = { config : Observed.t; response : Awskit.Response.t }
 
   let default_options = { expected_bucket_owner = None }
   let options ?expected_bucket_owner () = Ok { expected_bucket_owner }

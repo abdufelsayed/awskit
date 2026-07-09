@@ -103,7 +103,7 @@ let supports_command target_profile command =
   | Minio, Put_versioning status -> (
       match status with
       | Awskit_s3.Bucket.Versioning.Status.Enabled -> true
-      | Suspended | Unknown _ -> false)
+      | Suspended -> false)
   | Minio, Copy_object (source_key, destination_key) ->
       not (String.equal source_key destination_key)
   | Minio, _ -> true
@@ -184,7 +184,7 @@ let state_bins (model : S3_model.t) =
     | Some Awskit_s3.Bucket.Versioning.Status.Enabled ->
         [ "s3.state.versioning-enabled" ]
     | Some Suspended -> [ "s3.state.versioning-suspended" ]
-    | Some (Unknown _) | None -> []
+    | None -> []
   in
   let delete_marker_bins =
     if S3_model.delete_markers model = [] then []
