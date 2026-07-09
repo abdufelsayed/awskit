@@ -1,84 +1,9 @@
 module Make (Client : Cohttp_lwt.S.Client) = struct
   module Aws = Awskit_lwt.Make (Client)
-
-  type t = { aws : Aws.t; endpoint_config : Awskit_s3.endpoint_config }
-  type runtime_connection = t
-
-  module Runtime = struct
-    type connection = runtime_connection
-    type 'a t = 'a Lwt.t
-    type request_body = Aws.Runtime.request_body
-    type response_body = Aws.Runtime.response_body
-    type request_body_writer = Aws.Runtime.request_body_writer
-    type response_body_reader = Aws.Runtime.response_body_reader
-
-    module IO = Aws.Runtime.IO
-    module Request_body = Aws.Runtime.Request_body
-    module Response_body = Aws.Runtime.Response_body
-
-    module Transport = struct
-      type 'a io = 'a Lwt.t
-      type connection = runtime_connection
-      type request_body = Aws.Runtime.request_body
-      type response_body = Aws.Runtime.response_body
-
-      let with_response t request ~body ~consume =
-        Aws.Runtime.Transport.with_response t.aws request ~body ~consume
-    end
-
-    module Clock = struct
-      type connection = runtime_connection
-
-      let now t = Aws.Runtime.Clock.now t.aws
-    end
-
-    module Sleeper = struct
-      type 'a io = 'a Lwt.t
-      type connection = runtime_connection
-
-      let sleep t span = Aws.Runtime.Sleeper.sleep t.aws span
-    end
-
-    module Random = struct
-      type connection = runtime_connection
-
-      let float t ~upper_bound = Aws.Runtime.Random.float t.aws ~upper_bound
-    end
-
-    module Credentials = struct
-      type 'a io = 'a Lwt.t
-      type connection = runtime_connection
-
-      let resolve t = Aws.Runtime.Credentials.resolve t.aws
-    end
-
-    module Endpoint = struct
-      type connection = runtime_connection
-
-      let region t = Aws.Runtime.Endpoint.region t.aws
-      let endpoint t = Aws.Runtime.Endpoint.endpoint t.aws
-    end
-
-    module Retry = struct
-      type connection = runtime_connection
-
-      let policy t = Aws.Runtime.Retry.policy t.aws
-    end
-
-    module Timeout = struct
-      type connection = runtime_connection
-
-      let policy t = Aws.Runtime.Timeout.policy t.aws
-    end
-
-    module S3_endpoint = struct
-      type connection = runtime_connection
-
-      let s3_endpoint_config t = t.endpoint_config
-    end
-  end
-
+  module Runtime = Aws.Runtime
   module S3 = Awskit_s3.Make (Runtime)
+
+  type t = S3.t
 
   module Body = struct
     include S3.Body
@@ -99,15 +24,15 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
   module Reader = S3.Reader
 
-  let create ?ctx ?(endpoint_config = Awskit_s3.default_endpoint_config) ~region
-      ~credentials ~clock ?retry_policy ?sleep ?random_float ?timeout_policy
-      ?max_response_drain_bytes () =
+  let create ?ctx ?endpoint_config ~region ~credentials ~clock ?retry_policy
+      ?sleep ?random_float ?timeout_policy ?max_response_drain_bytes () =
     match
       Aws.create ?ctx ~region ~credentials ~clock ?retry_policy ?sleep
         ?random_float ?timeout_policy ?max_response_drain_bytes ()
     with
     | Error _ as error -> error
-    | Ok aws -> Ok { aws; endpoint_config }
+    | Ok runtime_connection ->
+        Ok (S3.create ?endpoint_config runtime_connection)
 
   module Object = S3.Object
   module Bucket = S3.Bucket

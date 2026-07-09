@@ -1,4 +1,4 @@
-module Make (R : Request_context.RUNTIME) = struct
+module Make (R : Awskit.Runtime.S) = struct
   let ( let* ) = R.IO.bind
 
   module Body = struct

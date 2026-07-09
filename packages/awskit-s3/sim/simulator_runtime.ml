@@ -283,10 +283,4 @@ module Runtime = struct
 
     let policy _ = Awskit.Timeout.default
   end
-
-  module S3_endpoint = struct
-    type nonrec connection = connection
-
-    let s3_endpoint_config _ = Awskit_s3.default_endpoint_config
-  end
 end

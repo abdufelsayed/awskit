@@ -534,32 +534,52 @@ Awskit_s3_eio.Bucket.Encryption.put s3
 parts require a known exact length, and custom stream producer errors are part
 of the upload result.
 
-{1 Advanced Direct Runtime Access}
+{1 Custom Runtime Composition}
 
-Most callers should use adapter [Body] and [Reader] helpers. Direct [Runtime]
-access is the raw layer for custom streaming integrations and runtime authors.
-The {!module-type:Awskit_s3.RUNTIME} contract is public: custom runtimes can
-instantiate {!module:Awskit_s3.Make} when they provide the grouped core runtime
-capabilities plus [S3_endpoint.s3_endpoint_config].
-
-Custom request bodies use [Runtime.Request_body.of_stream] with an explicit
-descriptor. Declare the exact [content_length] when S3 requires one, emit
-exactly that number of bytes, and mark the body [replayable] only if retrying
-can recreate the same bytes from the beginning.
+Custom runtimes implement the ordinary {!module-type:Awskit.Runtime.S}
+contract. Apply {!module:Awskit_s3.Make} once to select the runtime
+implementation, create the runtime connection once, then wrap it once with
+[S3.create]. Endpoint and addressing policy belong to the configured S3 client,
+not the runtime module.
 
 {[
-S3.Runtime.Request_body.of_stream descriptor ~write
+module Aws = Awskit_lwt.Make (My_cohttp_client)
+module S3 = Awskit_s3.Make (Aws.Runtime)
+
+let runtime =
+  Aws.create
+    ~region:"us-east-1"
+    ~credentials
+    ~clock
+    ~retry_policy:Awskit.Retry.disabled
+    ()
+  |> Result.get_ok
+
+let s3 = S3.create ~endpoint_config runtime
+
+let result =
+  S3.Object.get_string s3 ~bucket ~key ~max_bytes:1_048_576L ()
 ]}
 
-Raw response readers can be consumed with [Runtime.Response_body.read] while
-the reader is in scope:
+Every generated operation module accepts [S3.t]. Its [Body] and [Reader]
+modules retain the request-body, response-reader, and effect types chosen by the
+runtime functor. Build custom request bodies with [S3.Body.of_stream], declaring
+the exact [content_length] and marking the body replayable only when invoking
+the producer again recreates the same bytes from the beginning:
 
 {[
-S3.Runtime.Response_body.read reader bytes ~off ~len
+S3.Body.of_stream ~content_length ~replayable ~write
 ]}
 
-For custom S3 callers, prefer [Body.of_stream] and [Reader.read] so code stays
-within the S3 adapter API.
+Consume response readers with [S3.Reader.read] while the operation callback is
+in scope:
+
+{[
+S3.Reader.read reader bytes ~off ~len
+]}
+
+[S3.runtime_connection] is an explicit integration escape hatch. Ordinary S3
+operations should use the configured S3 client directly.
 
 Runtime authors should also run [opam exec -- dune build @runtime-http-contracts]
 alongside the S3 tests. The runtime workload captures shared HTTP expectations
@@ -567,9 +587,9 @@ for bodiless responses, framing, body-reader, and error-path behavior.
 
 {1 Presigned Request Artifacts}
 
-Use adapter-level [Presigned] modules when a connection already exists. Use
+Use adapter-level [Presigned] modules when a configured client already exists. Use
 standalone {!module:Awskit_s3.Presigned} helpers when generating presigned
-request artifacts without an adapter connection.
+request artifacts without an adapter client.
 
 {[
 Awskit_s3_eio.Presigned.get_object s3
@@ -646,7 +666,7 @@ A typical direct-upload multipart flow is:
 
 {1 Credentials}
 
-Eio S3 connections require explicit [region], [credentials], and [https]. This
+Eio S3 clients require explicit [region], [credentials], and [https]. This
 example reuses the [Https] helper from the endpoint configuration example
 above and [Awskit_unix.Credentials.default_chain] from the [awskit-unix]
 package for Unix credential loading.

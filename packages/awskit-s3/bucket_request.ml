@@ -20,7 +20,7 @@ module Make (C : Request_context.S) = struct
 
   let ( let* ) = bind
 
-  type nonrec connection = connection
+  type nonrec client = connection
   type 'a io = 'a R.t
 
   let return_result return_error return_ok = function

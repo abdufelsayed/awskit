@@ -793,7 +793,7 @@ let prop_complete_upload_rejects_unsorted_parts_before_request =
       match result with
       | Error error ->
           Awskit.Error.validation_field error = Some "part_number"
-          && conn.Protocol_recording_runtime.Runtime.calls = []
+          && Protocol_recording_runtime.calls conn = []
       | Ok _ -> false)
 
 let prop_complete_upload_rejects_small_nonfinal_parts =
@@ -809,7 +809,7 @@ let prop_complete_upload_rejects_small_nonfinal_parts =
       match result with
       | Error error ->
           Awskit.Error.validation_field error = Some "parts"
-          && conn.Protocol_recording_runtime.Runtime.calls = []
+          && Protocol_recording_runtime.calls conn = []
       | Ok _ -> false)
 
 let prop_complete_upload_rejects_checksum_parts_not_starting_at_one =
@@ -825,7 +825,7 @@ let prop_complete_upload_rejects_checksum_parts_not_starting_at_one =
       match result with
       | Error error ->
           Awskit.Error.validation_field error = Some "part_number"
-          && conn.Protocol_recording_runtime.Runtime.calls = []
+          && Protocol_recording_runtime.calls conn = []
       | Ok _ -> false)
 
 let prop_complete_upload_rejects_checksum_part_gaps =
@@ -840,7 +840,7 @@ let prop_complete_upload_rejects_checksum_part_gaps =
       match result with
       | Error error ->
           Awskit.Error.validation_field error = Some "part_number"
-          && conn.Protocol_recording_runtime.Runtime.calls = []
+          && Protocol_recording_runtime.calls conn = []
       | Ok _ -> false)
 
 type protocol_generator_sample =

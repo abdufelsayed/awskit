@@ -5,11 +5,7 @@
     helpers live under {!Object.Transfer}. *)
 
 type t
-(** Ready-to-use Lwt + Unix S3 client connection. Create with {!val:create}. *)
-
-(** Lwt + Unix S3 runtime used by [Awskit_s3.Make]. *)
-module Runtime :
-  Awskit_s3.RUNTIME with type 'a t = 'a Lwt.t and type connection = t
+(** Ready-to-use configured Lwt + Unix S3 client. Create with {!val:create}. *)
 
 val create :
   ?ctx:Cohttp_lwt_unix.Client.ctx ->
@@ -34,8 +30,9 @@ val create :
     drains after successful consumers. *)
 
 module Body : sig
-  include
-    Awskit_s3.BODY with type 'a io := 'a Lwt.t and type t = Runtime.request_body
+  type t
+
+  include Awskit_s3.BODY with type 'a io := 'a Lwt.t and type t := t
 
   val of_lwt_stream :
     content_length:int64 -> string Lwt_stream.t -> (t, Awskit_s3.Error.t) result
@@ -62,10 +59,9 @@ module Body : sig
 end
 
 module Reader : sig
-  include
-    Awskit_s3.READER
-      with type 'a io := 'a Lwt.t
-       and type t = Runtime.response_body_reader
+  type t
+
+  include Awskit_s3.READER with type 'a io := 'a Lwt.t and type t := t
 
   val to_channel :
     ?on_progress:(int64 -> unit) ->
@@ -87,7 +83,7 @@ end
 module Object : sig
   include
     Awskit_s3.OBJECT
-      with type connection := t
+      with type client := t
        and type 'a io := 'a Lwt.t
        and type request_body := Body.t
        and type response_body_reader := Reader.t
@@ -151,16 +147,16 @@ end
 
 (** Bucket operations returning [Lwt.t]. *)
 module Bucket :
-  Awskit_s3.BUCKET with type connection := t and type 'a io := 'a Lwt.t
+  Awskit_s3.BUCKET with type client := t and type 'a io := 'a Lwt.t
 
 (** Multipart operations returning [Lwt.t]. *)
 module Multipart :
   Awskit_s3.MULTIPART
-    with type connection := t
+    with type client := t
      and type 'a io := 'a Lwt.t
      and type request_body := Body.t
 
 (** Presigned request artifact helpers using the client's resolved region,
     credentials, clock, and endpoint configuration. *)
 module Presigned :
-  Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a Lwt.t
+  Awskit_s3.PRESIGNED with type client := t and type 'a io := 'a Lwt.t

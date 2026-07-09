@@ -5,10 +5,7 @@
     upload/download helpers live under {!Object.Transfer}. *)
 
 type t
-(** Eio S3 client connection. Create with {!val:create}. *)
-
-(** Direct-style S3 runtime used by [Awskit_s3.Make]. *)
-module Runtime : Awskit_s3.RUNTIME with type 'a t = 'a and type connection = t
+(** Configured Eio S3 client. Create with {!val:create}. *)
 
 val create :
   sw:Eio.Switch.t ->
@@ -35,7 +32,9 @@ val create :
     response body the runtime drains after successful consumers. *)
 
 module Body : sig
-  include Awskit_s3.BODY with type 'a io := 'a and type t = Runtime.request_body
+  type t
+
+  include Awskit_s3.BODY with type 'a io := 'a and type t := t
 
   val of_flow :
     content_length:int64 ->
@@ -55,10 +54,9 @@ module Body : sig
 end
 
 module Reader : sig
-  include
-    Awskit_s3.READER
-      with type 'a io := 'a
-       and type t = Runtime.response_body_reader
+  type t
+
+  include Awskit_s3.READER with type 'a io := 'a and type t := t
 
   val to_flow :
     ?on_progress:(int64 -> unit) ->
@@ -80,7 +78,7 @@ end
 module Object : sig
   include
     Awskit_s3.OBJECT
-      with type connection := t
+      with type client := t
        and type 'a io := 'a
        and type request_body := Body.t
        and type response_body_reader := Reader.t
@@ -141,16 +139,16 @@ module Object : sig
 end
 
 (** Bucket operations using direct-style Eio results. *)
-module Bucket : Awskit_s3.BUCKET with type connection := t and type 'a io := 'a
+module Bucket : Awskit_s3.BUCKET with type client := t and type 'a io := 'a
 
 (** Multipart operations using direct-style Eio results. *)
 module Multipart :
   Awskit_s3.MULTIPART
-    with type connection := t
+    with type client := t
      and type 'a io := 'a
      and type request_body := Body.t
 
 (** Presigned request artifact helpers using the client's region, credentials,
     clock, and endpoint configuration. *)
 module Presigned :
-  Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a
+  Awskit_s3.PRESIGNED with type client := t and type 'a io := 'a

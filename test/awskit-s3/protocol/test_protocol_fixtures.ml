@@ -535,7 +535,7 @@ let test_bucket_encryption_rejects_dsse_bucket_key () =
   expect_validation_field "bucket_key_enabled" result;
   Alcotest.(check int)
     "no request sent" 0
-    (List.length conn.Protocol_recording_runtime.Runtime.calls)
+    (List.length (Protocol_recording_runtime.calls conn))
 
 let describe_list_page (page : Object.List.page) =
   let render_prefix = Object_key.Prefix.to_string in

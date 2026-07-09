@@ -14,7 +14,7 @@ module Make (C : Request_context.S) = struct
 
   let ( let* ) = bind
 
-  type nonrec connection = connection
+  type nonrec client = connection
   type 'a io = 'a R.t
   type nonrec request_body = request_body
 

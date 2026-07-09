@@ -18,7 +18,7 @@ module Make (C : Request_context.S) = struct
   let validate_opt f = function None -> Ok () | Some value -> f value
   let header_value = Option.map Header_value.to_string
 
-  type nonrec connection = connection
+  type nonrec client = connection
   type 'a io = 'a R.t
   type nonrec request_body = request_body
   type nonrec response_body_reader = response_body_reader

@@ -42,6 +42,9 @@ _opam/
 # Agent plans
 .plans
 
+# Local agent working state
+.agents/
+
 # Local feature worktrees
 .worktrees/
 

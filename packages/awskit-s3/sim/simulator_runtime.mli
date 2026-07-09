@@ -4,9 +4,7 @@ open Simulator_support
 
 module Runtime : sig
   include
-    Awskit_s3.RUNTIME
-      with type connection = Simulator_state.t
-       and type 'a t = 'a
+    Awskit.Runtime.S with type connection = Simulator_state.t and type 'a t = 'a
 
   val request_body_result : request_body -> (string, Awskit.Error.t) result
   (** Materialize a simulator request body as an in-memory string. *)

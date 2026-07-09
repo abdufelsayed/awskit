@@ -6,11 +6,7 @@
 module Make (Client : Cohttp_lwt.S.Client) : sig
   (** Build an S3 adapter over a caller-supplied Cohttp Lwt client. *)
   type t
-  (** S3 connection handle for the supplied Cohttp client. *)
-
-  (** Lwt S3 runtime used by [Awskit_s3.Make]. *)
-  module Runtime :
-    Awskit_s3.RUNTIME with type 'a t = 'a Lwt.t and type connection = t
+  (** Configured S3 client for the supplied Cohttp client. *)
 
   val create :
     ?ctx:Client.ctx ->
@@ -38,10 +34,9 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
       consumers. *)
 
   module Body : sig
-    include
-      Awskit_s3.BODY
-        with type 'a io := 'a Lwt.t
-         and type t = Runtime.request_body
+    type t
+
+    include Awskit_s3.BODY with type 'a io := 'a Lwt.t and type t := t
 
     val of_lwt_stream :
       content_length:int64 -> string Lwt_stream.t -> (t, Awskit.Error.t) result
@@ -51,31 +46,32 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
         stream must remain valid until the request finishes. *)
   end
 
-  module Reader :
-    Awskit_s3.READER
-      with type 'a io := 'a Lwt.t
-       and type t = Runtime.response_body_reader
+  module Reader : sig
+    type t
+
+    include Awskit_s3.READER with type 'a io := 'a Lwt.t and type t := t
+  end
 
   (** Object operations returning [Lwt.t]. *)
   module Object :
     Awskit_s3.OBJECT
-      with type connection := t
+      with type client := t
        and type 'a io := 'a Lwt.t
        and type request_body := Body.t
        and type response_body_reader := Reader.t
 
   (** Bucket operations returning [Lwt.t]. *)
   module Bucket :
-    Awskit_s3.BUCKET with type connection := t and type 'a io := 'a Lwt.t
+    Awskit_s3.BUCKET with type client := t and type 'a io := 'a Lwt.t
 
   (** Multipart operations returning [Lwt.t]. *)
   module Multipart :
     Awskit_s3.MULTIPART
-      with type connection := t
+      with type client := t
        and type 'a io := 'a Lwt.t
        and type request_body := Body.t
 
   (** Presigned request artifact helpers returning [Lwt.t]. *)
   module Presigned :
-    Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a Lwt.t
+    Awskit_s3.PRESIGNED with type client := t and type 'a io := 'a Lwt.t
 end

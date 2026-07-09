@@ -211,7 +211,7 @@ let with_temp_download path f =
       | Ok value -> close_and_publish value)
 
 module Make_body_reader
-    (Runtime : Awskit_s3.RUNTIME with type 'a t = 'a)
+    (Runtime : Awskit.Runtime.S with type 'a t = 'a)
     (S3 : sig
       module Body :
         Awskit_s3.BODY with type 'a io := 'a and type t = Runtime.request_body
@@ -295,11 +295,13 @@ struct
 end
 
 module Make
-    (Runtime : Awskit_s3.RUNTIME with type 'a t = 'a)
+    (Runtime : Awskit.Runtime.S with type 'a t = 'a)
     (S3 : sig
+      type t
+
       module Object : sig
         val put :
-          Runtime.connection ->
+          t ->
           bucket:Awskit_s3.Bucket_name.t ->
           key:Awskit_s3.Object_key.t ->
           ?options:Awskit_s3.Object.Put.options ->
@@ -308,7 +310,7 @@ module Make
           (Awskit_s3.Object.Put.result, Awskit_s3.Error.t) result
 
         val get :
-          Runtime.connection ->
+          t ->
           bucket:Awskit_s3.Bucket_name.t ->
           key:Awskit_s3.Object_key.t ->
           ?options:Awskit_s3.Object.Get.options ->
@@ -318,7 +320,7 @@ module Make
           ('a Awskit_s3.Object.Get.result, Awskit_s3.Error.t) result
 
         val head :
-          Runtime.connection ->
+          t ->
           bucket:Awskit_s3.Bucket_name.t ->
           key:Awskit_s3.Object_key.t ->
           ?options:Awskit_s3.Object.Head.options ->
@@ -328,7 +330,7 @@ module Make
 
       module Multipart :
         Awskit_s3.MULTIPART
-          with type connection := Runtime.connection
+          with type client := t
            and type 'a io := 'a
            and type request_body := Runtime.request_body
     end)

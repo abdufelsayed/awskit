@@ -58,8 +58,9 @@ Small buffered object workflows can start with [Object.put_string],
 [Object.put_bytes], [Object.get_string], [Object.get_bytes],
 [Object.find_string], and [Object.find_bytes]. Larger or custom workflows pass
 [Body] values to [Object.put] and scoped [Reader] consumers to [Object.get].
-Direct [Runtime] access remains available for integrations and runtime authors
-that need the raw runtime body layer.
+Functor-produced clients keep their selected runtime's body, reader, and effect
+types through [Body] and [Reader]. Custom integrations retain their runtime
+module separately; ordinary operations receive only the configured S3 client.
 
 Managed local-file transfers are adapter features, not core S3 features. They
 live in [Object.Transfer] for [awskit-s3-eio] and [awskit-s3-lwt-unix]. The

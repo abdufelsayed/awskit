@@ -5,23 +5,6 @@
     presigned request artifacts, endpoint resolution, and runtime-backed
     clients. *)
 
-module type RUNTIME = sig
-  (** Runtime required by the S3 functor.
-
-      This extends [Awskit.Runtime.S] with S3-specific endpoint resolution
-      configuration. Runtime adapters implement this once and then reuse the
-      pure S3 operation functor. *)
-
-  include Awskit.Runtime.S
-
-  module S3_endpoint : sig
-    type nonrec connection = connection
-
-    val s3_endpoint_config : connection -> Endpoint_resolver.t
-    (** Return S3 addressing/endpoint configuration for this connection. *)
-  end
-end
-
 module type BODY = sig
   type +'a io
 
@@ -131,8 +114,8 @@ end
 module type OBJECT = sig
   (** Object operations produced by runtime-backed S3 clients. *)
 
-  type connection
-  (** Client connection handle. *)
+  type client
+  (** Configured S3 client. *)
 
   type +'a io
   (** Runtime effect type. *)
@@ -144,7 +127,7 @@ module type OBJECT = sig
   (** Scoped runtime response-body reader type. *)
 
   val put :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Put.options ->
@@ -158,7 +141,7 @@ module type OBJECT = sig
       [Body.of_string] and [Body.of_bytes] satisfy that contract. *)
 
   val put_string :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Put.options ->
@@ -169,7 +152,7 @@ module type OBJECT = sig
       {!val:put}. *)
 
   val put_bytes :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Put.options ->
@@ -180,7 +163,7 @@ module type OBJECT = sig
       {!val:put}. *)
 
   val get :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Get.options ->
@@ -193,7 +176,7 @@ module type OBJECT = sig
       The returned record contains response metadata and the callback result. *)
 
   val get_string :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Get.options ->
@@ -206,7 +189,7 @@ module type OBJECT = sig
       {!val:get} with a streaming [consume] callback for large objects. *)
 
   val get_bytes :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Get.options ->
@@ -216,7 +199,7 @@ module type OBJECT = sig
   (** Fetch an object into memory as bytes, bounded by [max_bytes]. *)
 
   val find :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Get.options ->
@@ -231,7 +214,7 @@ module type OBJECT = sig
       behavior. *)
 
   val find_string :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Get.options ->
@@ -242,7 +225,7 @@ module type OBJECT = sig
       present. *)
 
   val find_bytes :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Get.options ->
@@ -253,7 +236,7 @@ module type OBJECT = sig
       present. *)
 
   val head :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Head.options ->
@@ -262,7 +245,7 @@ module type OBJECT = sig
   (** Fetch object metadata without reading an object body. *)
 
   val find_metadata :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Head.options ->
@@ -278,7 +261,7 @@ module type OBJECT = sig
       HeadObject service behavior. *)
 
   val exists :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Head.options ->
@@ -293,7 +276,7 @@ module type OBJECT = sig
       failures remain [Error]. *)
 
   val delete :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Object.Delete.options ->
@@ -302,7 +285,7 @@ module type OBJECT = sig
   (** Delete an object or a specific object version. *)
 
   val delete_objects :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     objects:Object.Delete_many.object_ list ->
     ?options:Object.Delete_many.options ->
@@ -314,7 +297,7 @@ module type OBJECT = sig
       even when the operation itself returns [Ok]. *)
 
   val copy :
-    connection ->
+    client ->
     source_bucket:Bucket_name.t ->
     source_key:Object_key.t ->
     destination_bucket:Bucket_name.t ->
@@ -325,7 +308,7 @@ module type OBJECT = sig
   (** Copy an object from one bucket/key to another. *)
 
   val list_versions :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     ?options:Object.Versions.options ->
     unit ->
@@ -334,7 +317,7 @@ module type OBJECT = sig
       follow pagination. *)
 
   val list :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     ?options:Object.List.options ->
     unit ->
@@ -352,7 +335,7 @@ module type OBJECT = sig
               accumulator without fetching another page. *)
 
     val fold_pages :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Object.List.options ->
       ?max_pages:int ->
@@ -364,7 +347,7 @@ module type OBJECT = sig
         next token or [max_pages] is reached. *)
 
     val fold_pages_until :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Object.List.options ->
       ?max_pages:int ->
@@ -376,7 +359,7 @@ module type OBJECT = sig
         next token, [max_pages] is reached, or [f] returns [Stop]. *)
 
     val pages :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Object.List.options ->
       max_pages:int ->
@@ -387,7 +370,7 @@ module type OBJECT = sig
         Returns an error if S3 reports more pages than the bound allows. *)
 
     val objects :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Object.List.options ->
       max_pages:int ->
@@ -396,7 +379,7 @@ module type OBJECT = sig
     (** Collect object summaries across listing pages up to [max_pages]. *)
 
     val keys :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Object.List.options ->
       max_pages:int ->
@@ -415,7 +398,7 @@ module type OBJECT = sig
               accumulator without fetching another page. *)
 
     val fold_pages :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Object.Versions.options ->
       ?max_pages:int ->
@@ -427,7 +410,7 @@ module type OBJECT = sig
         markers or [max_pages] is reached. *)
 
     val fold_pages_until :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Object.Versions.options ->
       ?max_pages:int ->
@@ -442,7 +425,7 @@ module type OBJECT = sig
         markers, [max_pages] is reached, or [f] returns [Stop]. *)
 
     val pages :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Object.Versions.options ->
       max_pages:int ->
@@ -453,7 +436,7 @@ module type OBJECT = sig
         Returns an error if S3 reports more pages than the bound allows. *)
 
     val object_versions :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Object.Versions.options ->
       max_pages:int ->
@@ -462,7 +445,7 @@ module type OBJECT = sig
     (** Collect object-version entries across pages up to [max_pages]. *)
 
     val delete_markers :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Object.Versions.options ->
       max_pages:int ->
@@ -475,7 +458,7 @@ module type OBJECT = sig
     (** Object tagging operations. *)
 
     val get :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       key:Object_key.t ->
       ?options:Object.Tagging.options ->
@@ -484,7 +467,7 @@ module type OBJECT = sig
     (** Fetch object tags. *)
 
     val put :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       key:Object_key.t ->
       ?options:Object.Tagging.options ->
@@ -494,7 +477,7 @@ module type OBJECT = sig
     (** Replace the object's tag set. *)
 
     val delete :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       key:Object_key.t ->
       ?options:Object.Tagging.options ->
@@ -507,14 +490,14 @@ end
 module type BUCKET = sig
   (** Bucket lifecycle and bucket-configuration operations. *)
 
-  type connection
-  (** Client connection handle. *)
+  type client
+  (** Configured S3 client. *)
 
   type +'a io
   (** Runtime effect type. *)
 
   val create :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     ?options:Bucket.Create.options ->
     unit ->
@@ -522,7 +505,7 @@ module type BUCKET = sig
   (** Create a bucket. *)
 
   val delete :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     ?options:Bucket.Delete.options ->
     unit ->
@@ -530,7 +513,7 @@ module type BUCKET = sig
   (** Delete an empty bucket. *)
 
   val head :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     ?options:Bucket.Head.options ->
     unit ->
@@ -538,19 +521,18 @@ module type BUCKET = sig
   (** Check bucket existence and return metadata such as the region hint. *)
 
   val exists :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     ?options:Bucket.Head.options ->
     unit ->
     (bool, Awskit.Error.t) result io
   (** Return [false] for S3 not-found responses and [true] for success. *)
 
-  val list :
-    connection -> (Bucket.List_buckets.result, Awskit.Error.t) result io
+  val list : client -> (Bucket.List_buckets.result, Awskit.Error.t) result io
   (** List buckets visible to the credentials. *)
 
   val get_location :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     ?options:Bucket.Get_location.options ->
     unit ->
@@ -561,7 +543,7 @@ module type BUCKET = sig
     (** Bucket policy operations. Policy documents are opaque validated JSON. *)
 
     val get :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Policy.options ->
       unit ->
@@ -569,7 +551,7 @@ module type BUCKET = sig
     (** Fetch a bucket policy document. *)
 
     val put :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Policy.options ->
       policy:Policy.t ->
@@ -578,7 +560,7 @@ module type BUCKET = sig
     (** Replace the bucket policy document. *)
 
     val delete :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Policy.options ->
       unit ->
@@ -590,7 +572,7 @@ module type BUCKET = sig
     (** Bucket versioning operations. *)
 
     val get :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Versioning.options ->
       unit ->
@@ -598,7 +580,7 @@ module type BUCKET = sig
     (** Fetch bucket versioning state. *)
 
     val put :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Versioning.options ->
       status:Bucket.Versioning.Status.t ->
@@ -611,7 +593,7 @@ module type BUCKET = sig
     (** Bucket tagging operations. *)
 
     val get :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Tagging.options ->
       unit ->
@@ -619,7 +601,7 @@ module type BUCKET = sig
     (** Fetch the bucket tag set. *)
 
     val put :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Tagging.options ->
       tags:Tag.Set.t ->
@@ -628,7 +610,7 @@ module type BUCKET = sig
     (** Replace the bucket tag set. *)
 
     val delete :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Tagging.options ->
       unit ->
@@ -640,7 +622,7 @@ module type BUCKET = sig
     (** Bucket default-encryption operations. *)
 
     val get :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Encryption.options ->
       unit ->
@@ -648,7 +630,7 @@ module type BUCKET = sig
     (** Fetch bucket default-encryption configuration. *)
 
     val put :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Encryption.options ->
       config:Bucket.Encryption.config ->
@@ -657,7 +639,7 @@ module type BUCKET = sig
     (** Replace bucket default-encryption configuration. *)
 
     val delete :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Encryption.options ->
       unit ->
@@ -669,7 +651,7 @@ module type BUCKET = sig
     (** Bucket CORS operations. *)
 
     val get :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Cors.options ->
       unit ->
@@ -677,7 +659,7 @@ module type BUCKET = sig
     (** Fetch bucket CORS configuration. *)
 
     val put :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Cors.options ->
       config:Bucket.Cors.config ->
@@ -686,7 +668,7 @@ module type BUCKET = sig
     (** Replace bucket CORS configuration. *)
 
     val delete :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Cors.options ->
       unit ->
@@ -698,7 +680,7 @@ module type BUCKET = sig
     (** Bucket public-access-block operations. *)
 
     val get :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Public_access_block.options ->
       unit ->
@@ -706,7 +688,7 @@ module type BUCKET = sig
     (** Fetch public-access-block configuration. *)
 
     val put :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Public_access_block.options ->
       config:Bucket.Public_access_block.config ->
@@ -715,7 +697,7 @@ module type BUCKET = sig
     (** Replace public-access-block configuration. *)
 
     val delete :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Public_access_block.options ->
       unit ->
@@ -727,7 +709,7 @@ module type BUCKET = sig
     (** Bucket ownership-controls operations. *)
 
     val get :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Ownership_controls.options ->
       unit ->
@@ -735,7 +717,7 @@ module type BUCKET = sig
     (** Fetch ownership-controls configuration. *)
 
     val put :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Ownership_controls.options ->
       config:Bucket.Ownership_controls.config ->
@@ -744,7 +726,7 @@ module type BUCKET = sig
     (** Replace ownership-controls configuration. *)
 
     val delete :
-      connection ->
+      client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Ownership_controls.options ->
       unit ->
@@ -756,8 +738,8 @@ end
 module type MULTIPART = sig
   (** Multipart upload operations. *)
 
-  type connection
-  (** Client connection handle. *)
+  type client
+  (** Configured S3 client. *)
 
   type +'a io
   (** Runtime effect type. *)
@@ -766,7 +748,7 @@ module type MULTIPART = sig
   (** Runtime-owned request body type. *)
 
   val create_upload :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Multipart.Create.options ->
@@ -775,7 +757,7 @@ module type MULTIPART = sig
   (** Start a multipart upload and return its upload handle. *)
 
   val upload_part :
-    connection ->
+    client ->
     upload:_ Multipart.Upload.t ->
     part_number:Multipart.Part_number.t ->
     body:request_body ->
@@ -788,7 +770,7 @@ module type MULTIPART = sig
       accurate known content length. *)
 
   val complete_upload :
-    connection ->
+    client ->
     upload:_ Multipart.Upload.t ->
     ?options:Multipart.Complete.options ->
     parts:Multipart.Part.t list ->
@@ -797,7 +779,7 @@ module type MULTIPART = sig
   (** Complete a multipart upload using the supplied completed part list. *)
 
   val abort_upload :
-    connection ->
+    client ->
     upload:_ Multipart.Upload.t ->
     ?options:Multipart.Abort.options ->
     unit ->
@@ -805,7 +787,7 @@ module type MULTIPART = sig
   (** Abort a multipart upload. *)
 
   val list_parts :
-    connection ->
+    client ->
     upload:_ Multipart.Upload.t ->
     ?options:Multipart.List_parts.options ->
     unit ->
@@ -817,7 +799,7 @@ module type MULTIPART = sig
     (** Pagination helpers for [ListParts]. *)
 
     val fold_pages :
-      connection ->
+      client ->
       upload:_ Multipart.Upload.t ->
       ?options:Multipart.List_parts.options ->
       ?max_pages:int ->
@@ -829,7 +811,7 @@ module type MULTIPART = sig
         next marker or [max_pages] is reached. *)
 
     val pages :
-      connection ->
+      client ->
       upload:_ Multipart.Upload.t ->
       ?options:Multipart.List_parts.options ->
       ?max_pages:int ->
@@ -841,7 +823,7 @@ module type MULTIPART = sig
         than the bound allows. *)
 
     val parts :
-      connection ->
+      client ->
       upload:_ Multipart.Upload.t ->
       ?options:Multipart.List_parts.options ->
       ?max_pages:int ->
@@ -855,16 +837,16 @@ module type MULTIPART = sig
 end
 
 module type PRESIGNED = sig
-  (** Presigned request artifact helpers bound to a client connection. *)
+  (** Presigned request artifact helpers bound to a configured S3 client. *)
 
-  type connection
-  (** Client connection handle. *)
+  type client
+  (** Configured S3 client. *)
 
   type +'a io
   (** Runtime effect type. *)
 
   val get_object :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Presigned.Get_object.options ->
@@ -873,7 +855,7 @@ module type PRESIGNED = sig
   (** Generate a presigned [GET Object] request artifact. *)
 
   val put_object :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Presigned.Put_object.options ->
@@ -883,7 +865,7 @@ module type PRESIGNED = sig
       the result must be sent by the eventual uploader. *)
 
   val head_object :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Presigned.Head_object.options ->
@@ -892,7 +874,7 @@ module type PRESIGNED = sig
   (** Generate a presigned [HEAD Object] request artifact. *)
 
   val delete_object :
-    connection ->
+    client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
     ?options:Presigned.Delete_object.options ->
@@ -901,7 +883,7 @@ module type PRESIGNED = sig
   (** Generate a presigned [DELETE Object] request artifact. *)
 
   val upload_part :
-    connection ->
+    client ->
     upload:_ Multipart.Upload.t ->
     part_number:Multipart.Part_number.t ->
     ?options:Presigned.Upload_part.options ->
@@ -912,10 +894,13 @@ module type PRESIGNED = sig
 end
 
 module type S = sig
-  (** Complete S3 client surface for one runtime. *)
+  (** Complete configured S3 client surface for one runtime. *)
 
-  type connection
-  (** Client connection handle. *)
+  type t
+  (** Configured S3 client passed to operations. *)
+
+  type runtime_connection
+  (** Underlying connection owned by the selected runtime. *)
 
   type +'a io
   (** Runtime effect type. *)
@@ -926,12 +911,11 @@ module type S = sig
   type response_body_reader
   (** Scoped runtime response-body reader type. *)
 
-  module Runtime :
-    RUNTIME
-      with type connection = connection
-       and type 'a t = 'a io
-       and type request_body = request_body
-       and type response_body_reader = response_body_reader
+  val create : ?endpoint_config:Endpoint_config.t -> runtime_connection -> t
+  (** Bind S3 endpoint and addressing policy to a runtime connection. *)
+
+  val runtime_connection : t -> runtime_connection
+  (** Return the underlying runtime connection for runtime integrations. *)
 
   (** Request-body constructors for this runtime adapter. *)
   module Body : BODY with type 'a io = 'a io and type t = request_body
@@ -942,22 +926,20 @@ module type S = sig
 
   module Object :
     OBJECT
-      with type connection = connection
+      with type client = t
        and type 'a io = 'a io
        and type request_body = request_body
        and type response_body_reader = response_body_reader
 
-  module Bucket :
-    BUCKET with type connection = connection and type 'a io = 'a io
+  module Bucket : BUCKET with type client = t and type 'a io = 'a io
 
   module Multipart :
     MULTIPART
-      with type connection = connection
+      with type client = t
        and type 'a io = 'a io
        and type request_body = request_body
 
-  module Presigned :
-    PRESIGNED with type connection = connection and type 'a io = 'a io
+  module Presigned : PRESIGNED with type client = t and type 'a io = 'a io
 end
 
 module Credentials = Awskit.Credentials
@@ -1041,9 +1023,9 @@ module Transfer = Transfer
 module Policy = Policy
 module Presigned = Presigned
 
-module Make (R : RUNTIME) :
+module Make (R : Awskit.Runtime.S) :
   S
-    with type connection = R.connection
+    with type runtime_connection = R.connection
      and type 'a io = 'a R.t
      and type request_body = R.request_body
      and type response_body_reader = R.response_body_reader

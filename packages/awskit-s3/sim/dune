@@ -24,7 +24,6 @@
   simulator_object_tagging
   simulator_object_versions
   simulator_object_write
-  simulator_presigned
   simulator_runtime
   simulator_state
   simulator_store

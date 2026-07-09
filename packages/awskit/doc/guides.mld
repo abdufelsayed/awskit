@@ -384,9 +384,12 @@ authors can see exactly which law belongs to which part of the runtime:
   {li [Retry] and [Timeout] for operational policy}
 }
 
-S3 adapters extend the core runtime with [S3_endpoint.s3_endpoint_config] so S3
-endpoint resolution can stay AWS-aware without putting S3 concepts into the core
-AWS runtime abstraction. Run [opam exec -- dune build @runtime-http-contracts]
-when changing a runtime implementation; the workload checks shared runtime HTTP
-behavior, including bodiless responses, framing, body-reader, and error-path
-behavior.
+S3 uses this ordinary runtime contract directly. Apply [Awskit_s3.Make] to the
+runtime module, create the runtime connection, then call [S3.create] once to
+bind the connection to S3 endpoint and addressing policy. The resulting
+configured S3 client is passed to operations; S3-specific configuration is not
+a runtime capability.
+
+Run [opam exec -- dune build @runtime-http-contracts] when changing a runtime
+implementation; the workload checks shared runtime HTTP behavior, including
+bodiless responses, framing, body-reader, and error-path behavior.

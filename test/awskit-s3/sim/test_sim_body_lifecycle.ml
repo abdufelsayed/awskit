@@ -2,40 +2,20 @@ open Awskit_s3
 open Test_sim_contract_support
 module Simulator = Awskit_s3_sim
 
-let stream_body ?content_length write =
-  let descriptor =
-    Awskit.Body.Request.descriptor_exn ?content_length
-      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:false
-      ()
-  in
-  Simulator.Runtime.Request_body.of_stream descriptor ~write
+let stream_body ~content_length write =
+  Simulator.Body.of_stream ~content_length ~replayable:false ~write
+  |> ok_or_fail "create stream body"
 
-let test_request_body_requires_known_length () =
-  let conn = make_simulator () in
-  let body =
-    stream_body (fun writer ->
-        Simulator.Runtime.Request_body.write_string writer "body")
-  in
-  expect_validation_field "unknown length put" "content_length"
-    (Simulator.Object.put conn
-       ~bucket:(bucket_name "test-bucket")
-       ~key:(object_key "unknown") ~body ());
-  let created =
-    Simulator.Multipart.create_upload conn
-      ~bucket:(bucket_name "test-bucket")
-      ~key:(object_key "large.bin") ()
-    |> ok_or_fail "create upload"
-  in
-  expect_validation_field "unknown length part" "content_length"
-    (Simulator.Multipart.upload_part conn ~upload:created.upload
-       ~part_number:(Multipart.Part_number.of_int_exn 1)
-       ~body ())
+let test_request_body_rejects_negative_length () =
+  expect_validation_field "negative body length" "content_length"
+    (Simulator.Body.of_stream ~content_length:(-1L) ~replayable:false
+       ~write:(fun writer -> Simulator.Body.Writer.write_string writer "body"))
 
 let test_request_body_rejects_length_mismatch () =
   let conn = make_simulator () in
   let short =
     stream_body ~content_length:4L (fun writer ->
-        Simulator.Runtime.Request_body.write_string writer "ab")
+        Simulator.Body.Writer.write_string writer "ab")
   in
   expect_body_error "short body"
     (Simulator.Object.put conn
@@ -43,9 +23,9 @@ let test_request_body_rejects_length_mismatch () =
        ~key:(object_key "short") ~body:short ());
   let long =
     stream_body ~content_length:4L (fun writer ->
-        match Simulator.Runtime.Request_body.write_string writer "abcd" with
+        match Simulator.Body.Writer.write_string writer "abcd" with
         | Error _ as error -> error
-        | Ok () -> Simulator.Runtime.Request_body.write_string writer "e")
+        | Ok () -> Simulator.Body.Writer.write_string writer "e")
   in
   expect_body_error "long body"
     (Simulator.Object.put conn
@@ -64,7 +44,7 @@ let test_stream_error_does_not_store_part () =
   let stream_error = Awskit.Error.Producer.body "multipart stream failed" in
   let body =
     stream_body ~content_length:4L (fun writer ->
-        match Simulator.Runtime.Request_body.write_string writer "ab" with
+        match Simulator.Body.Writer.write_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
@@ -83,7 +63,7 @@ let test_stream_error_does_not_store_object () =
   let stream_error = Awskit.Error.Producer.body "put stream failed" in
   let body =
     stream_body ~content_length:4L (fun writer ->
-        match Simulator.Runtime.Request_body.write_string writer "ab" with
+        match Simulator.Body.Writer.write_string writer "ab" with
         | Error _ as error -> error
         | Ok () -> Error stream_error)
   in
@@ -136,8 +116,8 @@ let suite =
   [
     ( "contract:awskit-s3-sim:body-lifecycle",
       [
-        Alcotest.test_case "requires known length" `Quick
-          test_request_body_requires_known_length;
+        Alcotest.test_case "rejects negative length" `Quick
+          test_request_body_rejects_negative_length;
         Alcotest.test_case "rejects length mismatch" `Quick
           test_request_body_rejects_length_mismatch;
         Alcotest.test_case "stream error leaves no part" `Quick

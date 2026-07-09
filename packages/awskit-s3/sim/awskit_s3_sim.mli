@@ -45,7 +45,7 @@ val create_store : ?config:config -> clock:Clock.t -> unit -> store
 (** Create an empty store using a deterministic clock. *)
 
 type t
-(** Simulator connection handle. *)
+(** Configured simulator S3 client. *)
 
 val connect : store -> credentials:Awskit.Credentials.t -> t
 (** Connect to a store with credentials used by presigning/signing helpers. *)
@@ -53,18 +53,19 @@ val connect : store -> credentials:Awskit.Credentials.t -> t
 val store : t -> store
 (** Return the underlying shared store. *)
 
-(** Direct-style runtime used by the simulator. *)
-module Runtime : Awskit_s3.RUNTIME with type 'a t = 'a and type connection = t
-
 (** In-memory simulator request bodies. *)
-module Body :
-  Awskit_s3.BODY with type 'a io := 'a and type t = Runtime.request_body
+module Body : sig
+  type t
+
+  include Awskit_s3.BODY with type 'a io := 'a and type t := t
+end
 
 (** In-memory simulator response-body readers. *)
-module Reader :
-  Awskit_s3.READER
-    with type 'a io := 'a
-     and type t = Runtime.response_body_reader
+module Reader : sig
+  type t
+
+  include Awskit_s3.READER with type 'a io := 'a and type t := t
+end
 
 (** Deterministic fault kinds that can be injected before operations. *)
 type fault = Slow_down | Internal_error | Connection_reset | Response_lost
@@ -139,22 +140,22 @@ val objects_as_strings :
 (** Object operations against the in-memory simulator store. *)
 module Object :
   Awskit_s3.OBJECT
-    with type connection := t
+    with type client := t
      and type 'a io := 'a
      and type request_body := Body.t
      and type response_body_reader := Reader.t
 
 (** Bucket operations against the in-memory simulator store. *)
-module Bucket : Awskit_s3.BUCKET with type connection := t and type 'a io := 'a
+module Bucket : Awskit_s3.BUCKET with type client := t and type 'a io := 'a
 
 (** Multipart operations against the in-memory simulator store. *)
 module Multipart :
   Awskit_s3.MULTIPART
-    with type connection := t
+    with type client := t
      and type 'a io := 'a
      and type request_body := Body.t
 
-(** Presigned request artifact helpers using the simulator connection's
-    credentials and deterministic clock. *)
+(** Presigned request artifact helpers using the simulator client's credentials
+    and deterministic clock. *)
 module Presigned :
-  Awskit_s3.PRESIGNED with type connection := t and type 'a io := 'a
+  Awskit_s3.PRESIGNED with type client := t and type 'a io := 'a

@@ -18,7 +18,6 @@ module Runtime = struct
   type connection = {
     region : Region.t;
     credentials : Credentials.t;
-    endpoint_config : Awskit_s3.endpoint_config;
     retry_policy : Awskit.Retry.t;
     mutable calls : call list;
     mutable responses : response list;
@@ -36,19 +35,10 @@ module Runtime = struct
     mutable offset : int;
   }
 
-  let connect ?(endpoint_config = Awskit_s3.default_endpoint_config)
-      ?(region = Region.of_string_exn "us-east-1")
+  let connect ?(region = Region.of_string_exn "us-east-1")
       ?(credentials = Protocol_support.credentials)
       ?(retry_policy = Awskit.Retry.default) responses =
-    {
-      region;
-      credentials;
-      endpoint_config;
-      retry_policy;
-      calls = [];
-      responses;
-      sleeps = [];
-    }
+    { region; credentials; retry_policy; calls = []; responses; sleeps = [] }
 
   let last_call conn =
     match conn.calls with
@@ -273,22 +263,21 @@ module Runtime = struct
 
     let policy _ = Awskit.Timeout.default
   end
-
-  module S3_endpoint = struct
-    type nonrec connection = connection
-
-    let s3_endpoint_config conn = conn.endpoint_config
-  end
 end
 
 module S3 = Awskit_s3.Make (Runtime)
 
 type response = Runtime.response
 type call = Runtime.call
-type connection = Runtime.connection
+type connection = S3.t
 
-let connect = Runtime.connect
-let last_call = Runtime.last_call
+let connect ?endpoint_config ?region ?credentials ?retry_policy responses =
+  Runtime.connect ?region ?credentials ?retry_policy responses
+  |> S3.create ?endpoint_config
+
+let runtime_connection = S3.runtime_connection
+let last_call conn = Runtime.last_call (runtime_connection conn)
+let calls conn = (runtime_connection conn).Runtime.calls
 
 let response ?(headers = []) ?read_error_after status body =
   { Runtime.status; headers; body; read_error_after }

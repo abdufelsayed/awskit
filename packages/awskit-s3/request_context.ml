@@ -1,19 +1,9 @@
 module Error = S3_error
 
-module type RUNTIME = sig
-  include Awskit.Runtime.S
-
-  module S3_endpoint : sig
-    type nonrec connection = connection
-
-    val s3_endpoint_config : connection -> Endpoint_resolver.t
-  end
-end
-
 module type S = sig
-  module R : RUNTIME
+  module R : Awskit.Runtime.S
 
-  type connection = R.connection
+  type connection
   type 'a io = 'a R.t
   type request_body = R.request_body
   type response_body_reader = R.response_body_reader
