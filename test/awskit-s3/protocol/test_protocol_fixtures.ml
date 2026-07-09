@@ -473,21 +473,18 @@ let test_bucket_versioning_xml_fixture () =
     ~actual:(describe_request (Protocol_recording_runtime.last_call conn))
 
 let test_bucket_encryption_xml_fixture () =
+  let default_encryption =
+    Bucket.Encryption.Default_encryption.sse_kms_exn
+      ~key_id:"arn:aws:kms:us-east-1:123456789012:key/test"
+      ~bucket_key_enabled:true ()
+  in
   let config =
-    {
-      Bucket.Encryption.rules =
-        [
-          {
-            Bucket.Encryption.Rule.sse_algorithm =
-              Some Bucket.Encryption.Algorithm.Aws_kms;
-            kms_master_key_id =
-              Some "arn:aws:kms:us-east-1:123456789012:key/test";
-            bucket_key_enabled = Some true;
-            blocked_encryption_types =
-              [ Bucket.Encryption.Blocked_encryption_type.Sse_c ];
-          };
-        ];
-    }
+    Bucket.Encryption.Config.singleton
+      (Bucket.Encryption.Rule.Default_and_sse_c
+         {
+           default_encryption;
+           sse_c_policy = Bucket.Encryption.Sse_c_policy.Block;
+         })
   in
   let options =
     Bucket.Encryption.options_exn
@@ -507,35 +504,147 @@ let test_bucket_encryption_xml_fixture () =
     [ "bucket"; "encryption-put.expected" ]
     ~actual:(describe_request (Protocol_recording_runtime.last_call conn))
 
-let test_bucket_encryption_rejects_dsse_bucket_key () =
-  let config =
-    {
-      Bucket.Encryption.rules =
-        [
-          {
-            Bucket.Encryption.Rule.sse_algorithm =
-              Some Bucket.Encryption.Algorithm.Aws_kms_dsse;
-            kms_master_key_id =
-              Some "arn:aws:kms:us-east-1:123456789012:key/test";
-            bucket_key_enabled = Some true;
-            blocked_encryption_types = [];
-          };
-        ];
-    }
+let encryption_body rule =
+  let conn =
+    Protocol_recording_runtime.connect
+      [ Protocol_recording_runtime.response 200 "" ]
+  in
+  ignore
+    (Protocol_recording_runtime.S3.Bucket.Encryption.put conn
+       ~bucket:(Protocol_support.bucket_name "my-bucket")
+       ~config:(Bucket.Encryption.Config.singleton rule)
+       ()
+    |> Protocol_support.ok_or_fail "put bucket encryption");
+  (Protocol_recording_runtime.last_call conn).body
+
+let test_bucket_encryption_rule_shapes () =
+  Alcotest.(check string)
+    "SSE-S3"
+    "<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>"
+    (encryption_body
+       (Bucket.Encryption.Rule.Default
+          Bucket.Encryption.Default_encryption.sse_s3));
+  let dsse =
+    Bucket.Encryption.Default_encryption.dsse_kms_exn ~key_id:"key-id" ()
+  in
+  Alcotest.(check string)
+    "DSSE-KMS"
+    "<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms:dsse</SSEAlgorithm><KMSMasterKeyID>key-id</KMSMasterKeyID></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>"
+    (encryption_body (Bucket.Encryption.Rule.Default dsse));
+  Alcotest.(check string)
+    "allow SSE-C"
+    "<ServerSideEncryptionConfiguration><Rule><BlockedEncryptionTypes><EncryptionType>NONE</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>"
+    (encryption_body
+       (Bucket.Encryption.Rule.Sse_c Bucket.Encryption.Sse_c_policy.Allow))
+
+let test_bucket_encryption_constructor_validation () =
+  expect_validation_field "kms key id"
+    (Bucket.Encryption.Default_encryption.sse_kms ~key_id:"bad\nkey" ());
+  expect_validation_field "kms key id"
+    (Bucket.Encryption.Default_encryption.dsse_kms ~key_id:"\255" ());
+  expect_validation_field "encryption" (Bucket.Encryption.Config.of_rules [])
+
+let test_bucket_encryption_preserves_unknown_response_tokens () =
+  let body =
+    "<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>future:algorithm</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BlockedEncryptionTypes><EncryptionType>FUTURE</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>"
+  in
+  let conn =
+    Protocol_recording_runtime.connect
+      [ Protocol_recording_runtime.response 200 body ]
+  in
+  let result =
+    Protocol_recording_runtime.S3.Bucket.Encryption.get conn
+      ~bucket:(Protocol_support.bucket_name "my-bucket")
+      ()
+    |> Protocol_support.ok_or_fail "get bucket encryption"
+  in
+  match result.config.rules with
+  | [ rule ] ->
+      let algorithm =
+        match rule.default_encryption with
+        | Some { algorithm = Some algorithm; _ } -> algorithm
+        | _ -> Alcotest.fail "expected observed default encryption"
+      in
+      Alcotest.(check string)
+        "unknown algorithm" "future:algorithm"
+        (Bucket.Encryption.Observed.Algorithm.to_string algorithm);
+      let policy =
+        match rule.sse_c_policies with
+        | [ policy ] -> policy
+        | _ -> Alcotest.fail "expected observed SSE-C policy"
+      in
+      Alcotest.(check string)
+        "unknown policy" "FUTURE"
+        (Bucket.Encryption.Observed.Sse_c_policy.to_string policy)
+  | _ -> Alcotest.fail "expected one observed encryption rule"
+
+let cors_rule ?id ?(allowed_origins = [ "https://example.com" ])
+    ?(allowed_methods = [ Bucket.Cors.Method.Get ]) ?allowed_headers
+    ?expose_headers ?max_age_seconds () =
+  Bucket.Cors.Rule.create ?id ~allowed_origins ~allowed_methods ?allowed_headers
+    ?expose_headers ?max_age_seconds ()
+
+let test_bucket_cors_constructor_validation () =
+  expect_validation_field "cors" (cors_rule ~allowed_origins:[] ());
+  expect_validation_field "cors" (cors_rule ~allowed_methods:[] ());
+  expect_validation_field "allowed origin"
+    (cors_rule ~allowed_origins:[ "bad\norigin" ] ());
+  expect_validation_field "allowed origin"
+    (cors_rule ~allowed_origins:[ "\255" ] ());
+  expect_validation_field "cors rule id"
+    (cors_rule ~id:(String.make 256 'a') ());
+  expect_validation_field "cors" (cors_rule ~max_age_seconds:(-1) ());
+  expect_validation_field "cors" (Bucket.Cors.Config.of_rules []);
+  let rule = cors_rule () |> Protocol_support.ok_or_fail "CORS rule" in
+  ignore
+    (Bucket.Cors.Config.of_rules (List.init 100 (fun _ -> rule))
+    |> Protocol_support.ok_or_fail "100 CORS rules");
+  expect_validation_field "cors"
+    (Bucket.Cors.Config.of_rules (List.init 101 (fun _ -> rule)))
+
+let test_bucket_cors_xml () =
+  let rule =
+    cors_rule ~id:"browser" ~allowed_origins:[ "https://example.com" ]
+      ~allowed_methods:[ Bucket.Cors.Method.Get; Put ]
+      ~allowed_headers:[ "x-requested-with" ] ~expose_headers:[ "etag" ]
+      ~max_age_seconds:300 ()
+    |> Protocol_support.ok_or_fail "CORS rule"
   in
   let conn =
     Protocol_recording_runtime.connect
       [ Protocol_recording_runtime.response 200 "" ]
   in
-  let result =
-    Protocol_recording_runtime.S3.Bucket.Encryption.put conn
-      ~bucket:(Protocol_support.bucket_name "my-bucket")
-      ~config ()
+  ignore
+    (Protocol_recording_runtime.S3.Bucket.Cors.put conn
+       ~bucket:(Protocol_support.bucket_name "my-bucket")
+       ~config:(Bucket.Cors.Config.singleton rule)
+       ()
+    |> Protocol_support.ok_or_fail "put bucket CORS");
+  Alcotest.(check string)
+    "CORS XML"
+    "<CORSConfiguration><CORSRule><ID>browser</ID><AllowedOrigin>https://example.com</AllowedOrigin><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedHeader>x-requested-with</AllowedHeader><ExposeHeader>etag</ExposeHeader><MaxAgeSeconds>300</MaxAgeSeconds></CORSRule></CORSConfiguration>"
+    (Protocol_recording_runtime.last_call conn).body
+
+let test_bucket_cors_preserves_unknown_method () =
+  let body =
+    "<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin><AllowedMethod>PATCH</AllowedMethod></CORSRule></CORSConfiguration>"
   in
-  expect_validation_field "bucket_key_enabled" result;
-  Alcotest.(check int)
-    "no request sent" 0
-    (List.length (Protocol_recording_runtime.calls conn))
+  let conn =
+    Protocol_recording_runtime.connect
+      [ Protocol_recording_runtime.response 200 body ]
+  in
+  let result =
+    Protocol_recording_runtime.S3.Bucket.Cors.get conn
+      ~bucket:(Protocol_support.bucket_name "my-bucket")
+      ()
+    |> Protocol_support.ok_or_fail "get bucket CORS"
+  in
+  match result.config.rules with
+  | [ { allowed_methods = [ method_ ]; _ } ] ->
+      Alcotest.(check string)
+        "unknown method" "PATCH"
+        (Bucket.Cors.Method.observed_to_string method_)
+  | _ -> Alcotest.fail "expected one observed CORS rule and method"
 
 let describe_list_page (page : Object.List.page) =
   let render_prefix = Object_key.Prefix.to_string in
@@ -732,8 +841,17 @@ let suite =
           test_bucket_versioning_xml_fixture;
         Alcotest.test_case "bucket encryption XML" `Quick
           test_bucket_encryption_xml_fixture;
-        Alcotest.test_case "bucket encryption rejects DSSE bucket key" `Quick
-          test_bucket_encryption_rejects_dsse_bucket_key;
+        Alcotest.test_case "bucket encryption rule shapes" `Quick
+          test_bucket_encryption_rule_shapes;
+        Alcotest.test_case "bucket encryption constructors" `Quick
+          test_bucket_encryption_constructor_validation;
+        Alcotest.test_case "bucket encryption observed unknowns" `Quick
+          test_bucket_encryption_preserves_unknown_response_tokens;
+        Alcotest.test_case "bucket CORS constructors" `Quick
+          test_bucket_cors_constructor_validation;
+        Alcotest.test_case "bucket CORS XML" `Quick test_bucket_cors_xml;
+        Alcotest.test_case "bucket CORS observed unknown method" `Quick
+          test_bucket_cors_preserves_unknown_method;
         Alcotest.test_case "ListObjectsV2 XML" `Quick
           test_list_objects_v2_fixture;
         Alcotest.test_case "service error XML" `Quick test_service_error_fixture;

@@ -33,6 +33,10 @@
    (run
     ./test_awskit_s3_sim.exe
     test
+    "contract:awskit-s3-sim:bucket-configurations")
+   (run
+    ./test_awskit_s3_sim.exe
+    test
     "contract:awskit-s3-sim:list-pagination")
    (run
     ./test_awskit_s3_sim.exe

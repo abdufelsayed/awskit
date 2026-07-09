@@ -471,17 +471,9 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
-      let return_error =
-        S3_error_context.return_s3_error return_error
-          ~operation:"PutBucketEncryption" ~bucket:bucket_context
-      in
-      match Bucket_encryption_xml.validate_config config with
-      | Error error -> return_error error
-      | Ok () ->
-          put_xml ?expected_bucket_owner conn ~bucket ~subresource:"encryption"
-            ~operation:"PutBucketEncryption"
-            ~body:(Bucket_encryption_xml.xml config)
+      put_xml ?expected_bucket_owner conn ~bucket ~subresource:"encryption"
+        ~operation:"PutBucketEncryption"
+        ~body:(Bucket_encryption_xml.xml config)
 
     let delete conn ~bucket ?options () =
       let expected_bucket_owner =
@@ -511,17 +503,9 @@ module Make (C : Request_context.S) = struct
           (fun (options : Bucket_cors.options) -> options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
-      let return_error =
-        S3_error_context.return_s3_error return_error ~operation:"PutBucketCors"
-          ~bucket:bucket_context
-      in
-      match Bucket_cors_xml.validate_config config with
-      | Error error -> return_error error
-      | Ok () ->
-          put_xml ?expected_bucket_owner conn ~bucket ~subresource:"cors"
-            ~operation:"PutBucketCors"
-            ~body:(Bucket_cors_xml.xml config)
+      put_xml ?expected_bucket_owner conn ~bucket ~subresource:"cors"
+        ~operation:"PutBucketCors"
+        ~body:(Bucket_cors_xml.xml config)
 
     let delete conn ~bucket ?options () =
       let expected_bucket_owner =

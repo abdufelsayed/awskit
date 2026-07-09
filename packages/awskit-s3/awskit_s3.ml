@@ -584,7 +584,7 @@ module type BUCKET = sig
       client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Encryption.options ->
-      config:Bucket.Encryption.config ->
+      config:Bucket.Encryption.Config.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Replace bucket default-encryption configuration. *)
@@ -613,7 +613,7 @@ module type BUCKET = sig
       client ->
       bucket:Bucket_name.t ->
       ?options:Bucket.Cors.options ->
-      config:Bucket.Cors.config ->
+      config:Bucket.Cors.Config.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Replace bucket CORS configuration. *)

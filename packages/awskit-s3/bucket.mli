@@ -196,44 +196,93 @@ module Encryption : sig
   }
   (** Bucket encryption request options. *)
 
-  (** Bucket default encryption configuration. *)
-  module Algorithm : sig
-    (** Server-side encryption algorithms returned by S3. Unknown values are
-        preserved for forward compatibility. *)
-    type t = Aes256 | Aws_kms | Aws_kms_dsse | Unknown of string
+  module Default_encryption : sig
+    (** Valid default encryption for new bucket objects. The private variant
+        keeps its alternatives inspectable while requiring validated KMS key
+        strings. *)
+    type t = private
+      | Sse_s3
+      | Sse_kms of { key_id : string option; bucket_key_enabled : bool option }
+      | Dsse_kms of { key_id : string option }
 
-    val to_string : t -> string
-    val of_string : string -> t
+    val sse_s3 : t
+    (** S3-managed AES256 encryption. *)
+
+    val sse_kms :
+      ?key_id:string ->
+      ?bucket_key_enabled:bool ->
+      unit ->
+      (t, Awskit.Error.t) Stdlib.result
+    (** Validated SSE-KMS encryption. An omitted key uses the service default.
+    *)
+
+    val sse_kms_exn : ?key_id:string -> ?bucket_key_enabled:bool -> unit -> t
+
+    val dsse_kms : ?key_id:string -> unit -> (t, Awskit.Error.t) Stdlib.result
+    (** Validated DSSE-KMS encryption. Bucket keys are absent by construction.
+    *)
+
+    val dsse_kms_exn : ?key_id:string -> unit -> t
   end
 
-  module Blocked_encryption_type : sig
-    (** S3 bucket-key blocked encryption type values. Unknown values are
-        preserved. *)
-    type t = Sse_c | No_block | Unknown of string
-
-    val to_string : t -> string
-    val of_string : string -> t
+  module Sse_c_policy : sig
+    (** Whether uploads using customer-provided encryption keys are allowed or
+        blocked. *)
+    type t = Allow | Block
   end
 
   module Rule : sig
-    type t = {
-      sse_algorithm : Algorithm.t option;
-          (** Default server-side encryption algorithm. *)
-      kms_master_key_id : string option;
-          (** KMS key id/ARN when AWS KMS encryption is configured. *)
-      bucket_key_enabled : bool option;
-          (** Whether S3 Bucket Keys are enabled for KMS. *)
-      blocked_encryption_types : Blocked_encryption_type.t list;
-          (** Encryption types blocked by the bucket configuration, if S3
-              returns them. *)
-    }
-    (** One default-encryption rule. *)
+    (** One sendable encryption rule. Every case has a documented effect. *)
+    type t =
+      | Default of Default_encryption.t
+      | Sse_c of Sse_c_policy.t
+      | Default_and_sse_c of {
+          default_encryption : Default_encryption.t;
+          sse_c_policy : Sse_c_policy.t;
+        }
   end
 
-  type config = { rules : Rule.t list }
-  (** Bucket encryption configuration. *)
+  module Config : sig
+    type t = private { rules : Rule.t list }
+    (** Non-empty ordered bucket encryption configuration. *)
 
-  type result = { config : config; response : Awskit.Response.t }
+    val singleton : Rule.t -> t
+    val of_rules : Rule.t list -> (t, Awskit.Error.t) Stdlib.result
+    val of_rules_exn : Rule.t list -> t
+  end
+
+  module Observed : sig
+    module Algorithm : sig
+      type t = Aes256 | Aws_kms | Aws_kms_dsse | Unknown of string
+
+      val to_string : t -> string
+      val of_string : string -> t
+    end
+
+    module Sse_c_policy : sig
+      type t = Allow | Block | Unknown of string
+
+      val to_string : t -> string
+      val of_string : string -> t
+    end
+
+    type default_encryption = {
+      algorithm : Algorithm.t option;
+      kms_key_id : string option;
+    }
+
+    type rule = {
+      default_encryption : default_encryption option;
+      bucket_key_enabled : bool option;
+      sse_c_policies : Sse_c_policy.t list;
+    }
+
+    type t = { rules : rule list }
+    (** Configuration observed on the wire. Unknown future tokens and unusual
+        response combinations are preserved but cannot be sent by [put]. *)
+  end
+
+  type result = { config : Observed.t; response : Awskit.Response.t }
   (** [GetBucketEncryption] result metadata. *)
 
   val default_options : options
@@ -258,28 +307,75 @@ module Cors : sig
 
   (** Bucket CORS configuration. *)
   module Method : sig
-    (** HTTP methods accepted in CORS rules. *)
+    (** Closed HTTP-method vocabulary for sendable rules. *)
     type t = Get | Put | Post | Delete | Head
+
+    (** A method observed in a response. *)
+    type observed = Known of t | Unknown of string
 
     val to_string : t -> string
     val of_string : string -> t option
+    val observed_to_string : observed -> string
+    val observed_of_string : string -> observed
   end
 
-  type rule = {
-    id : string option;  (** Optional S3 rule id. *)
-    allowed_origins : string list;  (** Allowed CORS origins. *)
-    allowed_methods : Method.t list;  (** Allowed HTTP methods. *)
-    allowed_headers : string list;  (** Request headers allowed by browsers. *)
-    expose_headers : string list;
-        (** Response headers browsers may expose to callers. *)
-    max_age_seconds : int option;  (** Browser preflight cache lifetime. *)
-  }
-  (** One CORS rule. Lists are emitted in the order supplied by the caller. *)
+  module Rule : sig
+    type t = private {
+      id : string option;
+      allowed_origins : string list;
+      allowed_methods : Method.t list;
+      allowed_headers : string list;
+      expose_headers : string list;
+      max_age_seconds : int option;
+    }
+    (** A sendable CORS rule. Lists are emitted in caller order. *)
 
-  type config = { rules : rule list }
-  (** Bucket CORS configuration sent to or returned from S3. *)
+    val create :
+      ?id:string ->
+      allowed_origins:string list ->
+      allowed_methods:Method.t list ->
+      ?allowed_headers:string list ->
+      ?expose_headers:string list ->
+      ?max_age_seconds:int ->
+      unit ->
+      (t, Awskit.Error.t) Stdlib.result
 
-  type result = { config : config; response : Awskit.Response.t }
+    val create_exn :
+      ?id:string ->
+      allowed_origins:string list ->
+      allowed_methods:Method.t list ->
+      ?allowed_headers:string list ->
+      ?expose_headers:string list ->
+      ?max_age_seconds:int ->
+      unit ->
+      t
+  end
+
+  module Config : sig
+    type t = private { rules : Rule.t list }
+    (** An ordered CORS configuration containing one through 100 rules. *)
+
+    val singleton : Rule.t -> t
+    val of_rules : Rule.t list -> (t, Awskit.Error.t) Stdlib.result
+    val of_rules_exn : Rule.t list -> t
+  end
+
+  module Observed : sig
+    type rule = {
+      id : string option;
+      allowed_origins : string list;
+      allowed_methods : Method.observed list;
+      allowed_headers : string list;
+      expose_headers : string list;
+      max_age_seconds : int option;
+    }
+
+    type t = { rules : rule list }
+    (** CORS configuration observed on the wire. Unknown methods are preserved
+        but cannot be sent by [put]. *)
+  end
+
+  type result = { config : Observed.t; response : Awskit.Response.t }
   (** [GetBucketCors] result metadata. *)
 
   val default_options : options

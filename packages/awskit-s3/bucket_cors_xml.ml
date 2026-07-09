@@ -4,40 +4,7 @@ let ( let* ) = S3_result.( let* )
 
 open Bucket_xml_support
 
-let validate_rule (rule : Bucket.Cors.rule) =
-  let* () =
-    validate_all
-      [
-        validate_opt_header "cors rule id" rule.id;
-        validate_string_list ~field:"allowed origin" rule.allowed_origins;
-        validate_string_list ~field:"allowed header" rule.allowed_headers;
-        validate_string_list ~field:"expose header" rule.expose_headers;
-      ]
-  in
-  match (rule.allowed_origins, rule.allowed_methods) with
-  | [], _ ->
-      S3_error_context.invalid ~field:"cors"
-        "CORS rule must include an allowed origin"
-  | _, [] ->
-      S3_error_context.invalid ~field:"cors"
-        "CORS rule must include an allowed method"
-  | _ -> (
-      match rule.max_age_seconds with
-      | Some value when value < 0 ->
-          S3_error_context.invalid ~field:"cors"
-            "max_age_seconds must be non-negative"
-      | _ -> Ok ())
-
-let validate_config (config : Bucket.Cors.config) =
-  let rec loop = function
-    | [] -> Ok ()
-    | rule :: rest ->
-        let* () = validate_rule rule in
-        loop rest
-  in
-  loop config.rules
-
-let rule_xml (rule : Bucket.Cors.rule) =
+let rule_xml (rule : Bucket.Cors.Rule.t) =
   Xml.el "CORSRule"
     ((match rule.id with None -> [] | Some id -> [ Xml.text "ID" id ])
     @ List.map (Xml.text "AllowedOrigin") rule.allowed_origins
@@ -52,26 +19,13 @@ let rule_xml (rule : Bucket.Cors.rule) =
     | None -> []
     | Some value -> [ Xml.text "MaxAgeSeconds" (string_of_int value) ])
 
-let xml (config : Bucket.Cors.config) =
+let xml (config : Bucket.Cors.Config.t) =
   Xml.el "CORSConfiguration" (List.map rule_xml config.rules) |> xml_body
 
-let parse_method value =
-  match Bucket.Cors.Method.of_string value with
-  | Some method_ -> Ok method_
-  | None -> Error (S3_error_context.decode "invalid CORS method %S" value)
-
-let parse_methods values =
-  let rec loop acc = function
-    | [] -> Ok (List.rev acc)
-    | value :: rest ->
-        let* method_ = parse_method value in
-        loop (method_ :: acc) rest
-  in
-  loop [] values
-
 let parse_rule nodes =
-  let* allowed_methods =
-    parse_methods (Xml.child_texts "AllowedMethod" nodes)
+  let allowed_methods =
+    Xml.child_texts "AllowedMethod" nodes
+    |> List.map Bucket.Cors.Method.observed_of_string
   in
   let* max_age_seconds =
     Xml.optional_child_parse ~path:"CORSRule" "MaxAgeSeconds"
@@ -79,7 +33,7 @@ let parse_rule nodes =
   in
   Ok
     {
-      Bucket.Cors.id = Xml.child_text "ID" nodes;
+      Bucket.Cors.Observed.id = Xml.child_text "ID" nodes;
       allowed_origins = Xml.child_texts "AllowedOrigin" nodes;
       allowed_methods;
       allowed_headers = Xml.child_texts "AllowedHeader" nodes;
@@ -90,7 +44,12 @@ let parse_rule nodes =
 let parse body response =
   let* nodes = Xml.decode_root body ~name:"CORSConfiguration" in
   let rec loop acc = function
-    | [] -> Ok { Bucket.Cors.config = { rules = List.rev acc }; response }
+    | [] ->
+        Ok
+          {
+            Bucket.Cors.config = { Bucket.Cors.Observed.rules = List.rev acc };
+            response;
+          }
     | nodes :: rest ->
         let* rule = parse_rule nodes in
         loop (rule :: acc) rest

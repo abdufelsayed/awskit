@@ -496,18 +496,9 @@ let options = Awskit_s3.Bucket.Encryption.options_exn
     ~expected_bucket_owner:owner ()
 in
 let encryption =
-  {
-    Awskit_s3.Bucket.Encryption.rules =
-      [
-        {
-          Awskit_s3.Bucket.Encryption.Rule.sse_algorithm =
-            Some Awskit_s3.Bucket.Encryption.Algorithm.Aes256;
-          kms_master_key_id = None;
-          bucket_key_enabled = None;
-          blocked_encryption_types = [];
-        };
-      ];
-  }
+  Awskit_s3.Bucket.Encryption.Config.singleton
+    (Awskit_s3.Bucket.Encryption.Rule.Default
+       Awskit_s3.Bucket.Encryption.Default_encryption.sse_s3)
 in
 Awskit_s3_eio.Bucket.Encryption.put s3
   ~bucket
@@ -515,6 +506,11 @@ Awskit_s3_eio.Bucket.Encryption.put s3
   ~config:encryption
   ()
 ]}
+
+Encryption and CORS use distinct sendable and observed configuration types.
+Validated constructors produce values accepted by [put]; [get] preserves
+unknown future wire tokens in each module's [Observed] result model instead of
+allowing those tokens to flow back into requests accidentally.
 
 {1 Multipart Uploads}
 

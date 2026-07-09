@@ -83,8 +83,8 @@ type bucket_state = {
   mutable policy : Policy.t option;
   mutable bucket_tags : Tag.Set.t;
   mutable versioning : Bucket.Versioning.Status.t option;
-  mutable encryption : Bucket.Encryption.config option;
-  mutable cors : Bucket.Cors.config option;
+  mutable encryption : Bucket.Encryption.Observed.t option;
+  mutable cors : Bucket.Cors.Observed.t option;
   mutable public_access_block : Bucket.Public_access_block.config option;
   mutable ownership_controls : Bucket.Ownership_controls.config option;
 }

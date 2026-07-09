@@ -1,6 +1,7 @@
 let () =
   Alcotest.run "awskit-s3-sim"
     (Test_sim_multipart_validation.suite
+    @ Test_sim_bucket_configurations.suite
     @ Test_sim_list_pagination.suite
     @ Test_sim_response_metadata.suite
     @ Test_sim_body_lifecycle.suite

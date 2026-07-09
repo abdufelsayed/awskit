@@ -71,8 +71,8 @@ type bucket_state = {
   mutable policy : Awskit_s3.Policy.t option;
   mutable bucket_tags : Awskit_s3.Tag.Set.t;
   mutable versioning : Awskit_s3.Bucket.Versioning.Status.t option;
-  mutable encryption : Awskit_s3.Bucket.Encryption.config option;
-  mutable cors : Awskit_s3.Bucket.Cors.config option;
+  mutable encryption : Awskit_s3.Bucket.Encryption.Observed.t option;
+  mutable cors : Awskit_s3.Bucket.Cors.Observed.t option;
   mutable public_access_block :
     Awskit_s3.Bucket.Public_access_block.config option;
   mutable ownership_controls : Awskit_s3.Bucket.Ownership_controls.config option;

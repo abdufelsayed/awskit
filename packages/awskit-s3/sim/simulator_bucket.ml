@@ -168,6 +168,66 @@ module Bucket = struct
   end
 
   module Encryption = struct
+    let observe_default = function
+      | Bucket_model.Encryption.Default_encryption.Sse_s3 ->
+          ( {
+              Bucket_model.Encryption.Observed.algorithm =
+                Some Bucket_model.Encryption.Observed.Algorithm.Aes256;
+              kms_key_id = None;
+            },
+            None )
+      | Sse_kms { key_id; bucket_key_enabled } ->
+          ( {
+              Bucket_model.Encryption.Observed.algorithm =
+                Some Bucket_model.Encryption.Observed.Algorithm.Aws_kms;
+              kms_key_id = key_id;
+            },
+            bucket_key_enabled )
+      | Dsse_kms { key_id } ->
+          ( {
+              Bucket_model.Encryption.Observed.algorithm =
+                Some Bucket_model.Encryption.Observed.Algorithm.Aws_kms_dsse;
+              kms_key_id = key_id;
+            },
+            None )
+
+    let observe_sse_c_policy = function
+      | Bucket_model.Encryption.Sse_c_policy.Allow ->
+          Bucket_model.Encryption.Observed.Sse_c_policy.Allow
+      | Block -> Bucket_model.Encryption.Observed.Sse_c_policy.Block
+
+    let observe_rule rule =
+      let default, sse_c_policy =
+        match rule with
+        | Bucket_model.Encryption.Rule.Default default -> (Some default, None)
+        | Sse_c policy -> (None, Some policy)
+        | Default_and_sse_c { default_encryption; sse_c_policy } ->
+            (Some default_encryption, Some sse_c_policy)
+      in
+      let default_encryption, bucket_key_enabled =
+        match default with
+        | None -> (None, None)
+        | Some default ->
+            let observed, bucket_key_enabled = observe_default default in
+            (Some observed, bucket_key_enabled)
+      in
+      let sse_c_policies =
+        match sse_c_policy with
+        | None -> []
+        | Some policy -> [ observe_sse_c_policy policy ]
+      in
+      {
+        Bucket_model.Encryption.Observed.default_encryption;
+        bucket_key_enabled;
+        sse_c_policies;
+      }
+
+    let observe_config (config : Bucket_model.Encryption.Config.t) =
+      {
+        Bucket_model.Encryption.Observed.rules =
+          List.map observe_rule config.rules;
+      }
+
     let get conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
@@ -184,7 +244,7 @@ module Bucket = struct
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
-          state.encryption <- Some config;
+          state.encryption <- Some (observe_config config);
           Ok (response 200)
 
     let delete conn ~bucket ?options:_ () =
@@ -196,6 +256,22 @@ module Bucket = struct
   end
 
   module Cors = struct
+    let observe_rule (rule : Bucket_model.Cors.Rule.t) =
+      {
+        Bucket_model.Cors.Observed.id = rule.id;
+        allowed_origins = rule.allowed_origins;
+        allowed_methods =
+          List.map
+            (fun method_ -> Bucket_model.Cors.Method.Known method_)
+            rule.allowed_methods;
+        allowed_headers = rule.allowed_headers;
+        expose_headers = rule.expose_headers;
+        max_age_seconds = rule.max_age_seconds;
+      }
+
+    let observe_config (config : Bucket_model.Cors.Config.t) =
+      { Bucket_model.Cors.Observed.rules = List.map observe_rule config.rules }
+
     let get conn ~bucket ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> Error error
@@ -209,7 +285,7 @@ module Bucket = struct
       match require_bucket conn bucket with
       | Error error -> Error error
       | Ok state ->
-          state.cors <- Some config;
+          state.cors <- Some (observe_config config);
           Ok (response 200)
 
     let delete conn ~bucket ?options:_ () =
