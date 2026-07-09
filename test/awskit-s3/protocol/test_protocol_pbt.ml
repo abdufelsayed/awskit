@@ -720,7 +720,7 @@ let prop_get_request_emits_range_header =
     (QCheck.make ~print:generated_range_header Protocol_generators.valid_range)
     (fun generated ->
       let range = range_of_generated generated in
-      let options = Object.Get.options_exn ~range () in
+      let options = Object.Get.options ~range () in
       let conn =
         Protocol_recording_runtime.connect
           [

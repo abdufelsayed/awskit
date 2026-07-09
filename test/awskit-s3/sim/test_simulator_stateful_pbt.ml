@@ -312,7 +312,7 @@ let assert_get command_index command conn key expected =
 
 let assert_get_range command_index command conn key range model =
   let max_bytes = max_bytes_for_expected (Model.find key model) in
-  let options = Object.Get.options_exn ~range () in
+  let options = Object.Get.options ~range () in
   match Model.expected_result command model with
   | Get_ok summary ->
       let result =
@@ -769,7 +769,7 @@ let apply_simulator_command command_index conn model command =
             let options =
               match tags with
               | [] -> None
-              | _ -> Some (Object.Put.options_exn ~tags:(tags_to_set tags) ())
+              | _ -> Some (Object.Put.options ~tags:(tags_to_set tags) ())
             in
             let result =
               expect_ok command_index command "put_string"
@@ -785,7 +785,7 @@ let apply_simulator_command command_index conn model command =
             next_model
         | Put_string_metadata (key, body, tags, metadata) ->
             let options =
-              Object.Put.options_exn
+              Object.Put.options
                 ~metadata:(metadata_to_store metadata)
                 ~tags:(tags_to_set tags) ()
             in
@@ -854,7 +854,7 @@ let apply_simulator_command command_index conn model command =
               | Command.Copy_source_metadata -> None
               | Replace_metadata metadata ->
                   Some
-                    (Object.Copy.options_exn
+                    (Object.Copy.options
                        ~metadata_directive:
                          (`Replace (metadata_to_store metadata))
                        ())

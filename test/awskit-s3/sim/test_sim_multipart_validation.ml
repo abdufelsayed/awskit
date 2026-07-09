@@ -41,14 +41,14 @@ let etag_string label = function
 let test_put_rejects_bad_checksum () =
   let conn = make_simulator () in
   let options =
-    Object.Put.options_exn ~checksum:(sha256 "not-the-sha256-of-hello") ()
+    Object.Put.options ~checksum:(sha256 "not-the-sha256-of-hello") ()
   in
   expect_service_code "put bad checksum" "BadDigest"
     (Simulator.Object.put_string conn
        ~bucket:(bucket_name "test-bucket")
        ~key:(object_key "bad-put.bin") ~contents:"hello" ~options ());
   let options =
-    Object.Put.options_exn
+    Object.Put.options
       ~checksum:(sha256 "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=")
       ()
   in
@@ -68,9 +68,7 @@ let test_upload_part_rejects_bad_checksum () =
   let conn = make_simulator () in
   let created = create_upload conn "bad-part.bin" in
   let options =
-    Multipart.Upload_part.options_exn
-      ~checksum:(sha256 "not-the-sha256-of-part")
-      ()
+    Multipart.Upload_part.options ~checksum:(sha256 "not-the-sha256-of-part") ()
   in
   expect_service_code "upload part bad checksum" "BadDigest"
     (Simulator.Multipart.upload_part conn ~upload:created.upload
@@ -78,7 +76,7 @@ let test_upload_part_rejects_bad_checksum () =
        ~body:(Simulator.Body.of_string "part")
        ~options ());
   let options =
-    Multipart.Upload_part.options_exn
+    Multipart.Upload_part.options
       ~checksum:(sha256 "N6aAEzvQk0L5NK+43Sx9nhtiTaXzXjo4rbED43wFXtE=")
       ()
   in
@@ -146,7 +144,7 @@ let test_checksum_algorithms_are_computed_or_rejected () =
        ~bucket:(bucket_name "test-bucket")
        ~key:(object_key "crc32-put.bin")
        ~contents:"hello"
-       ~options:(Object.Put.options_exn ~checksum:(crc32 "aaaa") ())
+       ~options:(Object.Put.options ~checksum:(crc32 "aaaa") ())
        ());
   let created =
     Simulator.Multipart.create_upload conn
@@ -175,7 +173,7 @@ let test_checksum_algorithms_are_computed_or_rejected () =
       ~part_number:(Multipart.Part_number.of_int_exn 1)
       ~body:(Simulator.Body.of_string "part")
       ~options:
-        (Multipart.Upload_part.options_exn
+        (Multipart.Upload_part.options
            ~checksum:(md5 "9Mk4XxkC9zNLALm07NFk3g==")
            ())
       ()
@@ -265,7 +263,7 @@ let test_complete_rejects_part_checksum_mismatch () =
     Simulator.Multipart.upload_part conn ~upload:created.upload
       ~part_number:(Multipart.Part_number.of_int_exn 1)
       ~body:(Simulator.Body.of_string "part")
-      ~options:(Multipart.Upload_part.options_exn ~checksum ())
+      ~options:(Multipart.Upload_part.options ~checksum ())
       ()
     |> ok_or_fail "upload checksummed part"
   in

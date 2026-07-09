@@ -175,11 +175,7 @@ module Upload_part = struct
     { checksum = None; customer_key = None; expected_bucket_owner = None }
 
   let options ?checksum ?customer_key ?expected_bucket_owner () =
-    Ok { checksum; customer_key; expected_bucket_owner }
-
-  let options_exn ?checksum ?customer_key ?expected_bucket_owner () =
-    S3_result.result_exn
-      (options ?checksum ?customer_key ?expected_bucket_owner ())
+    { checksum; customer_key; expected_bucket_owner }
 end
 
 module Complete = struct

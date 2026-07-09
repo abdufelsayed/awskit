@@ -211,7 +211,7 @@ let test_endpoint_style_matrix_fixture () =
 
 let test_put_object_metadata_tags_fixture () =
   let options =
-    Object.Put.options_exn
+    Object.Put.options
       ~content_type:(Protocol_support.content_type "text/plain")
       ~storage_class:(Storage_class.of_string_exn "FUTURE")
       ~metadata:
@@ -265,7 +265,7 @@ let test_put_object_metadata_tags_fixture () =
     ~actual
 
 let describe_destination_encryption encryption =
-  let options = Object.Put.options_exn ~encryption () in
+  let options = Object.Put.options ~encryption () in
   let conn =
     Protocol_recording_runtime.connect
       [ Protocol_recording_runtime.response 200 "" ]
@@ -331,7 +331,7 @@ let test_object_checksum_preserves_unknown_response_tokens () =
 
 let test_copy_object_headers_fixture () =
   let options =
-    Object.Copy.options_exn
+    Object.Copy.options
       ~source_version_id:(Object.Version_id.of_string_exn "version 1/2")
       ~metadata_directive:
         (`Replace (Metadata.of_list_exn [ ("origin", "copy fixture") ]))
@@ -446,7 +446,7 @@ let test_range_get_fixture () =
     ]
   in
   let options =
-    Object.Get.options_exn ~range:(Range.bytes_exn ~start:2L ~finish:5L) ()
+    Object.Get.options ~range:(Range.bytes_exn ~start:2L ~finish:5L) ()
   in
   let conn =
     Protocol_recording_runtime.connect

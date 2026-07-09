@@ -570,7 +570,7 @@ let assert_get command_index command conn key expected =
 
 let assert_get_range command_index command conn key range model =
   let max_bytes = max_bytes_for_expected (Model.find key model) in
-  let options = Object.Get.options_exn ~range () in
+  let options = Object.Get.options ~range () in
   match Model.expected_result command model with
   | Get_ok summary ->
       let result =
@@ -858,7 +858,7 @@ let put_options ~tags ~metadata =
   in
   match (tags, metadata) with
   | None, None -> None
-  | _ -> Some (Object.Put.options_exn ?tags ?metadata ())
+  | _ -> Some (Object.Put.options ?tags ?metadata ())
 
 let assert_visible_store_object command_index command conn key object_ =
   let expected = Some object_ in
@@ -987,7 +987,7 @@ let apply_minio_command command_index conn model command =
           | Command.Copy_source_metadata -> `Copy
           | Replace_metadata metadata -> `Replace (metadata_of_model metadata)
         in
-        let options = Object.Copy.options_exn ~metadata_directive () in
+        let options = Object.Copy.options ~metadata_directive () in
         let source = Model.find source_key model in
         assert_copy command_index command conn ~source_key ~destination_key
           ~options
@@ -1209,7 +1209,7 @@ let test_object_metadata_tags_and_delete () =
       in
       let tags = [ ("env", "dev"); ("owner", "sdk") ] in
       let options =
-        Object.Put.options_exn
+        Object.Put.options
           ~content_type:(Content_type.of_string_exn "text/plain")
           ~metadata ~tags:(tags_to_set tags) ()
       in

@@ -58,8 +58,8 @@ let test_delete_marker_specific_version_has_last_modified () =
     | Some version_id -> version_id
     | None -> Alcotest.fail "delete marker did not return a version id"
   in
-  let get_options = Object.Get.options_exn ~version_id:marker_version () in
-  let head_options = Object.Head.options_exn ~version_id:marker_version () in
+  let get_options = Object.Get.options ~version_id:marker_version () in
+  let head_options = Object.Head.options ~version_id:marker_version () in
   let get_service =
     service_error "get delete marker"
       (Simulator.Object.get_string conn
@@ -80,7 +80,7 @@ let test_ranged_get_accept_ranges_header () =
   let conn = make_simulator () in
   ignore (put_string conn "range.txt" "abcdef");
   let options =
-    Object.Get.options_exn ~range:(Range.bytes_exn ~start:1L ~finish:3L) ()
+    Object.Get.options ~range:(Range.bytes_exn ~start:1L ~finish:3L) ()
   in
   let result =
     Simulator.Object.get_string conn

@@ -266,24 +266,8 @@ module Put : sig
     ?encryption:Encryption.Destination.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
-    (options, Awskit.Error.t) Stdlib.result
-  (** Build [PutObject] options. *)
-
-  val options_exn :
-    ?content_type:Content_type.t ->
-    ?metadata:Metadata.t ->
-    ?storage_class:Storage_class.t ->
-    ?tags:Tag.Set.t ->
-    ?cache_control:Header_value.t ->
-    ?content_encoding:Header_value.t ->
-    ?content_disposition:Header_value.t ->
-    ?preconditions:Preconditions.Write.t ->
-    ?checksum:Checksum.value ->
-    ?encryption:Encryption.Destination.t ->
-    ?expected_bucket_owner:Account_id.t ->
-    unit ->
     options
-  (** Like {!val:options}, but raises on validation failure. *)
+  (** Build [PutObject] options. *)
 end
 
 module Get : sig
@@ -360,19 +344,8 @@ module Get : sig
     ?source_encryption:Encryption.Source.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
-    (options, Awskit.Error.t) Stdlib.result
-  (** Build [GetObject] options. *)
-
-  val options_exn :
-    ?range:Range.t ->
-    ?preconditions:Preconditions.Read.t ->
-    ?version_id:Version_id.t ->
-    ?checksum_mode:Checksum.Mode.t ->
-    ?source_encryption:Encryption.Source.t ->
-    ?expected_bucket_owner:Account_id.t ->
-    unit ->
     options
-  (** Like {!val:options}, but raises on validation failure. *)
+  (** Build [GetObject] options. *)
 end
 
 module Head : sig
@@ -403,18 +376,8 @@ module Head : sig
     ?source_encryption:Encryption.Source.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
-    (options, Awskit.Error.t) Stdlib.result
-  (** Build [HeadObject] options. *)
-
-  val options_exn :
-    ?preconditions:Preconditions.Read.t ->
-    ?version_id:Version_id.t ->
-    ?checksum_mode:Checksum.Mode.t ->
-    ?source_encryption:Encryption.Source.t ->
-    ?expected_bucket_owner:Account_id.t ->
-    unit ->
     options
-  (** Like {!val:options}, but raises on validation failure. *)
+  (** Build [HeadObject] options. *)
 end
 
 module Delete : sig
@@ -443,16 +406,8 @@ module Delete : sig
     ?version_id:Version_id.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
-    (options, Awskit.Error.t) Stdlib.result
-  (** Build [DeleteObject] options. *)
-
-  val options_exn :
-    ?preconditions:Preconditions.Delete.t ->
-    ?version_id:Version_id.t ->
-    ?expected_bucket_owner:Account_id.t ->
-    unit ->
     options
-  (** Like {!val:options}, but raises on validation failure. *)
+  (** Build [DeleteObject] options. *)
 end
 
 module Delete_many : sig
@@ -570,22 +525,8 @@ module Copy : sig
     ?expected_bucket_owner:Account_id.t ->
     ?source_expected_bucket_owner:Account_id.t ->
     unit ->
-    (options, Awskit.Error.t) Stdlib.result
-  (** Build [CopyObject] options. *)
-
-  val options_exn :
-    ?source_version_id:Version_id.t ->
-    ?source_preconditions:Preconditions.Copy_source.t ->
-    ?metadata_directive:metadata_directive ->
-    ?storage_class:Storage_class.t ->
-    ?checksum_algorithm:Checksum.Algorithm.t ->
-    ?destination_encryption:Encryption.Destination.t ->
-    ?source_encryption:Encryption.Source.t ->
-    ?expected_bucket_owner:Account_id.t ->
-    ?source_expected_bucket_owner:Account_id.t ->
-    unit ->
     options
-  (** Like {!val:options}, but raises on validation failure. *)
+  (** Build [CopyObject] options. *)
 end
 
 module Versions : sig

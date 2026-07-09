@@ -25,7 +25,7 @@ let object_key value = Awskit_s3.Object_key.of_string_exn value
 let create_s3 () = S3.create () |> unwrap "create S3 client"
 
 let put_options =
-  Awskit_s3.Object.Put.options_exn
+  Awskit_s3.Object.Put.options
     ~content_type:(Awskit_s3.Content_type.of_string_exn "text/plain")
     ~metadata:
       (Awskit_s3.Metadata.of_list_exn

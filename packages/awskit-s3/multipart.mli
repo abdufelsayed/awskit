@@ -247,16 +247,8 @@ module Upload_part : sig
     ?customer_key:Encryption.Customer_key.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
-    (options, Awskit.Error.t) Stdlib.result
-  (** Build [UploadPart] options. *)
-
-  val options_exn :
-    ?checksum:Object.Checksum.value ->
-    ?customer_key:Encryption.Customer_key.t ->
-    ?expected_bucket_owner:Account_id.t ->
-    unit ->
     options
-  (** Like {!val:options}, but raises on validation failure. *)
+  (** Build [UploadPart] options. *)
 end
 
 module Complete : sig

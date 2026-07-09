@@ -274,28 +274,19 @@ module Put = struct
       ?(tags = Tag.Set.empty) ?cache_control ?content_encoding
       ?content_disposition ?(preconditions = Preconditions.Write.none) ?checksum
       ?encryption ?expected_bucket_owner () =
-    Ok
-      {
-        content_type;
-        metadata;
-        storage_class;
-        tags;
-        cache_control;
-        content_encoding;
-        content_disposition;
-        preconditions;
-        checksum;
-        encryption;
-        expected_bucket_owner;
-      }
-
-  let options_exn ?content_type ?metadata ?storage_class ?tags ?cache_control
-      ?content_encoding ?content_disposition ?preconditions ?checksum
-      ?encryption ?expected_bucket_owner () =
-    Awskit.Error.Producer.get_ok_exn
-      (options ?content_type ?metadata ?storage_class ?tags ?cache_control
-         ?content_encoding ?content_disposition ?preconditions ?checksum
-         ?encryption ?expected_bucket_owner ())
+    {
+      content_type;
+      metadata;
+      storage_class;
+      tags;
+      cache_control;
+      content_encoding;
+      content_disposition;
+      preconditions;
+      checksum;
+      encryption;
+      expected_bucket_owner;
+    }
 end
 
 module Get = struct
@@ -349,21 +340,14 @@ module Get = struct
 
   let options ?range ?(preconditions = Preconditions.Read.none) ?version_id
       ?checksum_mode ?source_encryption ?expected_bucket_owner () =
-    Ok
-      {
-        range;
-        preconditions;
-        version_id;
-        checksum_mode;
-        source_encryption;
-        expected_bucket_owner;
-      }
-
-  let options_exn ?range ?preconditions ?version_id ?checksum_mode
-      ?source_encryption ?expected_bucket_owner () =
-    Awskit.Error.Producer.get_ok_exn
-      (options ?range ?preconditions ?version_id ?checksum_mode
-         ?source_encryption ?expected_bucket_owner ())
+    {
+      range;
+      preconditions;
+      version_id;
+      checksum_mode;
+      source_encryption;
+      expected_bucket_owner;
+    }
 end
 
 module Head = struct
@@ -388,20 +372,13 @@ module Head = struct
 
   let options ?(preconditions = Preconditions.Read.none) ?version_id
       ?checksum_mode ?source_encryption ?expected_bucket_owner () =
-    Ok
-      {
-        preconditions;
-        version_id;
-        checksum_mode;
-        source_encryption;
-        expected_bucket_owner;
-      }
-
-  let options_exn ?preconditions ?version_id ?checksum_mode ?source_encryption
-      ?expected_bucket_owner () =
-    Awskit.Error.Producer.get_ok_exn
-      (options ?preconditions ?version_id ?checksum_mode ?expected_bucket_owner
-         ?source_encryption ())
+    {
+      preconditions;
+      version_id;
+      checksum_mode;
+      source_encryption;
+      expected_bucket_owner;
+    }
 end
 
 module Delete = struct
@@ -426,11 +403,7 @@ module Delete = struct
 
   let options ?(preconditions = Preconditions.Delete.none) ?version_id
       ?expected_bucket_owner () =
-    Ok { preconditions; version_id; expected_bucket_owner }
-
-  let options_exn ?preconditions ?version_id ?expected_bucket_owner () =
-    Awskit.Error.Producer.get_ok_exn
-      (options ?preconditions ?version_id ?expected_bucket_owner ())
+    { preconditions; version_id; expected_bucket_owner }
 end
 
 module Delete_many = struct
@@ -514,28 +487,17 @@ module Copy = struct
       ?metadata_directive ?storage_class ?checksum_algorithm
       ?destination_encryption ?source_encryption ?expected_bucket_owner
       ?source_expected_bucket_owner () =
-    Ok
-      {
-        source_version_id;
-        source_preconditions;
-        metadata_directive;
-        storage_class;
-        checksum_algorithm;
-        destination_encryption;
-        source_encryption;
-        expected_bucket_owner;
-        source_expected_bucket_owner;
-      }
-
-  let options_exn ?source_version_id ?source_preconditions ?metadata_directive
-      ?storage_class ?checksum_algorithm ?destination_encryption
-      ?source_encryption ?expected_bucket_owner ?source_expected_bucket_owner ()
-      =
-    Awskit.Error.Producer.get_ok_exn
-      (options ?source_version_id ?source_preconditions ?metadata_directive
-         ?storage_class ?checksum_algorithm ?destination_encryption
-         ?source_encryption ?expected_bucket_owner ?source_expected_bucket_owner
-         ())
+    {
+      source_version_id;
+      source_preconditions;
+      metadata_directive;
+      storage_class;
+      checksum_algorithm;
+      destination_encryption;
+      source_encryption;
+      expected_bucket_owner;
+      source_expected_bucket_owner;
+    }
 end
 
 module Versions = struct

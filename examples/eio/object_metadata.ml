@@ -57,7 +57,7 @@ let create_s3 stdenv sw =
   |> unwrap "create S3 client"
 
 let put_options =
-  Awskit_s3.Object.Put.options_exn
+  Awskit_s3.Object.Put.options
     ~content_type:(Awskit_s3.Content_type.of_string_exn "text/plain")
     ~metadata:
       (Awskit_s3.Metadata.of_list_exn

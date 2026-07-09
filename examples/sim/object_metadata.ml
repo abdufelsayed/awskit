@@ -25,7 +25,7 @@ let () =
       [ Awskit_s3.Tag.create_exn ~key:"purpose" ~value:"docs" ]
   in
   let options =
-    Awskit_s3.Object.Put.options_exn
+    Awskit_s3.Object.Put.options
       ~content_type:(Awskit_s3.Content_type.of_string_exn "text/plain")
       ~metadata ~tags ()
   in
