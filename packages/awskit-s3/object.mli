@@ -603,13 +603,14 @@ module Versions : sig
     val equal : t -> t -> bool
   end
 
-  type options = {
+  type options = private {
     prefix : Object_key.Prefix.t option;
         (** Return versions whose keys begin with this prefix. *)
     delimiter : Delimiter.t option;
         (** Group keys using this delimiter, commonly ["/"]. *)
     max_keys : int option;
-        (** Maximum number of keys/markers S3 should return in one page. *)
+        (** Maximum number of keys/markers S3 should return in one page. Values
+            are between 0 and 1,000 inclusive. *)
     key_marker : Object_key.t option;
         (** Pagination marker for keys. Usually supplied from the previous
             page's [next_key_marker]. *)
@@ -677,7 +678,9 @@ module Versions : sig
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
-  (** Build [ListObjectVersions] options. *)
+  (** Build [ListObjectVersions] options. [max_keys], when present, must be
+      between 0 and 1,000 inclusive. [version_id_marker] requires [key_marker].
+  *)
 
   val options_exn :
     ?prefix:Object_key.Prefix.t ->
@@ -720,13 +723,14 @@ module List : sig
     val equal : t -> t -> bool
   end
 
-  type options = {
+  type options = private {
     prefix : Object_key.Prefix.t option;
         (** Return keys that begin with this prefix. *)
     delimiter : Delimiter.t option;
         (** Group keys using this delimiter, commonly ["/"]. *)
     max_keys : int option;
-        (** Maximum number of objects S3 should return in one page. *)
+        (** Maximum number of objects S3 should return in one page. Values are
+            between 0 and 1,000 inclusive. *)
     start_after : Object_key.t option;
         (** Start listing after this key for the first page. *)
     continuation_token : Continuation_token.t option;
@@ -774,7 +778,8 @@ module List : sig
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
-  (** Build [ListObjectsV2] options. *)
+  (** Build [ListObjectsV2] options. [max_keys], when present, must be between 0
+      and 1,000 inclusive. *)
 
   val options_exn :
     ?prefix:Object_key.Prefix.t ->

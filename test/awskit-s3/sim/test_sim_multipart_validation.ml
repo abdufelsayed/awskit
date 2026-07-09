@@ -252,9 +252,7 @@ let test_complete_rejects_undersized_nonfinal_part () =
     upload_part conn created.upload 1 (String.make Transfer.min_part_size 'x')
   in
   let final = upload_part conn created.upload 2 "z" in
-  let options =
-    { Multipart.Complete.default_options with multipart_object_size = Some 1L }
-  in
+  let options = Multipart.Complete.options_exn ~multipart_object_size:1L () in
   expect_validation_field "object size mismatch" "multipart_object_size"
     (Simulator.Multipart.complete_upload conn ~upload:created.upload ~options
        ~parts:[ large.part; final.part ] ())

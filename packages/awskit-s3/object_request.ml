@@ -42,19 +42,6 @@ module Make (C : Request_context.S) = struct
     | Ok value -> return_ok value
     | Error error -> return_error error
 
-  let validate_list_max_keys = function
-    | None -> Ok ()
-    | Some value when value >= 1 && value <= 1000 -> Ok ()
-    | Some _ ->
-        S3_error_context.invalid ~field:"max_keys"
-          "max_keys must be between 1 and 1000"
-
-  let validate_list_options (options : List_objects_v2.options) =
-    validate_list_max_keys options.max_keys
-
-  let validate_list_versions_options (options : List_object_versions.options) =
-    validate_list_max_keys options.max_keys
-
   let validate_max_bytes max_bytes =
     if Int64.compare max_bytes 0L < 0 then
       S3_error_context.invalid ~field:"max_bytes"
@@ -469,50 +456,41 @@ module Make (C : Request_context.S) = struct
     match S3_validation.validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
-        match validate_list_versions_options options with
+        let add name = function
+          | None -> []
+          | Some value -> [ (name, [ value ]) ]
+        in
+        let query =
+          [ ("versions", []) ]
+          @ add "prefix" (Option.map Object_key.Prefix.to_string options.prefix)
+          @ add "delimiter"
+              (Option.map List_object_versions.Delimiter.to_string
+                 options.delimiter)
+          @ add "max-keys" (Option.map string_of_int options.max_keys)
+          @ add "key-marker"
+              (Option.map Object_key.to_string options.key_marker)
+          @ add "version-id-marker"
+              (Option.map Object.Version_id.to_string options.version_id_marker)
+        in
+        match bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/" with
         | Error error -> return_error error
-        | Ok () -> (
-            let add name = function
-              | None -> []
-              | Some value -> [ (name, [ value ]) ]
+        | Ok request ->
+            let headers =
+              []
+              |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+                   options.expected_bucket_owner
             in
-            let query =
-              [ ("versions", []) ]
-              @ add "prefix"
-                  (Option.map Object_key.Prefix.to_string options.prefix)
-              @ add "delimiter"
-                  (Option.map List_object_versions.Delimiter.to_string
-                     options.delimiter)
-              @ add "max-keys" (Option.map string_of_int options.max_keys)
-              @ add "key-marker"
-                  (Option.map Object_key.to_string options.key_marker)
-              @ add "version-id-marker"
-                  (Option.map Object.Version_id.to_string
-                     options.version_id_marker)
+            let* result =
+              with_empty_response conn ~method_:`GET ~request ~query ~headers
+                ~f:(fun response body ->
+                  let* body = read_response_body body ~max_size:4_194_304L in
+                  match body with
+                  | Error error -> return_error error
+                  | Ok body ->
+                      return_result return_error return_ok
+                        (Object_versions_xml.parse_page ~response body))
             in
-            match
-              bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/"
-            with
-            | Error error -> return_error error
-            | Ok request ->
-                let headers =
-                  []
-                  |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                       options.expected_bucket_owner
-                in
-                let* result =
-                  with_empty_response conn ~method_:`GET ~request ~query
-                    ~headers ~f:(fun response body ->
-                      let* body =
-                        read_response_body body ~max_size:4_194_304L
-                      in
-                      match body with
-                      | Error error -> return_error error
-                      | Ok body ->
-                          return_result return_error return_ok
-                            (Object_versions_xml.parse_page ~response body))
-                in
-                return_result return_error return_ok result))
+            return_result return_error return_ok result)
 
   let list conn ~bucket ?options () =
     let bucket = Bucket_name.to_string bucket in
@@ -526,50 +504,41 @@ module Make (C : Request_context.S) = struct
     match S3_validation.validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
-        match validate_list_options options with
+        let add name = function
+          | None -> []
+          | Some value -> [ (name, [ value ]) ]
+        in
+        let query =
+          [ ("list-type", [ "2" ]) ]
+          @ add "prefix" (Option.map Object_key.Prefix.to_string options.prefix)
+          @ add "delimiter"
+              (Option.map List_objects_v2.Delimiter.to_string options.delimiter)
+          @ add "max-keys" (Option.map string_of_int options.max_keys)
+          @ add "start-after"
+              (Option.map Object_key.to_string options.start_after)
+          @ add "continuation-token"
+              (Option.map List_objects_v2.Continuation_token.to_string
+                 options.continuation_token)
+        in
+        match bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/" with
         | Error error -> return_error error
-        | Ok () -> (
-            let add name = function
-              | None -> []
-              | Some value -> [ (name, [ value ]) ]
+        | Ok request ->
+            let headers =
+              []
+              |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+                   options.expected_bucket_owner
             in
-            let query =
-              [ ("list-type", [ "2" ]) ]
-              @ add "prefix"
-                  (Option.map Object_key.Prefix.to_string options.prefix)
-              @ add "delimiter"
-                  (Option.map List_objects_v2.Delimiter.to_string
-                     options.delimiter)
-              @ add "max-keys" (Option.map string_of_int options.max_keys)
-              @ add "start-after"
-                  (Option.map Object_key.to_string options.start_after)
-              @ add "continuation-token"
-                  (Option.map List_objects_v2.Continuation_token.to_string
-                     options.continuation_token)
+            let* result =
+              with_empty_response conn ~method_:`GET ~request ~query ~headers
+                ~f:(fun response body ->
+                  let* body = read_response_body body ~max_size:4_194_304L in
+                  match body with
+                  | Error error -> return_error error
+                  | Ok body ->
+                      return_result return_error return_ok
+                        (Object_list_xml.parse_page ~response body))
             in
-            match
-              bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/"
-            with
-            | Error error -> return_error error
-            | Ok request ->
-                let headers =
-                  []
-                  |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                       options.expected_bucket_owner
-                in
-                let* result =
-                  with_empty_response conn ~method_:`GET ~request ~query
-                    ~headers ~f:(fun response body ->
-                      let* body =
-                        read_response_body body ~max_size:4_194_304L
-                      in
-                      match body with
-                      | Error error -> return_error error
-                      | Ok body ->
-                          return_result return_error return_ok
-                            (Object_list_xml.parse_page ~response body))
-                in
-                return_result return_error return_ok result))
+            return_result return_error return_ok result)
 
   module List = struct
     type 'acc fold_step = Continue of 'acc | Stop of 'acc
@@ -593,14 +562,14 @@ module Make (C : Request_context.S) = struct
            max_pages)
 
     let options_for_page (base : List_objects_v2.options) continuation_token =
-      {
-        base with
-        List_objects_v2.continuation_token;
-        start_after =
-          (match continuation_token with
-          | None -> base.start_after
-          | Some _ -> None);
-      }
+      let start_after =
+        match continuation_token with
+        | None -> base.start_after
+        | Some _ -> None
+      in
+      List_objects_v2.options ?prefix:base.prefix ?delimiter:base.delimiter
+        ?max_keys:base.max_keys ?start_after ?continuation_token
+        ?expected_bucket_owner:base.expected_bucket_owner ()
 
     let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
       let return_context_error =
@@ -614,30 +583,32 @@ module Make (C : Request_context.S) = struct
             Option.value ~default:List_objects_v2.default_options options
           in
           let rec loop continuation_token page_count acc =
-            let options = options_for_page base continuation_token in
-            let* page = list conn ~bucket ~options () in
-            match page with
-            | Error error -> return_error error
-            | Ok page -> (
-                let* step = f acc page in
-                match step with
-                | Error error -> return_context_error error
-                | Ok (Stop acc) -> return_ok acc
-                | Ok (Continue acc) -> (
-                    let page_count = page_count + 1 in
-                    if not page.is_truncated then return_ok acc
-                    else
-                      match max_pages with
-                      | Some max_pages when page_count >= max_pages ->
-                          return_ok acc
-                      | _ -> (
-                          match page.next_continuation_token with
-                          | Some token -> loop (Some token) page_count acc
-                          | None ->
-                              return_context_error
-                                (S3_error_context.decode
-                                   "truncated list response missing \
-                                    NextContinuationToken"))))
+            match options_for_page base continuation_token with
+            | Error error -> return_context_error error
+            | Ok options -> (
+                let* page = list conn ~bucket ~options () in
+                match page with
+                | Error error -> return_error error
+                | Ok page -> (
+                    let* step = f acc page in
+                    match step with
+                    | Error error -> return_context_error error
+                    | Ok (Stop acc) -> return_ok acc
+                    | Ok (Continue acc) -> (
+                        let page_count = page_count + 1 in
+                        if not page.is_truncated then return_ok acc
+                        else
+                          match max_pages with
+                          | Some max_pages when page_count >= max_pages ->
+                              return_ok acc
+                          | _ -> (
+                              match page.next_continuation_token with
+                              | Some token -> loop (Some token) page_count acc
+                              | None ->
+                                  return_context_error
+                                    (S3_error_context.decode
+                                       "truncated list response missing \
+                                        NextContinuationToken")))))
           in
           loop base.continuation_token 0 init
 
@@ -660,27 +631,29 @@ module Make (C : Request_context.S) = struct
             Option.value ~default:List_objects_v2.default_options options
           in
           let rec loop continuation_token page_count acc =
-            let options = options_for_page base continuation_token in
-            let* page = list conn ~bucket ~options () in
-            match page with
-            | Error error -> return_error error
-            | Ok page -> (
-                let* next_acc = f acc page in
-                match next_acc with
-                | Error error -> return_context_error error
-                | Ok acc -> (
-                    let page_count = page_count + 1 in
-                    if not page.is_truncated then return_ok acc
-                    else if page_count >= max_pages then
-                      return_context_error (max_pages_exceeded max_pages)
-                    else
-                      match page.next_continuation_token with
-                      | Some token -> loop (Some token) page_count acc
-                      | None ->
-                          return_context_error
-                            (S3_error_context.decode
-                               "truncated list response missing \
-                                NextContinuationToken")))
+            match options_for_page base continuation_token with
+            | Error error -> return_context_error error
+            | Ok options -> (
+                let* page = list conn ~bucket ~options () in
+                match page with
+                | Error error -> return_error error
+                | Ok page -> (
+                    let* next_acc = f acc page in
+                    match next_acc with
+                    | Error error -> return_context_error error
+                    | Ok acc -> (
+                        let page_count = page_count + 1 in
+                        if not page.is_truncated then return_ok acc
+                        else if page_count >= max_pages then
+                          return_context_error (max_pages_exceeded max_pages)
+                        else
+                          match page.next_continuation_token with
+                          | Some token -> loop (Some token) page_count acc
+                          | None ->
+                              return_context_error
+                                (S3_error_context.decode
+                                   "truncated list response missing \
+                                    NextContinuationToken"))))
           in
           loop base.continuation_token 0 init
 
@@ -738,11 +711,10 @@ module Make (C : Request_context.S) = struct
 
     let options_for_page (base : List_object_versions.options)
         (page : List_object_versions.page) =
-      {
-        base with
-        List_object_versions.key_marker = page.next_key_marker;
-        version_id_marker = page.next_version_id_marker;
-      }
+      List_object_versions.options ?prefix:base.prefix ?delimiter:base.delimiter
+        ?max_keys:base.max_keys ?key_marker:page.next_key_marker
+        ?version_id_marker:page.next_version_id_marker
+        ?expected_bucket_owner:base.expected_bucket_owner ()
 
     let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
       let return_context_error =
@@ -774,9 +746,10 @@ module Make (C : Request_context.S) = struct
                           return_ok acc
                       | _ -> (
                           match page.next_key_marker with
-                          | Some _ ->
-                              let options = options_for_page base page in
-                              loop options page_count acc
+                          | Some _ -> (
+                              match options_for_page base page with
+                              | Ok options -> loop options page_count acc
+                              | Error error -> return_context_error error)
                           | None ->
                               return_context_error
                                 (S3_error_context.decode
@@ -819,9 +792,10 @@ module Make (C : Request_context.S) = struct
                       return_context_error (max_pages_exceeded max_pages)
                     else
                       match page.next_key_marker with
-                      | Some _ ->
-                          let options = options_for_page base page in
-                          loop options page_count acc
+                      | Some _ -> (
+                          match options_for_page base page with
+                          | Ok options -> loop options page_count acc
+                          | Error error -> return_context_error error)
                       | None ->
                           return_context_error
                             (S3_error_context.decode

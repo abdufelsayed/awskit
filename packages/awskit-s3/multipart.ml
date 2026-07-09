@@ -275,10 +275,10 @@ module List_parts = struct
 
   let validate_max_parts = function
     | None -> Ok ()
-    | Some value when value > 0 && value <= 1000 -> Ok ()
+    | Some value when value >= 0 && value <= 1000 -> Ok ()
     | Some _ ->
         S3_error_context.invalid ~field:"max_parts"
-          "max_parts must be between 1 and 1000"
+          "max_parts must be between 0 and 1000"
 
   let options ?max_parts ?part_number_marker ?expected_bucket_owner () =
     let* () = validate_max_parts max_parts in

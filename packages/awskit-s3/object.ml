@@ -601,14 +601,22 @@ module Versions = struct
 
   let validate_max_keys = function
     | None -> Ok ()
-    | Some value when value > 0 && value <= 1000 -> Ok ()
+    | Some value when value >= 0 && value <= 1000 -> Ok ()
     | Some _ ->
         S3_error_context.invalid ~field:"max_keys"
-          "max_keys must be between 1 and 1000"
+          "max_keys must be between 0 and 1000"
+
+  let validate_markers ~key_marker ~version_id_marker =
+    match (key_marker, version_id_marker) with
+    | None, Some _ ->
+        S3_error_context.invalid ~field:"version_id_marker"
+          "version_id_marker requires key_marker"
+    | _ -> Ok ()
 
   let options ?prefix ?delimiter ?max_keys ?key_marker ?version_id_marker
       ?expected_bucket_owner () =
     let* () = validate_max_keys max_keys in
+    let* () = validate_markers ~key_marker ~version_id_marker in
     Ok
       {
         prefix;
@@ -694,10 +702,10 @@ module List = struct
 
   let validate_max_keys = function
     | None -> Ok ()
-    | Some value when value > 0 && value <= 1000 -> Ok ()
+    | Some value when value >= 0 && value <= 1000 -> Ok ()
     | Some _ ->
         S3_error_context.invalid ~field:"max_keys"
-          "max_keys must be between 1 and 1000"
+          "max_keys must be between 0 and 1000"
 
   let options ?prefix ?delimiter ?max_keys ?start_after ?continuation_token
       ?expected_bucket_owner () =

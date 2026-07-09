@@ -655,6 +655,23 @@ let test_object_identity_boundaries () =
     (Object.Version_id.to_string version);
   expect_error_field "version_id" (Object.Version_id.of_string "");
   expect_error_field "version_id" (Object.Version_id.of_string "bad\nversion");
+  let zero_keys =
+    expect_ok "zero max keys" (Object.List.options ~max_keys:0 ())
+  in
+  Alcotest.(check (option int)) "zero max keys" (Some 0) zero_keys.max_keys;
+  expect_error_field "max_keys" (Object.List.options ~max_keys:(-1) ());
+  expect_error_field "max_keys" (Object.List.options ~max_keys:1001 ());
+  ignore
+    (expect_ok "zero version max keys" (Object.Versions.options ~max_keys:0 ()));
+  expect_error_field "max_keys" (Object.Versions.options ~max_keys:(-1) ());
+  expect_error_field "max_keys" (Object.Versions.options ~max_keys:1001 ());
+  expect_error_field "version_id_marker"
+    (Object.Versions.options ~version_id_marker:version ());
+  ignore
+    (expect_ok "version marker pair"
+       (Object.Versions.options
+          ~key_marker:(Object_key.of_string_exn "key")
+          ~version_id_marker:version ()));
   let owner = Object.Owner.create ~id:"owner-id" ~display_name:"owner" () in
   Alcotest.(check (option string))
     "owner id" (Some "owner-id")
@@ -801,7 +818,12 @@ let test_multipart_boundaries () =
     "part size" (Some 0L) (Multipart.Part.size part);
   expect_error_field "size"
     (Multipart.Part.create ~part_number:first ~etag ~size:(-1L) ());
-  expect_error_field "max_parts" (Multipart.List_parts.options ~max_parts:0 ());
+  let zero_parts =
+    expect_ok "zero max parts" (Multipart.List_parts.options ~max_parts:0 ())
+  in
+  Alcotest.(check (option int)) "zero max parts" (Some 0) zero_parts.max_parts;
+  expect_error_field "max_parts"
+    (Multipart.List_parts.options ~max_parts:(-1) ());
   expect_error_field "max_parts"
     (Multipart.List_parts.options ~max_parts:1001 ())
 

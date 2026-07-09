@@ -260,7 +260,7 @@ module Upload_part : sig
 end
 
 module Complete : sig
-  type options = {
+  type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
     checksum : Object.Checksum.value option;
@@ -295,7 +295,8 @@ module Complete : sig
     ?multipart_object_size:int64 ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
-  (** Build [CompleteMultipartUpload] options. *)
+  (** Build [CompleteMultipartUpload] options. [multipart_object_size], when
+      present, must be non-negative. *)
 
   val options_exn :
     ?expected_bucket_owner:Account_id.t ->
@@ -328,9 +329,10 @@ module Abort : sig
 end
 
 module List_parts : sig
-  type options = {
+  type options = private {
     max_parts : int option;
-        (** Maximum number of parts S3 should return in one page. *)
+        (** Maximum number of parts S3 should return in one page. Values are
+            between 0 and 1,000 inclusive. *)
     part_number_marker : Part_number_marker.t option;
         (** Pagination marker, usually from [next_part_number_marker]. Omit to
             start listing from the beginning. *)
@@ -367,8 +369,8 @@ module List_parts : sig
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
-  (** Build [ListParts] options. [max_parts], when present, must be in S3's
-      accepted range of 1 to 1,000. *)
+  (** Build [ListParts] options. [max_parts], when present, must be between 0
+      and 1,000 inclusive. *)
 
   val options_exn :
     ?max_parts:int ->

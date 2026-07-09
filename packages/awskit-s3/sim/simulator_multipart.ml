@@ -148,14 +148,6 @@ module Multipart = struct
                                   :: checksum_response_headers checksum);
                           }))))
 
-  let validate_complete_options (options : Multipart_model.Complete.options) =
-    Multipart_model.Complete.options
-      ?expected_bucket_owner:options.expected_bucket_owner
-      ?checksum:options.checksum ?checksum_type:options.checksum_type
-      ?customer_key:options.customer_key
-      ?multipart_object_size:options.multipart_object_size ()
-    |> Result.map ignore
-
   let validate_complete_parts upload options parts =
     let invalid_part_size () =
       invalid ~field:"parts" "non-final multipart parts must be at least 5 MiB"
@@ -253,84 +245,79 @@ module Multipart = struct
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        match validate_complete_options options with
+        match require_multipart_upload conn ~bucket ~key ~upload_id with
         | Error error -> return_error error
-        | Ok () -> (
-            match require_multipart_upload conn ~bucket ~key ~upload_id with
+        | Ok (bucket_state, upload) -> (
+            match validate_complete_parts upload options parts with
             | Error error -> return_error error
-            | Ok (bucket_state, upload) -> (
-                match validate_complete_parts upload options parts with
-                | Error error -> return_error error
-                | Ok () -> (
-                    match
-                      operation_fault conn `Complete_multipart_upload bucket
-                        (Some key)
-                    with
-                    | Some error -> return_error error
-                    | None -> (
-                        let part_bodies =
-                          parts
-                          |> List.map (fun (part : Multipart_model.Part.t) ->
-                              (Hashtbl.find upload.parts
-                                 (completed_part_number part))
-                                .body)
-                        in
-                        let body = String.concat "" part_bodies in
-                        let etag = multipart_etag part_bodies in
-                        match checksum_for_value ~body options.checksum with
+            | Ok () -> (
+                match
+                  operation_fault conn `Complete_multipart_upload bucket
+                    (Some key)
+                with
+                | Some error -> return_error error
+                | None -> (
+                    let part_bodies =
+                      parts
+                      |> List.map (fun (part : Multipart_model.Part.t) ->
+                          (Hashtbl.find upload.parts
+                             (completed_part_number part))
+                            .body)
+                    in
+                    let body = String.concat "" part_bodies in
+                    let etag = multipart_etag part_bodies in
+                    match checksum_for_value ~body options.checksum with
+                    | Error error -> return_error error
+                    | Ok supplied_checksum -> (
+                        match
+                          match supplied_checksum.values with
+                          | [] ->
+                              checksum_for_algorithm ~body
+                                upload.checksum_algorithm
+                          | _ -> Ok supplied_checksum
+                        with
                         | Error error -> return_error error
-                        | Ok supplied_checksum -> (
-                            match
-                              match supplied_checksum.values with
-                              | [] ->
-                                  checksum_for_algorithm ~body
-                                    upload.checksum_algorithm
-                              | _ -> Ok supplied_checksum
-                            with
-                            | Error error -> return_error error
-                            | Ok checksum ->
-                                let checksum =
-                                  {
-                                    checksum with
-                                    checksum_type =
-                                      Option.map
-                                        (fun checksum_type ->
-                                          Object_model.Checksum.Type.Known
-                                            checksum_type)
-                                        (match options.checksum_type with
-                                        | Some _ as value -> value
-                                        | None -> upload.checksum_type);
-                                  }
-                                in
-                                let obj =
-                                  {
-                                    body;
-                                    etag;
-                                    version_id = None;
-                                    content_type = upload.content_type;
-                                    metadata = upload.metadata;
-                                    storage_class = upload.storage_class;
-                                    tags = upload.tags;
-                                    checksum;
-                                    last_modified = now conn;
-                                  }
-                                in
-                                let obj =
-                                  store_object conn bucket_state key obj
-                                in
-                                Hashtbl.remove bucket_state.multipart_uploads
-                                  (upload_key upload_id);
-                                Ok
-                                  {
-                                    Multipart_model.Complete.etag = Some etag;
-                                    version_id = obj.version_id;
-                                    checksum;
-                                    response =
-                                      response 200
-                                        ~headers:
-                                          (version_headers obj.version_id
-                                          @ checksum_response_headers checksum);
-                                  }))))))
+                        | Ok checksum ->
+                            let checksum =
+                              {
+                                checksum with
+                                checksum_type =
+                                  Option.map
+                                    (fun checksum_type ->
+                                      Object_model.Checksum.Type.Known
+                                        checksum_type)
+                                    (match options.checksum_type with
+                                    | Some _ as value -> value
+                                    | None -> upload.checksum_type);
+                              }
+                            in
+                            let obj =
+                              {
+                                body;
+                                etag;
+                                version_id = None;
+                                content_type = upload.content_type;
+                                metadata = upload.metadata;
+                                storage_class = upload.storage_class;
+                                tags = upload.tags;
+                                checksum;
+                                last_modified = now conn;
+                              }
+                            in
+                            let obj = store_object conn bucket_state key obj in
+                            Hashtbl.remove bucket_state.multipart_uploads
+                              (upload_key upload_id);
+                            Ok
+                              {
+                                Multipart_model.Complete.etag = Some etag;
+                                version_id = obj.version_id;
+                                checksum;
+                                response =
+                                  response 200
+                                    ~headers:
+                                      (version_headers obj.version_id
+                                      @ checksum_response_headers checksum);
+                              })))))
 
   let abort_upload conn ~upload ?options:_ () =
     let bucket = upload_handle_bucket upload in
@@ -354,15 +341,6 @@ module Multipart = struct
                   (upload_key upload_id);
                 Ok { Multipart_model.Abort.response = response 204 }))
 
-  let validate_list_parts_options (options : Multipart_model.List_parts.options)
-      =
-    match options.max_parts with
-    | Some value when value <= 0 ->
-        invalid ~field:"max_parts" "max_parts must be greater than zero"
-    | Some value when value > 1000 ->
-        invalid ~field:"max_parts" "max_parts must be at most 1000"
-    | _ -> Ok ()
-
   let list_parts conn ~upload ?options () =
     let options =
       Option.value ~default:Multipart_model.List_parts.default_options options
@@ -376,68 +354,65 @@ module Multipart = struct
     match validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        match validate_list_parts_options options with
+        match require_multipart_upload conn ~bucket ~key ~upload_id with
         | Error error -> return_error error
-        | Ok () -> (
-            match require_multipart_upload conn ~bucket ~key ~upload_id with
-            | Error error -> return_error error
-            | Ok (_bucket_state, upload) -> (
-                match operation_fault conn `List_parts bucket (Some key) with
-                | Some error -> return_error error
-                | None ->
-                    let max_parts =
-                      Option.value ~default:(config (store conn)).max_list_keys
-                        options.max_parts
-                    in
-                    let all =
-                      Simulator_state.parts upload
-                      |> List.filter (fun part ->
-                          match options.part_number_marker with
-                          | None -> true
-                          | Some marker ->
-                              part.part_number
-                              > Multipart_model.Part_number_marker.to_int marker)
-                    in
-                    let selected =
-                      all |> List.to_seq |> Seq.take max_parts |> List.of_seq
-                    in
-                    let is_truncated = List.length all > List.length selected in
-                    let next_part_number_marker =
-                      if not is_truncated then None
-                      else
-                        match List.rev selected with
-                        | [] -> None
-                        | part :: _ ->
-                            Some
-                              (Multipart_model.Part_number_marker.of_int_exn
-                                 part.part_number)
-                    in
-                    let parts =
-                      List.map
-                        (fun part ->
-                          {
-                            Multipart_model.List_parts.part_number =
-                              Multipart_model.Part_number.of_int_exn
-                                part.part_number;
-                            etag = Some part.etag;
-                            size = Some (Int64.of_int (String.length part.body));
-                            last_modified = Some part.last_modified;
-                            checksum = part.checksum;
-                          })
-                        selected
-                    in
-                    Ok
+        | Ok (_bucket_state, upload) -> (
+            match operation_fault conn `List_parts bucket (Some key) with
+            | Some error -> return_error error
+            | None ->
+                let max_parts =
+                  Option.value ~default:(config (store conn)).max_list_keys
+                    options.max_parts
+                in
+                let all =
+                  Simulator_state.parts upload
+                  |> List.filter (fun part ->
+                      match options.part_number_marker with
+                      | None -> true
+                      | Some marker ->
+                          part.part_number
+                          > Multipart_model.Part_number_marker.to_int marker)
+                in
+                let selected =
+                  all |> List.to_seq |> Seq.take max_parts |> List.of_seq
+                in
+                let is_truncated = List.length all > List.length selected in
+                let next_part_number_marker =
+                  if not is_truncated then None
+                  else
+                    match List.rev selected with
+                    | [] -> None
+                    | part :: _ ->
+                        Some
+                          (Multipart_model.Part_number_marker.of_int_exn
+                             part.part_number)
+                in
+                let parts =
+                  List.map
+                    (fun part ->
                       {
-                        Multipart_model.List_parts.parts;
-                        is_truncated;
-                        next_part_number_marker;
-                        checksum_type =
-                          Option.map
-                            (fun checksum_type ->
-                              Object_model.Checksum.Type.Known checksum_type)
-                            upload.checksum_type;
-                        response = response 200;
-                      })))
+                        Multipart_model.List_parts.part_number =
+                          Multipart_model.Part_number.of_int_exn
+                            part.part_number;
+                        etag = Some part.etag;
+                        size = Some (Int64.of_int (String.length part.body));
+                        last_modified = Some part.last_modified;
+                        checksum = part.checksum;
+                      })
+                    selected
+                in
+                Ok
+                  {
+                    Multipart_model.List_parts.parts;
+                    is_truncated;
+                    next_part_number_marker;
+                    checksum_type =
+                      Option.map
+                        (fun checksum_type ->
+                          Object_model.Checksum.Type.Known checksum_type)
+                        upload.checksum_type;
+                    response = response 200;
+                  }))
 
   module List_parts = struct
     let validate_max_pages = function
@@ -448,7 +423,8 @@ module Multipart = struct
 
     let options_for_page (base : Multipart_model.List_parts.options)
         part_number_marker =
-      { base with Multipart_model.List_parts.part_number_marker }
+      Multipart_model.List_parts.options ?max_parts:base.max_parts
+        ?part_number_marker ?expected_bucket_owner:base.expected_bucket_owner ()
 
     let fold_pages conn ~upload ?options ?max_pages ~init ~f () =
       match validate_max_pages max_pages with
@@ -459,26 +435,29 @@ module Multipart = struct
               options
           in
           let rec loop part_number_marker page_count acc =
-            let options = options_for_page base part_number_marker in
-            match list_parts conn ~upload ~options () with
+            match options_for_page base part_number_marker with
             | Error error -> Error error
-            | Ok page -> (
-                match f acc page with
+            | Ok options -> (
+                match list_parts conn ~upload ~options () with
                 | Error error -> Error error
-                | Ok acc -> (
-                    let page_count = page_count + 1 in
-                    if not page.is_truncated then Ok acc
-                    else
-                      match max_pages with
-                      | Some max_pages when page_count >= max_pages -> Ok acc
-                      | _ -> (
-                          match page.next_part_number_marker with
-                          | Some marker -> loop (Some marker) page_count acc
-                          | None ->
-                              Error
-                                (decode
-                                   "truncated list-parts response missing \
-                                    NextPartNumberMarker"))))
+                | Ok page -> (
+                    match f acc page with
+                    | Error error -> Error error
+                    | Ok acc -> (
+                        let page_count = page_count + 1 in
+                        if not page.is_truncated then Ok acc
+                        else
+                          match max_pages with
+                          | Some max_pages when page_count >= max_pages ->
+                              Ok acc
+                          | _ -> (
+                              match page.next_part_number_marker with
+                              | Some marker -> loop (Some marker) page_count acc
+                              | None ->
+                                  Error
+                                    (decode
+                                       "truncated list-parts response missing \
+                                        NextPartNumberMarker")))))
           in
           loop base.part_number_marker 0 init
 

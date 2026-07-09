@@ -43,14 +43,6 @@ module Make (C : Request_context.S) = struct
   let upload_id upload = Multipart.Upload.upload_id upload
   let complete_min_part_size = 5_242_880L
 
-  let validate_complete_options (options : Complete_multipart_upload.options) =
-    Complete_multipart_upload.options
-      ?expected_bucket_owner:options.expected_bucket_owner
-      ?checksum:options.checksum ?checksum_type:options.checksum_type
-      ?customer_key:options.customer_key
-      ?multipart_object_size:options.multipart_object_size ()
-    |> Result.map ignore
-
   let validate_complete_parts ?multipart_object_size parts =
     let invalid_part_size () =
       S3_error_context.invalid ~field:"parts"
@@ -270,79 +262,73 @@ module Make (C : Request_context.S) = struct
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        match validate_complete_options options with
+        match
+          validate_complete_parts
+            ?multipart_object_size:options.multipart_object_size parts
+        with
         | Error error -> return_error error
         | Ok () -> (
-            match
-              validate_complete_parts
-                ?multipart_object_size:options.multipart_object_size parts
-            with
+            let part_xml (part : Multipart.Part.t) =
+              let part_number =
+                Multipart.Part.part_number part |> Multipart.Part_number.to_int
+              in
+              let children =
+                [
+                  Xml.text "PartNumber" (string_of_int part_number);
+                  Xml.text "ETag"
+                    (Object.Etag.to_string (Multipart.Part.etag part));
+                ]
+              in
+              let children =
+                match Multipart.Part.checksum part with
+                | None -> children
+                | Some checksum ->
+                    children
+                    @ [
+                        Xml.text
+                          (checksum_xml_name checksum.algorithm)
+                          checksum.value;
+                      ]
+              in
+              Xml.el "Part" children
+            in
+            let body =
+              Xml.el "CompleteMultipartUpload" (List.map part_xml parts)
+              |> Xml.to_string
+            in
+            let upload = R.Request_body.of_string body in
+            match object_request conn ~bucket ~key with
             | Error error -> return_error error
-            | Ok () -> (
-                let part_xml (part : Multipart.Part.t) =
-                  let part_number =
-                    Multipart.Part.part_number part
-                    |> Multipart.Part_number.to_int
-                  in
-                  let children =
-                    [
-                      Xml.text "PartNumber" (string_of_int part_number);
-                      Xml.text "ETag"
-                        (Object.Etag.to_string (Multipart.Part.etag part));
-                    ]
-                  in
-                  let children =
-                    match Multipart.Part.checksum part with
-                    | None -> children
-                    | Some checksum ->
-                        children
-                        @ [
-                            Xml.text
-                              (checksum_xml_name checksum.algorithm)
-                              checksum.value;
-                          ]
-                  in
-                  Xml.el "Part" children
-                in
-                let body =
-                  Xml.el "CompleteMultipartUpload" (List.map part_xml parts)
-                  |> Xml.to_string
-                in
-                let upload = R.Request_body.of_string body in
-                match object_request conn ~bucket ~key with
-                | Error error -> return_error error
-                | Ok request ->
-                    with_operation_result return_error return_ok
-                      (with_retryable_embedded_response conn ~method_:`POST
-                         ~request
-                         ~query:
-                           [
-                             ( "uploadId",
-                               [ Multipart.Upload_id.to_string upload_id ] );
-                           ]
-                         ~headers:
-                           ([ ("content-type", "application/xml") ]
-                            @ checksum_value_headers options.checksum
-                            @ checksum_type_header options.checksum_type
-                            @ customer_key_headers options.customer_key
-                            @ multipart_object_size_header
-                                options.multipart_object_size
-                           |> add_opt_account_id_header
-                                "x-amz-expected-bucket-owner"
-                                options.expected_bucket_owner)
-                         ~payload_hash:
-                           (R.Request_body.descriptor upload).payload_hash
-                         upload
-                         ~f:(fun response body ->
-                           let* body =
-                             read_response_body body ~max_size:1_048_576L
-                           in
-                           match body with
+            | Ok request ->
+                with_operation_result return_error return_ok
+                  (with_retryable_embedded_response conn ~method_:`POST ~request
+                     ~query:
+                       [
+                         ( "uploadId",
+                           [ Multipart.Upload_id.to_string upload_id ] );
+                       ]
+                     ~headers:
+                       ([ ("content-type", "application/xml") ]
+                        @ checksum_value_headers options.checksum
+                        @ checksum_type_header options.checksum_type
+                        @ customer_key_headers options.customer_key
+                        @ multipart_object_size_header
+                            options.multipart_object_size
+                       |> add_opt_account_id_header
+                            "x-amz-expected-bucket-owner"
+                            options.expected_bucket_owner)
+                     ~payload_hash:
+                       (R.Request_body.descriptor upload).payload_hash upload
+                     ~f:(fun response body ->
+                       let* body =
+                         read_response_body body ~max_size:1_048_576L
+                       in
+                       match body with
+                       | Error error -> return_error error
+                       | Ok body -> (
+                           match complete_result response body with
                            | Error error -> return_error error
-                           | Ok body -> (
-                               match complete_result response body with
-                               | Error error -> return_error error
-                               | Ok result -> return_ok result))))))
+                           | Ok result -> return_ok result)))))
 
   let abort_upload conn ~upload ?options () =
     let bucket = upload_bucket upload in
@@ -375,12 +361,6 @@ module Make (C : Request_context.S) = struct
                    | Error error -> return_error error
                    | Ok () -> return_ok { Abort_multipart_upload.response })))
 
-  let validate_list_parts_options (options : List_parts.options) =
-    List_parts.options ?max_parts:options.max_parts
-      ?part_number_marker:options.part_number_marker
-      ?expected_bucket_owner:options.expected_bucket_owner ()
-    |> Result.map ignore
-
   let list_parts conn ~upload ?options () =
     let bucket = upload_bucket upload in
     let key = upload_key upload in
@@ -393,138 +373,124 @@ module Make (C : Request_context.S) = struct
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        match validate_list_parts_options options with
+        match object_request conn ~bucket ~key with
         | Error error -> return_error error
-        | Ok () -> (
-            match object_request conn ~bucket ~key with
-            | Error error -> return_error error
-            | Ok request ->
-                let add_int name = function
-                  | None -> []
-                  | Some value -> [ (name, [ string_of_int value ]) ]
-                in
-                let add_part_number_marker name = function
-                  | None -> []
-                  | Some value ->
+        | Ok request ->
+            let add_int name = function
+              | None -> []
+              | Some value -> [ (name, [ string_of_int value ]) ]
+            in
+            let add_part_number_marker name = function
+              | None -> []
+              | Some value ->
+                  [
+                    ( name,
                       [
-                        ( name,
-                          [
-                            value
-                            |> Multipart.Part_number_marker.to_int
-                            |> string_of_int;
-                          ] );
-                      ]
-                in
-                let query =
-                  [ ("uploadId", [ Multipart.Upload_id.to_string upload_id ]) ]
-                  @ add_int "max-parts" options.max_parts
-                  @ add_part_number_marker "part-number-marker"
-                      options.part_number_marker
-                in
-                with_operation_result return_error return_ok
-                  (with_empty_response conn ~method_:`GET ~request ~query
-                     ~headers:
-                       ([]
-                       |> add_opt_account_id_header
-                            "x-amz-expected-bucket-owner"
-                            options.expected_bucket_owner)
-                     ~f:(fun response body ->
-                       let* body =
-                         read_response_body body ~max_size:1_048_576L
-                       in
-                       match body with
+                        value
+                        |> Multipart.Part_number_marker.to_int
+                        |> string_of_int;
+                      ] );
+                  ]
+            in
+            let query =
+              [ ("uploadId", [ Multipart.Upload_id.to_string upload_id ]) ]
+              @ add_int "max-parts" options.max_parts
+              @ add_part_number_marker "part-number-marker"
+                  options.part_number_marker
+            in
+            with_operation_result return_error return_ok
+              (with_empty_response conn ~method_:`GET ~request ~query
+                 ~headers:
+                   ([]
+                   |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+                        options.expected_bucket_owner)
+                 ~f:(fun response body ->
+                   let* body = read_response_body body ~max_size:1_048_576L in
+                   match body with
+                   | Error error -> return_error error
+                   | Ok body -> (
+                       match Xml.decode_root body ~name:"ListPartsResult" with
                        | Error error -> return_error error
-                       | Ok body -> (
+                       | Ok nodes -> (
                            match
-                             Xml.decode_root body ~name:"ListPartsResult"
-                           with
-                           | Error error -> return_error error
-                           | Ok nodes -> (
-                               match
-                                 Xml.children_result "Part" nodes
-                                   ~f:(fun index nodes ->
-                                     let path =
-                                       Fmt.str "ListPartsResult.Part[%d]" index
-                                     in
+                             Xml.children_result "Part" nodes
+                               ~f:(fun index nodes ->
+                                 let path =
+                                   Fmt.str "ListPartsResult.Part[%d]" index
+                                 in
+                                 match
+                                   Xml.optional_child_parse ~path "PartNumber"
+                                     part_number_of_string_opt nodes
+                                 with
+                                 | Error _ as error -> error
+                                 | Ok part_number -> (
                                      match
-                                       Xml.optional_child_parse ~path
-                                         "PartNumber" part_number_of_string_opt
-                                         nodes
+                                       Xml.optional_child_result ~path "ETag"
+                                         Object.Etag.of_string nodes
                                      with
                                      | Error _ as error -> error
-                                     | Ok part_number -> (
+                                     | Ok etag -> (
                                          match
-                                           Xml.optional_child_result ~path
-                                             "ETag" Object.Etag.of_string nodes
+                                           Xml.optional_child_parse ~path "Size"
+                                             S3_parse
+                                             .non_negative_int64_of_string_opt
+                                             nodes
                                          with
                                          | Error _ as error -> error
-                                         | Ok etag -> (
+                                         | Ok size -> (
                                              match
                                                Xml.optional_child_parse ~path
-                                                 "Size"
-                                                 S3_parse
-                                                 .non_negative_int64_of_string_opt
-                                                 nodes
+                                                 "LastModified"
+                                                 S3_time.of_string nodes
                                              with
                                              | Error _ as error -> error
-                                             | Ok size -> (
-                                                 match
-                                                   Xml.optional_child_parse
-                                                     ~path "LastModified"
-                                                     S3_time.of_string nodes
-                                                 with
-                                                 | Error _ as error -> error
-                                                 | Ok last_modified -> (
-                                                     match part_number with
-                                                     | None ->
-                                                         Xml.decode_field_error
-                                                           ~path
-                                                           "missing required \
-                                                            <PartNumber>"
-                                                     | Some part_number ->
-                                                         Ok
-                                                           {
-                                                             List_parts
-                                                             .part_number;
-                                                             etag;
-                                                             size;
-                                                             last_modified;
-                                                             checksum =
-                                                               checksum_response_from_xml
-                                                                 nodes;
-                                                           })))))
+                                             | Ok last_modified -> (
+                                                 match part_number with
+                                                 | None ->
+                                                     Xml.decode_field_error
+                                                       ~path
+                                                       "missing required \
+                                                        <PartNumber>"
+                                                 | Some part_number ->
+                                                     Ok
+                                                       {
+                                                         List_parts.part_number;
+                                                         etag;
+                                                         size;
+                                                         last_modified;
+                                                         checksum =
+                                                           checksum_response_from_xml
+                                                             nodes;
+                                                       })))))
+                           with
+                           | Error error -> return_error error
+                           | Ok parts -> (
+                               match
+                                 ( Xml.optional_child_parse
+                                     ~path:"ListPartsResult" "IsTruncated"
+                                     parse_bool nodes,
+                                   Xml.optional_child_parse
+                                     ~path:"ListPartsResult"
+                                     "NextPartNumberMarker"
+                                     part_number_marker_of_string_opt nodes )
                                with
-                               | Error error -> return_error error
-                               | Ok parts -> (
-                                   match
-                                     ( Xml.optional_child_parse
-                                         ~path:"ListPartsResult" "IsTruncated"
-                                         parse_bool nodes,
-                                       Xml.optional_child_parse
-                                         ~path:"ListPartsResult"
-                                         "NextPartNumberMarker"
-                                         part_number_marker_of_string_opt nodes
-                                     )
-                                   with
-                                   | Error error, _ | _, Error error ->
-                                       return_error error
-                                   | Ok is_truncated, Ok next_part_number_marker
-                                     ->
-                                       return_ok
-                                         {
-                                           List_parts.parts;
-                                           is_truncated =
-                                             Option.value ~default:false
-                                               is_truncated;
-                                           next_part_number_marker;
-                                           checksum_type =
-                                             Option.map
-                                               Object.Checksum.Type
-                                               .observed_of_string
-                                               (Xml.child_text "ChecksumType"
-                                                  nodes);
-                                           response;
-                                         })))))))
+                               | Error error, _ | _, Error error ->
+                                   return_error error
+                               | Ok is_truncated, Ok next_part_number_marker ->
+                                   return_ok
+                                     {
+                                       List_parts.parts;
+                                       is_truncated =
+                                         Option.value ~default:false
+                                           is_truncated;
+                                       next_part_number_marker;
+                                       checksum_type =
+                                         Option.map
+                                           Object.Checksum.Type
+                                           .observed_of_string
+                                           (Xml.child_text "ChecksumType" nodes);
+                                       response;
+                                     }))))))
 
   module List_parts = struct
     let validate_max_pages = function
@@ -539,7 +505,8 @@ module Make (C : Request_context.S) = struct
         (Fmt.str "ListParts collection exceeded max_pages bound (%d)" max_pages)
 
     let options_for_page (base : List_parts.options) part_number_marker =
-      { base with List_parts.part_number_marker }
+      List_parts.options ?max_parts:base.max_parts ?part_number_marker
+        ?expected_bucket_owner:base.expected_bucket_owner ()
 
     let fold_pages conn ~upload ?options ?max_pages ~init ~f () =
       let return_context_error =
@@ -551,29 +518,31 @@ module Make (C : Request_context.S) = struct
       | Ok () ->
           let base = Option.value ~default:List_parts.default_options options in
           let rec loop part_number_marker page_count acc =
-            let options = options_for_page base part_number_marker in
-            let* page = list_parts conn ~upload ~options () in
-            match page with
-            | Error error -> return_error error
-            | Ok page -> (
-                let* next_acc = f acc page in
-                match next_acc with
-                | Error error -> return_context_error error
-                | Ok acc -> (
-                    let page_count = page_count + 1 in
-                    if not page.is_truncated then return_ok acc
-                    else
-                      match max_pages with
-                      | Some max_pages when page_count >= max_pages ->
-                          return_ok acc
-                      | _ -> (
-                          match page.next_part_number_marker with
-                          | Some marker -> loop (Some marker) page_count acc
-                          | None ->
-                              return_context_error
-                                (S3_error_context.decode
-                                   "truncated list-parts response missing \
-                                    NextPartNumberMarker"))))
+            match options_for_page base part_number_marker with
+            | Error error -> return_context_error error
+            | Ok options -> (
+                let* page = list_parts conn ~upload ~options () in
+                match page with
+                | Error error -> return_error error
+                | Ok page -> (
+                    let* next_acc = f acc page in
+                    match next_acc with
+                    | Error error -> return_context_error error
+                    | Ok acc -> (
+                        let page_count = page_count + 1 in
+                        if not page.is_truncated then return_ok acc
+                        else
+                          match max_pages with
+                          | Some max_pages when page_count >= max_pages ->
+                              return_ok acc
+                          | _ -> (
+                              match page.next_part_number_marker with
+                              | Some marker -> loop (Some marker) page_count acc
+                              | None ->
+                                  return_context_error
+                                    (S3_error_context.decode
+                                       "truncated list-parts response missing \
+                                        NextPartNumberMarker")))))
           in
           loop base.part_number_marker 0 init
 
@@ -587,29 +556,32 @@ module Make (C : Request_context.S) = struct
       | Ok () ->
           let base = Option.value ~default:List_parts.default_options options in
           let rec loop part_number_marker page_count acc =
-            let options = options_for_page base part_number_marker in
-            let* page = list_parts conn ~upload ~options () in
-            match page with
-            | Error error -> return_error error
-            | Ok page -> (
-                let* next_acc = f acc page in
-                match next_acc with
-                | Error error -> return_context_error error
-                | Ok acc -> (
-                    let page_count = page_count + 1 in
-                    if not page.is_truncated then return_ok acc
-                    else
-                      match max_pages with
-                      | Some max_pages when page_count >= max_pages ->
-                          return_context_error (max_pages_exceeded max_pages)
-                      | _ -> (
-                          match page.next_part_number_marker with
-                          | Some marker -> loop (Some marker) page_count acc
-                          | None ->
+            match options_for_page base part_number_marker with
+            | Error error -> return_context_error error
+            | Ok options -> (
+                let* page = list_parts conn ~upload ~options () in
+                match page with
+                | Error error -> return_error error
+                | Ok page -> (
+                    let* next_acc = f acc page in
+                    match next_acc with
+                    | Error error -> return_context_error error
+                    | Ok acc -> (
+                        let page_count = page_count + 1 in
+                        if not page.is_truncated then return_ok acc
+                        else
+                          match max_pages with
+                          | Some max_pages when page_count >= max_pages ->
                               return_context_error
-                                (S3_error_context.decode
-                                   "truncated list-parts response missing \
-                                    NextPartNumberMarker"))))
+                                (max_pages_exceeded max_pages)
+                          | _ -> (
+                              match page.next_part_number_marker with
+                              | Some marker -> loop (Some marker) page_count acc
+                              | None ->
+                                  return_context_error
+                                    (S3_error_context.decode
+                                       "truncated list-parts response missing \
+                                        NextPartNumberMarker")))))
           in
           loop base.part_number_marker 0 init
 
