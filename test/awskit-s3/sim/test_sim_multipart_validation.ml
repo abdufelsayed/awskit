@@ -136,8 +136,11 @@ let test_checksum_algorithms_are_computed_or_rejected () =
        ~bucket:(bucket_name "test-bucket")
        ~key:(object_key "crc32.bin")
        ~options:
-         (Multipart.Create.options_exn
-            ~checksum_algorithm:Object.Checksum.Algorithm.Crc32 ())
+         (Multipart.Create.options
+            ~checksum:
+              (Multipart.Create.Checksum.create_exn
+                 ~algorithm:Object.Checksum.Algorithm.Crc32 ())
+            ())
        ());
   expect_validation_field "unsupported put checksum value" "checksum_algorithm"
     (Simulator.Object.put_string conn
@@ -151,8 +154,11 @@ let test_checksum_algorithms_are_computed_or_rejected () =
       ~bucket:(bucket_name "test-bucket")
       ~key:(object_key "sha512.bin")
       ~options:
-        (Multipart.Create.options_exn
-           ~checksum_algorithm:Object.Checksum.Algorithm.Sha512 ())
+        (Multipart.Create.options
+           ~checksum:
+             (Multipart.Create.Checksum.create_exn
+                ~algorithm:Object.Checksum.Algorithm.Sha512 ())
+           ())
       ()
     |> ok_or_fail "create sha512 upload"
   in

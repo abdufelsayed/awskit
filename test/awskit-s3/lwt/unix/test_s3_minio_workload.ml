@@ -1294,7 +1294,7 @@ let test_manual_multipart_lifecycle () =
       in
       let metadata = Metadata.of_list_exn [ ("transfer", "manual") ] in
       let create_options =
-        Multipart.Create.options_exn ~metadata
+        Multipart.Create.options ~metadata
           ~tags:(tags_to_set [ ("mode", "manual") ])
           ()
       in

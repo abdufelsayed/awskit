@@ -18,7 +18,10 @@ module Multipart = struct
   let validate_opt f = function None -> Ok () | Some value -> f value
 
   let validate_create_options (options : Multipart_model.Create.options) =
-    validate_opt validate_supported_algorithm options.checksum_algorithm
+    validate_opt
+      (fun (checksum : Multipart_model.Create.Checksum.t) ->
+        validate_supported_algorithm checksum.algorithm)
+      options.checksum
 
   let upload_handle_bucket upload =
     Multipart_model.Upload.bucket upload |> Bucket_name.to_string
@@ -72,8 +75,7 @@ module Multipart = struct
                             metadata = options.metadata;
                             storage_class = options.storage_class;
                             tags = options.tags;
-                            checksum_algorithm = options.checksum_algorithm;
-                            checksum_type = options.checksum_type;
+                            checksum = options.checksum;
                             parts = Hashtbl.create 17;
                             created_at = now conn;
                           };
@@ -166,7 +168,8 @@ module Multipart = struct
           left.algorithm = algorithm && String.equal left.value right.value
       | Object_model.Checksum.Algorithm.Unknown _ -> false
     in
-    let validate_part_checksum stored (part : Multipart_model.Part.t) =
+    let validate_part_checksum (stored : stored_part)
+        (part : Multipart_model.Part.t) =
       match
         ( stored.checksum.Object_model.Checksum.values,
           Multipart_model.Part.checksum part )
@@ -273,7 +276,11 @@ module Multipart = struct
                           match supplied_checksum.values with
                           | [] ->
                               checksum_for_algorithm ~body
-                                upload.checksum_algorithm
+                                (Option.map
+                                   (fun (checksum :
+                                          Multipart_model.Create.Checksum.t) ->
+                                     checksum.algorithm)
+                                   upload.checksum)
                           | _ -> Ok supplied_checksum
                         with
                         | Error error -> return_error error
@@ -288,7 +295,12 @@ module Multipart = struct
                                         checksum_type)
                                     (match options.checksum_type with
                                     | Some _ as value -> value
-                                    | None -> upload.checksum_type);
+                                    | None ->
+                                        Option.bind upload.checksum
+                                          (fun
+                                            (checksum :
+                                              Multipart_model.Create.Checksum.t)
+                                          -> checksum.checksum_type));
                               }
                             in
                             let obj =
@@ -410,7 +422,10 @@ module Multipart = struct
                       Option.map
                         (fun checksum_type ->
                           Object_model.Checksum.Type.Known checksum_type)
-                        upload.checksum_type;
+                        (Option.bind upload.checksum
+                           (fun
+                             (checksum : Multipart_model.Create.Checksum.t) ->
+                             checksum.checksum_type));
                     response = response 200;
                   }))
 

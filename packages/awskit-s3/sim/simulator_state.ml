@@ -69,8 +69,7 @@ type multipart_upload = {
   metadata : Metadata.t;
   storage_class : Storage_class.t option;
   tags : Tag.Set.t;
-  checksum_algorithm : Object.Checksum.Algorithm.t option;
-  checksum_type : Object.Checksum.Type.t option;
+  checksum : Multipart.Create.Checksum.t option;
   parts : (int, stored_part) Hashtbl.t;
   created_at : Ptime.t;
 }

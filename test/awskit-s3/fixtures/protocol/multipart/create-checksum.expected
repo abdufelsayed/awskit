@@ -1,0 +1,5 @@
+method=POST
+path=/large.bin
+query=uploads=
+checksum-algorithm=CRC32C
+checksum-type=FULL_OBJECT

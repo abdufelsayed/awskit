@@ -906,6 +906,41 @@ let test_delete_objects_error_preserves_version_id () =
 let checksum value : Object.Checksum.value =
   Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256 ~value
 
+let test_multipart_create_checksum_headers_fixture () =
+  let checksum =
+    Multipart.Create.Checksum.create_exn
+      ~algorithm:Object.Checksum.Algorithm.Crc32c
+      ~checksum_type:Object.Checksum.Type.Full_object ()
+  in
+  let options = Multipart.Create.options ~checksum () in
+  let conn =
+    Protocol_recording_runtime.connect
+      [
+        Protocol_recording_runtime.response 200
+          {|<InitiateMultipartUploadResult><UploadId>upload-1</UploadId></InitiateMultipartUploadResult>|};
+      ]
+  in
+  ignore
+    (Protocol_recording_runtime.S3.Multipart.create_upload conn
+       ~bucket:(Protocol_support.bucket_name "my-bucket")
+       ~key:(Protocol_support.object_key "large.bin")
+       ~options ()
+    |> Protocol_support.ok_or_fail "create multipart checksum fixture");
+  let request = (Protocol_recording_runtime.last_call conn).request in
+  let target = request.Awskit.Request.target in
+  let actual =
+    Fmt.str
+      "method=%s\npath=%s\nquery=%s\nchecksum-algorithm=%s\nchecksum-type=%s"
+      (Awskit.Request.Method.to_string request.method_)
+      target.path
+      (query_to_string target.query)
+      (header_or_empty "x-amz-checksum-algorithm" request.headers)
+      (header_or_empty "x-amz-checksum-type" request.headers)
+  in
+  check_fixture "create multipart checksum headers"
+    [ "multipart"; "create-checksum.expected" ]
+    ~actual
+
 let test_multipart_complete_xml_fixture () =
   let upload =
     Multipart.Upload.resume
@@ -986,6 +1021,8 @@ let suite =
           test_delete_objects_cr_xml_fixture;
         Alcotest.test_case "DeleteObjects error VersionId" `Quick
           test_delete_objects_error_preserves_version_id;
+        Alcotest.test_case "CreateMultipartUpload checksum headers" `Quick
+          test_multipart_create_checksum_headers_fixture;
         Alcotest.test_case "CompleteMultipartUpload XML" `Quick
           test_multipart_complete_xml_fixture;
       ] );

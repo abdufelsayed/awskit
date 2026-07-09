@@ -108,13 +108,47 @@ module Part = struct
 end
 
 module Create = struct
+  module Checksum = struct
+    type t = {
+      algorithm : Object.Checksum.Algorithm.t;
+      checksum_type : Object.Checksum.Type.t option;
+    }
+
+    let supported algorithm = function
+      | None -> true
+      | Some Object.Checksum.Type.Composite ->
+          algorithm <> Object.Checksum.Algorithm.Crc64nvme
+      | Some Object.Checksum.Type.Full_object -> (
+          match algorithm with
+          | Object.Checksum.Algorithm.Crc32 | Object.Checksum.Algorithm.Crc32c
+          | Object.Checksum.Algorithm.Crc64nvme ->
+              true
+          | Object.Checksum.Algorithm.Sha1 | Object.Checksum.Algorithm.Sha256
+          | Object.Checksum.Algorithm.Sha512 | Object.Checksum.Algorithm.Md5
+          | Object.Checksum.Algorithm.Xxhash64
+          | Object.Checksum.Algorithm.Xxhash3
+          | Object.Checksum.Algorithm.Xxhash128 ->
+              false)
+
+    let create ~algorithm ?checksum_type () =
+      if supported algorithm checksum_type then Ok { algorithm; checksum_type }
+      else
+        S3_error_context.invalid ~field:"checksum_type"
+          "checksum type %s is not supported with algorithm %s"
+          (Option.fold ~none:"service default"
+             ~some:Object.Checksum.Type.to_string checksum_type)
+          (Object.Checksum.Algorithm.to_string algorithm)
+
+    let create_exn ~algorithm ?checksum_type () =
+      S3_result.result_exn (create ~algorithm ?checksum_type ())
+  end
+
   type options = {
     content_type : Content_type.t option;
     metadata : Metadata.t;
     storage_class : Storage_class.t option;
     tags : Tag.Set.t;
-    checksum_algorithm : Object.Checksum.Algorithm.t option;
-    checksum_type : Object.Checksum.Type.t option;
+    checksum : Checksum.t option;
     encryption : Encryption.Destination.t option;
     expected_bucket_owner : Account_id.t option;
   }
@@ -130,32 +164,22 @@ module Create = struct
       metadata = Metadata.empty;
       storage_class = None;
       tags = Tag.Set.empty;
-      checksum_algorithm = None;
-      checksum_type = None;
+      checksum = None;
       encryption = None;
       expected_bucket_owner = None;
     }
 
   let options ?content_type ?(metadata = Metadata.empty) ?storage_class
-      ?(tags = Tag.Set.empty) ?checksum_algorithm ?checksum_type ?encryption
-      ?expected_bucket_owner () =
-    Ok
-      {
-        content_type;
-        metadata;
-        storage_class;
-        tags;
-        checksum_algorithm;
-        checksum_type;
-        encryption;
-        expected_bucket_owner;
-      }
-
-  let options_exn ?content_type ?metadata ?storage_class ?tags
-      ?checksum_algorithm ?checksum_type ?encryption ?expected_bucket_owner () =
-    S3_result.result_exn
-      (options ?content_type ?metadata ?storage_class ?tags ?checksum_algorithm
-         ?checksum_type ?encryption ?expected_bucket_owner ())
+      ?(tags = Tag.Set.empty) ?checksum ?encryption ?expected_bucket_owner () =
+    {
+      content_type;
+      metadata;
+      storage_class;
+      tags;
+      checksum;
+      encryption;
+      expected_bucket_owner;
+    }
 end
 
 module Upload_part = struct

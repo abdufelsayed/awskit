@@ -57,8 +57,7 @@ type multipart_upload = {
   metadata : Awskit_s3.Metadata.t;
   storage_class : Awskit_s3.Storage_class.t option;
   tags : Awskit_s3.Tag.Set.t;
-  checksum_algorithm : Awskit_s3.Object.Checksum.Algorithm.t option;
-  checksum_type : Awskit_s3.Object.Checksum.Type.t option;
+  checksum : Awskit_s3.Multipart.Create.Checksum.t option;
   parts : (int, stored_part) Hashtbl.t;
   created_at : Ptime.t;
 }

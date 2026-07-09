@@ -849,9 +849,7 @@ let test_multipart_option_boundaries () =
   let future_storage_class =
     expect_ok "future storage class" (Storage_class.of_string "FUTURE")
   in
-  ignore
-    (expect_ok "future storage class"
-       (Multipart.Create.options ~storage_class:future_storage_class ()));
+  ignore (Multipart.Create.options ~storage_class:future_storage_class ());
   Alcotest.(check string)
     "future storage class spelling" "FUTURE"
     (Storage_class.to_string future_storage_class);
@@ -859,6 +857,46 @@ let test_multipart_option_boundaries () =
   expect_error_field "checksum_algorithm"
     (Object.Checksum.Algorithm.of_string "FUTURE");
   expect_error_field "checksum_type" (Object.Checksum.Type.of_string "FUTURE");
+  let full_object_algorithms =
+    [
+      Object.Checksum.Algorithm.Crc32;
+      Object.Checksum.Algorithm.Crc32c;
+      Object.Checksum.Algorithm.Crc64nvme;
+    ]
+  in
+  List.iter
+    (fun algorithm ->
+      let default =
+        expect_ok "multipart checksum with service-default type"
+          (Multipart.Create.Checksum.create ~algorithm ())
+      in
+      Alcotest.(check bool)
+        "default checksum algorithm" true
+        (default.algorithm = algorithm);
+      let composite =
+        Multipart.Create.Checksum.create ~algorithm
+          ~checksum_type:Object.Checksum.Type.Composite ()
+      in
+      if algorithm = Object.Checksum.Algorithm.Crc64nvme then
+        expect_error_field "checksum_type" composite
+      else ignore (expect_ok "composite multipart checksum" composite);
+      let full_object =
+        Multipart.Create.Checksum.create ~algorithm
+          ~checksum_type:Object.Checksum.Type.Full_object ()
+      in
+      if List.mem algorithm full_object_algorithms then
+        ignore (expect_ok "full-object multipart checksum" full_object)
+      else expect_error_field "checksum_type" full_object)
+    known_checksum_algorithms;
+  let checksum =
+    Multipart.Create.Checksum.create_exn
+      ~algorithm:Object.Checksum.Algorithm.Crc32
+      ~checksum_type:Object.Checksum.Type.Full_object ()
+  in
+  let create_options = Multipart.Create.options ~checksum () in
+  Alcotest.(check bool)
+    "validated create checksum retained" true
+    (create_options.checksum = Some checksum);
   ignore
     (expect_ok "complete zero object size"
        (Multipart.Complete.options ~multipart_object_size:0L ()));

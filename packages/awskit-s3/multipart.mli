@@ -167,16 +167,39 @@ module Part : sig
 end
 
 module Create : sig
+  module Checksum : sig
+    type t = private {
+      algorithm : Object.Checksum.Algorithm.t;
+      checksum_type : Object.Checksum.Type.t option;
+    }
+    (** Valid checksum policy for [CreateMultipartUpload]. An omitted
+        [checksum_type] lets S3 select the mode for [algorithm]. Explicit
+        full-object mode accepts CRC64/NVME, CRC32, and CRC32C; explicit
+        composite mode accepts every supported algorithm except CRC64/NVME. *)
+
+    val create :
+      algorithm:Object.Checksum.Algorithm.t ->
+      ?checksum_type:Object.Checksum.Type.t ->
+      unit ->
+      (t, Awskit.Error.t) result
+    (** Build and validate an initiation checksum policy. *)
+
+    val create_exn :
+      algorithm:Object.Checksum.Algorithm.t ->
+      ?checksum_type:Object.Checksum.Type.t ->
+      unit ->
+      t
+    (** Like {!val:create}, but raises on validation failure. *)
+  end
+
   type options = {
     content_type : Content_type.t option;  (** Final object's [Content-Type]. *)
     metadata : Metadata.t;  (** User metadata for the final object. *)
     storage_class : Storage_class.t option;
         (** Storage class for the final object. *)
     tags : Tag.Set.t;  (** Tags for the final object. *)
-    checksum_algorithm : Object.Checksum.Algorithm.t option;
-        (** Checksum algorithm requested for the multipart upload. *)
-    checksum_type : Object.Checksum.Type.t option;
-        (** Whether S3 should treat checksums as full-object or composite. *)
+    checksum : Checksum.t option;
+        (** Valid checksum policy requested for the multipart upload. *)
     encryption : Encryption.Destination.t option;
         (** Encryption for the final object. *)
     expected_bucket_owner : Account_id.t option;
@@ -198,26 +221,12 @@ module Create : sig
     ?metadata:Metadata.t ->
     ?storage_class:Storage_class.t ->
     ?tags:Tag.Set.t ->
-    ?checksum_algorithm:Object.Checksum.Algorithm.t ->
-    ?checksum_type:Object.Checksum.Type.t ->
-    ?encryption:Encryption.Destination.t ->
-    ?expected_bucket_owner:Account_id.t ->
-    unit ->
-    (options, Awskit.Error.t) Stdlib.result
-  (** Build [CreateMultipartUpload] options. *)
-
-  val options_exn :
-    ?content_type:Content_type.t ->
-    ?metadata:Metadata.t ->
-    ?storage_class:Storage_class.t ->
-    ?tags:Tag.Set.t ->
-    ?checksum_algorithm:Object.Checksum.Algorithm.t ->
-    ?checksum_type:Object.Checksum.Type.t ->
+    ?checksum:Checksum.t ->
     ?encryption:Encryption.Destination.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     options
-  (** Like {!val:options}, but raises on validation failure. *)
+  (** Build [CreateMultipartUpload] options from independently valid fields. *)
 end
 
 module Upload_part : sig

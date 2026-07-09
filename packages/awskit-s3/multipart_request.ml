@@ -137,10 +137,16 @@ module Make (C : Request_context.S) = struct
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
+        let checksum_headers =
+          match options.checksum with
+          | None -> []
+          | Some checksum ->
+              checksum_algorithm_header (Some checksum.algorithm)
+              @ checksum_type_header checksum.checksum_type
+        in
         let headers =
           Metadata_headers.to_headers options.metadata
-          @ checksum_algorithm_header options.checksum_algorithm
-          @ checksum_type_header options.checksum_type
+          @ checksum_headers
           @ destination_encryption_headers options.encryption
           |> add_opt_content_type_header "content-type" options.content_type
           |> add_opt_header "x-amz-storage-class"

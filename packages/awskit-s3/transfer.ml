@@ -133,11 +133,8 @@ let validate_upload_options (options : upload_options) =
       ~concurrency:options.concurrency
   in
   let* () = validate_upload_part_size options.part_size in
-  if Option.is_some options.create_options.checksum_algorithm then
-    S3_error_context.invalid ~field:"create_options.checksum_algorithm"
-      "multipart file helpers do not compute per-part checksums"
-  else if Option.is_some options.create_options.checksum_type then
-    S3_error_context.invalid ~field:"create_options.checksum_type"
+  if Option.is_some options.create_options.checksum then
+    S3_error_context.invalid ~field:"create_options.checksum"
       "multipart file helpers do not compute per-part checksums"
   else if Option.is_some options.upload_part_options.checksum then
     S3_error_context.invalid ~field:"upload_part_options.checksum"
