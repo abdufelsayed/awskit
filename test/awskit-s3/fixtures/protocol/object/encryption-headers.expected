@@ -1,0 +1,9 @@
+[sse-kms]
+algorithm=aws:kms
+key-id=key-id
+bucket-key=true
+
+[dsse-kms]
+algorithm=aws:kms:dsse
+key-id=key-id
+bucket-key=

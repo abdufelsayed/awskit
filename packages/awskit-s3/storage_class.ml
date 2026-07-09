@@ -12,7 +12,7 @@ type t =
   | Express_onezone
   | Fsx_openzfs
   | Fsx_ontap
-  | Other of string
+  | Other of Header_value.t
 
 let to_string = function
   | Standard -> "STANDARD"
@@ -28,11 +28,11 @@ let to_string = function
   | Express_onezone -> "EXPRESS_ONEZONE"
   | Fsx_openzfs -> "FSX_OPENZFS"
   | Fsx_ontap -> "FSX_ONTAP"
-  | Other value -> value
+  | Other value -> Header_value.to_string value
 
 let of_string value =
   let ( let* ) = S3_result.( let* ) in
-  let* () = S3_validation.validate_header_value ~field:"storage_class" value in
+  let* header_value = Header_value.of_string ~field:"storage_class" value in
   Ok
     (match value with
     | "STANDARD" -> Standard
@@ -48,6 +48,6 @@ let of_string value =
     | "EXPRESS_ONEZONE" -> Express_onezone
     | "FSX_OPENZFS" -> Fsx_openzfs
     | "FSX_ONTAP" -> Fsx_ontap
-    | value -> Other value)
+    | _ -> Other header_value)
 
 let of_string_exn value = S3_result.result_exn (of_string value)

@@ -353,7 +353,7 @@ module List_parts : sig
     is_truncated : bool;  (** Whether more part pages are available. *)
     next_part_number_marker : Part_number_marker.t option;
         (** Marker to use for the next page. *)
-    checksum_type : Object.Checksum.Type.t option;
+    checksum_type : Object.Checksum.Type.observed option;
         (** Checksum aggregation mode reported by S3. *)
     response : Awskit.Response.t;  (** Raw response metadata. *)
   }

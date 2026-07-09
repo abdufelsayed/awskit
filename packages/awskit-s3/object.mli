@@ -48,8 +48,7 @@ end
 
 module Checksum : sig
   module Algorithm : sig
-    (** S3 checksum algorithm names. [Unknown] preserves forward-compatible
-        values returned by AWS. *)
+    (** Closed checksum algorithms accepted in outbound requests. *)
     type t =
       | Crc32
       | Crc32c
@@ -61,22 +60,40 @@ module Checksum : sig
       | Xxhash64
       | Xxhash3
       | Xxhash128
-      | Unknown of string
+
+    (** Checksum algorithm observed in a response. *)
+    type observed = Known of t | Unknown of string
 
     val to_string : t -> string
     (** Render the AWS header/API spelling. *)
 
-    val of_string : string -> t
-    (** Parse an AWS checksum algorithm name. Unknown values are preserved. *)
+    val of_string : string -> (t, Awskit.Error.t) result
+    (** Parse a supported outbound checksum algorithm. *)
+
+    val of_string_exn : string -> t
+    (** Like {!val:of_string}, but raises on validation failure. *)
+
+    val observed_of_string : string -> observed
+    (** Parse a response token while preserving unknown values. *)
+
+    val observed_to_string : observed -> string
   end
 
   module Type : sig
-    (** Whether an S3 checksum covers the full object or a composite multipart
-        checksum. Unknown values are preserved. *)
-    type t = Composite | Full_object | Unknown of string
+    (** Closed checksum aggregation modes accepted in outbound requests. *)
+    type t = Composite | Full_object
+
+    (** Checksum aggregation mode observed in a response. *)
+    type observed = Known of t | Unknown of string
 
     val to_string : t -> string
-    val of_string : string -> t
+    val of_string : string -> (t, Awskit.Error.t) result
+
+    val of_string_exn : string -> t
+    (** Like {!val:of_string}, but raises on validation failure. *)
+
+    val observed_of_string : string -> observed
+    val observed_to_string : observed -> string
   end
 
   module Mode : sig
@@ -87,10 +104,8 @@ module Checksum : sig
   end
 
   type value = private { algorithm : Algorithm.t; value : string }
-  (** Explicit checksum value supplied by the caller or returned for a part. The
-      value is the base64/string payload expected by the selected algorithm.
-      Values remain inspectable, but use {!val:value} to construct outbound
-      request checksums so unknown response-only algorithms cannot be sent. *)
+  (** Explicit validated checksum value supplied by the caller. The value is the
+      base64/string payload expected by the selected algorithm. *)
 
   val value :
     algorithm:Algorithm.t -> value:string -> (value, Awskit.Error.t) result
@@ -101,17 +116,19 @@ module Checksum : sig
   (** Like {!val:value}, but raises [Awskit.Error.Awskit_error] carrying the
       structured validation error on validation failure. *)
 
-  val response_value : algorithm:Algorithm.t -> value:string -> value
-  (** Wrap a checksum value observed in S3 response metadata. This preserves
-      response-only future algorithms; request builders revalidate values before
-      sending them. *)
+  type observed_value = { algorithm : Algorithm.observed; value : string }
+  (** Checksum value observed in response metadata. It is deliberately not
+      type-compatible with outbound {!type:value}. *)
 
-  type response = { values : value list; checksum_type : Type.t option }
+  type response = {
+    values : observed_value list;
+    checksum_type : Type.observed option;
+  }
   (** Modeled checksum headers returned by object and multipart operations. *)
 
   type summary = {
-    algorithms : Algorithm.t list;
-    checksum_type : Type.t option;
+    algorithms : Algorithm.observed list;
+    checksum_type : Type.observed option;
   }
   (** Compact checksum metadata returned by list operations. *)
 

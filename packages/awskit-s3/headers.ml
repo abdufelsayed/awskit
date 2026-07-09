@@ -10,5 +10,4 @@ include
     end)
     (struct
       let ptime_to_header = S3_time.to_header
-      let validate_header_value = S3_validation.validate_header_value
     end)

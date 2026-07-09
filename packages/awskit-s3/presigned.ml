@@ -196,8 +196,6 @@ let expected_owner_header value =
   option_header "x-amz-expected-bucket-owner"
     (Option.map Account_id.to_string value)
 
-let validate_opt f = function None -> Ok () | Some value -> f value
-
 let expires_seconds span =
   if Ptime.Span.compare span Ptime.Span.zero <= 0 then
     S3_error_context.invalid ~field:"expires_in" "expires_in must be positive"
@@ -390,7 +388,6 @@ let head_query (options : Head_object.options) =
 let get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
   let options = Option.value ~default:Get_object.default_options options in
-  let* () = Headers.validate_source_encryption options.source_encryption in
   let signed_headers =
     Headers.source_encryption_headers options.source_encryption
     @ expected_owner_header options.expected_bucket_owner
@@ -403,7 +400,6 @@ let get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
 let head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
   let options = Option.value ~default:Head_object.default_options options in
-  let* () = Headers.validate_source_encryption options.source_encryption in
   let signed_headers =
     Headers.source_encryption_headers options.source_encryption
     @ expected_owner_header options.expected_bucket_owner
@@ -416,8 +412,6 @@ let head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
 let put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~bucket ~key ?options () =
   let options = Option.value ~default:Put_object.default_options options in
-  let* () = validate_opt Headers.validate_checksum_value options.checksum in
-  let* () = Headers.validate_destination_encryption options.encryption in
   let headers =
     option_content_type_header "content-type" options.content_type
     @ Headers.checksum_value_headers options.checksum
@@ -455,7 +449,6 @@ let upload_part_headers (options : Upload_part.options) =
 let upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
     ~upload ~part_number ?options () =
   let options = Option.value ~default:Upload_part.default_options options in
-  let* () = validate_opt Headers.validate_checksum_value options.checksum in
   let bucket = Multipart.Upload.bucket upload in
   let key = Multipart.Upload.key upload in
   let upload_id = Multipart.Upload.upload_id upload in

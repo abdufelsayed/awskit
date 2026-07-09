@@ -63,9 +63,9 @@ let parse_checksum_summary nodes =
     Object.Checksum.algorithms =
       Xml.child_texts "ChecksumAlgorithm" nodes
       |> List.map String.trim
-      |> List.map Object.Checksum.Algorithm.of_string;
+      |> List.map Object.Checksum.Algorithm.observed_of_string;
     checksum_type =
-      Option.map Object.Checksum.Type.of_string
+      Option.map Object.Checksum.Type.observed_of_string
         (Xml.child_text "ChecksumType" nodes);
   }
 

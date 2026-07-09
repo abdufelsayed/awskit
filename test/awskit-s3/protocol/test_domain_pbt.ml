@@ -294,7 +294,7 @@ let prop_checksum_algorithm_render_parse_is_stable =
     (QCheck.make ~print:Object.Checksum.Algorithm.to_string
        (QCheck.Gen.oneof_list known_checksum_algorithms))
     (fun algorithm ->
-      Object.Checksum.Algorithm.(of_string (to_string algorithm) = algorithm))
+      Object.Checksum.Algorithm.(of_string (to_string algorithm) = Ok algorithm))
 
 let prop_checksum_type_render_parse_is_stable =
   QCheck.Test.make ~count:default_count
@@ -302,7 +302,8 @@ let prop_checksum_type_render_parse_is_stable =
     (QCheck.make ~print:Object.Checksum.Type.to_string
        (QCheck.Gen.oneof_list known_checksum_types))
     (fun checksum_type ->
-      Object.Checksum.Type.(of_string (to_string checksum_type) = checksum_type))
+      Object.Checksum.Type.(
+        of_string (to_string checksum_type) = Ok checksum_type))
 
 let metadata_entries =
   let open QCheck.Gen in
@@ -631,8 +632,11 @@ let test_account_header_and_checksum_boundaries () =
   expect_error_field "checksum_value"
     (Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Sha256 ~value:"");
   expect_error_field "checksum_algorithm"
-    (Object.Checksum.value
-       ~algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE") ~value:"checksum")
+    (Object.Checksum.Algorithm.of_string "FUTURE");
+  let observed = Object.Checksum.Algorithm.observed_of_string "FUTURE" in
+  Alcotest.(check string)
+    "observed checksum algorithm" "FUTURE"
+    (Object.Checksum.Algorithm.observed_to_string observed)
 
 let test_object_identity_boundaries () =
   let etag = expect_ok "etag" (Object.Etag.of_string "\"abc\"") in
@@ -815,38 +819,49 @@ let test_multipart_option_boundaries () =
     (Multipart.Upload.of_strings ~bucket:"Invalid" ~key:"file.bin" ~upload_id);
   expect_error_field "key"
     (Multipart.Upload.of_strings ~bucket:"valid-bucket" ~key:"" ~upload_id);
-  let part_number = Multipart.Part_number.of_int_exn 1 in
-  let etag = Object.Etag.of_string_exn "\"part\"" in
-  let unknown_checksum =
-    Object.Checksum.response_value
-      ~algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE") ~value:"abc"
-  in
-  expect_error_field "checksum_algorithm"
-    (Multipart.Part.create ~part_number ~etag ~checksum:unknown_checksum ());
   let bad_checksum =
-    Object.Checksum.response_value ~algorithm:Object.Checksum.Algorithm.Sha256
+    Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Sha256
       ~value:"bad\nchecksum"
   in
-  expect_error_field "checksum_value"
-    (Multipart.Part.create ~part_number ~etag ~checksum:bad_checksum ());
+  expect_error_field "checksum_value" bad_checksum;
+  let future_storage_class =
+    expect_ok "future storage class" (Storage_class.of_string "FUTURE")
+  in
   ignore
     (expect_ok "future storage class"
-       (Multipart.Create.options ~storage_class:(Storage_class.Other "FUTURE")
-          ()));
+       (Multipart.Create.options ~storage_class:future_storage_class ()));
+  Alcotest.(check string)
+    "future storage class spelling" "FUTURE"
+    (Storage_class.to_string future_storage_class);
+  expect_error_field "storage_class" (Storage_class.of_string "bad\nvalue");
   expect_error_field "checksum_algorithm"
-    (Multipart.Create.options
-       ~checksum_algorithm:(Object.Checksum.Algorithm.Unknown "FUTURE") ());
-  expect_error_field "checksum_type"
-    (Multipart.Create.options
-       ~checksum_type:(Object.Checksum.Type.Unknown "FUTURE") ());
+    (Object.Checksum.Algorithm.of_string "FUTURE");
+  expect_error_field "checksum_type" (Object.Checksum.Type.of_string "FUTURE");
   ignore
     (expect_ok "complete zero object size"
        (Multipart.Complete.options ~multipart_object_size:0L ()));
   expect_error_field "multipart_object_size"
     (Multipart.Complete.options ~multipart_object_size:(-1L) ());
-  expect_error_field "checksum_type"
-    (Multipart.Complete.options
-       ~checksum_type:(Object.Checksum.Type.Unknown "FUTURE") ())
+  let observed_type = Object.Checksum.Type.observed_of_string "FUTURE" in
+  Alcotest.(check string)
+    "observed checksum type" "FUTURE"
+    (Object.Checksum.Type.observed_to_string observed_type);
+  let sse_kms =
+    expect_ok "SSE-KMS"
+      (Encryption.Destination.sse_kms ~key_id:"key-id" ~bucket_key_enabled:true
+         ())
+  in
+  (match sse_kms with
+  | Encryption.Destination.Sse_kms { bucket_key_enabled = Some true; _ } -> ()
+  | _ -> Alcotest.fail "expected SSE-KMS bucket-key setting");
+  let dsse_kms =
+    expect_ok "DSSE-KMS" (Encryption.Destination.dsse_kms ~key_id:"key-id" ())
+  in
+  (match dsse_kms with
+  | Encryption.Destination.Dsse_kms { key_id = Some "key-id" } -> ()
+  | _ -> Alcotest.fail "expected DSSE-KMS key id");
+  expect_error_field "sse_kms_key_id"
+    (Encryption.Destination.dsse_kms ~key_id:"bad\nkey" ())
 
 let suite =
   [

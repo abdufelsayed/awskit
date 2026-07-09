@@ -2,22 +2,25 @@ module Xml = S3_xml
 open Response
 
 let checksum_xml_name = function
-  | Object.Checksum.Algorithm.Crc32 -> Some "ChecksumCRC32"
-  | Crc32c -> Some "ChecksumCRC32C"
-  | Crc64nvme -> Some "ChecksumCRC64NVME"
-  | Md5 -> Some "ChecksumMD5"
-  | Sha1 -> Some "ChecksumSHA1"
-  | Sha256 -> Some "ChecksumSHA256"
-  | Sha512 -> Some "ChecksumSHA512"
-  | Xxhash64 -> Some "ChecksumXXHASH64"
-  | Xxhash3 -> Some "ChecksumXXHASH3"
-  | Xxhash128 -> Some "ChecksumXXHASH128"
-  | Unknown _ -> None
+  | Object.Checksum.Algorithm.Crc32 -> "ChecksumCRC32"
+  | Crc32c -> "ChecksumCRC32C"
+  | Crc64nvme -> "ChecksumCRC64NVME"
+  | Md5 -> "ChecksumMD5"
+  | Sha1 -> "ChecksumSHA1"
+  | Sha256 -> "ChecksumSHA256"
+  | Sha512 -> "ChecksumSHA512"
+  | Xxhash64 -> "ChecksumXXHASH64"
+  | Xxhash3 -> "ChecksumXXHASH3"
+  | Xxhash128 -> "ChecksumXXHASH128"
 
 let checksum_values_from_xml nodes =
   let find algorithm name =
     Option.map
-      (fun value -> Object.Checksum.response_value ~algorithm ~value)
+      (fun value ->
+        {
+          Object.Checksum.algorithm = Object.Checksum.Algorithm.Known algorithm;
+          value;
+        })
       (Xml.child_text name nodes)
   in
   [
@@ -38,7 +41,7 @@ let checksum_response_from_xml nodes =
   {
     Object.Checksum.values = checksum_values_from_xml nodes;
     checksum_type =
-      Option.map Object.Checksum.Type.of_string
+      Option.map Object.Checksum.Type.observed_of_string
         (Xml.child_text "ChecksumType" nodes);
   }
 

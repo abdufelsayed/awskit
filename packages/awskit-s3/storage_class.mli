@@ -14,9 +14,10 @@ type t =
   | Express_onezone
   | Fsx_openzfs
   | Fsx_ontap
-  | Other of string
+  | Other of Header_value.t
       (** A storage-class value not modeled by awskit. This covers future AWS
-          values and provider-specific S3-compatible storage classes. *)
+          values and provider-specific S3-compatible storage classes. The
+          payload is already valid for use as an HTTP header value. *)
 
 val to_string : t -> string
 (** Render the AWS storage-class spelling used in headers and XML. *)

@@ -66,7 +66,13 @@ let response_checksum response =
   let find (algorithm, header) =
     match Awskit.Response.header response header with
     | None -> None
-    | Some value -> Some (Object.Checksum.response_value ~algorithm ~value)
+    | Some value ->
+        Some
+          {
+            Object.Checksum.algorithm =
+              Object.Checksum.Algorithm.Known algorithm;
+            value;
+          }
   in
   let prefix = "x-amz-checksum-" in
   let prefix_length = String.length prefix in
@@ -86,15 +92,18 @@ let response_checksum response =
           if String.equal algorithm "" then None
           else
             Some
-              (Object.Checksum.response_value ~algorithm:(Unknown algorithm)
-                 ~value)
+              {
+                Object.Checksum.algorithm =
+                  Object.Checksum.Algorithm.Unknown algorithm;
+                value;
+              }
         else None)
   in
   let values = List.filter_map find checksum_headers @ unknown_values in
   {
     Object.Checksum.values;
     checksum_type =
-      Option.map Object.Checksum.Type.of_string
+      Option.map Object.Checksum.Type.observed_of_string
         (Awskit.Response.header response "x-amz-checksum-type");
   }
 
@@ -104,11 +113,11 @@ let response_encryption response =
       response_bool_header response
         "x-amz-server-side-encryption-bucket-key-enabled"
     in
-    Encryption.Kms.create
-      ?key_id:
-        (Awskit.Response.header response
-           "x-amz-server-side-encryption-aws-kms-key-id")
-      ?bucket_key_enabled ()
+    let key_id =
+      Awskit.Response.header response
+        "x-amz-server-side-encryption-aws-kms-key-id"
+    in
+    Ok { Encryption.Observed.key_id; bucket_key_enabled }
   in
   match
     Awskit.Response.header response

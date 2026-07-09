@@ -27,7 +27,8 @@ let single_checksum_value label algorithm (checksum : Object.Checksum.response)
     =
   match
     List.find_opt
-      (fun (value : Object.Checksum.value) -> value.algorithm = algorithm)
+      (fun (value : Object.Checksum.observed_value) ->
+        value.algorithm = Object.Checksum.Algorithm.Known algorithm)
       checksum.values
   with
   | Some value -> value.value

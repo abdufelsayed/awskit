@@ -4,5 +4,6 @@ query=
 content-type=text/plain
 x-amz-meta-origin=fixture
 x-amz-meta-trace=abc-123
+x-amz-storage-class=FUTURE
 x-amz-tagging=env=test&owner=sdk
 body=body

@@ -1,24 +1,5 @@
 let ( let* ) = S3_result.( let* )
 
-module Kms = struct
-  type t = { key_id : string option; bucket_key_enabled : bool option }
-
-  let create ?key_id ?bucket_key_enabled () =
-    let* () =
-      match key_id with
-      | None -> Ok ()
-      | Some key_id ->
-          S3_validation.validate_header_value ~field:"sse_kms_key_id" key_id
-    in
-    Ok { key_id; bucket_key_enabled }
-
-  let create_exn ?key_id ?bucket_key_enabled () =
-    S3_result.result_exn (create ?key_id ?bucket_key_enabled ())
-
-  let key_id t = t.key_id
-  let bucket_key_enabled t = t.bucket_key_enabled
-end
-
 module Customer_key = struct
   type t = { key_base64 : string; key_md5_base64 : string }
 
@@ -63,9 +44,30 @@ end
 module Destination = struct
   type t =
     | Sse_s3
-    | Sse_kms of Kms.t
-    | Dsse_kms of Kms.t
+    | Sse_kms of { key_id : string option; bucket_key_enabled : bool option }
+    | Dsse_kms of { key_id : string option }
     | Sse_c of Customer_key.t
+
+  let validate_key_id = function
+    | None -> Ok ()
+    | Some key_id ->
+        S3_validation.validate_header_value ~field:"sse_kms_key_id" key_id
+
+  let sse_s3 = Sse_s3
+
+  let sse_kms ?key_id ?bucket_key_enabled () =
+    let* () = validate_key_id key_id in
+    Ok (Sse_kms { key_id; bucket_key_enabled })
+
+  let sse_kms_exn ?key_id ?bucket_key_enabled () =
+    S3_result.result_exn (sse_kms ?key_id ?bucket_key_enabled ())
+
+  let dsse_kms ?key_id () =
+    let* () = validate_key_id key_id in
+    Ok (Dsse_kms { key_id })
+
+  let dsse_kms_exn ?key_id () = S3_result.result_exn (dsse_kms ?key_id ())
+  let sse_c key = Sse_c key
 end
 
 module Source = struct
@@ -73,10 +75,12 @@ module Source = struct
 end
 
 module Observed = struct
+  type kms = { key_id : string option; bucket_key_enabled : bool option }
+
   type t =
     | Sse_s3
-    | Sse_kms of Kms.t
-    | Dsse_kms of Kms.t
+    | Sse_kms of kms
+    | Dsse_kms of kms
     | Sse_c
     | Aws_fsx
     | Unknown of string

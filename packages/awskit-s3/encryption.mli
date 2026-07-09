@@ -1,32 +1,5 @@
 (** Object encryption domains for S3 request and response metadata. *)
 
-module Kms : sig
-  type t
-  (** KMS options for ordinary and dual-layer KMS object encryption.
-
-      [bucket_key_enabled] applies to ordinary SSE-KMS destinations. DSSE-KMS
-      request builders reject bucket-key settings because S3 does not support S3
-      bucket keys for dual-layer KMS encryption. *)
-
-  val create :
-    ?key_id:string ->
-    ?bucket_key_enabled:bool ->
-    unit ->
-    (t, Awskit.Error.t) result
-  (** Build KMS encryption options. [key_id], when present, must be a valid HTTP
-      header value. *)
-
-  val create_exn : ?key_id:string -> ?bucket_key_enabled:bool -> unit -> t
-  (** Like {!val:create}, but raises [Awskit.Error.Awskit_error] carrying the
-      structured validation error on validation failure. *)
-
-  val key_id : t -> string option
-  (** Return the optional KMS key id. *)
-
-  val bucket_key_enabled : t -> bool option
-  (** Return the optional S3 bucket-key setting. *)
-end
-
 module Customer_key : sig
   type t
   (** SSE-C customer key material rendered as AES256 headers.
@@ -65,13 +38,37 @@ module Customer_key : sig
 end
 
 module Destination : sig
-  (** Encryption settings callers may send for a destination object. *)
+  (** Valid encryption settings callers may send for a destination object. The
+      private variant keeps alternatives inspectable while requiring validated
+      KMS key ids and making DSSE-KMS bucket keys unconstructible. *)
 
-  type t =
+  type t = private
     | Sse_s3
-    | Sse_kms of Kms.t
-    | Dsse_kms of Kms.t
+    | Sse_kms of { key_id : string option; bucket_key_enabled : bool option }
+    | Dsse_kms of { key_id : string option }
     | Sse_c of Customer_key.t
+
+  val sse_s3 : t
+  (** S3-managed AES256 encryption. *)
+
+  val sse_kms :
+    ?key_id:string ->
+    ?bucket_key_enabled:bool ->
+    unit ->
+    (t, Awskit.Error.t) result
+  (** Validated SSE-KMS encryption. An omitted key uses the service default. *)
+
+  val sse_kms_exn : ?key_id:string -> ?bucket_key_enabled:bool -> unit -> t
+  (** Like {!val:sse_kms}, but raises on validation failure. *)
+
+  val dsse_kms : ?key_id:string -> unit -> (t, Awskit.Error.t) result
+  (** Validated DSSE-KMS encryption. Bucket keys are absent by construction. *)
+
+  val dsse_kms_exn : ?key_id:string -> unit -> t
+  (** Like {!val:dsse_kms}, but raises on validation failure. *)
+
+  val sse_c : Customer_key.t -> t
+  (** SSE-C encryption with a validated AES256 customer key. *)
 end
 
 module Source : sig
@@ -86,10 +83,13 @@ module Observed : sig
       Unknown wire values are preserved for forward compatibility and are
       read-side only. *)
 
+  type kms = { key_id : string option; bucket_key_enabled : bool option }
+  (** KMS metadata returned by S3. *)
+
   type t =
     | Sse_s3
-    | Sse_kms of Kms.t
-    | Dsse_kms of Kms.t
+    | Sse_kms of kms
+    | Dsse_kms of kms
     | Sse_c
     | Aws_fsx
     | Unknown of string

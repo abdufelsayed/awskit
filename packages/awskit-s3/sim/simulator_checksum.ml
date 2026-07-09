@@ -25,6 +25,13 @@ let empty_checksum = { Object.Checksum.values = []; checksum_type = None }
 let checksum_response ?checksum_type values =
   { Object.Checksum.values; checksum_type }
 
+let observe_value (value : Object.Checksum.value) :
+    Object.Checksum.observed_value =
+  {
+    algorithm = Object.Checksum.Algorithm.Known value.algorithm;
+    value = value.value;
+  }
+
 let bad_digest algorithm =
   Error
     (Awskit.Error.Producer.service ~status:400 ~code:"BadDigest"
@@ -61,20 +68,20 @@ let checksum_for_value ~body = function
   | Some (value : Object.Checksum.value) ->
       let* computed = computed_value ~body value.algorithm in
       if String.equal value.value computed.value then
-        Ok (checksum_response [ value ])
+        Ok (checksum_response [ observe_value value ])
       else bad_digest value.algorithm
 
 let checksum_for_algorithm ~body = function
   | None -> Ok empty_checksum
   | Some algorithm ->
       let* value = computed_value ~body algorithm in
-      Ok (checksum_response [ value ])
+      Ok (checksum_response [ observe_value value ])
 
 let checksum_summary (checksum : Object.Checksum.response) =
   {
     Object.Checksum.algorithms =
       List.map
-        (fun (value : Object.Checksum.value) -> value.algorithm)
+        (fun (value : Object.Checksum.observed_value) -> value.algorithm)
         checksum.values;
     checksum_type = checksum.checksum_type;
   }
@@ -84,10 +91,19 @@ let checksum_response_headers = function
   | checksum ->
       let value_headers =
         checksum.values
-        |> List.filter_map (fun (value : Object.Checksum.value) ->
-            Option.map
-              (fun name -> (name, value.value))
-              (checksum_header_name value.algorithm))
+        |> List.filter_map (fun (value : Object.Checksum.observed_value) ->
+            match value.algorithm with
+            | Object.Checksum.Algorithm.Known algorithm ->
+                Some (checksum_header_name algorithm, value.value)
+            | Object.Checksum.Algorithm.Unknown _ -> None)
       in
-      let type_headers = checksum_type_header checksum.checksum_type in
+      let type_headers =
+        match checksum.checksum_type with
+        | None -> []
+        | Some checksum_type ->
+            [
+              ( "x-amz-checksum-type",
+                Object.Checksum.Type.observed_to_string checksum_type );
+            ]
+      in
       value_headers @ type_headers

@@ -15,7 +15,6 @@ module Make (C : Request_context.S) = struct
   open C
 
   let ( let* ) = bind
-  let validate_opt f = function None -> Ok () | Some value -> f value
   let header_value = Option.map Header_value.to_string
 
   type nonrec client = connection
@@ -42,64 +41,6 @@ module Make (C : Request_context.S) = struct
   let return_result return_error return_ok = function
     | Ok value -> return_ok value
     | Error error -> return_error error
-
-  let validate_put_options (options : Put_object.options) =
-    match S3_validation.validate_metadata options.metadata with
-    | Error _ as error -> error
-    | Ok () -> (
-        match S3_validation.validate_tags options.tags with
-        | Error _ as error -> error
-        | Ok () -> (
-            match validate_opt validate_storage_class options.storage_class with
-            | Error _ as error -> error
-            | Ok () -> (
-                match validate_opt validate_checksum_value options.checksum with
-                | Error _ as error -> error
-                | Ok () -> (
-                    match
-                      validate_destination_encryption options.encryption
-                    with
-                    | Error _ as error -> error
-                    | Ok () ->
-                        validate_common_headers
-                          ?content_type:
-                            (Option.map Content_type.to_string
-                               options.content_type)
-                          ?cache_control:(header_value options.cache_control)
-                          ?content_encoding:
-                            (header_value options.content_encoding)
-                          ?content_disposition:
-                            (header_value options.content_disposition)
-                          ()))))
-
-  let validate_copy_options (options : Copy_object.options) =
-    match validate_opt validate_storage_class options.storage_class with
-    | Error _ as error -> error
-    | Ok () -> (
-        match
-          validate_opt validate_checksum_algorithm options.checksum_algorithm
-        with
-        | Error _ as error -> error
-        | Ok () -> (
-            match options.metadata_directive with
-            | Some (`Replace metadata) -> (
-                match S3_validation.validate_metadata metadata with
-                | Error _ as error -> error
-                | Ok () -> (
-                    match
-                      validate_destination_encryption
-                        options.destination_encryption
-                    with
-                    | Error _ as error -> error
-                    | Ok () ->
-                        validate_source_encryption options.source_encryption))
-            | Some `Copy | None -> (
-                match
-                  validate_destination_encryption options.destination_encryption
-                with
-                | Error _ as error -> error
-                | Ok () -> validate_source_encryption options.source_encryption)
-            ))
 
   let validate_list_max_keys = function
     | None -> Ok ()
@@ -131,57 +72,52 @@ module Make (C : Request_context.S) = struct
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        match validate_put_options options with
-        | Error error -> return_error error
-        | Ok () -> (
-            let descriptor = R.Request_body.descriptor body in
-            match descriptor.content_length with
-            | None ->
-                return_error
-                  (Awskit.Error.Producer.validation ~field:"content_length"
-                     "S3 uploads require a known content length before SigV4 \
-                      chunked streaming")
-            | Some content_length -> (
-                match Awskit.Body.Request.validate_descriptor descriptor with
+        let descriptor = R.Request_body.descriptor body in
+        match descriptor.content_length with
+        | None ->
+            return_error
+              (Awskit.Error.Producer.validation ~field:"content_length"
+                 "S3 uploads require a known content length before SigV4 \
+                  chunked streaming")
+        | Some content_length -> (
+            match Awskit.Body.Request.validate_descriptor descriptor with
+            | Error error -> return_error error
+            | Ok () -> (
+                let headers =
+                  [ ("content-length", Int64.to_string content_length) ]
+                  @ Metadata_headers.to_headers options.metadata
+                  @ write_precondition_headers options.preconditions
+                  @ checksum_value_headers options.checksum
+                  @ destination_encryption_headers options.encryption
+                  |> add_opt_content_type_header "content-type"
+                       options.content_type
+                  |> add_opt_header "cache-control"
+                       (header_value options.cache_control)
+                  |> add_opt_header "content-encoding"
+                       (header_value options.content_encoding)
+                  |> add_opt_header "content-disposition"
+                       (header_value options.content_disposition)
+                  |> add_opt_header "x-amz-storage-class"
+                       (Option.map Storage_class.to_string options.storage_class)
+                  |> add_opt_header "x-amz-tagging" (tags_header options.tags)
+                  |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+                       options.expected_bucket_owner
+                in
+                match object_request conn ~bucket ~key with
                 | Error error -> return_error error
-                | Ok () -> (
-                    let headers =
-                      [ ("content-length", Int64.to_string content_length) ]
-                      @ Metadata_headers.to_headers options.metadata
-                      @ write_precondition_headers options.preconditions
-                      @ checksum_value_headers options.checksum
-                      @ destination_encryption_headers options.encryption
-                      |> add_opt_content_type_header "content-type"
-                           options.content_type
-                      |> add_opt_header "cache-control"
-                           (header_value options.cache_control)
-                      |> add_opt_header "content-encoding"
-                           (header_value options.content_encoding)
-                      |> add_opt_header "content-disposition"
-                           (header_value options.content_disposition)
-                      |> add_opt_header "x-amz-storage-class"
-                           (Option.map Storage_class.to_string
-                              options.storage_class)
-                      |> add_opt_header "x-amz-tagging"
-                           (tags_header options.tags)
-                      |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                           options.expected_bucket_owner
+                | Ok request ->
+                    let* result =
+                      with_response conn ~method_:`PUT ~request ~query:[]
+                        ~headers ~payload_hash:descriptor.payload_hash body
+                        ~f:(fun response body ->
+                          let* discarded = discard_response_body body in
+                          match discarded with
+                          | Error error -> return_error error
+                          | Ok () ->
+                              return_result return_error return_ok
+                                (put_result response))
                     in
-                    match object_request conn ~bucket ~key with
-                    | Error error -> return_error error
-                    | Ok request ->
-                        let* result =
-                          with_response conn ~method_:`PUT ~request ~query:[]
-                            ~headers ~payload_hash:descriptor.payload_hash body
-                            ~f:(fun response body ->
-                              let* discarded = discard_response_body body in
-                              match discarded with
-                              | Error error -> return_error error
-                              | Ok () ->
-                                  return_result return_error return_ok
-                                    (put_result response))
-                        in
-                        return_result return_error return_ok result))))
+                    return_result return_error return_ok result)))
 
   let put_string conn ~bucket ~key ?options ~contents () =
     put conn ~bucket ~key ?options ~body:(R.Request_body.of_string contents) ()
@@ -474,60 +410,52 @@ module Make (C : Request_context.S) = struct
                     (Awskit.Signing.uri_encode ~encode_slash:true
                        (Object.Version_id.to_string version_id))
             in
-            match validate_copy_options options with
+            let headers =
+              ("x-amz-copy-source", copy_source)
+              :: copy_source_precondition_headers options.source_preconditions
+              @ checksum_algorithm_header options.checksum_algorithm
+              @ destination_encryption_headers options.destination_encryption
+              @ copy_source_encryption_headers options.source_encryption
+            in
+            let headers =
+              match options.metadata_directive with
+              | None -> headers
+              | Some `Copy -> ("x-amz-metadata-directive", "COPY") :: headers
+              | Some (`Replace metadata) ->
+                  ("x-amz-metadata-directive", "REPLACE")
+                  :: Metadata_headers.to_headers metadata
+                  @ headers
+            in
+            let headers =
+              headers
+              |> add_opt_header "x-amz-storage-class"
+                   (Option.map Storage_class.to_string options.storage_class)
+              |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+                   options.expected_bucket_owner
+              |> add_opt_account_id_header "x-amz-source-expected-bucket-owner"
+                   options.source_expected_bucket_owner
+            in
+            match
+              object_request conn ~bucket:destination_bucket
+                ~key:destination_key
+            with
             | Error error -> return_error error
-            | Ok () -> (
-                let headers =
-                  ("x-amz-copy-source", copy_source)
-                  :: copy_source_precondition_headers
-                       options.source_preconditions
-                  @ checksum_algorithm_header options.checksum_algorithm
-                  @ destination_encryption_headers
-                      options.destination_encryption
-                  @ copy_source_encryption_headers options.source_encryption
+            | Ok request ->
+                let* result =
+                  with_retryable_embedded_response conn ~method_:`PUT ~request
+                    ~query:[] ~headers
+                    ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string "")
+                    R.Request_body.empty ~f:(fun response body ->
+                      let* body =
+                        read_response_body body ~max_size:1_048_576L
+                      in
+                      match body with
+                      | Error error -> return_error error
+                      | Ok body ->
+                          return_result return_error return_ok
+                            (copy_result response body))
                 in
-                let headers =
-                  match options.metadata_directive with
-                  | None -> headers
-                  | Some `Copy ->
-                      ("x-amz-metadata-directive", "COPY") :: headers
-                  | Some (`Replace metadata) ->
-                      ("x-amz-metadata-directive", "REPLACE")
-                      :: Metadata_headers.to_headers metadata
-                      @ headers
-                in
-                let headers =
-                  headers
-                  |> add_opt_header "x-amz-storage-class"
-                       (Option.map Storage_class.to_string options.storage_class)
-                  |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                       options.expected_bucket_owner
-                  |> add_opt_account_id_header
-                       "x-amz-source-expected-bucket-owner"
-                       options.source_expected_bucket_owner
-                in
-                match
-                  object_request conn ~bucket:destination_bucket
-                    ~key:destination_key
-                with
-                | Error error -> return_error error
-                | Ok request ->
-                    let* result =
-                      with_retryable_embedded_response conn ~method_:`PUT
-                        ~request ~query:[] ~headers
-                        ~payload_hash:
-                          (Awskit.Body.Payload_hash.sha256_of_string "")
-                        R.Request_body.empty ~f:(fun response body ->
-                          let* body =
-                            read_response_body body ~max_size:1_048_576L
-                          in
-                          match body with
-                          | Error error -> return_error error
-                          | Ok body ->
-                              return_result return_error return_ok
-                                (copy_result response body))
-                    in
-                    return_result return_error return_ok result)))
+                return_result return_error return_ok result))
 
   let list_versions conn ~bucket ?options () =
     let bucket = Bucket_name.to_string bucket in

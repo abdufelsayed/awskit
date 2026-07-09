@@ -31,33 +31,12 @@ module type DOMAIN = sig
   end
 
   module Storage_class : sig
-    type t =
-      | Standard
-      | Reduced_redundancy
-      | Standard_ia
-      | Onezone_ia
-      | Intelligent_tiering
-      | Glacier
-      | Glacier_ir
-      | Deep_archive
-      | Outposts
-      | Snow
-      | Express_onezone
-      | Fsx_openzfs
-      | Fsx_ontap
-      | Other of string
+    type t
 
     val to_string : t -> string
   end
 
   module Encryption : sig
-    module Kms : sig
-      type t
-
-      val key_id : t -> string option
-      val bucket_key_enabled : t -> bool option
-    end
-
     module Customer_key : sig
       type t
 
@@ -67,10 +46,13 @@ module type DOMAIN = sig
     end
 
     module Destination : sig
-      type t =
+      type t = private
         | Sse_s3
-        | Sse_kms of Kms.t
-        | Dsse_kms of Kms.t
+        | Sse_kms of {
+            key_id : string option;
+            bucket_key_enabled : bool option;
+          }
+        | Dsse_kms of { key_id : string option }
         | Sse_c of Customer_key.t
     end
 
@@ -134,13 +116,12 @@ module type DOMAIN = sig
           | Xxhash64
           | Xxhash3
           | Xxhash128
-          | Unknown of string
 
         val to_string : t -> string
       end
 
       module Type : sig
-        type t = Composite | Full_object | Unknown of string
+        type t = Composite | Full_object
 
         val to_string : t -> string
       end
@@ -158,9 +139,6 @@ end
 
 module type CONFIG = sig
   val ptime_to_header : Ptime.t -> string
-
-  val validate_header_value :
-    field:string -> string -> (unit, Awskit.Error.t) result
 end
 
 module Make (Domain : DOMAIN) (Config : CONFIG) : sig
@@ -191,35 +169,8 @@ module Make (Domain : DOMAIN) (Config : CONFIG) : sig
   val copy_source_precondition_headers :
     Domain.Object.Preconditions.Copy_source.t -> (string * string) list
 
-  val validate_common_headers :
-    ?content_type:string ->
-    ?cache_control:string ->
-    ?content_encoding:string ->
-    ?content_disposition:string ->
-    unit ->
-    (unit, Awskit.Error.t) result
-
   val tags_header : Domain.Tag.Set.t -> string option
-  val checksum_header_name : Domain.Object.Checksum.Algorithm.t -> string option
-
-  val validate_checksum_algorithm :
-    Domain.Object.Checksum.Algorithm.t -> (unit, Awskit.Error.t) result
-
-  val validate_checksum_type :
-    Domain.Object.Checksum.Type.t -> (unit, Awskit.Error.t) result
-
-  val validate_checksum_value :
-    Domain.Object.Checksum.value -> (unit, Awskit.Error.t) result
-
-  val validate_storage_class :
-    Domain.Storage_class.t -> (unit, Awskit.Error.t) result
-  (** Validate that a storage class can be rendered as an S3 header value. *)
-
-  val validate_destination_encryption :
-    Domain.Encryption.Destination.t option -> (unit, Awskit.Error.t) result
-
-  val validate_source_encryption :
-    Domain.Encryption.Source.t option -> (unit, Awskit.Error.t) result
+  val checksum_header_name : Domain.Object.Checksum.Algorithm.t -> string
 
   val checksum_value_headers :
     Domain.Object.Checksum.value option -> (string * string) list

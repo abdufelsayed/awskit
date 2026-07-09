@@ -5,8 +5,8 @@ val multipart_etag : string list -> Awskit_s3.Object.Etag.t
 val empty_checksum : Awskit_s3.Object.Checksum.response
 
 val checksum_response :
-  ?checksum_type:Awskit_s3.Object.Checksum.Type.t ->
-  Awskit_s3.Object.Checksum.value list ->
+  ?checksum_type:Awskit_s3.Object.Checksum.Type.observed ->
+  Awskit_s3.Object.Checksum.observed_value list ->
   Awskit_s3.Object.Checksum.response
 
 val validate_supported_algorithm :

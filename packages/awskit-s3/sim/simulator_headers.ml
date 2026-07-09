@@ -10,5 +10,4 @@ include
     end)
     (struct
       let ptime_to_header = Simulator_support.ptime_to_header
-      let validate_header_value = Simulator_support.validate_header_value
     end)

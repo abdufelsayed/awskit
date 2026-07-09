@@ -40,45 +40,11 @@ val copy_source_precondition_headers :
   Object.Preconditions.Copy_source.t -> (string * string) list
 (** Render copy-source preconditions as request headers. *)
 
-val validate_common_headers :
-  ?content_type:string ->
-  ?cache_control:string ->
-  ?content_encoding:string ->
-  ?content_disposition:string ->
-  unit ->
-  (unit, Awskit.Error.t) result
-(** Validate common HTTP header values before they are sent to S3. *)
-
 val tags_header : Tag.Set.t -> string option
 (** Encode tags for the [x-amz-tagging] header. *)
 
-val checksum_header_name : Object.Checksum.Algorithm.t -> string option
-(** Return the S3 checksum header name for algorithms that are valid in
-    checksum-value headers. *)
-
-val validate_checksum_algorithm :
-  Object.Checksum.Algorithm.t -> (unit, Awskit.Error.t) result
-(** Validate that a checksum algorithm can be requested from S3. *)
-
-val validate_checksum_type :
-  Object.Checksum.Type.t -> (unit, Awskit.Error.t) result
-(** Validate that a checksum type can be sent to S3. *)
-
-val validate_checksum_value :
-  Object.Checksum.value -> (unit, Awskit.Error.t) result
-(** Validate that a checksum value has a supported algorithm/header shape. *)
-
-val validate_storage_class : Storage_class.t -> (unit, Awskit.Error.t) result
-(** Validate that a storage class can be rendered as an S3 header value. *)
-
-val validate_destination_encryption :
-  Encryption.Destination.t option -> (unit, Awskit.Error.t) result
-(** Validate destination encryption request headers before they are sent to S3.
-*)
-
-val validate_source_encryption :
-  Encryption.Source.t option -> (unit, Awskit.Error.t) result
-(** Validate source encryption request headers before they are sent to S3. *)
+val checksum_header_name : Object.Checksum.Algorithm.t -> string
+(** Return the S3 checksum value-header name for a sendable algorithm. *)
 
 val checksum_value_headers :
   Object.Checksum.value option -> (string * string) list

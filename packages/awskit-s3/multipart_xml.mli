@@ -1,6 +1,6 @@
 (** S3 multipart XML decoder helpers. *)
 
-val checksum_xml_name : Object.Checksum.Algorithm.t -> string option
+val checksum_xml_name : Object.Checksum.Algorithm.t -> string
 (** Return the XML element name for a checksum algorithm. *)
 
 val checksum_response_from_xml : Ezxmlm.nodes -> Object.Checksum.response

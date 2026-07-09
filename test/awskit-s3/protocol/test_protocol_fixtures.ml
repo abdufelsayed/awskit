@@ -213,6 +213,7 @@ let test_put_object_metadata_tags_fixture () =
   let options =
     Object.Put.options_exn
       ~content_type:(Protocol_support.content_type "text/plain")
+      ~storage_class:(Storage_class.of_string_exn "FUTURE")
       ~metadata:
         (Metadata.of_list_exn [ ("origin", "fixture"); ("trace", "abc-123") ])
       ~tags:
@@ -246,6 +247,7 @@ let test_put_object_metadata_tags_fixture () =
        content-type=%s\n\
        x-amz-meta-origin=%s\n\
        x-amz-meta-trace=%s\n\
+       x-amz-storage-class=%s\n\
        x-amz-tagging=%s\n\
        body=%s"
       (Awskit.Request.Method.to_string request.method_)
@@ -254,12 +256,78 @@ let test_put_object_metadata_tags_fixture () =
       (header_or_empty "content-type" request.headers)
       (header_or_empty "x-amz-meta-origin" request.headers)
       (header_or_empty "x-amz-meta-trace" request.headers)
+      (header_or_empty "x-amz-storage-class" request.headers)
       (header_or_empty "x-amz-tagging" request.headers)
       call.body
   in
   check_fixture "put object metadata and tags"
     [ "object"; "put-metadata-tags.expected" ]
     ~actual
+
+let describe_destination_encryption encryption =
+  let options = Object.Put.options_exn ~encryption () in
+  let conn =
+    Protocol_recording_runtime.connect
+      [ Protocol_recording_runtime.response 200 "" ]
+  in
+  ignore
+    (Protocol_recording_runtime.S3.Object.put conn
+       ~bucket:(Protocol_support.bucket_name "bucket")
+       ~key:(Protocol_support.object_key "file.txt")
+       ~options
+       ~body:(Protocol_recording_runtime.S3.Body.of_string "body")
+       ()
+    |> Protocol_support.ok_or_fail "destination encryption fixture");
+  let headers = (Protocol_recording_runtime.last_call conn).request.headers in
+  Fmt.str "algorithm=%s\nkey-id=%s\nbucket-key=%s"
+    (header_or_empty "x-amz-server-side-encryption" headers)
+    (header_or_empty "x-amz-server-side-encryption-aws-kms-key-id" headers)
+    (header_or_empty "x-amz-server-side-encryption-bucket-key-enabled" headers)
+
+let test_destination_encryption_headers_fixture () =
+  let actual =
+    Fmt.str "[sse-kms]\n%s\n\n[dsse-kms]\n%s"
+      (describe_destination_encryption
+         (Encryption.Destination.sse_kms_exn ~key_id:"key-id"
+            ~bucket_key_enabled:true ()))
+      (describe_destination_encryption
+         (Encryption.Destination.dsse_kms_exn ~key_id:"key-id" ()))
+  in
+  check_fixture "destination encryption headers"
+    [ "object"; "encryption-headers.expected" ]
+    ~actual
+
+let test_object_checksum_preserves_unknown_response_tokens () =
+  let headers =
+    [
+      ("x-amz-checksum-future256", "opaque"); ("x-amz-checksum-type", "FUTURE");
+    ]
+  in
+  let conn =
+    Protocol_recording_runtime.connect
+      [ Protocol_recording_runtime.response ~headers 200 "" ]
+  in
+  let result =
+    Protocol_recording_runtime.S3.Object.head conn
+      ~bucket:(Protocol_support.bucket_name "bucket")
+      ~key:(Protocol_support.object_key "file.txt")
+      ()
+    |> Protocol_support.ok_or_fail "unknown checksum response"
+  in
+  (match result.checksum.values with
+  | [
+   {
+     Object.Checksum.algorithm = Object.Checksum.Algorithm.Unknown algorithm;
+     value;
+   };
+  ] ->
+      Alcotest.(check string) "unknown checksum algorithm" "FUTURE256" algorithm;
+      Alcotest.(check string) "unknown checksum value" "opaque" value
+  | _ -> Alcotest.fail "expected one unknown checksum value");
+  match result.checksum.checksum_type with
+  | Some (Object.Checksum.Type.Unknown value) ->
+      Alcotest.(check string) "unknown checksum type" "FUTURE" value
+  | _ -> Alcotest.fail "expected unknown checksum type"
 
 let test_copy_object_headers_fixture () =
   let options =
@@ -883,6 +951,10 @@ let suite =
           test_endpoint_style_matrix_fixture;
         Alcotest.test_case "PUT metadata/tags" `Quick
           test_put_object_metadata_tags_fixture;
+        Alcotest.test_case "destination encryption headers" `Quick
+          test_destination_encryption_headers_fixture;
+        Alcotest.test_case "object checksum observed unknowns" `Quick
+          test_object_checksum_preserves_unknown_response_tokens;
         Alcotest.test_case "CopyObject headers" `Quick
           test_copy_object_headers_fixture;
         Alcotest.test_case "Object tagging XML" `Quick

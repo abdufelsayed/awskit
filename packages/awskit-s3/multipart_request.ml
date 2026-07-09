@@ -28,8 +28,6 @@ module Make (C : Request_context.S) = struct
     | Some value -> Result.to_option (Multipart.Part_number_marker.of_int value)
     | _ -> None
 
-  let validate_opt f = function None -> Ok () | Some value -> f value
-
   let return_result return_error return_ok = function
     | Ok value -> return_ok value
     | Error error -> return_error error
@@ -44,25 +42,6 @@ module Make (C : Request_context.S) = struct
   let upload_key upload = Multipart.Upload.key upload |> Object_key.to_string
   let upload_id upload = Multipart.Upload.upload_id upload
   let complete_min_part_size = 5_242_880L
-
-  let validate_create_options (options : Create_multipart_upload.options) =
-    match S3_validation.validate_metadata options.metadata with
-    | Error _ as error -> error
-    | Ok () -> (
-        match S3_validation.validate_tags options.tags with
-        | Error _ as error -> error
-        | Ok () -> (
-            match validate_opt validate_storage_class options.storage_class with
-            | Error _ as error -> error
-            | Ok () -> (
-                match
-                  ( validate_opt validate_checksum_algorithm
-                      options.checksum_algorithm,
-                    validate_opt validate_checksum_type options.checksum_type )
-                with
-                | Error error, _ | _, Error error -> Error error
-                | Ok (), Ok () ->
-                    validate_destination_encryption options.encryption)))
 
   let validate_complete_options (options : Complete_multipart_upload.options) =
     Complete_multipart_upload.options
@@ -166,38 +145,33 @@ module Make (C : Request_context.S) = struct
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        match validate_create_options options with
+        let headers =
+          Metadata_headers.to_headers options.metadata
+          @ checksum_algorithm_header options.checksum_algorithm
+          @ checksum_type_header options.checksum_type
+          @ destination_encryption_headers options.encryption
+          |> add_opt_content_type_header "content-type" options.content_type
+          |> add_opt_header "x-amz-storage-class"
+               (Option.map Storage_class.to_string options.storage_class)
+          |> add_opt_header "x-amz-tagging" (tags_header options.tags)
+          |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+               options.expected_bucket_owner
+        in
+        match object_request conn ~bucket ~key with
         | Error error -> return_error error
-        | Ok () -> (
-            let headers =
-              Metadata_headers.to_headers options.metadata
-              @ checksum_algorithm_header options.checksum_algorithm
-              @ checksum_type_header options.checksum_type
-              @ destination_encryption_headers options.encryption
-              |> add_opt_content_type_header "content-type" options.content_type
-              |> add_opt_header "x-amz-storage-class"
-                   (Option.map Storage_class.to_string options.storage_class)
-              |> add_opt_header "x-amz-tagging" (tags_header options.tags)
-              |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                   options.expected_bucket_owner
-            in
-            match object_request conn ~bucket ~key with
-            | Error error -> return_error error
-            | Ok request ->
-                with_operation_result return_error return_ok
-                  (with_empty_response conn ~method_:`POST ~request
-                     ~query:[ ("uploads", []) ]
-                     ~headers
-                     ~f:(fun response body ->
-                       let* body =
-                         read_response_body body ~max_size:1_048_576L
-                       in
-                       match body with
-                       | Error error -> return_error error
-                       | Ok body ->
-                           return_result return_error return_ok
-                             (create_upload_result ~typed_bucket ~typed_key
-                                response body)))))
+        | Ok request ->
+            with_operation_result return_error return_ok
+              (with_empty_response conn ~method_:`POST ~request
+                 ~query:[ ("uploads", []) ]
+                 ~headers
+                 ~f:(fun response body ->
+                   let* body = read_response_body body ~max_size:1_048_576L in
+                   match body with
+                   | Error error -> return_error error
+                   | Ok body ->
+                       return_result return_error return_ok
+                         (create_upload_result ~typed_bucket ~typed_key response
+                            body))))
 
   let upload_part conn ~upload ~part_number ~body ?options () =
     let bucket = upload_bucket upload in
@@ -207,6 +181,20 @@ module Make (C : Request_context.S) = struct
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"UploadPart"
         ~bucket ~key
+    in
+    let rec first_sendable_checksum = function
+      | [] -> Ok options.checksum
+      | (value : Object.Checksum.observed_value) :: rest -> (
+          match value.algorithm with
+          | Object.Checksum.Algorithm.Unknown _ -> first_sendable_checksum rest
+          | Object.Checksum.Algorithm.Known algorithm -> (
+              match Object.Checksum.value ~algorithm ~value:value.value with
+              | Ok checksum -> Ok (Some checksum)
+              | Error error ->
+                  Error
+                    (S3_error_context.decode_with_context
+                       ~what:"multipart checksum response header"
+                       (Awskit.Error.to_string_hum error))))
     in
     let handle_response ~content_length response body =
       let* discarded = discard_response_body body in
@@ -220,17 +208,16 @@ module Make (C : Request_context.S) = struct
                 (S3_error_context.decode "missing multipart part etag")
           | Ok (Some etag) -> (
               let checksum = response_checksum response in
-              let part_checksum =
-                match checksum.values with
-                | [] -> options.checksum
-                | value :: _ -> Some value
-              in
-              match
-                Multipart.Part.create ~part_number ~etag ?checksum:part_checksum
-                  ~size:content_length ()
-              with
+              match first_sendable_checksum checksum.values with
               | Error error -> return_error error
-              | Ok part -> return_ok { Upload_part.part; checksum; response }))
+              | Ok part_checksum -> (
+                  match
+                    Multipart.Part.create ~part_number ~etag
+                      ?checksum:part_checksum ~size:content_length ()
+                  with
+                  | Error error -> return_error error
+                  | Ok part ->
+                      return_ok { Upload_part.part; checksum; response })))
     in
     let send ~content_length (descriptor : Awskit.Body.Request.descriptor) =
       let headers =
@@ -258,19 +245,16 @@ module Make (C : Request_context.S) = struct
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
     | Ok () -> (
-        match validate_opt validate_checksum_value options.checksum with
-        | Error error -> return_error error
-        | Ok () -> (
-            let descriptor = R.Request_body.descriptor body in
-            match descriptor.content_length with
-            | None ->
-                return_error
-                  (Awskit.Error.Producer.validation ~field:"content_length"
-                     "S3 multipart uploads require a known content length")
-            | Some content_length -> (
-                match Awskit.Body.Request.validate_descriptor descriptor with
-                | Error error -> return_error error
-                | Ok () -> send ~content_length descriptor)))
+        let descriptor = R.Request_body.descriptor body in
+        match descriptor.content_length with
+        | None ->
+            return_error
+              (Awskit.Error.Producer.validation ~field:"content_length"
+                 "S3 multipart uploads require a known content length")
+        | Some content_length -> (
+            match Awskit.Body.Request.validate_descriptor descriptor with
+            | Error error -> return_error error
+            | Ok () -> send ~content_length descriptor))
 
   let complete_upload conn ~upload ?options ~parts () =
     let bucket = upload_bucket upload in
@@ -310,11 +294,13 @@ module Make (C : Request_context.S) = struct
                   let children =
                     match Multipart.Part.checksum part with
                     | None -> children
-                    | Some checksum -> (
-                        match checksum_xml_name checksum.algorithm with
-                        | None -> children
-                        | Some name ->
-                            children @ [ Xml.text name checksum.value ])
+                    | Some checksum ->
+                        children
+                        @ [
+                            Xml.text
+                              (checksum_xml_name checksum.algorithm)
+                              checksum.value;
+                          ]
                   in
                   Xml.el "Part" children
                 in
@@ -533,7 +519,8 @@ module Make (C : Request_context.S) = struct
                                            next_part_number_marker;
                                            checksum_type =
                                              Option.map
-                                               Object.Checksum.Type.of_string
+                                               Object.Checksum.Type
+                                               .observed_of_string
                                                (Xml.child_text "ChecksumType"
                                                   nodes);
                                            response;

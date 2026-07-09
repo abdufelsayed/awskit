@@ -92,21 +92,11 @@ module Part = struct
     size : int64 option;
   }
 
-  let validate_checksum = function
-    | Some { Object.Checksum.algorithm = Unknown value; _ } ->
-        S3_error_context.invalid ~field:"checksum_algorithm"
-          "unknown checksum algorithm %S cannot be sent" value
-    | Some { Object.Checksum.value; _ } ->
-        S3_validation.validate_header_value ~field:"checksum_value" value
-    | _ -> Ok ()
-
   let create ?checksum ?size ~part_number ~etag () =
     match size with
     | Some size when Int64.compare size 0L < 0 ->
         S3_error_context.invalid ~field:"size" "part size must be non-negative"
-    | _ ->
-        let* () = validate_checksum checksum in
-        Ok { part_number; etag; checksum; size }
+    | _ -> Ok { part_number; etag; checksum; size }
 
   let create_exn ?checksum ?size ~part_number ~etag () =
     S3_result.result_exn (create ?checksum ?size ~part_number ~etag ())
@@ -146,32 +136,9 @@ module Create = struct
       expected_bucket_owner = None;
     }
 
-  let validate_checksum_algorithm = function
-    | Some (Object.Checksum.Algorithm.Unknown value) ->
-        S3_error_context.invalid ~field:"checksum_algorithm"
-          "unknown checksum algorithm %S cannot be sent" value
-    | _ -> Ok ()
-
-  let validate_checksum_type = function
-    | Some (Object.Checksum.Type.Unknown value) ->
-        S3_error_context.invalid ~field:"checksum_type"
-          "unknown checksum type %S cannot be sent" value
-    | _ -> Ok ()
-
-  let validate_storage_class = function
-    | Some storage_class ->
-        S3_validation.validate_header_value ~field:"storage_class"
-          (Storage_class.to_string storage_class)
-    | _ -> Ok ()
-
   let options ?content_type ?(metadata = Metadata.empty) ?storage_class
       ?(tags = Tag.Set.empty) ?checksum_algorithm ?checksum_type ?encryption
       ?expected_bucket_owner () =
-    let* () = S3_validation.validate_metadata metadata in
-    let* () = S3_validation.validate_tags tags in
-    let* () = validate_storage_class storage_class in
-    let* () = validate_checksum_algorithm checksum_algorithm in
-    let* () = validate_checksum_type checksum_type in
     Ok
       {
         content_type;
@@ -207,16 +174,7 @@ module Upload_part = struct
   let default_options =
     { checksum = None; customer_key = None; expected_bucket_owner = None }
 
-  let validate_checksum = function
-    | Some { Object.Checksum.algorithm = Unknown value; _ } ->
-        S3_error_context.invalid ~field:"checksum_algorithm"
-          "unknown checksum algorithm %S cannot be sent" value
-    | Some { Object.Checksum.value; _ } ->
-        S3_validation.validate_header_value ~field:"checksum_value" value
-    | _ -> Ok ()
-
   let options ?checksum ?customer_key ?expected_bucket_owner () =
-    let* () = validate_checksum checksum in
     Ok { checksum; customer_key; expected_bucket_owner }
 
   let options_exn ?checksum ?customer_key ?expected_bucket_owner () =
@@ -249,24 +207,8 @@ module Complete = struct
       multipart_object_size = None;
     }
 
-  let validate_checksum = function
-    | Some { Object.Checksum.algorithm = Unknown value; _ } ->
-        S3_error_context.invalid ~field:"checksum_algorithm"
-          "unknown checksum algorithm %S cannot be sent" value
-    | Some { Object.Checksum.value; _ } ->
-        S3_validation.validate_header_value ~field:"checksum_value" value
-    | _ -> Ok ()
-
-  let validate_checksum_type = function
-    | Some (Object.Checksum.Type.Unknown value) ->
-        S3_error_context.invalid ~field:"checksum_type"
-          "unknown checksum type %S cannot be sent" value
-    | _ -> Ok ()
-
   let options ?expected_bucket_owner ?checksum ?checksum_type ?customer_key
       ?multipart_object_size () =
-    let* () = validate_checksum checksum in
-    let* () = validate_checksum_type checksum_type in
     let* () =
       match multipart_object_size with
       | Some size when Int64.compare size 0L < 0 ->
@@ -320,7 +262,7 @@ module List_parts = struct
     parts : part_info list;
     is_truncated : bool;
     next_part_number_marker : Part_number_marker.t option;
-    checksum_type : Object.Checksum.Type.t option;
+    checksum_type : Object.Checksum.Type.observed option;
     response : Awskit.Response.t;
   }
 

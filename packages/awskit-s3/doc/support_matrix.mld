@@ -190,13 +190,13 @@ not imply support for arbitrary S3-compatible providers.
     checksums, multipart checksums, time preconditions, and delete preconditions
     are recorded as MinIO capability differences.}
   {li {b Notes and boundaries}: unknown read-side checksum and encryption
-    values are preserved where the public types model them. Unknown outbound
-    checksum algorithms are rejected, while unmodeled storage classes can be
-    sent through [Storage_class.Other]. Outbound object encryption is limited to
-    the typed {!module:Awskit_s3.Encryption} destination and source models.
-    Unmodeled checksum variants, arbitrary outbound encryption strings, KMS
-    policy behavior, Object Lock retention, and ACL edge cases are out of
-    scope.}
+    values are preserved in explicit observed types and cannot inhabit outbound
+    checksum fields. Unmodeled storage classes remain sendable after validation
+    through [Storage_class.of_string]. Outbound object encryption is limited to
+    the typed {!module:Awskit_s3.Encryption} destination and source models;
+    DSSE-KMS bucket keys are unconstructible. Unmodeled outbound checksum
+    variants, arbitrary outbound encryption strings, KMS policy behavior,
+    Object Lock retention, and ACL edge cases are out of scope.}
 }
 
 {1 Bucket Operations}

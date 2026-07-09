@@ -47,7 +47,8 @@ module Checksum = struct
       | Xxhash64
       | Xxhash3
       | Xxhash128
-      | Unknown of string
+
+    type observed = Known of t | Unknown of string
 
     let to_string = function
       | Crc32 -> "CRC32"
@@ -60,34 +61,69 @@ module Checksum = struct
       | Xxhash64 -> "XXHASH64"
       | Xxhash3 -> "XXHASH3"
       | Xxhash128 -> "XXHASH128"
-      | Unknown value -> value
 
-    let of_string = function
-      | "CRC32" -> Crc32
-      | "CRC32C" -> Crc32c
-      | "CRC64NVME" -> Crc64nvme
-      | "SHA1" -> Sha1
-      | "SHA256" -> Sha256
-      | "SHA512" -> Sha512
-      | "MD5" -> Md5
-      | "XXHASH64" -> Xxhash64
-      | "XXHASH3" -> Xxhash3
-      | "XXHASH128" -> Xxhash128
-      | value -> Unknown value
+    let known_of_string = function
+      | "CRC32" -> Some Crc32
+      | "CRC32C" -> Some Crc32c
+      | "CRC64NVME" -> Some Crc64nvme
+      | "SHA1" -> Some Sha1
+      | "SHA256" -> Some Sha256
+      | "SHA512" -> Some Sha512
+      | "MD5" -> Some Md5
+      | "XXHASH64" -> Some Xxhash64
+      | "XXHASH3" -> Some Xxhash3
+      | "XXHASH128" -> Some Xxhash128
+      | _ -> None
+
+    let of_string value =
+      match known_of_string value with
+      | Some algorithm -> Ok algorithm
+      | None ->
+          S3_error_context.invalid ~field:"checksum_algorithm"
+            "unsupported checksum algorithm %S" value
+
+    let of_string_exn value = S3_result.result_exn (of_string value)
+
+    let observed_of_string value =
+      match known_of_string value with
+      | Some algorithm -> Known algorithm
+      | None -> Unknown value
+
+    let observed_to_string = function
+      | Known algorithm -> to_string algorithm
+      | Unknown value -> value
   end
 
   module Type = struct
-    type t = Composite | Full_object | Unknown of string
+    type t = Composite | Full_object
+    type observed = Known of t | Unknown of string
 
     let to_string = function
       | Composite -> "COMPOSITE"
       | Full_object -> "FULL_OBJECT"
-      | Unknown value -> value
 
-    let of_string = function
-      | "COMPOSITE" -> Composite
-      | "FULL_OBJECT" -> Full_object
-      | value -> Unknown value
+    let known_of_string = function
+      | "COMPOSITE" -> Some Composite
+      | "FULL_OBJECT" -> Some Full_object
+      | _ -> None
+
+    let of_string value =
+      match known_of_string value with
+      | Some checksum_type -> Ok checksum_type
+      | None ->
+          S3_error_context.invalid ~field:"checksum_type"
+            "unsupported checksum type %S" value
+
+    let of_string_exn value = S3_result.result_exn (of_string value)
+
+    let observed_of_string value =
+      match known_of_string value with
+      | Some checksum_type -> Known checksum_type
+      | None -> Unknown value
+
+    let observed_to_string = function
+      | Known checksum_type -> to_string checksum_type
+      | Unknown value -> value
   end
 
   module Mode = struct
@@ -99,26 +135,24 @@ module Checksum = struct
   type value = { algorithm : Algorithm.t; value : string }
 
   let value ~algorithm ~value =
-    match algorithm with
-    | Algorithm.Unknown algorithm ->
-        S3_error_context.invalid ~field:"checksum_algorithm"
-          "unknown checksum algorithm %S cannot be sent" algorithm
-    | _ ->
-        let* () =
-          S3_validation.validate_header_value ~field:"checksum_value" value
-        in
-        Ok { algorithm; value }
+    let* () =
+      S3_validation.validate_header_value ~field:"checksum_value" value
+    in
+    Ok { algorithm; value }
 
   let value_exn ~algorithm ~value:checksum =
     S3_result.result_exn (value ~algorithm ~value:checksum)
 
-  let response_value ~algorithm ~value = { algorithm; value }
+  type observed_value = { algorithm : Algorithm.observed; value : string }
 
-  type response = { values : value list; checksum_type : Type.t option }
+  type response = {
+    values : observed_value list;
+    checksum_type : Type.observed option;
+  }
 
   type summary = {
-    algorithms : Algorithm.t list;
-    checksum_type : Type.t option;
+    algorithms : Algorithm.observed list;
+    checksum_type : Type.observed option;
   }
 
   let empty_response = { values = []; checksum_type = None }
@@ -236,26 +270,10 @@ module Put = struct
       expected_bucket_owner = None;
     }
 
-  let validate_storage_class = function
-    | Some storage_class ->
-        S3_validation.validate_header_value ~field:"storage_class"
-          (Storage_class.to_string storage_class)
-    | _ -> Ok ()
-
-  let validate_checksum_value = function
-    | Some { Checksum.algorithm = Unknown value; _ } ->
-        S3_error_context.invalid ~field:"checksum_algorithm"
-          "unknown checksum algorithm %S cannot be sent" value
-    | Some { Checksum.value; _ } ->
-        S3_validation.validate_header_value ~field:"checksum_value" value
-    | _ -> Ok ()
-
   let options ?content_type ?(metadata = Metadata.empty) ?storage_class
       ?(tags = Tag.Set.empty) ?cache_control ?content_encoding
       ?content_disposition ?(preconditions = Preconditions.Write.none) ?checksum
       ?encryption ?expected_bucket_owner () =
-    let* () = validate_storage_class storage_class in
-    let* () = validate_checksum_value checksum in
     Ok
       {
         content_type;
@@ -491,25 +509,11 @@ module Copy = struct
       source_expected_bucket_owner = None;
     }
 
-  let validate_storage_class = function
-    | Some storage_class ->
-        S3_validation.validate_header_value ~field:"storage_class"
-          (Storage_class.to_string storage_class)
-    | _ -> Ok ()
-
-  let validate_checksum_algorithm = function
-    | Some (Checksum.Algorithm.Unknown value) ->
-        S3_error_context.invalid ~field:"checksum_algorithm"
-          "unknown checksum algorithm %S cannot be sent" value
-    | _ -> Ok ()
-
   let options ?source_version_id
       ?(source_preconditions = Preconditions.Copy_source.none)
       ?metadata_directive ?storage_class ?checksum_algorithm
       ?destination_encryption ?source_encryption ?expected_bucket_owner
       ?source_expected_bucket_owner () =
-    let* () = validate_storage_class storage_class in
-    let* () = validate_checksum_algorithm checksum_algorithm in
     Ok
       {
         source_version_id;

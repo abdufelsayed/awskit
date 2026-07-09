@@ -44,7 +44,7 @@ let options =
     ~tags:
       (Awskit_s3.Tag.Set.of_list_exn
          [ Awskit_s3.Tag.create_exn ~key:"env" ~value:"dev" ])
-    ~encryption:Awskit_s3.Encryption.Destination.Sse_s3
+    ~encryption:Awskit_s3.Encryption.Destination.sse_s3
     ()
 in
 Awskit_s3_eio.Object.put_string s3

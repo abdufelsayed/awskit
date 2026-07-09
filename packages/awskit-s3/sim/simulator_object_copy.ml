@@ -33,13 +33,6 @@ let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
           | Error error -> source_error error
           | Ok src -> (
               match
-                let* () =
-                  validate_opt validate_storage_class options.storage_class
-                in
-                let* () =
-                  validate_opt validate_checksum_algorithm
-                    options.checksum_algorithm
-                in
                 validate_opt validate_supported_algorithm
                   options.checksum_algorithm
               with
