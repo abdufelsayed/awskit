@@ -229,14 +229,7 @@ module Complete = struct
 end
 
 module Abort = struct
-  type options = { expected_bucket_owner : Account_id.t option }
   type result = { response : Awskit.Response.t }
-
-  let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
-
-  let options_exn ?expected_bucket_owner () =
-    S3_result.result_exn (options ?expected_bucket_owner ())
 end
 
 module List_parts = struct

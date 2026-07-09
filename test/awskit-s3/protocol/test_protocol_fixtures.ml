@@ -386,11 +386,7 @@ let test_copy_object_headers_fixture () =
     ~actual
 
 let test_object_tagging_xml_fixture () =
-  let options =
-    Object.Tagging.options_exn
-      ~expected_bucket_owner:(Protocol_support.account_id "123456789012")
-      ()
-  in
+  let expected_bucket_owner = Protocol_support.account_id "123456789012" in
   let conn =
     Protocol_recording_runtime.connect
       [ Protocol_recording_runtime.response 200 "" ]
@@ -399,7 +395,7 @@ let test_object_tagging_xml_fixture () =
     (Protocol_recording_runtime.S3.Object.Tagging.put conn
        ~bucket:(Protocol_support.bucket_name "bucket")
        ~key:(Protocol_support.object_key "file.txt")
-       ~options
+       ~expected_bucket_owner
        ~tags:
          (Protocol_support.tag_set
             [

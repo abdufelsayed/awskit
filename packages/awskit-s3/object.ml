@@ -436,14 +436,6 @@ module Delete_many = struct
     errors : item_error list;
     response : Awskit.Response.t;
   }
-
-  type options = { expected_bucket_owner : Account_id.t option }
-
-  let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
-
-  let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end
 
 module Copy = struct
@@ -690,12 +682,5 @@ module List = struct
 end
 
 module Tagging = struct
-  type options = { expected_bucket_owner : Account_id.t option }
   type result = { tags : Tag.Set.t; response : Awskit.Response.t }
-
-  let default_options = { expected_bucket_owner = None }
-  let options ?expected_bucket_owner () = Ok { expected_bucket_owner }
-
-  let options_exn ?expected_bucket_owner () =
-    Awskit.Error.Producer.get_ok_exn (options ?expected_bucket_owner ())
 end

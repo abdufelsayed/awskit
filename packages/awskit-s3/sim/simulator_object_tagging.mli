@@ -3,7 +3,7 @@ module Tagging : sig
     Simulator_state.t ->
     bucket:string ->
     key:string ->
-    ?options:Awskit_s3.Object.Tagging.options ->
+    ?expected_bucket_owner:Awskit_s3.Account_id.t ->
     unit ->
     (Awskit_s3.Object.Tagging.result, Awskit.Error.t) result
 
@@ -11,7 +11,7 @@ module Tagging : sig
     Simulator_state.t ->
     bucket:string ->
     key:string ->
-    ?options:Awskit_s3.Object.Tagging.options ->
+    ?expected_bucket_owner:Awskit_s3.Account_id.t ->
     tags:Awskit_s3.Tag.Set.t ->
     unit ->
     (Awskit.Response.t, Awskit.Error.t) result
@@ -20,7 +20,7 @@ module Tagging : sig
     Simulator_state.t ->
     bucket:string ->
     key:string ->
-    ?options:Awskit_s3.Object.Tagging.options ->
+    ?expected_bucket_owner:Awskit_s3.Account_id.t ->
     unit ->
     (Awskit.Response.t, Awskit.Error.t) result
 end

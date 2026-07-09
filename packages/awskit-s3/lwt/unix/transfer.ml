@@ -671,7 +671,8 @@ struct
     let abort_and_return error =
       Lwt.bind
         (S3.Multipart.abort_upload conn ~upload:created.upload
-           ~options:options.abort_options ()) (function
+           ?expected_bucket_owner:options.abort_expected_bucket_owner ())
+        (function
         | Ok _ -> Lwt.return_error error
         | Error cleanup_error ->
             Lwt.return_error
@@ -685,7 +686,7 @@ struct
           Lwt.bind
             (Lwt.protected
                (S3.Multipart.abort_upload conn ~upload:created.upload
-                  ~options:options.abort_options ()))
+                  ?expected_bucket_owner:options.abort_expected_bucket_owner ()))
             (fun _ -> Lwt.return_unit))
         (fun _exn -> Lwt.return_unit)
     in

@@ -151,9 +151,9 @@ module Object = struct
     Raw.delete (raw conn) ~bucket:(bucket_to_string bucket)
       ~key:(key_to_string key) ?options ()
 
-  let delete_objects conn ~bucket ~objects ?options () =
+  let delete_objects conn ~bucket ~objects ?expected_bucket_owner () =
     Raw.delete_objects (raw conn) ~bucket:(bucket_to_string bucket) ~objects
-      ?options ()
+      ?expected_bucket_owner ()
 
   let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
       ?options () =
@@ -223,17 +223,17 @@ module Object = struct
   end
 
   module Tagging = struct
-    let get conn ~bucket ~key ?options () =
+    let get conn ~bucket ~key ?expected_bucket_owner () =
       Raw.Tagging.get (raw conn) ~bucket:(bucket_to_string bucket)
-        ~key:(key_to_string key) ?options ()
+        ~key:(key_to_string key) ?expected_bucket_owner ()
 
-    let put conn ~bucket ~key ?options ~tags () =
+    let put conn ~bucket ~key ?expected_bucket_owner ~tags () =
       Raw.Tagging.put (raw conn) ~bucket:(bucket_to_string bucket)
-        ~key:(key_to_string key) ?options ~tags ()
+        ~key:(key_to_string key) ?expected_bucket_owner ~tags ()
 
-    let delete conn ~bucket ~key ?options () =
+    let delete conn ~bucket ~key ?expected_bucket_owner () =
       Raw.Tagging.delete (raw conn) ~bucket:(bucket_to_string bucket)
-        ~key:(key_to_string key) ?options ()
+        ~key:(key_to_string key) ?expected_bucket_owner ()
   end
 end
 
@@ -380,8 +380,8 @@ module Multipart = struct
   let complete_upload conn ~upload ?options ~parts () =
     Raw.complete_upload (raw conn) ~upload ?options ~parts ()
 
-  let abort_upload conn ~upload ?options () =
-    Raw.abort_upload (raw conn) ~upload ?options ()
+  let abort_upload conn ~upload ?expected_bucket_owner () =
+    Raw.abort_upload (raw conn) ~upload ?expected_bucket_owner ()
 
   let list_parts conn ~upload ?options () =
     Raw.list_parts (raw conn) ~upload ?options ()

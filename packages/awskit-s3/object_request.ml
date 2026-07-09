@@ -314,11 +314,8 @@ module Make (C : Request_context.S) = struct
             in
             return_result return_error return_ok result)
 
-  let delete_objects conn ~bucket ~objects ?options () =
+  let delete_objects conn ~bucket ~objects ?expected_bucket_owner () =
     let bucket = Bucket_name.to_string bucket in
-    let options =
-      Option.value ~default:Delete_objects.default_options options
-    in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation:"DeleteObjects"
         ~bucket
@@ -336,7 +333,7 @@ module Make (C : Request_context.S) = struct
                 ("content-type", "application/xml");
               ]
               |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                   options.expected_bucket_owner
+                   expected_bucket_owner
             in
             let upload = R.Request_body.of_string body in
             match

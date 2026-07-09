@@ -58,9 +58,9 @@ type upload_options = private {
       (** Options used by each [UploadPart]. *)
   complete_options : Multipart.Complete.options;
       (** Options used by [CompleteMultipartUpload]. *)
-  abort_options : Multipart.Abort.options;
-      (** Options used when aborting a failed Awskit-created multipart upload.
-      *)
+  abort_expected_bucket_owner : Account_id.t option;
+      (** Expected bucket owner used when aborting a failed Awskit-created
+          multipart upload. *)
   list_parts_options : Multipart.List_parts.options;
       (** Options used when verifying caller-owned uploads before resumed file
           transfer writes fresh parts. *)
@@ -179,7 +179,7 @@ val upload_options :
   ?create_options:Multipart.Create.options ->
   ?upload_part_options:Multipart.Upload_part.options ->
   ?complete_options:Multipart.Complete.options ->
-  ?abort_options:Multipart.Abort.options ->
+  ?abort_expected_bucket_owner:Account_id.t ->
   ?list_parts_options:Multipart.List_parts.options ->
   unit ->
   (upload_options, Awskit.Error.t) result
@@ -193,7 +193,7 @@ val upload_options_exn :
   ?create_options:Multipart.Create.options ->
   ?upload_part_options:Multipart.Upload_part.options ->
   ?complete_options:Multipart.Complete.options ->
-  ?abort_options:Multipart.Abort.options ->
+  ?abort_expected_bucket_owner:Account_id.t ->
   ?list_parts_options:Multipart.List_parts.options ->
   unit ->
   upload_options
@@ -242,9 +242,9 @@ val upload_part_options : upload_options -> Multipart.Upload_part.options
 val upload_complete_options : upload_options -> Multipart.Complete.options
 (** Return options used by [CompleteMultipartUpload]. *)
 
-val upload_abort_options : upload_options -> Multipart.Abort.options
-(** Return options used when aborting an Awskit-created multipart upload after a
-    helper failure. *)
+val upload_abort_expected_bucket_owner : upload_options -> Account_id.t option
+(** Return the expected owner used when aborting an Awskit-created multipart
+    upload after a helper failure. *)
 
 val upload_list_parts_options : upload_options -> Multipart.List_parts.options
 (** Return options used to verify a caller-owned upload before resumed multipart

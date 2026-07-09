@@ -592,7 +592,7 @@ struct
     let abort_and_return error =
       match
         S3.Multipart.abort_upload conn ~upload:created.upload
-          ~options:options.abort_options ()
+          ?expected_bucket_owner:options.abort_expected_bucket_owner ()
       with
       | Ok _ -> Error error
       | Error cleanup_error ->
@@ -605,7 +605,7 @@ struct
       Eio.Cancel.protect (fun () ->
           match
             S3.Multipart.abort_upload conn ~upload:created.upload
-              ~options:options.abort_options ()
+              ?expected_bucket_owner:options.abort_expected_bucket_owner ()
           with
           | Ok _ | Error _ -> ()
           | exception _ -> ())

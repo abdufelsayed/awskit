@@ -24,7 +24,7 @@ type upload_options = {
   create_options : Multipart.Create.options;
   upload_part_options : Multipart.Upload_part.options;
   complete_options : Multipart.Complete.options;
-  abort_options : Multipart.Abort.options;
+  abort_expected_bucket_owner : Account_id.t option;
   list_parts_options : Multipart.List_parts.options;
 }
 
@@ -88,7 +88,7 @@ let default_upload_options =
     create_options = Multipart.Create.default_options;
     upload_part_options = Multipart.Upload_part.default_options;
     complete_options = Multipart.Complete.default_options;
-    abort_options = Multipart.Abort.default_options;
+    abort_expected_bucket_owner = None;
     list_parts_options = Multipart.List_parts.default_options;
   }
 
@@ -267,7 +267,7 @@ let upload_options ?(multipart_threshold = default_multipart_threshold)
     ?(create_options = Multipart.Create.default_options)
     ?(upload_part_options = Multipart.Upload_part.default_options)
     ?(complete_options = Multipart.Complete.default_options)
-    ?(abort_options = Multipart.Abort.default_options)
+    ?abort_expected_bucket_owner
     ?(list_parts_options = Multipart.List_parts.default_options) () =
   let options =
     {
@@ -278,7 +278,7 @@ let upload_options ?(multipart_threshold = default_multipart_threshold)
       create_options;
       upload_part_options;
       complete_options;
-      abort_options;
+      abort_expected_bucket_owner;
       list_parts_options;
     }
   in
@@ -286,12 +286,12 @@ let upload_options ?(multipart_threshold = default_multipart_threshold)
   Ok options
 
 let upload_options_exn ?multipart_threshold ?part_size ?concurrency ?put_options
-    ?create_options ?upload_part_options ?complete_options ?abort_options
-    ?list_parts_options () =
+    ?create_options ?upload_part_options ?complete_options
+    ?abort_expected_bucket_owner ?list_parts_options () =
   Awskit.Error.Producer.get_ok_exn
     (upload_options ?multipart_threshold ?part_size ?concurrency ?put_options
-       ?create_options ?upload_part_options ?complete_options ?abort_options
-       ?list_parts_options ())
+       ?create_options ?upload_part_options ?complete_options
+       ?abort_expected_bucket_owner ?list_parts_options ())
 
 let download_options ?(multipart_threshold = default_multipart_threshold)
     ?(part_size = default_part_size) ?(concurrency = default_concurrency)
@@ -320,7 +320,8 @@ let upload_part_options (options : upload_options) = options.upload_part_options
 let upload_complete_options (options : upload_options) =
   options.complete_options
 
-let upload_abort_options (options : upload_options) = options.abort_options
+let upload_abort_expected_bucket_owner (options : upload_options) =
+  options.abort_expected_bucket_owner
 
 let upload_list_parts_options (options : upload_options) =
   options.list_parts_options

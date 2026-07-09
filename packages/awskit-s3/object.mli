@@ -457,20 +457,6 @@ module Delete_many : sig
   }
   (** [DeleteObjects] result data. Check [errors] even when the operation itself
       returned [Ok]. *)
-
-  type options = { expected_bucket_owner : Account_id.t option }
-  (** [DeleteObjects] request options. *)
-
-  val default_options : options
-
-  val options :
-    ?expected_bucket_owner:Account_id.t ->
-    unit ->
-    (options, Awskit.Error.t) Stdlib.result
-  (** Build [DeleteObjects] options. *)
-
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
-  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module Copy : sig
@@ -735,20 +721,6 @@ module List : sig
 end
 
 module Tagging : sig
-  type options = { expected_bucket_owner : Account_id.t option }
-  (** Object tagging request options. *)
-
   type result = { tags : Tag.Set.t; response : Awskit.Response.t }
   (** Object tag set returned by [GetObjectTagging]. *)
-
-  val default_options : options
-
-  val options :
-    ?expected_bucket_owner:Account_id.t ->
-    unit ->
-    (options, Awskit.Error.t) Stdlib.result
-  (** Build object tagging request options. *)
-
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
-  (** Like {!val:options}, but raises on validation failure. *)
 end

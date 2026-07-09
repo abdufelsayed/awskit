@@ -14,17 +14,14 @@ module Make (C : Request_context.S) = struct
     let* result = response in
     return_result return_error return_ok result
 
-  let owner_headers options =
+  let owner_headers expected_bucket_owner =
     []
     |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-         options.Object.Tagging.expected_bucket_owner
+         expected_bucket_owner
 
-  let get conn ~bucket ~key ?options () =
+  let get conn ~bucket ~key ?expected_bucket_owner () =
     let bucket = Bucket_name.to_string bucket in
     let key = Object_key.to_string key in
-    let options =
-      Option.value ~default:Object.Tagging.default_options options
-    in
     let return_error =
       S3_error_context.return_s3_error return_error
         ~operation:"GetObjectTagging" ~bucket ~key
@@ -38,7 +35,7 @@ module Make (C : Request_context.S) = struct
             with_operation_result return_error return_ok
               (with_empty_response conn ~method_:`GET ~request
                  ~query:[ ("tagging", []) ]
-                 ~headers:(owner_headers options)
+                 ~headers:(owner_headers expected_bucket_owner)
                  ~f:(fun response body ->
                    let* body = read_response_body body ~max_size:1_048_576L in
                    match body with
@@ -49,12 +46,9 @@ module Make (C : Request_context.S) = struct
                             (fun tags -> { Object.Tagging.tags; response })
                             (parse_tags body)))))
 
-  let put conn ~bucket ~key ?options ~tags () =
+  let put conn ~bucket ~key ?expected_bucket_owner ~tags () =
     let bucket = Bucket_name.to_string bucket in
     let key = Object_key.to_string key in
-    let options =
-      Option.value ~default:Object.Tagging.default_options options
-    in
     let return_error =
       S3_error_context.return_s3_error return_error
         ~operation:"PutObjectTagging" ~bucket ~key
@@ -72,7 +66,7 @@ module Make (C : Request_context.S) = struct
                 ("content-md5", content_md5 body);
                 ("content-type", "application/xml");
               ]
-              @ owner_headers options
+              @ owner_headers expected_bucket_owner
             in
             match object_request conn ~bucket ~key with
             | Error error -> return_error error
@@ -89,12 +83,9 @@ module Make (C : Request_context.S) = struct
                        | Error error -> return_error error
                        | Ok () -> return_ok response))))
 
-  let delete conn ~bucket ~key ?options () =
+  let delete conn ~bucket ~key ?expected_bucket_owner () =
     let bucket = Bucket_name.to_string bucket in
     let key = Object_key.to_string key in
-    let options =
-      Option.value ~default:Object.Tagging.default_options options
-    in
     let return_error =
       S3_error_context.return_s3_error return_error
         ~operation:"DeleteObjectTagging" ~bucket ~key
@@ -108,7 +99,7 @@ module Make (C : Request_context.S) = struct
             with_operation_result return_error return_ok
               (with_empty_response conn ~method_:`DELETE ~request
                  ~query:[ ("tagging", []) ]
-                 ~headers:(owner_headers options)
+                 ~headers:(owner_headers expected_bucket_owner)
                  ~f:(fun response body ->
                    let* discarded = discard_response_body body in
                    match discarded with

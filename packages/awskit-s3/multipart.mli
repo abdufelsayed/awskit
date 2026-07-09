@@ -302,22 +302,8 @@ module Complete : sig
 end
 
 module Abort : sig
-  type options = { expected_bucket_owner : Account_id.t option }
-  (** [AbortMultipartUpload] request options. *)
-
   type result = { response : Awskit.Response.t }
   (** [AbortMultipartUpload] result metadata. *)
-
-  val default_options : options
-
-  val options :
-    ?expected_bucket_owner:Account_id.t ->
-    unit ->
-    (options, Awskit.Error.t) Stdlib.result
-  (** Build [AbortMultipartUpload] options. *)
-
-  val options_exn : ?expected_bucket_owner:Account_id.t -> unit -> options
-  (** Like {!val:options}, but raises on validation failure. *)
 end
 
 module List_parts : sig

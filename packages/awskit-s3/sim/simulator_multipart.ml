@@ -319,7 +319,7 @@ module Multipart = struct
                                       @ checksum_response_headers checksum);
                               })))))
 
-  let abort_upload conn ~upload ?options:_ () =
+  let abort_upload conn ~upload ?expected_bucket_owner:_ () =
     let bucket = upload_handle_bucket upload in
     let key = upload_handle_key upload in
     let upload_id = upload_handle_id upload in

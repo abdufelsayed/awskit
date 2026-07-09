@@ -330,13 +330,10 @@ module Make (C : Request_context.S) = struct
                            | Error error -> return_error error
                            | Ok result -> return_ok result)))))
 
-  let abort_upload conn ~upload ?options () =
+  let abort_upload conn ~upload ?expected_bucket_owner () =
     let bucket = upload_bucket upload in
     let key = upload_key upload in
     let upload_id = upload_id upload in
-    let options =
-      Option.value ~default:Abort_multipart_upload.default_options options
-    in
     let return_error =
       S3_error_context.return_s3_error return_error
         ~operation:"AbortMultipartUpload" ~bucket ~key
@@ -354,7 +351,7 @@ module Make (C : Request_context.S) = struct
                  ~headers:
                    ([]
                    |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                        options.expected_bucket_owner)
+                        expected_bucket_owner)
                  ~f:(fun response body ->
                    let* discarded = discard_response_body body in
                    match discarded with

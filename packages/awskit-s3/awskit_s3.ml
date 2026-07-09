@@ -239,7 +239,7 @@ module type OBJECT = sig
     client ->
     bucket:Bucket_name.t ->
     objects:Object.Delete_many.object_ list ->
-    ?options:Object.Delete_many.options ->
+    ?expected_bucket_owner:Account_id.t ->
     unit ->
     (Object.Delete_many.result, Awskit.Error.t) result io
   (** Delete multiple objects with [DeleteObjects].
@@ -412,7 +412,7 @@ module type OBJECT = sig
       client ->
       bucket:Bucket_name.t ->
       key:Object_key.t ->
-      ?options:Object.Tagging.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Object.Tagging.result, Awskit.Error.t) result io
     (** Fetch object tags. *)
@@ -421,7 +421,7 @@ module type OBJECT = sig
       client ->
       bucket:Bucket_name.t ->
       key:Object_key.t ->
-      ?options:Object.Tagging.options ->
+      ?expected_bucket_owner:Account_id.t ->
       tags:Tag.Set.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
@@ -431,7 +431,7 @@ module type OBJECT = sig
       client ->
       bucket:Bucket_name.t ->
       key:Object_key.t ->
-      ?options:Object.Tagging.options ->
+      ?expected_bucket_owner:Account_id.t ->
       unit ->
       (Awskit.Response.t, Awskit.Error.t) result io
     (** Remove all tags from the object. *)
@@ -737,7 +737,7 @@ module type MULTIPART = sig
   val abort_upload :
     client ->
     upload:_ Multipart.Upload.t ->
-    ?options:Multipart.Abort.options ->
+    ?expected_bucket_owner:Account_id.t ->
     unit ->
     (Multipart.Abort.result, Awskit.Error.t) result io
   (** Abort a multipart upload. *)

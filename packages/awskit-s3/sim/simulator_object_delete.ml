@@ -96,7 +96,7 @@ let delete conn ~bucket ~key ?options () =
                           Hashtbl.remove bucket_state.objects key;
                           Ok (delete_result ()))))))
 
-let delete_objects conn ~bucket ~objects ?options:_ () =
+let delete_objects conn ~bucket ~objects ?expected_bucket_owner:_ () =
   let key_string key = Object_key.to_string key in
   let return_error error =
     Error (with_operation `Delete_objects ~bucket error)
