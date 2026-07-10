@@ -32,7 +32,10 @@ val create :
 module Body : sig
   type t
 
-  include Awskit_s3.BODY with type 'a io := 'a Lwt.t and type t := t
+  include
+    Awskit_s3.Implementor.Request_body
+      with type 'a io := 'a Lwt.t
+       and type t := t
 
   val of_lwt_stream :
     content_length:int64 -> string Lwt_stream.t -> (t, Awskit_s3.Error.t) result
@@ -61,7 +64,10 @@ end
 module Reader : sig
   type t
 
-  include Awskit_s3.READER with type 'a io := 'a Lwt.t and type t := t
+  include
+    Awskit_s3.Implementor.Response_reader
+      with type 'a io := 'a Lwt.t
+       and type t := t
 
   val to_channel :
     ?on_progress:(int64 -> unit) ->
@@ -82,7 +88,7 @@ end
 
 module Object : sig
   include
-    Awskit_s3.OBJECT
+    Awskit_s3.Implementor.Object_operations
       with type client := t
        and type 'a io := 'a Lwt.t
        and type request_body := Body.t
@@ -147,11 +153,13 @@ end
 
 (** Bucket operations returning [Lwt.t]. *)
 module Bucket :
-  Awskit_s3.BUCKET with type client := t and type 'a io := 'a Lwt.t
+  Awskit_s3.Implementor.Bucket_operations
+    with type client := t
+     and type 'a io := 'a Lwt.t
 
 (** Multipart operations returning [Lwt.t]. *)
 module Multipart :
-  Awskit_s3.MULTIPART
+  Awskit_s3.Implementor.Multipart_operations
     with type client := t
      and type 'a io := 'a Lwt.t
      and type request_body := Body.t
@@ -159,4 +167,6 @@ module Multipart :
 (** Presigned request artifact helpers using the client's resolved region,
     credentials, clock, and endpoint configuration. *)
 module Presigned :
-  Awskit_s3.PRESIGNED with type client := t and type 'a io := 'a Lwt.t
+  Awskit_s3.Implementor.Presigned_operations
+    with type client := t
+     and type 'a io := 'a Lwt.t
