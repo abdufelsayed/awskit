@@ -34,7 +34,11 @@ module Bucket = struct
               public_access_block = None;
               ownership_controls = None;
             };
-          Ok { Bucket_model.Create.response = response 200 }
+          Ok
+            {
+              Bucket_model.Create.location = Some ("/" ^ bucket);
+              response = response 200;
+            }
         end
 
   let delete conn ~bucket ?expected_bucket_owner:_ () =
@@ -45,7 +49,7 @@ module Bucket = struct
           Error (service ~status:409 ~code:"BucketNotEmpty" ())
         else begin
           remove_bucket (store conn) bucket;
-          Ok { Bucket_model.Delete.response = response 204 }
+          Ok (response 204)
         end
 
   let head conn ~bucket ?expected_bucket_owner:_ () =

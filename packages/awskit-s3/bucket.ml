@@ -1,11 +1,7 @@
 type info = { name : Bucket_name.t; creation_date : Ptime.t option }
 
 module Create = struct
-  type result = { response : Awskit.Response.t }
-end
-
-module Delete = struct
-  type result = { response : Awskit.Response.t }
+  type result = { location : string option; response : Awskit.Response.t }
 end
 
 module Head = struct

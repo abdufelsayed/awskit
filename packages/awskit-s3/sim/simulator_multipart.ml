@@ -433,7 +433,7 @@ module Multipart = struct
             | None ->
                 Hashtbl.remove bucket_state.multipart_uploads
                   (upload_key upload_id);
-                Ok { Multipart_model.Abort.response = response 204 }))
+                Ok (response 204)))
 
   let list_parts conn ~upload ?options () =
     let options =

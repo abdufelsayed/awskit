@@ -557,11 +557,11 @@ let assert_get command_index command conn key expected =
         Alcotest.(option int64)
         "get content length"
         (content_length_of_model object_)
-        result.content_length;
+        result.info.content_length;
       check_metadata command_index command "get metadata" object_.metadata
-        result.metadata;
+        result.info.metadata;
       check_version_id_presence command_index command "get version id"
-        object_.has_version_id result.version_id
+        object_.has_version_id result.info.version_id
   | None ->
       expect_no_such_key command_index command "get_string"
         (await_result "get_string"
@@ -584,16 +584,16 @@ let assert_get_range command_index command conn key range model =
       check_equal command_index command
         Alcotest.(option int64)
         "get range content length" summary.read_content_length
-        result.content_length;
+        result.info.content_length;
       check_equal command_index command
         Alcotest.(option string)
         "get range content range"
         (model_content_range_to_string summary.read_content_range)
-        (actual_content_range_to_string result.content_range);
+        (actual_content_range_to_string result.info.content_range);
       check_metadata command_index command "get range metadata"
-        summary.read_metadata result.metadata;
+        summary.read_metadata result.info.metadata;
       check_version_id_presence command_index command "get range version id"
-        summary.read_has_version_id result.version_id
+        summary.read_has_version_id result.info.version_id
   | Not_found ->
       expect_no_such_key command_index command "get range"
         (await_result "get range"
@@ -621,9 +621,9 @@ let assert_find command_index command conn key expected =
           check_equal command_index command Alcotest.string "find body"
             object_.body result.value;
           check_metadata command_index command "find metadata" object_.metadata
-            result.metadata;
+            result.info.metadata;
           check_version_id_presence command_index command "find version id"
-            object_.has_version_id result.version_id
+            object_.has_version_id result.info.version_id
       | None -> fail command_index command "find_string expected Ok None")
   | Ok None -> (
       match expected with

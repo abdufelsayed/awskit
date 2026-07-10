@@ -330,24 +330,7 @@ module Get : sig
 
   type 'a result = {
     value : 'a;  (** Value returned by the response-body consumer. *)
-    etag : Etag.t option;  (** Object ETag returned by S3. *)
-    content_type : Content_type.t option;
-        (** Object [Content-Type] response header. *)
-    content_length : int64 option;
-        (** Number of response-body bytes when S3 supplied [Content-Length]. *)
-    content_range : Range.Content_range.t option;
-        (** Parsed [Content-Range] response header for ranged responses. *)
-    last_modified : Ptime.t option;
-        (** Last modified timestamp parsed from the response. *)
-    metadata : Metadata.t;
-        (** User metadata parsed from [x-amz-meta-*] headers. *)
-    storage_class : Storage_class.t option;
-        (** Storage class reported for the object, if present. *)
-    version_id : Version_id.t option;  (** Version id of the returned object. *)
-    checksum : Checksum.response;  (** Checksum response headers. *)
-    encryption : Encryption.Observed.t option;
-        (** Encryption metadata reported by S3. *)
-    response : Awskit.Response.t;  (** Raw response metadata. *)
+    info : info;  (** Object and response metadata. *)
   }
   (** [GetObject] result containing response metadata and the caller's consumed
       body value. *)

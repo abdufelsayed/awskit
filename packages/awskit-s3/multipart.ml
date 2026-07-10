@@ -343,10 +343,6 @@ module Complete = struct
       (options ?expected_bucket_owner ?checksum ?checksum_type ?customer_key ())
 end
 
-module Abort = struct
-  type result = { response : Awskit.Response.t }
-end
-
 module List_parts = struct
   type options = {
     max_parts : int option;

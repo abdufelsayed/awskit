@@ -6,7 +6,6 @@ module Xml = S3_xml
 module Create_multipart_upload = Multipart.Create
 module Upload_part = Multipart.Upload_part
 module Complete_multipart_upload = Multipart.Complete
-module Abort_multipart_upload = Multipart.Abort
 module List_parts = Multipart.List_parts
 
 module Make (C : Request_context.S) = struct
@@ -290,7 +289,7 @@ module Make (C : Request_context.S) = struct
                    let* discarded = discard_response_body body in
                    match discarded with
                    | Error error -> return_error error
-                   | Ok () -> return_ok { Abort_multipart_upload.response })))
+                   | Ok () -> return_ok response)))
 
   let list_parts conn ~upload ?options () =
     let bucket = upload_bucket upload in

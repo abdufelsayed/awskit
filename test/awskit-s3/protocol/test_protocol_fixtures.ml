@@ -464,6 +464,7 @@ let test_range_get_fixture () =
       ()
     |> Protocol_support.ok_or_fail "range get fixture"
   in
+  let info = result.info in
   let actual =
     Fmt.str
       "status=%d\n\
@@ -475,25 +476,25 @@ let test_range_get_fixture () =
        range-complete=%s\n\
        metadata-origin=%s\n\
        metadata-title=%s"
-      (Awskit.Response.status result.response)
+      (Awskit.Response.status info.response)
       result.value
-      (option_to_string Int64.to_string result.content_length)
-      (option_to_string Range.Content_range.to_header result.content_range)
+      (option_to_string Int64.to_string info.content_length)
+      (option_to_string Range.Content_range.to_header info.content_range)
       (content_range_field "range start"
          (fun (range : Range.Content_range.t) -> range.start)
-         result.content_range)
+         info.content_range)
       (content_range_field "range finish"
          (fun (range : Range.Content_range.t) -> range.finish)
-         result.content_range)
+         info.content_range)
       (content_range_field "range complete"
          (fun (range : Range.Content_range.t) ->
            option_to_string Int64.to_string range.complete_length)
-         result.content_range)
+         info.content_range)
       (Option.value ~default:""
-         (List.assoc_opt "origin" (Metadata.to_list result.metadata)))
+         (List.assoc_opt "origin" (Metadata.to_list info.metadata)))
       (Option.value ~default:""
          (Option.map String.escaped
-            (List.assoc_opt "title" (Metadata.to_list result.metadata))))
+            (List.assoc_opt "title" (Metadata.to_list info.metadata))))
   in
   check_fixture "range GET response" [ "object"; "range-get.expected" ] ~actual
 
@@ -528,13 +529,20 @@ let test_bucket_create_region_selection_fixture () =
   let create ?region configured_region =
     let conn =
       Protocol_recording_runtime.connect ~region:configured_region
-        [ Protocol_recording_runtime.response 200 "" ]
+        [
+          Protocol_recording_runtime.response
+            ~headers:[ ("location", "/my-bucket") ]
+            200 "";
+        ]
     in
-    ignore
-      (Protocol_recording_runtime.S3.Bucket.create conn
-         ~bucket:(Protocol_support.bucket_name "my-bucket")
-         ?region ()
-      |> Protocol_support.ok_or_fail "bucket create region fixture");
+    let result =
+      Protocol_recording_runtime.S3.Bucket.create conn
+        ~bucket:(Protocol_support.bucket_name "my-bucket")
+        ?region ()
+      |> Protocol_support.ok_or_fail "bucket create region fixture"
+    in
+    Alcotest.(check (option string))
+      "create bucket location" (Some "/my-bucket") result.location;
     describe_request (Protocol_recording_runtime.last_call conn)
   in
   let actual =

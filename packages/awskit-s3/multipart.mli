@@ -330,11 +330,6 @@ module Complete : sig
   (** Like {!val:options}, but raises on validation failure. *)
 end
 
-module Abort : sig
-  type result = { response : Awskit.Response.t }
-  (** [AbortMultipartUpload] result metadata. *)
-end
-
 module List_parts : sig
   type options = private {
     max_parts : int option;

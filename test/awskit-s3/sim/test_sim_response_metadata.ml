@@ -89,13 +89,15 @@ let test_ranged_get_accept_ranges_header () =
     |> ok_or_fail "ranged get"
   in
   Alcotest.(check string) "body" "bcd" result.value;
-  Alcotest.(check int) "status" 206 (Awskit.Response.status result.response);
+  Alcotest.(check int)
+    "status" 206
+    (Awskit.Response.status result.info.response);
   Alcotest.(check (option string))
     "content range" (Some "bytes 1-3/6")
-    (Awskit.Response.header result.response "content-range");
+    (Awskit.Response.header result.info.response "content-range");
   Alcotest.(check (option string))
     "accept ranges" (Some "bytes")
-    (Awskit.Response.header result.response "accept-ranges")
+    (Awskit.Response.header result.info.response "accept-ranges")
 
 let suite =
   [

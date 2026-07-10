@@ -5,14 +5,13 @@ type info = { name : Bucket_name.t; creation_date : Ptime.t option }
     when the service response omits it. *)
 
 module Create : sig
+  type result = {
+    location : string option;
+        (** Bucket location from the [Location] response header, when present.
+        *)
+    response : Awskit.Response.t;  (** Raw response metadata. *)
+  }
   (** [CreateBucket] result metadata. *)
-  type result = { response : Awskit.Response.t }
-  (** [CreateBucket] result metadata. *)
-end
-
-module Delete : sig
-  type result = { response : Awskit.Response.t }
-  (** [DeleteBucket] result metadata. *)
 end
 
 module Head : sig

@@ -765,22 +765,6 @@ struct
       expected_bucket_owner = options.expected_bucket_owner;
     }
 
-  let get_info (result : _ Awskit_s3.Object.Get.result) :
-      Awskit_s3.Object.Get.info =
-    {
-      etag = result.etag;
-      content_type = result.content_type;
-      content_length = result.content_length;
-      content_range = result.content_range;
-      last_modified = result.last_modified;
-      metadata = result.metadata;
-      storage_class = result.storage_class;
-      version_id = result.version_id;
-      checksum = result.checksum;
-      encryption = result.encryption;
-      response = result.response;
-    }
-
   let ranged_get_options_of_head (info : Awskit_s3.Object.Head.result)
       (get_options : Awskit_s3.Object.Get.options) :
       Awskit_s3.Object.Get.options =
@@ -889,7 +873,7 @@ struct
       in
       Lwt.return_ok
         (Awskit_s3.Transfer.Get
-           { info = get_info result; bytes_transferred = !bytes_transferred })
+           { info = result.info; bytes_transferred = !bytes_transferred })
     in
     let head_options = head_options_of_get_options options.get_options in
     let* info = S3.Object.head conn ~bucket ~key ~options:head_options () in

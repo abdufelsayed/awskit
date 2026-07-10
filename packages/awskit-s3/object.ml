@@ -325,20 +325,7 @@ module Get = struct
     response : Awskit.Response.t;
   }
 
-  type 'a result = {
-    value : 'a;
-    etag : Etag.t option;
-    content_type : Content_type.t option;
-    content_length : int64 option;
-    content_range : Range.Content_range.t option;
-    last_modified : Ptime.t option;
-    metadata : Metadata.t;
-    storage_class : Storage_class.t option;
-    version_id : Version_id.t option;
-    checksum : Checksum.response;
-    encryption : Encryption.Observed.t option;
-    response : Awskit.Response.t;
-  }
+  type 'a result = { value : 'a; info : info }
 
   let default_options =
     {

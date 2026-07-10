@@ -514,7 +514,7 @@ module type BUCKET = sig
     bucket:Bucket_name.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
-    (Bucket.Delete.result, Awskit.Error.t) result io
+    (Awskit.Response.t, Awskit.Error.t) result io
   (** Delete an empty bucket. *)
 
   val head :
@@ -788,7 +788,7 @@ module type MULTIPART = sig
     upload:_ Multipart.Upload.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
-    (Multipart.Abort.result, Awskit.Error.t) result io
+    (Awskit.Response.t, Awskit.Error.t) result io
   (** Abort a multipart upload. *)
 
   val list_parts :

@@ -25,20 +25,7 @@ let object_read_info (obj : stored_object) ~status ~content_length
   info_of_object ~content_length response obj
 
 let get_result (info : Object.Get.info) value : _ Object.Get.result =
-  {
-    Object.Get.value;
-    etag = info.etag;
-    content_type = info.content_type;
-    content_length = info.content_length;
-    content_range = info.content_range;
-    last_modified = info.last_modified;
-    metadata = info.metadata;
-    storage_class = info.storage_class;
-    version_id = info.version_id;
-    checksum = info.checksum;
-    encryption = info.encryption;
-    response = info.response;
-  }
+  { Object.Get.value; info }
 
 let read_object ?read_fault obj options ~consume =
   let* () = ensure_read_preconditions obj options.Object.Get.preconditions in

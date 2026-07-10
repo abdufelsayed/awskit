@@ -23,20 +23,7 @@ module Make (C : Request_context.S) = struct
   type nonrec response_body_reader = response_body_reader
 
   let get_result (info : Get_object.info) value : _ Get_object.result =
-    {
-      Get_object.value;
-      etag = info.etag;
-      content_type = info.content_type;
-      content_length = info.content_length;
-      content_range = info.content_range;
-      last_modified = info.last_modified;
-      metadata = info.metadata;
-      storage_class = info.storage_class;
-      version_id = info.version_id;
-      checksum = info.checksum;
-      encryption = info.encryption;
-      response = info.response;
-    }
+    { Get_object.value; info }
 
   let return_result return_error return_ok = function
     | Ok value -> return_ok value

@@ -3,7 +3,6 @@ open Response
 open Tagging_xml
 module Error = S3_error
 module Create_bucket = Bucket.Create
-module Delete_bucket = Bucket.Delete
 module Head_bucket = Bucket.Head
 module List_buckets = Bucket.List_buckets
 module Get_bucket_location = Bucket.Get_location
@@ -146,7 +145,13 @@ module Make (C : Request_context.S) = struct
                    let* discarded = discard_response_body body in
                    match discarded with
                    | Error error -> return_error error
-                   | Ok () -> return_ok { Create_bucket.response })))
+                   | Ok () ->
+                       return_ok
+                         {
+                           Create_bucket.location =
+                             Awskit.Response.header response "location";
+                           response;
+                         })))
 
   let delete conn ~bucket ?expected_bucket_owner () =
     let bucket = Bucket_name.to_string bucket in
@@ -167,7 +172,7 @@ module Make (C : Request_context.S) = struct
                    let* discarded = discard_response_body body in
                    match discarded with
                    | Error error -> return_error error
-                   | Ok () -> return_ok { Delete_bucket.response })))
+                   | Ok () -> return_ok response)))
 
   let head conn ~bucket ?expected_bucket_owner () =
     let bucket_name = bucket in

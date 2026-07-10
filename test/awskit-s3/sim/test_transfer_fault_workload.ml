@@ -285,7 +285,7 @@ let inject_fault_for_cleanup conn = function
 
 let abort_upload conn upload =
   match Simulator.Multipart.abort_upload conn ~upload () with
-  | Ok (_ : Multipart.Abort.result) -> Ok ()
+  | Ok (_ : Awskit.Response.t) -> Ok ()
   | Error _ as error -> error
 
 let cleanup_secondary_error primary cleanup =
