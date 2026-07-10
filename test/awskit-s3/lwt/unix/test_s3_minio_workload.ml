@@ -285,6 +285,7 @@ let cleanup_delete_objects conn ~bucket objects =
   | [] -> Lwt.return_ok ()
   | _ -> (
       let context = cleanup_delete_objects_context ~bucket objects in
+      let objects = Object.Delete_many.Objects.of_list_exn objects in
       let* result = S3.Object.delete_objects conn ~bucket ~objects () in
       match result with
       | Error error ->

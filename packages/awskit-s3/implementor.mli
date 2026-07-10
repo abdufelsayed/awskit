@@ -280,7 +280,7 @@ module type Object_operations = sig
   val delete_objects :
     client ->
     bucket:Bucket_name.t ->
-    objects:Object.Delete_many.object_ list ->
+    objects:Object.Delete_many.Objects.t ->
     ?expected_bucket_owner:Account_id.t ->
     unit ->
     (Object.Delete_many.result, Awskit.Error.t) result io

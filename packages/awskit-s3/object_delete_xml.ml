@@ -4,17 +4,6 @@ let ( let* ) = S3_result.( let* )
 
 module Delete_objects = Object.Delete_many
 
-let validate_objects objects =
-  let count = List.length objects in
-  if count = 0 then
-    S3_error_context.invalid ~field:"objects"
-      "delete objects request must contain at least one object"
-  else if count > Delete_objects.max_objects then
-    S3_error_context.invalid ~field:"objects"
-      "delete objects request must contain at most %d objects"
-      Delete_objects.max_objects
-  else Ok ()
-
 let encode_carriage_returns value =
   if not (String.contains value '\r') then value
   else
@@ -44,7 +33,7 @@ let body objects =
           (Option.map Object.Version_id.to_string object_.version_id)
       @ optional "ETag" (Option.map condition_etag_xml_value object_.etag))
   in
-  Xml.el "Delete" (List.map object_xml objects)
+  Xml.el "Delete" (List.map object_xml (Delete_objects.Objects.to_list objects))
   |> Xml.to_string
   |> encode_carriage_returns
 

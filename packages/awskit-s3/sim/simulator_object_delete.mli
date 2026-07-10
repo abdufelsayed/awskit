@@ -27,7 +27,7 @@ val delete :
 val delete_objects :
   Simulator_state.t ->
   bucket:string ->
-  objects:Awskit_s3.Object.Delete_many.object_ list ->
+  objects:Awskit_s3.Object.Delete_many.Objects.t ->
   ?expected_bucket_owner:Awskit_s3.Account_id.t ->
   unit ->
   (Awskit_s3.Object.Delete_many.result, Awskit.Error.t) result

@@ -20,7 +20,8 @@ module Clock : sig
   (** Advance simulated time by a span. *)
 
   val advance_ms : t -> int -> unit
-  (** Advance simulated time by milliseconds. *)
+  (** Advance simulated time by a signed number of milliseconds without
+      truncating subsecond precision. *)
 end
 
 type config = private { max_list_keys : int }

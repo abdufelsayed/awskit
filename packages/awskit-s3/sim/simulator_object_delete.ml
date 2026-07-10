@@ -158,7 +158,8 @@ let delete_objects conn ~bucket ~objects ?expected_bucket_owner:_ () =
                         }
                         :: deleted,
                         errors ))
-                  objects ([], [])
+                  (Object.Delete_many.Objects.to_list objects)
+                  ([], [])
               in
               Ok { Object.Delete_many.deleted; errors; response = response 200 }
           ))

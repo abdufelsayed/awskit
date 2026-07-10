@@ -963,6 +963,45 @@ let test_multipart_option_boundaries () =
   expect_error_field "sse_kms_key_id"
     (Encryption.Destination.dsse_kms ~key_id:"bad\nkey" ())
 
+let test_delete_many_object_boundaries () =
+  let member key =
+    Object.Delete_many.object_ ~key:(Object_key.of_string_exn key) ()
+  in
+  expect_error_field "objects" (Object.Delete_many.Objects.of_list []);
+  let one =
+    expect_ok "one delete member"
+      (Object.Delete_many.Objects.of_list [ member "one" ])
+  in
+  Alcotest.(check int)
+    "one delete member" 1
+    (Object.Delete_many.Objects.length one);
+  let ordered =
+    expect_ok "ordered delete members"
+      (Object.Delete_many.Objects.of_list
+         [ member "first"; member "second"; member "first" ])
+  in
+  Alcotest.(check (list string))
+    "order and duplicates"
+    [ "first"; "second"; "first" ]
+    (Object.Delete_many.Objects.to_list ordered
+    |> List.map (fun (object_ : Object.Delete_many.object_) ->
+        Object_key.to_string object_.key));
+  let maximum =
+    List.init Object.Delete_many.max_objects (fun index ->
+        member (Fmt.str "key-%d" index))
+  in
+  let maximum =
+    expect_ok "maximum delete members"
+      (Object.Delete_many.Objects.of_list maximum)
+  in
+  Alcotest.(check int)
+    "maximum delete members" Object.Delete_many.max_objects
+    (Object.Delete_many.Objects.length maximum);
+  let too_many =
+    member "overflow" :: Object.Delete_many.Objects.to_list maximum
+  in
+  expect_error_field "objects" (Object.Delete_many.Objects.of_list too_many)
+
 let suite =
   [
     ( "pbt:awskit-s3:domain:bucket",
@@ -1037,6 +1076,8 @@ let suite =
           test_multipart_boundaries;
         Alcotest.test_case "multipart option boundaries" `Quick
           test_multipart_option_boundaries;
+        Alcotest.test_case "delete-many object boundaries" `Quick
+          test_delete_many_object_boundaries;
       ] );
   ]
 

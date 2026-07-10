@@ -96,10 +96,11 @@ not imply support for arbitrary S3-compatible providers.
     tests. Delete preconditions and one missing-version-delete behavior differ
     from the strict profile and are recorded in the MinIO capability profile.}
   {li {b Notes and boundaries}: [DeleteObject] models version id, expected
-    bucket owner, and ETag delete preconditions. [DeleteObjects] accepts up to
-    1,000 typed objects with optional version ids and ETag conditions. MFA
-    delete, Object Lock governance bypass, Requester Pays, and
-    directory-bucket-only delete conditions are out of scope.}
+    bucket owner, and ETag delete preconditions. [DeleteObjects] accepts a
+    validated non-empty collection of up to 1,000 typed objects with optional
+    version ids and ETag conditions. MFA delete, Object Lock governance bypass,
+    Requester Pays, and directory-bucket-only delete conditions are out of
+    scope.}
 }
 
 {2 CopyObject}

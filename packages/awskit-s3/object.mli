@@ -433,6 +433,25 @@ module Delete_many : sig
     object_
   (** Build one [DeleteObjects] request member. *)
 
+  module Objects : sig
+    type t
+    (** Non-empty collection of at most [max_objects] request members. *)
+
+    val of_list : object_ list -> (t, Awskit.Error.t) result
+    (** Validate a request collection while preserving member order and
+        duplicates. *)
+
+    val of_list_exn : object_ list -> t
+    (** Like {!val:of_list}, but raises [Awskit.Error.Awskit_error] carrying the
+        structured validation error on failure. *)
+
+    val to_list : t -> object_ list
+    (** Return the validated request members in wire order. *)
+
+    val length : t -> int
+    (** Return the number of request members. *)
+  end
+
   type deleted = {
     key : Object_key.t;  (** Deleted key reported by S3. *)
     version_id : Version_id.t option;  (** Deleted version id, when present. *)

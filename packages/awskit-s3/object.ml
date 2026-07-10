@@ -416,6 +416,24 @@ module Delete_many = struct
 
   let object_ ~key ?version_id ?etag () = { key; version_id; etag }
 
+  module Objects = struct
+    type t = object_ list
+
+    let of_list values =
+      let count = List.length values in
+      if count = 0 then
+        S3_error_context.invalid ~field:"objects"
+          "delete objects request must contain at least one object"
+      else if count > max_objects then
+        S3_error_context.invalid ~field:"objects"
+          "delete objects request must contain at most %d objects" max_objects
+      else Ok values
+
+    let of_list_exn values = S3_result.result_exn (of_list values)
+    let to_list values = values
+    let length = List.length
+  end
+
   type deleted = {
     key : Object_key.t;
     version_id : Version_id.t option;

@@ -914,6 +914,7 @@ let test_delete_objects_cr_xml_fixture () =
         ~key:(Protocol_support.object_key "line\rbreak")
         ();
     ]
+    |> Object.Delete_many.Objects.of_list_exn
   in
   let conn =
     Protocol_recording_runtime.connect
@@ -938,6 +939,7 @@ let test_delete_objects_error_preserves_version_id () =
         ~key:(Protocol_support.object_key "locked.txt")
         ();
     ]
+    |> Object.Delete_many.Objects.of_list_exn
   in
   let conn =
     Protocol_recording_runtime.connect

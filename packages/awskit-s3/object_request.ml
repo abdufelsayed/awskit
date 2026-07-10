@@ -310,41 +310,36 @@ module Make (C : Request_context.S) = struct
     match S3_validation.validate_bucket bucket with
     | Error error -> return_error error
     | Ok () -> (
-        match Object_delete_xml.validate_objects objects with
+        let body = Object_delete_xml.body objects in
+        let headers =
+          [
+            ("content-md5", content_md5 body);
+            ("content-type", "application/xml");
+          ]
+          |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+               expected_bucket_owner
+        in
+        let upload = R.Request_body.of_string body in
+        match bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/" with
         | Error error -> return_error error
-        | Ok () -> (
-            let body = Object_delete_xml.body objects in
-            let headers =
-              [
-                ("content-md5", content_md5 body);
-                ("content-type", "application/xml");
-              ]
-              |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                   expected_bucket_owner
+        | Ok request ->
+            let* result =
+              with_response conn ~method_:`POST ~request
+                ~query:[ ("delete", []) ]
+                ~headers
+                ~payload_hash:(R.Request_body.descriptor upload).payload_hash
+                upload
+                ~f:(fun response response_body ->
+                  let* body =
+                    read_response_body response_body ~max_size:1_048_576L
+                  in
+                  match body with
+                  | Error error -> return_error error
+                  | Ok body ->
+                      return_result return_error return_ok
+                        (Object_delete_xml.parse_result ~response body))
             in
-            let upload = R.Request_body.of_string body in
-            match
-              bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/"
-            with
-            | Error error -> return_error error
-            | Ok request ->
-                let* result =
-                  with_response conn ~method_:`POST ~request
-                    ~query:[ ("delete", []) ]
-                    ~headers
-                    ~payload_hash:
-                      (R.Request_body.descriptor upload).payload_hash upload
-                    ~f:(fun response response_body ->
-                      let* body =
-                        read_response_body response_body ~max_size:1_048_576L
-                      in
-                      match body with
-                      | Error error -> return_error error
-                      | Ok body ->
-                          return_result return_error return_ok
-                            (Object_delete_xml.parse_result ~response body))
-                in
-                return_result return_error return_ok result))
+            return_result return_error return_ok result)
 
   let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
       ?options () =

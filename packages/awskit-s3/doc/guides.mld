@@ -142,6 +142,20 @@ The object surface also includes:
   {li [Object.Tagging.get], [put], and [delete]}
 }
 
+[DeleteObjects] uses a validated non-empty collection so every runtime and the
+simulator receive the same 1--1,000 member contract:
+
+{[
+let objects =
+  [
+    Awskit_s3.Object.Delete_many.object_ ~key:first_key ();
+    Awskit_s3.Object.Delete_many.object_ ~key:second_key ();
+  ]
+  |> Awskit_s3.Object.Delete_many.Objects.of_list_exn
+in
+S3.Object.delete_objects s3 ~bucket ~objects ()
+]}
+
 Pagination helpers preserve the regular [Object.List.options] record and
 update only the continuation token between requests. Collection helpers require
 an explicit [max_pages] bound and return an error if S3 reports more pages than

@@ -17,7 +17,22 @@ module Clock = struct
   let advance t span =
     t.now <- Option.value ~default:t.now (Ptime.add_span t.now span)
 
-  let advance_ms t ms = advance t (Ptime.Span.of_int_s (ms / 1000))
+  let span_of_ms ms =
+    let milliseconds_per_day = 86_400_000 in
+    let picoseconds_per_millisecond = 1_000_000_000L in
+    let days = ms / milliseconds_per_day in
+    let remainder = ms mod milliseconds_per_day in
+    if remainder >= 0 then
+      Ptime.Span.v
+        (days, Int64.mul (Int64.of_int remainder) picoseconds_per_millisecond)
+    else
+      Ptime.Span.v
+        ( days - 1,
+          Int64.mul
+            (Int64.of_int (milliseconds_per_day + remainder))
+            picoseconds_per_millisecond )
+
+  let advance_ms t ms = advance t (span_of_ms ms)
 end
 
 type config = { max_list_keys : int }
