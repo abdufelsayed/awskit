@@ -1341,7 +1341,11 @@ let test_manual_multipart_lifecycle () =
         (await_ok
            (Printf.sprintf "complete manual multipart upload %s" upload_context)
            (S3.Multipart.complete_upload conn ~upload:create.upload
-              ~parts:[ first.part; second.part ]
+              ~parts:
+                (Multipart.Complete.Parts.of_list_exn
+                   ~multipart_object_size:
+                     (Int64.of_int (String.length first_body + second_body))
+                   [ first.part; second.part ])
               ())
           : Multipart.Complete.result);
       let body = first_body ^ second_body in

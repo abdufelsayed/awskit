@@ -520,7 +520,10 @@ their [observed] companions preserve unknown values returned by a service.
 {ol
   {li [Multipart.create_upload] starts an upload and returns an upload handle.}
   {li [Multipart.upload_part] uploads a known-length part.}
-  {li [Multipart.complete_upload] completes the upload with ordered parts.}
+  {li [Multipart.Complete.Parts.of_list] validates ordered completion parts and
+    optional expected object size.}
+  {li [Multipart.complete_upload] completes the upload with those validated
+    parts.}
   {li [Multipart.abort_upload] cancels an upload.}
   {li [Multipart.list_parts] inspects one page of uploaded parts.}
   {li [Multipart.List_parts.pages] and [parts] follow [ListParts] part-number
@@ -530,6 +533,10 @@ their [observed] companions preserve unknown values returned by a service.
 [Multipart.upload_part] follows the same request body contract as [Object.put]:
 parts require a known exact length, and custom stream producer errors are part
 of the upload result.
+
+[Multipart.Complete.Parts.of_list] rejects empty or unordered completion lists,
+checksum numbering gaps or mixed algorithms, undersized known non-final parts,
+and a known total-size mismatch before any request is sent.
 
 {1 Custom Runtime Composition}
 

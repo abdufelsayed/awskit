@@ -778,10 +778,10 @@ module type MULTIPART = sig
     client ->
     upload:_ Multipart.Upload.t ->
     ?options:Multipart.Complete.options ->
-    parts:Multipart.Part.t list ->
+    parts:Multipart.Complete.Parts.t ->
     unit ->
     (Multipart.Complete.result, Awskit.Error.t) result io
-  (** Complete a multipart upload using the supplied completed part list. *)
+  (** Complete a multipart upload using validated completed parts. *)
 
   val abort_upload :
     client ->

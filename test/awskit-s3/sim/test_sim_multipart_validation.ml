@@ -20,8 +20,12 @@ let part_number (part : Multipart.List_parts.part_info) =
 
 let checksum_value algorithm value = Object.Checksum.value_exn ~algorithm ~value
 let sha256 value = checksum_value Object.Checksum.Algorithm.Sha256 value
+let sha512 value = checksum_value Object.Checksum.Algorithm.Sha512 value
 let md5 value = checksum_value Object.Checksum.Algorithm.Md5 value
 let crc32 value = checksum_value Object.Checksum.Algorithm.Crc32 value
+
+let complete_parts ?multipart_object_size parts =
+  Multipart.Complete.Parts.of_list_exn ?multipart_object_size parts
 
 let single_checksum_value label algorithm (checksum : Object.Checksum.response)
     =
@@ -103,7 +107,51 @@ let test_complete_rejects_bad_full_object_checksum () =
   in
   expect_service_code "complete bad checksum" "BadDigest"
     (Simulator.Multipart.complete_upload conn ~upload:created.upload ~options
-       ~parts:[ uploaded.part ] ())
+       ~parts:(complete_parts [ uploaded.part ])
+       ())
+
+let test_complete_rejects_checksum_policy_mismatch () =
+  let conn = make_simulator () in
+  let checksum =
+    Multipart.Create.Checksum.create_exn
+      ~algorithm:Object.Checksum.Algorithm.Sha512
+      ~checksum_type:Object.Checksum.Type.Composite ()
+  in
+  let created =
+    Simulator.Multipart.create_upload conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "checksum-policy.bin")
+      ~options:(Multipart.Create.options ~checksum ())
+      ()
+    |> ok_or_fail "create checksum-policy upload"
+  in
+  expect_service_code "upload part checksum algorithm mismatch" "BadDigest"
+    (Simulator.Multipart.upload_part conn ~upload:created.upload
+       ~part_number:(Multipart.Part_number.of_int_exn 1)
+       ~body:(Simulator.Body.of_string "final")
+       ~options:(Multipart.Upload_part.options ~checksum:(md5 "value") ())
+       ());
+  let uploaded =
+    Simulator.Multipart.upload_part conn ~upload:created.upload
+      ~part_number:(Multipart.Part_number.of_int_exn 1)
+      ~body:(Simulator.Body.of_string "final")
+      ~options:
+        (Multipart.Upload_part.options
+           ~checksum:
+             (sha512
+                "s9lZjKCqXaKL4cl6RdU8xccqgOYcQ5yL8+icXAZh9J34+jQBmiHNXjEmGuOjqH70WS2AEKrWpezcnbquOM0UcA==")
+           ())
+      ()
+    |> ok_or_fail "upload checksum-policy part"
+  in
+  let options =
+    Multipart.Complete.options_exn
+      ~checksum_type:Object.Checksum.Type.Full_object ()
+  in
+  expect_service_code "complete checksum type mismatch" "BadDigest"
+    (Simulator.Multipart.complete_upload conn ~upload:created.upload ~options
+       ~parts:(complete_parts [ uploaded.part ])
+       ())
 
 let test_complete_uses_multipart_etag () =
   let conn = make_simulator () in
@@ -111,7 +159,8 @@ let test_complete_uses_multipart_etag () =
   let uploaded = upload_part conn created.upload 1 "final" in
   let completed =
     Simulator.Multipart.complete_upload conn ~upload:created.upload
-      ~parts:[ uploaded.part ] ()
+      ~parts:(complete_parts [ uploaded.part ])
+      ()
     |> ok_or_fail "complete multipart etag"
   in
   Alcotest.(check string)
@@ -162,10 +211,23 @@ let test_checksum_algorithms_are_computed_or_rejected () =
       ()
     |> ok_or_fail "create sha512 upload"
   in
-  let uploaded = upload_part conn created.upload 1 "part" in
+  let uploaded =
+    Simulator.Multipart.upload_part conn ~upload:created.upload
+      ~part_number:(Multipart.Part_number.of_int_exn 1)
+      ~body:(Simulator.Body.of_string "part")
+      ~options:
+        (Multipart.Upload_part.options
+           ~checksum:
+             (sha512
+                "GhqvZuOtT6dLeD6B6eSAp+8Qo3MZrkfbGkzIqfUaMM5iH5j5vFd1NNZY3q1k3Uuksy9pUYion0/prI/ElqaQdw==")
+           ())
+      ()
+    |> ok_or_fail "upload sha512 part"
+  in
   let completed =
     Simulator.Multipart.complete_upload conn ~upload:created.upload
-      ~parts:[ uploaded.part ] ()
+      ~parts:(complete_parts [ uploaded.part ])
+      ()
     |> ok_or_fail "complete sha512 upload"
   in
   Alcotest.(check string)
@@ -173,7 +235,20 @@ let test_checksum_algorithms_are_computed_or_rejected () =
     "GhqvZuOtT6dLeD6B6eSAp+8Qo3MZrkfbGkzIqfUaMM5iH5j5vFd1NNZY3q1k3Uuksy9pUYion0/prI/ElqaQdw=="
     (single_checksum_value "complete sha512" Object.Checksum.Algorithm.Sha512
        completed.checksum);
-  let created = create_upload conn "md5-part.bin" in
+  let created =
+    Simulator.Multipart.create_upload conn
+      ~bucket:(bucket_name "test-bucket")
+      ~key:(object_key "md5-part.bin")
+      ~options:
+        (Multipart.Create.options
+           ~checksum:
+             (Multipart.Create.Checksum.create_exn
+                ~algorithm:Object.Checksum.Algorithm.Md5
+                ~checksum_type:Object.Checksum.Type.Composite ())
+           ())
+      ()
+    |> ok_or_fail "create md5 upload"
+  in
   let uploaded =
     Simulator.Multipart.upload_part conn ~upload:created.upload
       ~part_number:(Multipart.Part_number.of_int_exn 1)
@@ -207,7 +282,8 @@ let test_complete_success_removes_upload () =
   let uploaded = upload_part conn created.upload 1 "final" in
   ignore
     (Simulator.Multipart.complete_upload conn ~upload:created.upload
-       ~parts:[ uploaded.part ] ()
+       ~parts:(complete_parts [ uploaded.part ])
+       ()
     |> ok_or_fail "complete upload");
   expect_service_code "list parts after complete" "NoSuchUpload"
     (Simulator.Multipart.list_parts conn ~upload:created.upload ());
@@ -235,7 +311,8 @@ let test_complete_validation_failure_keeps_upload () =
   in
   expect_service_code "missing part" "InvalidPart"
     (Simulator.Multipart.complete_upload conn ~upload:created.upload
-       ~parts:[ uploaded.part; missing ] ());
+       ~parts:(complete_parts [ uploaded.part; missing ])
+       ());
   let listed =
     Simulator.Multipart.list_parts conn ~upload:created.upload ()
     |> ok_or_fail "list parts after failed complete"
@@ -250,16 +327,14 @@ let test_complete_rejects_undersized_nonfinal_part () =
   let first = upload_part conn created.upload 1 "a" in
   let final = upload_part conn created.upload 2 "b" in
   expect_validation_field "undersized non-final" "parts"
-    (Simulator.Multipart.complete_upload conn ~upload:created.upload
-       ~parts:[ first.part; final.part ] ());
+    (Multipart.Complete.Parts.of_list [ first.part; final.part ]);
   let large =
     upload_part conn created.upload 1 (String.make Transfer.min_part_size 'x')
   in
   let final = upload_part conn created.upload 2 "z" in
-  let options = Multipart.Complete.options_exn ~multipart_object_size:1L () in
   expect_validation_field "object size mismatch" "multipart_object_size"
-    (Simulator.Multipart.complete_upload conn ~upload:created.upload ~options
-       ~parts:[ large.part; final.part ] ())
+    (Multipart.Complete.Parts.of_list ~multipart_object_size:1L
+       [ large.part; final.part ])
 
 let test_complete_rejects_part_checksum_mismatch () =
   let conn = make_simulator () in
@@ -284,7 +359,8 @@ let test_complete_rejects_part_checksum_mismatch () =
   in
   expect_service_code "wrong checksum" "InvalidPart"
     (Simulator.Multipart.complete_upload conn ~upload:created.upload
-       ~parts:[ wrong_part ] ());
+       ~parts:(complete_parts [ wrong_part ])
+       ());
   let missing_checksum_part =
     Multipart.Part.create_exn
       ~part_number:(Multipart.Part.part_number uploaded.part)
@@ -294,7 +370,8 @@ let test_complete_rejects_part_checksum_mismatch () =
   in
   expect_service_code "missing checksum" "InvalidPart"
     (Simulator.Multipart.complete_upload conn ~upload:created.upload
-       ~parts:[ missing_checksum_part ] ())
+       ~parts:(complete_parts [ missing_checksum_part ])
+       ())
 
 let test_list_parts_pagination () =
   let conn = make_simulator () in
@@ -328,6 +405,8 @@ let suite =
           test_upload_part_rejects_bad_checksum;
         Alcotest.test_case "complete rejects bad full-object checksum" `Quick
           test_complete_rejects_bad_full_object_checksum;
+        Alcotest.test_case "complete rejects checksum policy mismatch" `Quick
+          test_complete_rejects_checksum_policy_mismatch;
         Alcotest.test_case "complete uses multipart etag" `Quick
           test_complete_uses_multipart_etag;
         Alcotest.test_case "checksum algorithms are explicit" `Quick

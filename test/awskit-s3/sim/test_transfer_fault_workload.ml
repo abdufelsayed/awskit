@@ -352,9 +352,12 @@ let upload_multipart case counts conn =
         | Error _ as error -> error
         | Ok completed -> (
             inject_fault_for_complete conn case.Model.fault;
+            let completion_parts =
+              Multipart.Complete.Parts.of_list_exn completed
+            in
             match
               Simulator.Multipart.complete_upload conn ~upload:created.upload
-                ~parts:completed ()
+                ~parts:completion_parts ()
             with
             | Ok _ -> Ok ()
             | Error _ as error -> error)

@@ -963,7 +963,9 @@ let test_multipart_complete_xml_fixture () =
   in
   ignore
     (Protocol_recording_runtime.S3.Multipart.complete_upload conn ~upload
-       ~parts:[ part 1 "sha256-part-1"; part 2 "sha256-part-2" ]
+       ~parts:
+         (Multipart.Complete.Parts.of_list_exn
+            [ part 1 "sha256-part-1"; part 2 "sha256-part-2" ])
        ()
     |> Protocol_support.ok_or_fail "complete multipart fixture");
   let body = (Protocol_recording_runtime.last_call conn).body in

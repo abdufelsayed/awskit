@@ -261,18 +261,38 @@ module Upload_part : sig
 end
 
 module Complete : sig
+  module Parts : sig
+    type t
+    (** Valid, ordered collection for [CompleteMultipartUpload]. *)
+
+    val of_list :
+      ?multipart_object_size:int64 -> Part.t list -> (t, Awskit.Error.t) result
+    (** Validate a completion list. The list must be non-empty and strictly
+        ordered. When checksums are present, part numbers start at one, remain
+        consecutive, and checksum algorithms agree. Known non-final part sizes
+        must be at least 5 MiB. [multipart_object_size], when supplied, is
+        non-negative and must equal the sum when every part size is known. *)
+
+    val of_list_exn : ?multipart_object_size:int64 -> Part.t list -> t
+    (** Like {!val:of_list}, but raises on validation failure. *)
+
+    val to_list : t -> Part.t list
+    (** Return the validated parts in completion order. *)
+
+    val multipart_object_size : t -> int64 option
+    (** Return the expected assembled object size, when supplied. *)
+  end
+
   type options = private {
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
     checksum : Object.Checksum.value option;
-        (** Optional full-object checksum supplied at completion time. *)
+        (** Optional object-level checksum supplied at completion time. *)
     checksum_type : Object.Checksum.Type.t option;
         (** Checksum aggregation mode for S3 to apply. *)
     customer_key : Encryption.Customer_key.t option;
         (** SSE-C customer key headers for completing an SSE-C multipart upload.
         *)
-    multipart_object_size : int64 option;
-        (** Expected final object size sent as [x-amz-mp-object-size]. *)
   }
   (** [CompleteMultipartUpload] request options. *)
 
@@ -293,18 +313,18 @@ module Complete : sig
     ?checksum:Object.Checksum.value ->
     ?checksum_type:Object.Checksum.Type.t ->
     ?customer_key:Encryption.Customer_key.t ->
-    ?multipart_object_size:int64 ->
     unit ->
     (options, Awskit.Error.t) Stdlib.result
-  (** Build [CompleteMultipartUpload] options. [multipart_object_size], when
-      present, must be non-negative. *)
+  (** Build [CompleteMultipartUpload] header options. When [checksum] and
+      [checksum_type] are both supplied, their multipart capability pair is
+      validated. A type without a value remains a valid assertion about the
+      initiation policy. *)
 
   val options_exn :
     ?expected_bucket_owner:Account_id.t ->
     ?checksum:Object.Checksum.value ->
     ?checksum_type:Object.Checksum.Type.t ->
     ?customer_key:Encryption.Customer_key.t ->
-    ?multipart_object_size:int64 ->
     unit ->
     options
   (** Like {!val:options}, but raises on validation failure. *)

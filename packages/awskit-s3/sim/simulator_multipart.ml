@@ -97,6 +97,45 @@ module Multipart = struct
         | Error error -> Error error
         | Ok () -> Runtime.request_body_result body)
 
+  let create_checksum_type (checksum : Multipart_model.Create.Checksum.t) =
+    match checksum.checksum_type with
+    | Some checksum_type -> checksum_type
+    | None -> (
+        match checksum.algorithm with
+        | Object_model.Checksum.Algorithm.Crc64nvme ->
+            Object_model.Checksum.Type.Full_object
+        | Object_model.Checksum.Algorithm.Crc32
+        | Object_model.Checksum.Algorithm.Crc32c
+        | Object_model.Checksum.Algorithm.Sha1
+        | Object_model.Checksum.Algorithm.Sha256
+        | Object_model.Checksum.Algorithm.Sha512
+        | Object_model.Checksum.Algorithm.Md5
+        | Object_model.Checksum.Algorithm.Xxhash64
+        | Object_model.Checksum.Algorithm.Xxhash3
+        | Object_model.Checksum.Algorithm.Xxhash128 ->
+            Object_model.Checksum.Type.Composite)
+
+  let validate_upload_part_policy (upload : multipart_upload)
+      (options : Multipart_model.Upload_part.options) =
+    let invalid_request message =
+      Error (service ~status:400 ~code:"InvalidRequest" ~message ())
+    in
+    let bad_digest message =
+      Error (service ~status:400 ~code:"BadDigest" ~message ())
+    in
+    match upload.checksum with
+    | None -> Ok ()
+    | Some (created : Multipart_model.Create.Checksum.t) -> (
+        match options.Multipart_model.Upload_part.checksum with
+        | Some (supplied : Object_model.Checksum.value)
+          when supplied.algorithm <> created.algorithm ->
+            bad_digest "part checksum algorithm does not match upload"
+        | None
+          when create_checksum_type created
+               = Object_model.Checksum.Type.Composite ->
+            invalid_request "composite multipart uploads require part checksums"
+        | Some _ | None -> Ok ())
+
   let upload_part conn ~upload ~part_number ~body ?options () =
     let options =
       Option.value ~default:Multipart_model.Upload_part.default_options options
@@ -114,43 +153,47 @@ module Multipart = struct
         match require_multipart_upload conn ~bucket ~key ~upload_id with
         | Error error -> return_error error
         | Ok (_bucket_state, stored_upload) -> (
-            match operation_fault conn `Upload_part bucket (Some key) with
-            | Some error -> return_error error
-            | None -> (
-                match request_body_result body with
-                | Error error -> return_error error
-                | Ok body -> (
-                    let etag = etag body in
-                    match checksum_for_value ~body options.checksum with
+            match validate_upload_part_policy stored_upload options with
+            | Error error -> return_error error
+            | Ok () -> (
+                match operation_fault conn `Upload_part bucket (Some key) with
+                | Some error -> return_error error
+                | None -> (
+                    match request_body_result body with
                     | Error error -> return_error error
-                    | Ok checksum ->
-                        let part =
-                          {
-                            part_number = part_number_int;
-                            body;
-                            etag;
-                            checksum;
-                            last_modified = now conn;
-                          }
-                        in
-                        Hashtbl.replace stored_upload.parts part_number_int part;
-                        let size = Int64.of_int (String.length body) in
-                        let part =
-                          Multipart_model.Part.create_exn ~part_number ~etag
-                            ?checksum:options.checksum ~size ()
-                        in
-                        Ok
-                          {
-                            Multipart_model.Upload_part.part;
-                            checksum;
-                            response =
-                              response 200
-                                ~headers:
-                                  (("etag", Object_model.Etag.to_string etag)
-                                  :: checksum_response_headers checksum);
-                          }))))
+                    | Ok body -> (
+                        let etag = etag body in
+                        match checksum_for_value ~body options.checksum with
+                        | Error error -> return_error error
+                        | Ok checksum ->
+                            let part =
+                              {
+                                part_number = part_number_int;
+                                body;
+                                etag;
+                                checksum;
+                                last_modified = now conn;
+                              }
+                            in
+                            Hashtbl.replace stored_upload.parts part_number_int
+                              part;
+                            let size = Int64.of_int (String.length body) in
+                            let part =
+                              Multipart_model.Part.create_exn ~part_number ~etag
+                                ?checksum:options.checksum ~size ()
+                            in
+                            Ok
+                              {
+                                Multipart_model.Upload_part.part;
+                                checksum;
+                                response =
+                                  response 200
+                                    ~headers:
+                                      (("etag", Object_model.Etag.to_string etag)
+                                      :: checksum_response_headers checksum);
+                              })))))
 
-  let validate_complete_parts upload options parts =
+  let validate_complete_parts upload ~multipart_object_size parts =
     let invalid_part_size () =
       invalid ~field:"parts" "non-final multipart parts must be at least 5 MiB"
     in
@@ -182,58 +225,83 @@ module Multipart = struct
           if List.exists (checksum_value_equal checksum) values then Ok ()
           else invalid_checksum "multipart part checksum does not match"
     in
-    let rec loop previous total = function
+    let rec loop total = function
       | [] -> Ok total
       | (part : Multipart_model.Part.t) :: rest -> (
           let part_number = completed_part_number part in
-          match previous with
-          | Some previous when part_number <= previous ->
-              invalid ~field:"part_number" "parts must be sorted by part_number"
-          | _ -> (
-              match Hashtbl.find_opt upload.parts part_number with
-              | None ->
-                  Error
-                    (service ~status:400 ~code:"InvalidPart"
-                       ~message:"multipart part is missing" ())
-              | Some stored
-                when not
-                       (Object_model.Etag.equal stored.etag
-                          (Multipart_model.Part.etag part)) ->
-                  Error
-                    (service ~status:400 ~code:"InvalidPart"
-                       ~message:"multipart part etag does not match" ())
-              | Some stored -> (
-                  match validate_part_checksum stored part with
-                  | Error _ as error -> error
-                  | Ok () ->
-                      let has_more_parts =
-                        match rest with [] -> false | _ :: _ -> true
-                      in
-                      if
-                        has_more_parts
-                        && String.length stored.body < complete_min_part_size
-                      then invalid_part_size ()
-                      else
-                        let total =
-                          Int64.add total
-                            (Int64.of_int (String.length stored.body))
-                        in
-                        loop (Some part_number) total rest)))
+          match Hashtbl.find_opt upload.parts part_number with
+          | None ->
+              Error
+                (service ~status:400 ~code:"InvalidPart"
+                   ~message:"multipart part is missing" ())
+          | Some stored
+            when not
+                   (Object_model.Etag.equal stored.etag
+                      (Multipart_model.Part.etag part)) ->
+              Error
+                (service ~status:400 ~code:"InvalidPart"
+                   ~message:"multipart part etag does not match" ())
+          | Some stored -> (
+              match validate_part_checksum stored part with
+              | Error _ as error -> error
+              | Ok () ->
+                  let has_more_parts =
+                    match rest with [] -> false | _ :: _ -> true
+                  in
+                  if
+                    has_more_parts
+                    && String.length stored.body < complete_min_part_size
+                  then invalid_part_size ()
+                  else
+                    let total =
+                      Int64.add total (Int64.of_int (String.length stored.body))
+                    in
+                    loop total rest))
     in
-    match parts with
-    | [] ->
-        Error
-          (Awskit.Error.Producer.validation ~field:"parts"
-             "complete requires at least one part")
-    | parts -> (
-        match loop None 0L parts with
-        | Error _ as error -> error
-        | Ok total -> (
-            match options.Multipart_model.Complete.multipart_object_size with
-            | Some expected ->
-                if Int64.equal expected total then Ok ()
-                else invalid_object_size ()
-            | _ -> Ok ()))
+    match loop 0L parts with
+    | Error _ as error -> error
+    | Ok total -> (
+        match multipart_object_size with
+        | Some expected ->
+            if Int64.equal expected total then Ok () else invalid_object_size ()
+        | None -> Ok ())
+
+  let validate_completion_policy (upload : multipart_upload)
+      (options : Multipart_model.Complete.options) parts =
+    let bad_digest message =
+      Error (service ~status:400 ~code:"BadDigest" ~message ())
+    in
+    match upload.checksum with
+    | None -> Ok ()
+    | Some (created : Multipart_model.Create.Checksum.t) -> (
+        let completion_algorithm =
+          Option.map
+            (fun (checksum : Object_model.Checksum.value) -> checksum.algorithm)
+            options.Multipart_model.Complete.checksum
+        in
+        let part_algorithm =
+          List.find_map
+            (fun part ->
+              Option.map
+                (fun (checksum : Object_model.Checksum.value) ->
+                  checksum.algorithm)
+                (Multipart_model.Part.checksum part))
+            parts
+        in
+        let differs_from_created = function
+          | Some algorithm -> algorithm <> created.algorithm
+          | None -> false
+        in
+        if differs_from_created completion_algorithm then
+          bad_digest "completion checksum algorithm does not match upload"
+        else if differs_from_created part_algorithm then
+          bad_digest "part checksum algorithm does not match upload"
+        else
+          match (created.checksum_type, options.checksum_type) with
+          | Some created_type, Some completed_type
+            when created_type <> completed_type ->
+              bad_digest "completion checksum type does not match upload"
+          | _ -> Ok ())
 
   let complete_upload conn ~upload ?options ~parts () =
     let options =
@@ -242,6 +310,10 @@ module Multipart = struct
     let bucket = upload_handle_bucket upload in
     let key = upload_handle_key upload in
     let upload_id = upload_handle_id upload in
+    let part_values = Multipart_model.Complete.Parts.to_list parts in
+    let multipart_object_size =
+      Multipart_model.Complete.Parts.multipart_object_size parts
+    in
     let return_error error =
       Error (with_operation `Complete_multipart_upload ~bucket ~key error)
     in
@@ -251,85 +323,95 @@ module Multipart = struct
         match require_multipart_upload conn ~bucket ~key ~upload_id with
         | Error error -> return_error error
         | Ok (bucket_state, upload) -> (
-            match validate_complete_parts upload options parts with
+            match validate_completion_policy upload options part_values with
             | Error error -> return_error error
             | Ok () -> (
                 match
-                  operation_fault conn `Complete_multipart_upload bucket
-                    (Some key)
+                  validate_complete_parts upload ~multipart_object_size
+                    part_values
                 with
-                | Some error -> return_error error
-                | None -> (
-                    let part_bodies =
-                      parts
-                      |> List.map (fun (part : Multipart_model.Part.t) ->
-                          (Hashtbl.find upload.parts
-                             (completed_part_number part))
-                            .body)
-                    in
-                    let body = String.concat "" part_bodies in
-                    let etag = multipart_etag part_bodies in
-                    match checksum_for_value ~body options.checksum with
-                    | Error error -> return_error error
-                    | Ok supplied_checksum -> (
-                        match
-                          match supplied_checksum.values with
-                          | [] ->
-                              checksum_for_algorithm ~body
-                                (Option.map
-                                   (fun (checksum :
-                                          Multipart_model.Create.Checksum.t) ->
-                                     checksum.algorithm)
-                                   upload.checksum)
-                          | _ -> Ok supplied_checksum
-                        with
+                | Error error -> return_error error
+                | Ok () -> (
+                    match
+                      operation_fault conn `Complete_multipart_upload bucket
+                        (Some key)
+                    with
+                    | Some error -> return_error error
+                    | None -> (
+                        let part_bodies =
+                          part_values
+                          |> List.map (fun (part : Multipart_model.Part.t) ->
+                              (Hashtbl.find upload.parts
+                                 (completed_part_number part))
+                                .body)
+                        in
+                        let body = String.concat "" part_bodies in
+                        let etag = multipart_etag part_bodies in
+                        match checksum_for_value ~body options.checksum with
                         | Error error -> return_error error
-                        | Ok checksum ->
-                            let checksum =
-                              {
-                                checksum with
-                                checksum_type =
-                                  Option.map
-                                    (fun checksum_type ->
-                                      Object_model.Checksum.Type.Known
-                                        checksum_type)
-                                    (match options.checksum_type with
-                                    | Some _ as value -> value
-                                    | None ->
-                                        Option.bind upload.checksum
-                                          (fun
-                                            (checksum :
+                        | Ok supplied_checksum -> (
+                            match
+                              match supplied_checksum.values with
+                              | [] ->
+                                  checksum_for_algorithm ~body
+                                    (Option.map
+                                       (fun (checksum :
                                               Multipart_model.Create.Checksum.t)
-                                          -> checksum.checksum_type));
-                              }
-                            in
-                            let obj =
-                              {
-                                body;
-                                etag;
-                                version_id = None;
-                                content_type = upload.content_type;
-                                metadata = upload.metadata;
-                                storage_class = upload.storage_class;
-                                tags = upload.tags;
-                                checksum;
-                                last_modified = now conn;
-                              }
-                            in
-                            let obj = store_object conn bucket_state key obj in
-                            Hashtbl.remove bucket_state.multipart_uploads
-                              (upload_key upload_id);
-                            Ok
-                              {
-                                Multipart_model.Complete.etag = Some etag;
-                                version_id = obj.version_id;
-                                checksum;
-                                response =
-                                  response 200
-                                    ~headers:
-                                      (version_headers obj.version_id
-                                      @ checksum_response_headers checksum);
-                              })))))
+                                          -> checksum.algorithm)
+                                       upload.checksum)
+                              | _ -> Ok supplied_checksum
+                            with
+                            | Error error -> return_error error
+                            | Ok checksum ->
+                                let checksum =
+                                  {
+                                    checksum with
+                                    checksum_type =
+                                      Option.map
+                                        (fun checksum_type ->
+                                          Object_model.Checksum.Type.Known
+                                            checksum_type)
+                                        (match options.checksum_type with
+                                        | Some _ as value -> value
+                                        | None ->
+                                            Option.bind upload.checksum
+                                              (fun
+                                                (checksum :
+                                                  Multipart_model.Create
+                                                  .Checksum
+                                                  .t)
+                                              -> checksum.checksum_type));
+                                  }
+                                in
+                                let obj =
+                                  {
+                                    body;
+                                    etag;
+                                    version_id = None;
+                                    content_type = upload.content_type;
+                                    metadata = upload.metadata;
+                                    storage_class = upload.storage_class;
+                                    tags = upload.tags;
+                                    checksum;
+                                    last_modified = now conn;
+                                  }
+                                in
+                                let obj =
+                                  store_object conn bucket_state key obj
+                                in
+                                Hashtbl.remove bucket_state.multipart_uploads
+                                  (upload_key upload_id);
+                                Ok
+                                  {
+                                    Multipart_model.Complete.etag = Some etag;
+                                    version_id = obj.version_id;
+                                    checksum;
+                                    response =
+                                      response 200
+                                        ~headers:
+                                          (version_headers obj.version_id
+                                          @ checksum_response_headers checksum);
+                                  }))))))
 
   let abort_upload conn ~upload ?expected_bucket_owner:_ () =
     let bucket = upload_handle_bucket upload in

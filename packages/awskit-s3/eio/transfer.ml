@@ -543,19 +543,25 @@ struct
   let complete_multipart conn ~upload ~options ~bytes_transferred parts =
     let parts = sort_parts parts in
     match
-      S3.Multipart.complete_upload conn ~upload ~parts
-        ~options:options.Awskit_s3.Transfer.complete_options ()
+      Awskit_s3.Multipart.Complete.Parts.of_list
+        ~multipart_object_size:bytes_transferred parts
     with
     | Error _ as error -> error
-    | Ok complete ->
-        Ok
-          {
-            Awskit_s3.Transfer.upload =
-              Awskit_s3.Multipart.Upload.as_caller_owned upload;
-            parts;
-            complete;
-            bytes_transferred;
-          }
+    | Ok completion_parts -> (
+        match
+          S3.Multipart.complete_upload conn ~upload ~parts:completion_parts
+            ~options:options.Awskit_s3.Transfer.complete_options ()
+        with
+        | Error _ as error -> error
+        | Ok complete ->
+            Ok
+              {
+                Awskit_s3.Transfer.upload =
+                  Awskit_s3.Multipart.Upload.as_caller_owned upload;
+                parts;
+                complete;
+                bytes_transferred;
+              })
 
   let resume_multipart_upload_file conn ~upload ?options ?on_progress ~path () =
     let options =

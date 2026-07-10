@@ -760,24 +760,6 @@ let multipart_checksum_part_exn number =
     ~etag:(Object.Etag.of_string_exn (Fmt.str "\"part-%d\"" number))
     ~checksum ()
 
-let complete_upload_result parts =
-  let upload =
-    Multipart.Upload.resume
-      ~bucket:(Protocol_support.bucket_name "bucket")
-      ~key:(Protocol_support.object_key "large.bin")
-      ~upload_id:(Multipart.Upload_id.of_string_exn "upload-1")
-  in
-  let conn =
-    Protocol_recording_runtime.connect
-      [
-        Protocol_recording_runtime.response 200
-          {|<CompleteMultipartUploadResult><ETag>"final"</ETag></CompleteMultipartUploadResult>|};
-      ]
-  in
-  ( conn,
-    Protocol_recording_runtime.S3.Multipart.complete_upload conn ~upload ~parts
-      () )
-
 let prop_complete_upload_rejects_unsorted_parts_before_request =
   QCheck.Test.make ~count:boundary_count
     ~name:"complete multipart rejects unsorted parts before request"
@@ -789,11 +771,8 @@ let prop_complete_upload_rejects_unsorted_parts_before_request =
           multipart_part_exn (number - 1) 1L;
         ]
       in
-      let conn, result = complete_upload_result parts in
-      match result with
-      | Error error ->
-          Awskit.Error.validation_field error = Some "part_number"
-          && Protocol_recording_runtime.calls conn = []
+      match Multipart.Complete.Parts.of_list parts with
+      | Error error -> Awskit.Error.validation_field error = Some "part_number"
       | Ok _ -> false)
 
 let prop_complete_upload_rejects_small_nonfinal_parts =
@@ -805,11 +784,8 @@ let prop_complete_upload_rejects_small_nonfinal_parts =
       let parts =
         [ multipart_part_exn 1 first_size; multipart_part_exn 2 1L ]
       in
-      let conn, result = complete_upload_result parts in
-      match result with
-      | Error error ->
-          Awskit.Error.validation_field error = Some "parts"
-          && Protocol_recording_runtime.calls conn = []
+      match Multipart.Complete.Parts.of_list parts with
+      | Error error -> Awskit.Error.validation_field error = Some "parts"
       | Ok _ -> false)
 
 let prop_complete_upload_rejects_checksum_parts_not_starting_at_one =
@@ -819,13 +795,10 @@ let prop_complete_upload_rejects_checksum_parts_not_starting_at_one =
        request"
     (QCheck.make ~print:string_of_int QCheck.Gen.(int_range 2 10_000))
     (fun number ->
-      let conn, result =
-        complete_upload_result [ multipart_checksum_part_exn number ]
-      in
-      match result with
-      | Error error ->
-          Awskit.Error.validation_field error = Some "part_number"
-          && Protocol_recording_runtime.calls conn = []
+      match
+        Multipart.Complete.Parts.of_list [ multipart_checksum_part_exn number ]
+      with
+      | Error error -> Awskit.Error.validation_field error = Some "part_number"
       | Ok _ -> false)
 
 let prop_complete_upload_rejects_checksum_part_gaps =
@@ -833,14 +806,11 @@ let prop_complete_upload_rejects_checksum_part_gaps =
     ~name:"complete multipart rejects checksumed part gaps before request"
     (QCheck.make ~print:string_of_int QCheck.Gen.(int_range 3 10_000))
     (fun number ->
-      let conn, result =
-        complete_upload_result
+      match
+        Multipart.Complete.Parts.of_list
           [ multipart_checksum_part_exn 1; multipart_checksum_part_exn number ]
-      in
-      match result with
-      | Error error ->
-          Awskit.Error.validation_field error = Some "part_number"
-          && Protocol_recording_runtime.calls conn = []
+      with
+      | Error error -> Awskit.Error.validation_field error = Some "part_number"
       | Ok _ -> false)
 
 type protocol_generator_sample =

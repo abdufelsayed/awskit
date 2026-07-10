@@ -538,16 +538,24 @@ let prop_multipart_parts_preserve_known_checksum_and_size =
           && Multipart.Part.checksum part = Some checksum
           && Multipart.Part.size part = Some size)
 
-let prop_complete_options_accept_non_negative_object_size =
+let prop_complete_parts_accept_matching_non_negative_object_size =
   QCheck.Test.make ~count:default_count
-    ~name:"complete options accept non-negative object sizes"
+    ~name:"complete parts accept matching non-negative object sizes"
     (QCheck.make ~print:Int64.to_string
        QCheck.Gen.(map Int64.of_int (int_range 0 100_000_000)))
     (fun multipart_object_size ->
-      match Multipart.Complete.options ~multipart_object_size () with
-      | Ok options ->
+      let part =
+        Multipart.Part.create_exn
+          ~part_number:(Multipart.Part_number.of_int_exn 1)
+          ~etag:(Object.Etag.of_string_exn "\"etag\"")
+          ~size:multipart_object_size ()
+      in
+      match
+        Multipart.Complete.Parts.of_list ~multipart_object_size [ part ]
+      with
+      | Ok parts ->
           Option.equal Int64.equal (Some multipart_object_size)
-            options.multipart_object_size
+            (Multipart.Complete.Parts.multipart_object_size parts)
       | Error _ -> false)
 
 let test_bucket_boundaries () =
@@ -897,11 +905,43 @@ let test_multipart_option_boundaries () =
   Alcotest.(check bool)
     "validated create checksum retained" true
     (create_options.checksum = Some checksum);
+  let completion_part =
+    Multipart.Part.create_exn
+      ~part_number:(Multipart.Part_number.of_int_exn 1)
+      ~etag:(Object.Etag.of_string_exn "\"completion\"")
+      ~size:0L ()
+  in
   ignore
     (expect_ok "complete zero object size"
-       (Multipart.Complete.options ~multipart_object_size:0L ()));
+       (Multipart.Complete.Parts.of_list ~multipart_object_size:0L
+          [ completion_part ]));
   expect_error_field "multipart_object_size"
-    (Multipart.Complete.options ~multipart_object_size:(-1L) ());
+    (Multipart.Complete.Parts.of_list ~multipart_object_size:(-1L)
+       [ completion_part ]);
+  let sha512 =
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha512
+      ~value:"sha512"
+  in
+  expect_error_field "checksum_type"
+    (Multipart.Complete.options ~checksum:sha512
+       ~checksum_type:Object.Checksum.Type.Full_object ());
+  ignore
+    (expect_ok "checksum type assertion without value"
+       (Multipart.Complete.options
+          ~checksum_type:Object.Checksum.Type.Full_object ()));
+  let md5 =
+    Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Md5
+      ~value:"md5"
+  in
+  let checksummed_part number checksum size =
+    Multipart.Part.create_exn
+      ~part_number:(Multipart.Part_number.of_int_exn number)
+      ~etag:(Object.Etag.of_string_exn (Fmt.str "\"part-%d\"" number))
+      ~checksum ~size ()
+  in
+  expect_error_field "checksum_algorithm"
+    (Multipart.Complete.Parts.of_list
+       [ checksummed_part 1 sha512 5_242_880L; checksummed_part 2 md5 0L ]);
   let observed_type = Object.Checksum.Type.observed_of_string "FUTURE" in
   Alcotest.(check string)
     "observed checksum type" "FUTURE"
@@ -978,7 +1018,7 @@ let suite =
           prop_part_number_markers_round_trip;
           prop_upload_of_strings_preserves_valid_identifiers;
           prop_multipart_parts_preserve_known_checksum_and_size;
-          prop_complete_options_accept_non_negative_object_size;
+          prop_complete_parts_accept_matching_non_negative_object_size;
         ] );
     ( "unit:awskit-s3:domain:regression",
       [

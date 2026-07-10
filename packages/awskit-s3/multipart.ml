@@ -203,12 +203,109 @@ module Upload_part = struct
 end
 
 module Complete = struct
+  module Parts = struct
+    type t = { values : Part.t list; multipart_object_size : int64 option }
+
+    let min_nonfinal_part_size = 5_242_880L
+
+    let validate_object_size = function
+      | Some size when Int64.compare size 0L < 0 ->
+          S3_error_context.invalid ~field:"multipart_object_size"
+            "multipart object size must be non-negative"
+      | _ -> Ok ()
+
+    let validate_expected_size multipart_object_size total all_sizes_known =
+      match multipart_object_size with
+      | Some expected when all_sizes_known && not (Int64.equal expected total)
+        ->
+          S3_error_context.invalid ~field:"multipart_object_size"
+            "multipart object size does not match completed part sizes"
+      | _ -> Ok ()
+
+    let validate_checksum_algorithm expected part =
+      match (expected, Part.checksum part) with
+      | None, None -> Ok None
+      | None, Some checksum -> Ok (Some checksum.algorithm)
+      | Some algorithm, None -> Ok (Some algorithm)
+      | Some algorithm, Some checksum when algorithm = checksum.algorithm ->
+          Ok (Some algorithm)
+      | Some _, Some _ ->
+          S3_error_context.invalid ~field:"checksum_algorithm"
+            "completed part checksums must use one algorithm"
+
+    let of_list ?multipart_object_size values =
+      let* () = validate_object_size multipart_object_size in
+      let checksummed_parts =
+        List.exists (fun part -> Option.is_some (Part.checksum part)) values
+      in
+      let rec loop previous checksum_algorithm total all_sizes_known = function
+        | [] ->
+            let* () =
+              validate_expected_size multipart_object_size total all_sizes_known
+            in
+            Ok { values; multipart_object_size }
+        | part :: rest ->
+            let part_number = Part.part_number part |> Part_number.to_int in
+            let* () =
+              if
+                match previous with
+                | Some previous -> part_number <= previous
+                | None -> false
+              then
+                S3_error_context.invalid ~field:"part_number"
+                  "parts must be sorted by part_number"
+              else Ok ()
+            in
+            let* () =
+              if
+                checksummed_parts
+                &&
+                match previous with
+                | None -> part_number <> 1
+                | Some previous -> part_number <> previous + 1
+              then
+                S3_error_context.invalid ~field:"part_number"
+                  "parts with checksums must use consecutive part numbers \
+                   starting at 1"
+              else Ok ()
+            in
+            let* checksum_algorithm =
+              validate_checksum_algorithm checksum_algorithm part
+            in
+            let* () =
+              match (rest, Part.size part) with
+              | _ :: _, Some size
+                when Int64.compare size min_nonfinal_part_size < 0 ->
+                  S3_error_context.invalid ~field:"parts"
+                    "non-final multipart parts must be at least 5 MiB"
+              | _ -> Ok ()
+            in
+            let total, all_sizes_known =
+              match Part.size part with
+              | None -> (total, false)
+              | Some size -> (Int64.add total size, all_sizes_known)
+            in
+            loop (Some part_number) checksum_algorithm total all_sizes_known
+              rest
+      in
+      match values with
+      | [] ->
+          S3_error_context.invalid ~field:"parts"
+            "complete requires at least one part"
+      | _ -> loop None None 0L true values
+
+    let of_list_exn ?multipart_object_size values =
+      S3_result.result_exn (of_list ?multipart_object_size values)
+
+    let to_list parts = parts.values
+    let multipart_object_size parts = parts.multipart_object_size
+  end
+
   type options = {
     expected_bucket_owner : Account_id.t option;
     checksum : Object.Checksum.value option;
     checksum_type : Object.Checksum.Type.t option;
     customer_key : Encryption.Customer_key.t option;
-    multipart_object_size : int64 option;
   }
 
   type result = {
@@ -224,32 +321,26 @@ module Complete = struct
       checksum = None;
       checksum_type = None;
       customer_key = None;
-      multipart_object_size = None;
     }
 
-  let options ?expected_bucket_owner ?checksum ?checksum_type ?customer_key
-      ?multipart_object_size () =
+  let options ?expected_bucket_owner ?checksum ?checksum_type ?customer_key () =
     let* () =
-      match multipart_object_size with
-      | Some size when Int64.compare size 0L < 0 ->
-          S3_error_context.invalid ~field:"multipart_object_size"
-            "multipart object size must be non-negative"
+      match checksum with
+      | Some (checksum : Object.Checksum.value)
+        when not (Create.Checksum.supported checksum.algorithm checksum_type) ->
+          S3_error_context.invalid ~field:"checksum_type"
+            "checksum type %s is not supported with algorithm %s"
+            (Option.fold ~none:"service default"
+               ~some:Object.Checksum.Type.to_string checksum_type)
+            (Object.Checksum.Algorithm.to_string checksum.algorithm)
       | _ -> Ok ()
     in
-    Ok
-      {
-        expected_bucket_owner;
-        checksum;
-        checksum_type;
-        customer_key;
-        multipart_object_size;
-      }
+    Ok { expected_bucket_owner; checksum; checksum_type; customer_key }
 
   let options_exn ?expected_bucket_owner ?checksum ?checksum_type ?customer_key
-      ?multipart_object_size () =
+      () =
     S3_result.result_exn
-      (options ?expected_bucket_owner ?checksum ?checksum_type ?customer_key
-         ?multipart_object_size ())
+      (options ?expected_bucket_owner ?checksum ?checksum_type ?customer_key ())
 end
 
 module Abort = struct
