@@ -903,22 +903,12 @@ module Tag = Tag
 module Range = Range
 module Encryption = Encryption
 module Endpoint_config = Endpoint_config
-module Endpoint_resolver = Endpoint_resolver
 module Object = Object
 module Bucket = Bucket
 module Multipart = Multipart
 module Transfer = Transfer
 module Policy = Policy
 module Presigned = Presigned
-
-type addressing_style = Endpoint_config.addressing_style
-type endpoint_variant = Endpoint_config.endpoint_variant
-type endpoint_config = Endpoint_resolver.t
-
-let endpoint_config ?addressing_style ?endpoint_variant () =
-  Endpoint_config.aws ?addressing_style ?endpoint_variant ()
-
-let default_endpoint_config = Endpoint_resolver.default
 
 module Make (R : Awskit.Runtime.S) = struct
   type runtime_connection = R.connection
@@ -968,25 +958,25 @@ module Make (R : Awskit.Runtime.S) = struct
           match Object_key.of_string key with
           | Error _ as error -> error
           | Ok key ->
-              Endpoint_resolver.resolve_object_request (endpoint_config conn)
-                ~region:(region conn) ~bucket ~key)
+              Endpoint_config.Resolver.resolve_object_request
+                (endpoint_config conn) ~region:(region conn) ~bucket ~key)
 
     let bucket_request conn ~bucket ~suffix ~signing_suffix =
       match Bucket_name.of_string bucket with
       | Error _ as error -> error
       | Ok bucket ->
-          Endpoint_resolver.resolve_bucket_request (endpoint_config conn)
+          Endpoint_config.Resolver.resolve_bucket_request (endpoint_config conn)
             ~region:(region conn) ~bucket ~suffix ~signing_suffix
 
     let root_request conn =
       match
-        Endpoint_resolver.endpoint (endpoint_config conn) ~region:(region conn)
+        Endpoint_config.endpoint (endpoint_config conn) ~region:(region conn)
       with
       | Error _ as error -> error
       | Ok endpoint ->
           Ok
             {
-              Endpoint_resolver.Request.endpoint;
+              Endpoint_config.Resolver.Request.endpoint;
               path = "/";
               signing_path = "/";
               signing_region =
@@ -1039,8 +1029,9 @@ module Make (R : Awskit.Runtime.S) = struct
         ~headers:(Awskit.Response.headers response)
         ?body ()
 
-    let signed_request conn ~method_ ~(request : Endpoint_resolver.Request.t)
-        ~query ~headers ~payload_hash =
+    let signed_request conn ~method_
+        ~(request : Endpoint_config.Resolver.Request.t) ~query ~headers
+        ~payload_hash =
       let headers =
         ("host", Awskit.Endpoint.authority request.endpoint) :: headers
       in

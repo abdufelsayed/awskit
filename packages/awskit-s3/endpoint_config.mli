@@ -94,3 +94,47 @@ val signing_region : t -> client_region:Awskit.Region.t -> Awskit.Region.t
 
 val feature_policy : t -> feature_policy
 (** Return the configured feature policy. *)
+
+module Resolver : sig
+  (** Request-specific S3 endpoint and addressing resolution.
+
+      Application code normally passes a configuration to a client or presigner.
+      This nested surface supports protocol inspection and runtime
+      implementations without introducing a second endpoint configuration type.
+  *)
+
+  type resolved_style = [ `Path | `Virtual_hosted ]
+  (** Concrete addressing style selected for one request. *)
+
+  module Request : sig
+    type t = {
+      endpoint : Awskit.Endpoint.t;
+      path : string;
+      signing_path : string;
+      signing_region : Awskit.Region.t;
+      style : resolved_style;
+    }
+    (** Resolved endpoint and paths for one S3 request. *)
+  end
+
+  val resolve_bucket_request :
+    t ->
+    region:Awskit.Region.t ->
+    bucket:Bucket_name.t ->
+    suffix:string ->
+    signing_suffix:string ->
+    (Request.t, Awskit.Error.t) result
+  (** Resolve endpoint, transport path, and signing path for a bucket-level
+      request. *)
+
+  val resolve_object_request :
+    t ->
+    region:Awskit.Region.t ->
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    (Request.t, Awskit.Error.t) result
+  (** Resolve endpoint, transport path, and signing path for an object request.
+
+      Object key exactly ["soap"] uses path-style addressing for [`Auto] and
+      [`Path], and is rejected for explicit [`Virtual_hosted] addressing. *)
+end

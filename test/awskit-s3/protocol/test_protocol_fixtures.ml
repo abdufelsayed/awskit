@@ -154,7 +154,8 @@ let test_signing_artifact_fixture () =
 let test_endpoint_resolution_fixture () =
   let region = Region.of_string_exn "us-east-1" in
   let resolved =
-    Endpoint_resolver.resolve_object_request Endpoint_config.default ~region
+    Endpoint_config.Resolver.resolve_object_request Endpoint_config.default
+      ~region
       ~bucket:(Protocol_support.bucket_name "bucket")
       ~key:(Protocol_support.object_key "photos/cat.jpg")
     |> Protocol_support.ok_or_fail "endpoint fixture"
@@ -175,7 +176,8 @@ let test_endpoint_resolution_fixture () =
     [ "endpoint"; "default-object.txt" ]
     ~actual
 
-let describe_resolved_endpoint label (resolved : Endpoint_resolver.Request.t) =
+let describe_resolved_endpoint label
+    (resolved : Endpoint_config.Resolver.Request.t) =
   let style =
     match resolved.style with
     | `Path -> "path"
@@ -190,7 +192,7 @@ let describe_resolved_endpoint label (resolved : Endpoint_resolver.Request.t) =
     style
 
 let resolve_object_or_fail label config ~bucket ~key =
-  Endpoint_resolver.resolve_object_request config
+  Endpoint_config.Resolver.resolve_object_request config
     ~region:(Region.of_string_exn "us-east-1")
     ~bucket:(Protocol_support.bucket_name bucket)
     ~key:(Protocol_support.object_key key)

@@ -233,7 +233,7 @@ let prop_endpoint_auto_virtual_hosted_object_paths =
       let typed_bucket = Bucket_name.of_string_exn bucket in
       let typed_key = Object_key.of_string_exn key in
       match
-        Endpoint_resolver.resolve_object_request Endpoint_config.default
+        Endpoint_config.Resolver.resolve_object_request Endpoint_config.default
           ~region:test_region ~bucket:typed_bucket ~key:typed_key
       with
       | Error _ -> false
@@ -294,7 +294,7 @@ let test_endpoint_china_partition_hosts () =
     cases
 
 let resolve_object_or_fail label config ~bucket ~key =
-  Endpoint_resolver.resolve_object_request config ~region:test_region
+  Endpoint_config.Resolver.resolve_object_request config ~region:test_region
     ~bucket:(Bucket_name.of_string_exn bucket)
     ~key:(Object_key.of_string_exn key)
   |> Protocol_support.ok_or_fail label
@@ -327,7 +327,8 @@ let test_endpoint_soap_key_addressing () =
     Endpoint_config.aws ~addressing_style:`Virtual_hosted ()
   in
   match
-    Endpoint_resolver.resolve_object_request virtual_hosted ~region:test_region
+    Endpoint_config.Resolver.resolve_object_request virtual_hosted
+      ~region:test_region
       ~bucket:(Bucket_name.of_string_exn "bucket")
       ~key:(Object_key.of_string_exn "soap")
   with
@@ -353,7 +354,7 @@ let prop_endpoint_auto_dotted_bucket_uses_path_style =
       let typed_bucket = Bucket_name.of_string_exn bucket in
       let typed_key = Object_key.of_string_exn key in
       match
-        Endpoint_resolver.resolve_object_request Endpoint_config.default
+        Endpoint_config.Resolver.resolve_object_request Endpoint_config.default
           ~region:test_region ~bucket:typed_bucket ~key:typed_key
       with
       | Error _ -> false
@@ -375,12 +376,12 @@ let prop_endpoint_paths_preserve_percent_encoded_object_keys =
       | Ok typed_key -> (
           let path_bucket = "bucket.example" in
           match
-            ( Endpoint_resolver.resolve_object_request Endpoint_config.default
-                ~region:test_region
+            ( Endpoint_config.Resolver.resolve_object_request
+                Endpoint_config.default ~region:test_region
                 ~bucket:(Bucket_name.of_string_exn "bucket")
                 ~key:typed_key,
-              Endpoint_resolver.resolve_object_request Endpoint_config.default
-                ~region:test_region
+              Endpoint_config.Resolver.resolve_object_request
+                Endpoint_config.default ~region:test_region
                 ~bucket:(Bucket_name.of_string_exn path_bucket)
                 ~key:typed_key )
           with
@@ -411,7 +412,7 @@ let prop_endpoint_accelerate_rejects_dotted_buckets =
       let typed_bucket = Bucket_name.of_string_exn bucket in
       let typed_key = Object_key.of_string_exn key in
       match
-        Endpoint_resolver.resolve_object_request endpoint_config
+        Endpoint_config.Resolver.resolve_object_request endpoint_config
           ~region:test_region ~bucket:typed_bucket ~key:typed_key
       with
       | Error error -> Awskit.Error.validation_field error = Some "bucket"

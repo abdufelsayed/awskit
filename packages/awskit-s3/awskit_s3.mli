@@ -1010,29 +1010,6 @@ module Tag = Tag
 module Range = Range
 module Encryption = Encryption
 module Endpoint_config = Endpoint_config
-module Endpoint_resolver = Endpoint_resolver
-
-type addressing_style = Endpoint_config.addressing_style
-type endpoint_variant = Endpoint_config.endpoint_variant
-type endpoint_config = Endpoint_resolver.t
-
-val endpoint_config :
-  ?addressing_style:addressing_style ->
-  ?endpoint_variant:endpoint_variant ->
-  unit ->
-  endpoint_config
-(** Build an AWS S3 endpoint resolver from addressing and endpoint variant
-    preferences.
-
-    Use {!Awskit_s3.Endpoint_config.s3_compatible},
-    {!Awskit_s3.Endpoint_config.local_plaintext}, or
-    {!Awskit_s3.Endpoint_config.unsafe_plaintext} before passing
-    [~endpoint_config] to an adapter when targeting an explicit non-AWS
-    endpoint. *)
-
-val default_endpoint_config : endpoint_config
-(** Default AWS S3 regional HTTPS endpoint resolver. *)
-
 module Object = Object
 module Bucket = Bucket
 module Multipart = Multipart

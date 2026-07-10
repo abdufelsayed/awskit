@@ -1,6 +1,6 @@
 module Multipart = Multipart
 module Object = Object
-module Endpoint_resolver = Endpoint_resolver
+module Resolver = Endpoint_config.Resolver
 
 let ( let* ) = S3_result.( let* )
 
@@ -196,8 +196,7 @@ let generate ~region ~credentials ~now ~endpoint_config ~bucket ~key ~method_
           "presigned expiration is outside the supported timestamp range"
   in
   let* request =
-    Endpoint_resolver.resolve_object_request endpoint_config ~region ~bucket
-      ~key
+    Resolver.resolve_object_request endpoint_config ~region ~bucket ~key
   in
   let datestamp, amz_date = Awskit.Signing.ptime_to_date_time now in
   let scope =
