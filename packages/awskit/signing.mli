@@ -1,12 +1,16 @@
 (** AWS Signature Version 4 request signing. Pure, no IO. *)
 
-type signed_headers = {
-  headers : (string * string) list;
-  signed_headers_str : string;
-}
-(** Result of signing structured request parameters. [headers] contains the
-    caller's headers plus [authorization], [x-amz-date], [x-amz-content-sha256],
-    and [x-amz-security-token] when credentials include a session token. *)
+type result
+(** Opaque signed request artifact. *)
+
+val signed_header_names : result -> string list
+(** Return the canonical signed-header names. *)
+
+val reveal_headers : result -> (string * string) list
+(** Deliberately reveal the headers required for the HTTP request.
+
+    The list includes [authorization], signing timestamps and payload hash, and
+    may include a session token. Treat values as sensitive and avoid logs. *)
 
 val ptime_to_date_time : Ptime.t -> string * string
 (** [(datestamp, amz_date)] in AWS SigV4 format. *)
@@ -23,7 +27,7 @@ val canonical_headers : (string * string) list -> (string * string) list
     sorted names, and comma-joined duplicate names. This helper does not
     validate header safety or enforce the single-[Host] signing requirement. *)
 
-val signed_header_names : (string * string) list -> string
+val canonical_header_names : (string * string) list -> string
 (** Render the semicolon-separated signed header name list from canonical
     headers. *)
 
@@ -40,7 +44,7 @@ val sign_request_params :
   headers:(string * string) list ->
   payload_hash:Body.Payload_hash.t ->
   now:Ptime.t ->
-  (signed_headers, Error.t) result
+  (result, Error.t) Stdlib.result
 (** Sign a request from structured query parameters.
 
     The returned header list includes the caller's headers plus SigV4 headers.
@@ -58,6 +62,6 @@ val sign_request_params_exn :
   headers:(string * string) list ->
   payload_hash:Body.Payload_hash.t ->
   now:Ptime.t ->
-  signed_headers
+  result
 (** Like {!val:sign_request_params}, but raises [Error.Awskit_error] carrying
     the structured error on signing or validation failure. *)

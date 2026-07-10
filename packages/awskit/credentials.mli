@@ -88,8 +88,11 @@ val create_exn :
 val access_key_id : t -> string
 (** Return the non-secret access key id. *)
 
-val session_token : t -> string option
-(** Return the optional session token for temporary credentials. *)
+val reveal_session_token : t -> string option
+(** Deliberately reveal the optional session token for temporary credentials.
+
+    Prefer {!Awskit.Signing} for ordinary SigV4 requests. Custom signers must
+    treat a revealed token as secret bearer material and avoid diagnostics. *)
 
 val source : t -> Provider.source option
 (** Return the credential source metadata, if the provider supplied one. *)
@@ -122,7 +125,14 @@ val validate_fresh : t -> now:Ptime.t -> (unit, Error.t) result
     credentials return a credentials error with source metadata when available.
 *)
 
-val signing_key :
-  t -> datestamp:string -> region:Region.t -> service:string -> string
-(** Derive a SigV4 signing key without exposing the raw secret access key. This
-    is primarily for {!Awskit.Signing} and custom AWS signers. *)
+val sigv4_signature :
+  t ->
+  datestamp:string ->
+  region:Region.t ->
+  service:string ->
+  string_to_sign:string ->
+  string
+(** Return the lowercase hexadecimal SigV4 signature for one string-to-sign.
+
+    This bounded operation supports custom signers without exposing the raw
+    secret or reusable derived signing key. *)

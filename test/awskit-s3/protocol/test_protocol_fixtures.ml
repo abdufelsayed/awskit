@@ -1,5 +1,16 @@
 open Awskit_s3
 
+let contains text substring =
+  let text_length = String.length text in
+  let substring_length = String.length substring in
+  let rec loop index =
+    if index + substring_length > text_length then false
+    else if String.equal (String.sub text index substring_length) substring then
+      true
+    else loop (index + 1)
+  in
+  substring_length = 0 || loop 0
+
 let fixture_path parts =
   List.fold_left Filename.concat "../fixtures/protocol" parts
 
@@ -53,6 +64,37 @@ let test_presigned_get_fixture () =
   check_fixture "presigned GET safe URI"
     [ "presign"; "get-object-safe-uri.txt" ]
     ~actual:safe_uri
+
+let test_presigned_sensitive_header_handoff () =
+  let customer_key =
+    Encryption.Customer_key.of_bytes_exn (Bytes.make 32 '\001')
+  in
+  let options =
+    Object.Put.options
+      ~encryption:(Encryption.Destination.sse_c customer_key)
+      ()
+  in
+  let request =
+    Presigned.Signer.put_object (presigner ()) ~now:Protocol_support.test_time
+      ~bucket:(Protocol_support.bucket_name "bucket")
+      ~key:(Protocol_support.object_key "secret.txt")
+      ~options ()
+    |> Protocol_support.ok_or_fail "presigned SSE-C handoff"
+  in
+  let key_header = "x-amz-server-side-encryption-customer-key" in
+  let expected_key =
+    Encryption.Customer_key.reveal_headers customer_key |> List.assoc key_header
+  in
+  Alcotest.(check bool)
+    "safe request header names include SSE-C key header" true
+    (List.mem key_header (Presigned.request_header_names request));
+  Alcotest.(check (option string))
+    "explicit request header reveal preserves SSE-C key" (Some expected_key)
+    (List.assoc_opt key_header (Presigned.reveal_request_headers request));
+  let safe_summary = Format.asprintf "%a" Presigned.pp request in
+  Alcotest.(check bool)
+    "safe presigned summary omits SSE-C key" false
+    (contains safe_summary expected_key)
 
 let redact_authorization authorization =
   match String.index_opt authorization ' ' with
@@ -116,13 +158,14 @@ let test_signing_artifact_fixture () =
       ~headers ~payload_hash ~now:Protocol_support.test_time
     |> Protocol_support.ok_or_fail "signing artifact fixture"
   in
+  let revealed_headers = Awskit.Signing.reveal_headers signed in
   let canonical_headers =
     Awskit.Signing.canonical_headers
       (List.filter
          (fun (name, _) -> not (String.equal name "authorization"))
-         signed.headers)
+         revealed_headers)
   in
-  let authorization = header_or_empty "authorization" signed.headers in
+  let authorization = header_or_empty "authorization" revealed_headers in
   let signature = authorization_field_or_fail "Signature" authorization in
   let actual =
     Fmt.str
@@ -142,7 +185,7 @@ let test_signing_artifact_fixture () =
            ("X-Amz-Meta", [ "a/b"; "a b" ]);
          ])
       (Awskit.Signing.canonical_headers_block canonical_headers)
-      signed.signed_headers_str
+      (Awskit.Signing.signed_header_names signed |> String.concat ";")
       (Awskit.Body.Payload_hash.to_header_value payload_hash)
       (redact_authorization authorization)
       signature
@@ -995,6 +1038,8 @@ let suite =
     ( "fixture:awskit-s3:protocol-wire",
       [
         Alcotest.test_case "presigned GET" `Quick test_presigned_get_fixture;
+        Alcotest.test_case "presigned sensitive header handoff" `Quick
+          test_presigned_sensitive_header_handoff;
         Alcotest.test_case "endpoint resolution" `Quick
           test_endpoint_resolution_fixture;
         Alcotest.test_case "endpoint style matrix" `Quick

@@ -35,9 +35,8 @@ module type DOMAIN = sig
     module Customer_key : sig
       type t
 
-      val algorithm : t -> string
-      val key_base64 : t -> string
-      val key_md5_base64 : t -> string
+      val reveal_headers : t -> (string * string) list
+      val reveal_copy_source_headers : t -> (string * string) list
     end
 
     module Destination : sig
@@ -244,18 +243,9 @@ module Make (Domain : DOMAIN) (Config : CONFIG) = struct
     |> add_opt_header "x-amz-server-side-encryption-bucket-key-enabled"
          (Option.map string_of_bool bucket_key_enabled)
 
-  let customer_key_headers_with_prefix prefix key =
-    [
-      (prefix ^ "algorithm", Domain.Encryption.Customer_key.algorithm key);
-      (prefix ^ "key", Domain.Encryption.Customer_key.key_base64 key);
-      (prefix ^ "key-MD5", Domain.Encryption.Customer_key.key_md5_base64 key);
-    ]
-
   let customer_key_headers = function
     | None -> []
-    | Some key ->
-        customer_key_headers_with_prefix
-          "x-amz-server-side-encryption-customer-" key
+    | Some key -> Domain.Encryption.Customer_key.reveal_headers key
 
   let destination_encryption_headers = function
     | None -> []
@@ -278,6 +268,5 @@ module Make (Domain : DOMAIN) (Config : CONFIG) = struct
   let copy_source_encryption_headers = function
     | None -> []
     | Some (Domain.Encryption.Source.Sse_c key) ->
-        customer_key_headers_with_prefix
-          "x-amz-copy-source-server-side-encryption-customer-" key
+        Domain.Encryption.Customer_key.reveal_copy_source_headers key
 end

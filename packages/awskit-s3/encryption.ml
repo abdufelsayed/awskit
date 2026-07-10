@@ -36,9 +36,19 @@ module Customer_key = struct
             "invalid base64 SSE-C customer key: %s" message
 
   let of_base64_exn value = S3_result.result_exn (of_base64 value)
-  let algorithm _ = algorithm
-  let key_base64 t = t.key_base64
-  let key_md5_base64 t = t.key_md5_base64
+
+  let headers_with_prefix prefix t =
+    [
+      (prefix ^ "algorithm", algorithm);
+      (prefix ^ "key", t.key_base64);
+      (prefix ^ "key-MD5", t.key_md5_base64);
+    ]
+
+  let reveal_headers t =
+    headers_with_prefix "x-amz-server-side-encryption-customer-" t
+
+  let reveal_copy_source_headers t =
+    headers_with_prefix "x-amz-copy-source-server-side-encryption-customer-" t
 end
 
 module Destination = struct

@@ -19,8 +19,10 @@ type result = {
 
 let method_ t = t.method_
 let safe_uri t = t.safe_uri
-let signed_headers t = t.signed_headers
-let request_headers t = t.request_headers
+let header_names headers = List.map fst headers
+let signed_header_names t = header_names t.signed_headers
+let request_header_names t = header_names t.request_headers
+let reveal_request_headers t = t.request_headers
 let requested_expires_in t = t.requested_expires_in
 let effective_expires_in t = t.effective_expires_in
 let expires_at t = t.expires_at
@@ -217,7 +219,7 @@ let generate ~region ~credentials ~now ~endpoint_config ~bucket ~key ~method_
     Awskit.Signing.canonical_headers raw_signed_header_values
   in
   let signed_headers_param =
-    Awskit.Signing.signed_header_names signed_header_values
+    Awskit.Signing.canonical_header_names signed_header_values
   in
   let query =
     [
@@ -230,7 +232,7 @@ let generate ~region ~credentials ~now ~endpoint_config ~bucket ~key ~method_
     @ query
   in
   let query =
-    match Awskit.Credentials.session_token credentials with
+    match Awskit.Credentials.reveal_session_token credentials with
     | None -> query
     | Some token -> ("X-Amz-Security-Token", [ token ]) :: query
   in
@@ -255,12 +257,9 @@ let generate ~region ~credentials ~now ~endpoint_config ~bucket ~key ~method_
         Digestif.SHA256.(digest_string canonical_request |> to_hex);
       ]
   in
-  let signing_key =
-    Awskit.Credentials.signing_key credentials ~datestamp
-      ~region:request.signing_region ~service:"s3"
-  in
   let signature =
-    Digestif.SHA256.(hmac_string ~key:signing_key string_to_sign |> to_hex)
+    Awskit.Credentials.sigv4_signature credentials ~datestamp
+      ~region:request.signing_region ~service:"s3" ~string_to_sign
   in
   let url =
     Fmt.str "%s%s?%s&X-Amz-Signature=%s"

@@ -119,7 +119,7 @@ let hmac_sha256 ~key data =
   Digestif.SHA256.(hmac_string ~key data |> to_raw_string)
 
 let access_key_id t = t.access_key_id
-let session_token t = t.session_token
+let reveal_session_token t = t.session_token
 let source t = t.source
 let source_label t = Option.map t.source ~f:source_label_of_source
 let expires_at t = t.expires_at
@@ -145,3 +145,7 @@ let signing_key t ~datestamp ~region ~service =
   hmac_sha256 ~key:("AWS4" ^ t.secret_access_key) datestamp |> fun key ->
   hmac_sha256 ~key (Region.to_string region) |> fun key ->
   hmac_sha256 ~key service |> fun key -> hmac_sha256 ~key "aws4_request"
+
+let sigv4_signature t ~datestamp ~region ~service ~string_to_sign =
+  let key = signing_key t ~datestamp ~region ~service in
+  Digestif.SHA256.(hmac_string ~key string_to_sign |> to_hex)

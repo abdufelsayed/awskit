@@ -40,9 +40,8 @@ module type DOMAIN = sig
     module Customer_key : sig
       type t
 
-      val algorithm : t -> string
-      val key_base64 : t -> string
-      val key_md5_base64 : t -> string
+      val reveal_headers : t -> (string * string) list
+      val reveal_copy_source_headers : t -> (string * string) list
     end
 
     module Destination : sig

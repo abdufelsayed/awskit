@@ -434,6 +434,38 @@ let test_credentials_metadata_and_provider () =
   | Unavailable _ | Invalid _ | Failed _ ->
       Alcotest.fail "static provider should resolve credentials"
 
+let test_signing_sensitive_handoff () =
+  let credentials =
+    Awskit.Credentials.create_exn ~access_key_id:"AKID"
+      ~secret_access_key:"SECRET" ~session_token:"SESSION" ()
+  in
+  Alcotest.(check (option string))
+    "explicit session token reveal" (Some "SESSION")
+    (Awskit.Credentials.reveal_session_token credentials);
+  let signed =
+    Awskit.Signing.sign_request_params ~credentials
+      ~region:(Awskit.Region.of_string_exn "us-east-1")
+      ~service:"s3" ~method_:`GET ~path:"/object" ~query_params:[]
+      ~headers:[ ("host", "bucket.s3.us-east-1.amazonaws.com") ]
+      ~payload_hash:(Awskit.Body.Payload_hash.sha256_of_string "")
+      ~now:test_time
+  in
+  match signed with
+  | Error error ->
+      Alcotest.failf "signing should succeed: %a" Awskit.Error.pp error
+  | Ok signed ->
+      Alcotest.(check bool)
+        "signed names include security token" true
+        (List.mem "x-amz-security-token"
+           (Awskit.Signing.signed_header_names signed));
+      let headers = Awskit.Signing.reveal_headers signed in
+      Alcotest.(check (option string))
+        "revealed token header" (Some "SESSION")
+        (List.assoc_opt "x-amz-security-token" headers);
+      Alcotest.(check bool)
+        "revealed authorization header" true
+        (List.mem_assoc "authorization" headers)
+
 let test_static_provider_annotates_absent_source () =
   let credentials =
     Awskit.Credentials.create_exn ~access_key_id:"AKID"
@@ -862,6 +894,8 @@ let suite =
       [
         Alcotest.test_case "credentials metadata and provider" `Quick
           test_credentials_metadata_and_provider;
+        Alcotest.test_case "signing sensitive handoff" `Quick
+          test_signing_sensitive_handoff;
         Alcotest.test_case "static provider annotates absent source" `Quick
           test_static_provider_annotates_absent_source;
         Alcotest.test_case "credentials provider chain and expiration" `Quick

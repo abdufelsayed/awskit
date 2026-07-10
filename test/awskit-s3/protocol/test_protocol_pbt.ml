@@ -439,7 +439,7 @@ let prop_canonical_headers_normalize_repeated_case_variants =
            (Awskit.Signing.canonical_headers_block actual_headers)
            (Protocol_wire_model.canonical_headers_block headers)
       && String.equal
-           (Awskit.Signing.signed_header_names actual_headers)
+           (Awskit.Signing.canonical_header_names actual_headers)
            (Protocol_wire_model.signed_header_names headers))
 
 let prop_request_headers_reject_newline_and_name_controls =
@@ -510,8 +510,8 @@ let prop_presigned_upload_part_safe_uri_keeps_operation_query =
              = [ Multipart.Part_number.to_int part_number |> string_of_int ]
           && query_values "uploadId" safe_uri
              = [ Multipart.Upload_id.to_string upload_id ]
-          && List.mem_assoc "host" (Presigned.signed_headers presigned)
-          && not (List.mem_assoc "host" (Presigned.request_headers presigned)))
+          && List.mem "host" (Presigned.signed_header_names presigned)
+          && not (List.mem "host" (Presigned.request_header_names presigned)))
 
 let prop_presigned_rejects_invalid_additional_headers =
   QCheck.Test.make ~count:boundary_count

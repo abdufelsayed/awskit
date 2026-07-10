@@ -30,10 +30,13 @@ let credentials =
 ]}
 
 Credentials are opaque so secret access keys are harder to log accidentally.
-Use {!val:Awskit.Credentials.access_key_id} and
-{!val:Awskit.Credentials.session_token} only when code deliberately needs those
-fields. Session tokens are credential material. The secret access key is
-accepted at construction time but not exposed afterward.
+The non-secret {!val:Awskit.Credentials.access_key_id} remains inspectable.
+Ordinary request code should use {!module:Awskit.Signing}, which handles secret
+material internally. Custom signers may use
+{!val:Awskit.Credentials.reveal_session_token} and
+{!val:Awskit.Credentials.sigv4_signature}; revealing a session token is an
+explicit secret-bearing handoff. The secret access key and reusable derived
+signing keys are not exposed after construction.
 
 {2 Environment Variables}
 

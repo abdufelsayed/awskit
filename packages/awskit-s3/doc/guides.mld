@@ -652,13 +652,14 @@ Awskit_s3.Presigned.Signer.upload_part signer
 Presigned request artifacts use [UNSIGNED-PAYLOAD] and the same
 endpoint/addressing options as regular operations. Use
 [Awskit_s3.Presigned.method_], [Awskit_s3.Presigned.safe_uri],
-[Awskit_s3.Presigned.signed_headers], [Awskit_s3.Presigned.request_headers],
-and the expiry accessors for diagnostics and user-facing output.
-[Awskit_s3.Presigned.signed_headers] includes the canonical [host] header;
-[Awskit_s3.Presigned.request_headers] contains the non-host headers to pass
-explicitly when executing the request. [Awskit_s3.Presigned.reveal_url] is the
-explicit bearer-token handoff boundary for the component that will execute the
-request. Build [Presigned.Lifetime.t] and
+[Awskit_s3.Presigned.signed_header_names],
+[Awskit_s3.Presigned.request_header_names], and the expiry accessors for safe
+diagnostics and user-facing output. Signed header names include [host]; request
+header names describe the non-host headers the requester must send.
+[Awskit_s3.Presigned.reveal_url] and
+[Awskit_s3.Presigned.reveal_request_headers] are the explicit bearer/secret
+handoff boundaries for the component that will execute the request. Build
+[Presigned.Lifetime.t] and
 [Presigned.Additional_headers.t] before signing. Each presigning operation
 accepts the same [Object] or [Multipart.Upload_part] options as normal
 execution, so checksum, encryption, precondition, version, metadata, tag, and
@@ -672,7 +673,7 @@ A typical direct-upload multipart flow is:
     configured client's [Presigned.upload_part] or
     [Presigned.Signer.upload_part].}
   {li The uploader sends each part using the revealed bearer URL, method, and
-    signed headers.}
+    revealed request headers.}
   {li Complete the upload with the returned part ETags.}
 }
 

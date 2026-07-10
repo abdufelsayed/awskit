@@ -24,11 +24,11 @@ let print_presigned label result =
   Format.printf "summary: %a@." Awskit_s3.Presigned.pp result;
   Format.printf "expires at: %s@."
     (Awskit_s3.Presigned.expires_at result |> Ptime.to_rfc3339);
-  (match Awskit_s3.Presigned.request_headers result with
+  (match Awskit_s3.Presigned.request_header_names result with
   | [] -> ()
-  | headers ->
+  | names ->
       Format.printf "request header names:@.";
-      List.iter (fun (name, _) -> Format.printf "  %s@." name) headers);
+      List.iter (fun name -> Format.printf "  %s@." name) names);
   Format.printf
     "raw bearer URL intentionally omitted; reveal it only at the HTTP handoff@.";
   Format.printf "@."

@@ -1,10 +1,13 @@
 module Aws_error = Error
 open Base
 
-type signed_headers = {
+type result = {
   headers : (string * string) list;
-  signed_headers_str : string;
+  signed_header_names : string list;
 }
+
+let signed_header_names t = t.signed_header_names
+let reveal_headers t = t.headers
 
 let ptime_to_date_time (t : Ptime.t) =
   let (y, m, d), ((hh, mm, ss), _tz) = Ptime.to_date_time t in
@@ -38,7 +41,7 @@ let canonical_headers headers =
     | (key, value) :: rest ->
         (key, String.concat ~sep:"," (value :: List.map rest ~f:snd)))
 
-let signed_header_names headers =
+let canonical_header_names headers =
   String.concat ~sep:";" (List.map headers ~f:fst)
 
 let canonical_headers_block headers =
@@ -80,7 +83,7 @@ let sign_request_params ~credentials ~region ~service ~method_ ~path
         :: headers
       in
       let base_headers =
-        match Credentials.session_token credentials with
+        match Credentials.reveal_session_token credentials with
         | Some token -> ("x-amz-security-token", token) :: base_headers
         | None -> base_headers
       in
@@ -91,7 +94,9 @@ let sign_request_params ~credentials ~region ~service ~method_ ~path
           | Error _ as error -> error
           | Ok () ->
               let sorted_headers = canonical_headers base_headers in
-              let signed_headers_str = signed_header_names sorted_headers in
+              let signed_header_names_param =
+                canonical_header_names sorted_headers
+              in
               let canonical_headers = canonical_headers_block sorted_headers in
               let canonical_request =
                 String.concat ~sep:"\n"
@@ -100,7 +105,7 @@ let sign_request_params ~credentials ~region ~service ~method_ ~path
                     uri_encode ~encode_slash:false path;
                     canonical_query_params query_params;
                     canonical_headers;
-                    signed_headers_str;
+                    signed_header_names_param;
                     payload_hash_header;
                   ]
               in
@@ -119,24 +124,21 @@ let sign_request_params ~credentials ~region ~service ~method_ ~path
                     sha256_hex canonical_request;
                   ]
               in
-              let signing_key =
-                Credentials.signing_key credentials ~datestamp ~region ~service
-              in
               let signature =
-                Digestif.SHA256.(
-                  hmac_string ~key:signing_key string_to_sign |> to_hex)
+                Credentials.sigv4_signature credentials ~datestamp ~region
+                  ~service ~string_to_sign
               in
               let authorization =
                 Fmt.str
                   "AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, \
                    Signature=%s"
                   (Credentials.access_key_id credentials)
-                  scope signed_headers_str signature
+                  scope signed_header_names_param signature
               in
               Ok
                 {
                   headers = ("authorization", authorization) :: base_headers;
-                  signed_headers_str;
+                  signed_header_names = List.map sorted_headers ~f:fst;
                 }))
 
 let sign_request_params_exn ~credentials ~region ~service ~method_ ~path

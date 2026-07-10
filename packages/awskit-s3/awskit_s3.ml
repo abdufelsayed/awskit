@@ -172,7 +172,8 @@ module Make (R : Awskit.Runtime.S) = struct
               | Ok target -> (
                   match
                     Awskit.Request.create ~method_ ~target
-                      ~headers:signed.headers ()
+                      ~headers:(Awskit.Signing.reveal_headers signed)
+                      ()
                   with
                   | Error error -> return_error error
                   | Ok request -> return_ok request)))

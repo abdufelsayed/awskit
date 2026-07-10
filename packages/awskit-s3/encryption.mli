@@ -24,17 +24,17 @@ module Customer_key : sig
   (** Like {!val:of_base64}, but raises [Awskit.Error.Awskit_error] carrying the
       structured validation error on validation failure. *)
 
-  val algorithm : t -> string
-  (** Return the SSE-C algorithm header value, always ["AES256"]. *)
+  val reveal_headers : t -> (string * string) list
+  (** Deliberately reveal the three SSE-C request headers for an object source,
+      destination, or multipart part.
 
-  val key_base64 : t -> string
-  (** Return the base64-encoded raw key.
+      The returned key header contains secret material. Use it only for the HTTP
+      request handoff and never in diagnostics. *)
 
-      This value is sensitive; it is exposed so callers can inspect or forward
-      the exact request headers they must send. *)
+  val reveal_copy_source_headers : t -> (string * string) list
+  (** Deliberately reveal the three copy-source SSE-C request headers.
 
-  val key_md5_base64 : t -> string
-  (** Return the base64-encoded MD5 digest of the raw key bytes. *)
+      The returned key header contains secret material. *)
 end
 
 module Destination : sig

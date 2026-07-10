@@ -9,7 +9,7 @@ type result
     Presigned URLs are bearer tokens. The raw URL is intentionally hidden behind
     {!val:reveal_url}; use the safe accessors for logs and diagnostics.
     Consumers must use {!val:reveal_url}, {!val:method_}, and every
-    {!val:request_headers} value exactly as returned. *)
+    {!val:reveal_request_headers} value exactly as returned. *)
 
 val method_ : result -> method_
 
@@ -17,12 +17,17 @@ val safe_uri : result -> Uri.t
 (** URI with SigV4 bearer query parameters removed. Operation query parameters
     are preserved. *)
 
-val signed_headers : result -> (string * string) list
-(** Canonical headers included in the signature, including [host]. Values may be
-    sensitive and should not be logged by default. *)
+val signed_header_names : result -> string list
+(** Names of canonical headers included in the signature, including [host]. *)
 
-val request_headers : result -> (string * string) list
-(** Signed non-[host] headers the eventual requester must send. *)
+val request_header_names : result -> string list
+(** Names of signed non-[host] headers the eventual requester must send. *)
+
+val reveal_request_headers : result -> (string * string) list
+(** Deliberately reveal signed non-[host] headers for the HTTP request handoff.
+
+    Values may contain application secrets or SSE-C customer keys. Use every
+    header exactly as returned and avoid diagnostics. *)
 
 val requested_expires_in : result -> Ptime.Span.t
 

@@ -49,11 +49,11 @@ let print_presigned label (result : Awskit_s3.Presigned.result) =
     (span_to_string (Awskit_s3.Presigned.effective_expires_in result));
   Format.printf "expires at: %s@."
     (Awskit_s3.Presigned.expires_at result |> Ptime.to_rfc3339);
-  (match Awskit_s3.Presigned.request_headers result with
+  (match Awskit_s3.Presigned.request_header_names result with
   | [] -> ()
-  | headers ->
+  | names ->
       Format.printf "request headers:@.";
-      List.iter (fun (name, _) -> Format.printf "  %s@." name) headers);
+      List.iter (fun name -> Format.printf "  %s@." name) names);
   Format.printf
     "bearer URL: call Awskit_s3.Presigned.reveal_url only when handing off to \
      the HTTP client@.";
