@@ -799,7 +799,10 @@ module type PRESIGNED = sig
     client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
-    ?options:Presigned.Get_object.options ->
+    ?expires_in:Presigned.Lifetime.t ->
+    ?additional_headers:Presigned.Additional_headers.t ->
+    ?response_overrides:Object.Response_overrides.t ->
+    ?options:Object.Get.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
   (** Generate a presigned [GET Object] request artifact. *)
@@ -808,7 +811,9 @@ module type PRESIGNED = sig
     client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
-    ?options:Presigned.Put_object.options ->
+    ?expires_in:Presigned.Lifetime.t ->
+    ?additional_headers:Presigned.Additional_headers.t ->
+    ?options:Object.Put.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
   (** Generate a presigned [PUT Object] request artifact. Headers returned in
@@ -818,7 +823,10 @@ module type PRESIGNED = sig
     client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
-    ?options:Presigned.Head_object.options ->
+    ?expires_in:Presigned.Lifetime.t ->
+    ?additional_headers:Presigned.Additional_headers.t ->
+    ?response_overrides:Object.Response_overrides.t ->
+    ?options:Object.Head.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
   (** Generate a presigned [HEAD Object] request artifact. *)
@@ -827,7 +835,9 @@ module type PRESIGNED = sig
     client ->
     bucket:Bucket_name.t ->
     key:Object_key.t ->
-    ?options:Presigned.Delete_object.options ->
+    ?expires_in:Presigned.Lifetime.t ->
+    ?additional_headers:Presigned.Additional_headers.t ->
+    ?options:Object.Delete.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
   (** Generate a presigned [DELETE Object] request artifact. *)
@@ -836,7 +846,9 @@ module type PRESIGNED = sig
     client ->
     upload:_ Multipart.Upload.t ->
     part_number:Multipart.Part_number.t ->
-    ?options:Presigned.Upload_part.options ->
+    ?expires_in:Presigned.Lifetime.t ->
+    ?additional_headers:Presigned.Additional_headers.t ->
+    ?options:Multipart.Upload_part.options ->
     unit ->
     (Presigned.result, Awskit.Error.t) result io
   (** Generate a presigned [UploadPart] request artifact for one multipart part.

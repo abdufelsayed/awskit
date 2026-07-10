@@ -17,21 +17,28 @@ let header_or_empty name headers =
   | None -> ""
   | Some value -> value
 
+let presigner () =
+  Presigned.Signer.create
+    ~region:(Awskit.Region.of_string_exn "us-east-1")
+    ~credentials:Protocol_support.credentials ()
+
 let test_presigned_get_fixture () =
-  let options : Presigned.Get_object.options =
-    {
-      Presigned.Get_object.default_options with
-      expires_in = Some (Ptime.Span.of_int_s 900);
-      response_content_type = Some (Protocol_support.content_type "text/plain");
-      version_id = Some (Object.Version_id.of_string_exn "version-1");
-    }
+  let expires_in = Presigned.Lifetime.of_span_exn (Ptime.Span.of_int_s 900) in
+  let options =
+    Object.Get.options
+      ~version_id:(Object.Version_id.of_string_exn "version-1")
+      ()
+  in
+  let response_overrides =
+    Object.Response_overrides.create
+      ~content_type:(Protocol_support.content_type "text/plain")
+      ()
   in
   let request =
-    Presigned.get_object ~region:"us-east-1"
-      ~credentials:Protocol_support.credentials ~now:Protocol_support.test_time
+    Presigned.Signer.get_object (presigner ()) ~now:Protocol_support.test_time
       ~bucket:(Protocol_support.bucket_name "bucket")
       ~key:(Protocol_support.object_key "file.txt")
-      ~options ()
+      ~expires_in ~response_overrides ~options ()
     |> Protocol_support.ok_or_fail "presigned get fixture"
   in
   let redacted_url =

@@ -591,9 +591,9 @@ for bodiless responses, framing, body-reader, and error-path behavior.
 
 {1 Presigned Request Artifacts}
 
-Use adapter-level [Presigned] modules when a configured client already exists. Use
-standalone {!module:Awskit_s3.Presigned} helpers when generating presigned
-request artifacts without an adapter client.
+Use adapter-level [Presigned] modules when a configured client already exists.
+Use {!module:Awskit_s3.Presigned.Signer} when generating artifacts without an
+adapter client.
 
 {[
 Awskit_s3_eio.Presigned.get_object s3
@@ -611,11 +611,15 @@ let endpoint_config =
     ()
   |> Result.get_ok
 in
-Awskit_s3.Presigned.put_object_with_endpoint_config
+let signer =
+  Awskit_s3.Presigned.Signer.create
   ~region:(Awskit.Region.of_string_exn "us-east-1")
   ~credentials
-  ~now
   ~endpoint_config
+  ()
+in
+Awskit_s3.Presigned.Signer.put_object signer
+  ~now
   ~bucket
   ~key:(Awskit_s3.Object_key.of_string_exn "upload.txt")
   ()
@@ -632,9 +636,13 @@ let upload =
     ~key:(Awskit_s3.Object_key.of_string_exn "large.bin")
     ~upload_id
 in
-Awskit_s3.Presigned.upload_part
-  ~region:"us-east-1"
-  ~credentials
+let signer =
+  Awskit_s3.Presigned.Signer.create
+    ~region:(Awskit.Region.of_string_exn "us-east-1")
+    ~credentials
+    ()
+in
+Awskit_s3.Presigned.Signer.upload_part signer
   ~now
   ~upload
   ~part_number:(Awskit_s3.Multipart.Part_number.of_int_exn 1)
@@ -650,19 +658,19 @@ and the expiry accessors for diagnostics and user-facing output.
 [Awskit_s3.Presigned.request_headers] contains the non-host headers to pass
 explicitly when executing the request. [Awskit_s3.Presigned.reveal_url] is the
 explicit bearer-token handoff boundary for the component that will execute the
-request. Use [extra_signed_headers] only for additional headers that must be
-included in the signature. Presigned [PUT] and [UploadPart] helpers sign
-explicit checksum value headers when configured. Presigned [GET] and [HEAD]
-sign SSE-C source headers, presigned [PUT] signs typed destination encryption
-headers, presigned [UploadPart] signs SSE-C customer-key headers, and object
-presigning options support [expected_bucket_owner] guard rails.
+request. Build [Presigned.Lifetime.t] and
+[Presigned.Additional_headers.t] before signing. Each presigning operation
+accepts the same [Object] or [Multipart.Upload_part] options as normal
+execution, so checksum, encryption, precondition, version, metadata, tag, and
+owner policy has one typed representation.
 
 A typical direct-upload multipart flow is:
 
 {ol
   {li Start the upload with [Multipart.create_upload].}
-  {li Presign one [UploadPart] request artifact per part number with
-    [Presigned.upload_part].}
+  {li Presign one [UploadPart] request artifact per part number with the
+    configured client's [Presigned.upload_part] or
+    [Presigned.Signer.upload_part].}
   {li The uploader sends each part using the revealed bearer URL, method, and
     signed headers.}
   {li Complete the upload with the returned part ETags.}

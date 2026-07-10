@@ -1,10 +1,4 @@
-(** Standalone S3 presigned request generation. *)
-
-type addressing_style = Endpoint_config.addressing_style
-(** S3 bucket addressing style used when building the presigned request. *)
-
-type endpoint_variant = Endpoint_config.endpoint_variant
-(** AWS S3 endpoint variant. *)
+(** Runtime-neutral S3 presigned request artifacts and signing. *)
 
 type method_ = [ `GET | `PUT | `HEAD | `DELETE ]
 (** HTTP method a caller must use with the generated request. *)
@@ -13,303 +7,128 @@ type result
 (** Opaque generated presigned request artifact.
 
     Presigned URLs are bearer tokens. The raw URL is intentionally hidden behind
-    {!val:reveal_url}; use {!val:safe_uri}, {!val:method_},
-    {!val:signed_headers}, {!val:request_headers}, and the expiry accessors for
-    logs, diagnostics, and user-facing output. Consumers that execute the
-    request must use {!val:reveal_url}, {!val:method_}, and all
-    {!val:request_headers} exactly as returned. *)
+    {!val:reveal_url}; use the safe accessors for logs and diagnostics.
+    Consumers must use {!val:reveal_url}, {!val:method_}, and every
+    {!val:request_headers} value exactly as returned. *)
 
 val method_ : result -> method_
-(** HTTP method the caller must use. *)
 
 val safe_uri : result -> Uri.t
-(** Documentation/log-safe URI with SigV4 bearer query parameters removed.
-
-    Operation query parameters such as response overrides, [versionId],
-    [partNumber], and [uploadId] are preserved. *)
+(** URI with SigV4 bearer query parameters removed. Operation query parameters
+    are preserved. *)
 
 val signed_headers : result -> (string * string) list
-(** All canonical headers that were part of the signature, including [host].
-
-    Do not log header values unless the caller has made an explicit
-    application-level decision that they are safe. *)
+(** Canonical headers included in the signature, including [host]. Values may be
+    sensitive and should not be logged by default. *)
 
 val request_headers : result -> (string * string) list
-(** Signed headers the caller must explicitly send with the eventual request.
-
-    The [host] header is omitted because it is derived from the revealed URL's
-    authority and is normally set by the HTTP client. Do not log header values
-    unless the caller has made an explicit application-level decision that they
-    are safe. *)
+(** Signed non-[host] headers the eventual requester must send. *)
 
 val requested_expires_in : result -> Ptime.Span.t
-(** Lifetime requested by the caller, or the default when omitted. *)
 
 val effective_expires_in : result -> Ptime.Span.t
-(** Lifetime actually signed into the bearer URL.
+(** Effective lifetime after capping to temporary credential lifetime. *)
 
-    This is capped by temporary credential expiration when credentials expire
-    before the requested lifetime. *)
-
-val expires_at : result -> Ptime.t option
-(** Absolute expiration timestamp for the effective lifetime. *)
+val expires_at : result -> Ptime.t
+(** Absolute expiration of the generated artifact. *)
 
 val reveal_url : result -> string
-(** Return the fully signed bearer URL.
-
-    This includes SigV4 credential, signature, and session-token material and
-    should only be handed to the component that will execute the presigned
-    request. Do not print or log it by default. *)
+(** Deliberately reveal the fully signed bearer URL. *)
 
 val pp : Format.formatter -> result -> unit
-(** Safe pretty-printer that omits the raw bearer URL, SigV4 credential,
-    signature, session token, and signed header values. *)
+(** Safe printer that omits the bearer URL and header values. *)
 
-module Put_object : sig
-  type options = {
-    expires_in : Ptime.Span.t option;
-        (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
-            authentication. *)
-    content_type : Content_type.t option;
-        (** Optional [Content-Type] header to sign. The uploader must send the
-            same value. *)
-    checksum : Object.Checksum.value option;
-        (** Optional checksum header to sign. *)
-    encryption : Encryption.Destination.t option;
-        (** Optional encryption headers to sign. *)
-    expected_bucket_owner : Account_id.t option;
-        (** [x-amz-expected-bucket-owner] header to sign. *)
-    extra_signed_headers : (string * string) list;
-        (** Additional headers to include in the signature. Callers must send
-            them with the eventual request. *)
-  }
-  (** Presigned [PUT Object] options. *)
+module Lifetime : sig
+  type t
+  (** Valid whole-second SigV4 query lifetime between one second and seven days
+      inclusive. *)
 
-  val default_options : options
-  (** Default presigned [PUT Object] options. *)
+  val default : t
+  (** One hour. *)
+
+  val of_span : Ptime.Span.t -> (t, Awskit.Error.t) Stdlib.result
+  val of_span_exn : Ptime.Span.t -> t
+  val to_span : t -> Ptime.Span.t
 end
 
-module Get_object : sig
-  type options = {
-    expires_in : Ptime.Span.t option;
-        (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
-            authentication. *)
-    response_content_type : Content_type.t option;
-        (** Optional [response-content-type] query override. *)
-    response_content_disposition : Header_value.t option;
-        (** Optional [response-content-disposition] query override. *)
-    version_id : Object.Version_id.t option;  (** Object version to presign. *)
-    source_encryption : Encryption.Source.t option;
-        (** Optional SSE-C source-object key headers to sign. *)
-    expected_bucket_owner : Account_id.t option;
-        (** [x-amz-expected-bucket-owner] header to sign. *)
-    extra_signed_headers : (string * string) list;
-        (** Additional headers to include in the signature. *)
-  }
-  (** Presigned [GET Object] options. *)
+module Additional_headers : sig
+  type t
+  (** Valid, case-insensitively unique additional signed headers.
 
-  val default_options : options
-  (** Default presigned [GET Object] options. *)
+      Signer-owned [host], [authorization], and SigV4 authentication controls
+      are rejected. Values may be sensitive. *)
+
+  val empty : t
+  val of_list : (string * string) list -> (t, Awskit.Error.t) Stdlib.result
+  val of_list_exn : (string * string) list -> t
 end
 
-module Head_object : sig
-  type options = {
-    expires_in : Ptime.Span.t option;
-        (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
-            authentication. *)
-    response_content_type : Content_type.t option;
-        (** Optional [response-content-type] query override. *)
-    response_content_disposition : Header_value.t option;
-        (** Optional [response-content-disposition] query override. *)
-    version_id : Object.Version_id.t option;  (** Object version to presign. *)
-    source_encryption : Encryption.Source.t option;
-        (** Optional SSE-C source-object key headers to sign. *)
-    expected_bucket_owner : Account_id.t option;
-        (** [x-amz-expected-bucket-owner] header to sign. *)
-    extra_signed_headers : (string * string) list;
-        (** Additional headers to include in the signature. *)
-  }
-  (** Presigned [HEAD Object] options. *)
+module Signer : sig
+  type t
+  (** Pure configured presigner. Runtime adapters expose client-bound helpers
+      that refresh credentials and time before delegating here. *)
 
-  val default_options : options
-  (** Default presigned [HEAD Object] options. *)
+  val create :
+    region:Awskit.Region.t ->
+    credentials:Awskit.Credentials.t ->
+    ?endpoint_config:Endpoint_config.t ->
+    unit ->
+    t
+
+  val get_object :
+    t ->
+    now:Ptime.t ->
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    ?expires_in:Lifetime.t ->
+    ?additional_headers:Additional_headers.t ->
+    ?response_overrides:Object.Response_overrides.t ->
+    ?options:Object.Get.options ->
+    unit ->
+    (result, Awskit.Error.t) Stdlib.result
+
+  val put_object :
+    t ->
+    now:Ptime.t ->
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    ?expires_in:Lifetime.t ->
+    ?additional_headers:Additional_headers.t ->
+    ?options:Object.Put.options ->
+    unit ->
+    (result, Awskit.Error.t) Stdlib.result
+
+  val head_object :
+    t ->
+    now:Ptime.t ->
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    ?expires_in:Lifetime.t ->
+    ?additional_headers:Additional_headers.t ->
+    ?response_overrides:Object.Response_overrides.t ->
+    ?options:Object.Head.options ->
+    unit ->
+    (result, Awskit.Error.t) Stdlib.result
+
+  val delete_object :
+    t ->
+    now:Ptime.t ->
+    bucket:Bucket_name.t ->
+    key:Object_key.t ->
+    ?expires_in:Lifetime.t ->
+    ?additional_headers:Additional_headers.t ->
+    ?options:Object.Delete.options ->
+    unit ->
+    (result, Awskit.Error.t) Stdlib.result
+
+  val upload_part :
+    t ->
+    now:Ptime.t ->
+    upload:_ Multipart.Upload.t ->
+    part_number:Multipart.Part_number.t ->
+    ?expires_in:Lifetime.t ->
+    ?additional_headers:Additional_headers.t ->
+    ?options:Multipart.Upload_part.options ->
+    unit ->
+    (result, Awskit.Error.t) Stdlib.result
 end
-
-module Upload_part : sig
-  type options = {
-    expires_in : Ptime.Span.t option;
-        (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
-            authentication. *)
-    checksum : Object.Checksum.value option;
-        (** Optional checksum header to sign for the part body. *)
-    customer_key : Encryption.Customer_key.t option;
-        (** Optional SSE-C customer key headers to sign for the part upload. *)
-    expected_bucket_owner : Account_id.t option;
-        (** [x-amz-expected-bucket-owner] header to sign. *)
-    extra_signed_headers : (string * string) list;
-        (** Additional headers to include in the signature. *)
-  }
-  (** Presigned [UploadPart] options. *)
-
-  val default_options : options
-  (** Default presigned [UploadPart] options. *)
-end
-
-module Delete_object : sig
-  type options = {
-    expires_in : Ptime.Span.t option;
-        (** URL lifetime. AWS S3 accepts at most seven days for SigV4 query
-            authentication. *)
-    expected_bucket_owner : Account_id.t option;
-        (** [x-amz-expected-bucket-owner] header to sign. *)
-    extra_signed_headers : (string * string) list;
-        (** Additional headers to include in the signature. *)
-  }
-  (** Presigned [DELETE Object] options. *)
-
-  val default_options : options
-  (** Default presigned [DELETE Object] options. *)
-end
-
-type endpoint_config = Endpoint_resolver.t
-(** Reusable endpoint configuration for callers generating many URLs. *)
-
-val endpoint_config :
-  ?addressing_style:addressing_style ->
-  ?endpoint_variant:endpoint_variant ->
-  unit ->
-  endpoint_config
-(** Build AWS endpoint configuration for presigning.
-
-    Use {!Awskit_s3.Endpoint_config.s3_compatible},
-    {!Awskit_s3.Endpoint_config.local_plaintext}, or
-    {!Awskit_s3.Endpoint_config.unsafe_plaintext} for explicit non-AWS endpoints
-    before calling the [_with_endpoint_config] functions. *)
-
-val get_object :
-  region:string ->
-  credentials:Awskit.Credentials.t ->
-  now:Ptime.t ->
-  ?addressing_style:addressing_style ->
-  ?endpoint_variant:endpoint_variant ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
-  ?options:Get_object.options ->
-  unit ->
-  (result, Awskit.Error.t) Stdlib.result
-(** Generate a presigned [GET Object] request artifact. *)
-
-val put_object :
-  region:string ->
-  credentials:Awskit.Credentials.t ->
-  now:Ptime.t ->
-  ?addressing_style:addressing_style ->
-  ?endpoint_variant:endpoint_variant ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
-  ?options:Put_object.options ->
-  unit ->
-  (result, Awskit.Error.t) Stdlib.result
-(** Generate a presigned [PUT Object] request artifact. Headers represented by
-    [options], such as content type or checksum, must be sent by the eventual
-    uploader. *)
-
-val head_object :
-  region:string ->
-  credentials:Awskit.Credentials.t ->
-  now:Ptime.t ->
-  ?addressing_style:addressing_style ->
-  ?endpoint_variant:endpoint_variant ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
-  ?options:Head_object.options ->
-  unit ->
-  (result, Awskit.Error.t) Stdlib.result
-(** Generate a presigned [HEAD Object] request artifact. *)
-
-val delete_object :
-  region:string ->
-  credentials:Awskit.Credentials.t ->
-  now:Ptime.t ->
-  ?addressing_style:addressing_style ->
-  ?endpoint_variant:endpoint_variant ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
-  ?options:Delete_object.options ->
-  unit ->
-  (result, Awskit.Error.t) Stdlib.result
-(** Generate a presigned [DELETE Object] request artifact. *)
-
-val upload_part :
-  region:string ->
-  credentials:Awskit.Credentials.t ->
-  now:Ptime.t ->
-  ?addressing_style:addressing_style ->
-  ?endpoint_variant:endpoint_variant ->
-  upload:_ Multipart.Upload.t ->
-  part_number:Multipart.Part_number.t ->
-  ?options:Upload_part.options ->
-  unit ->
-  (result, Awskit.Error.t) Stdlib.result
-(** Generate a presigned [UploadPart] request artifact for one multipart part
-    number. *)
-
-val get_object_with_endpoint_config :
-  region:Awskit.Region.t ->
-  credentials:Awskit.Credentials.t ->
-  now:Ptime.t ->
-  endpoint_config:endpoint_config ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
-  ?options:Get_object.options ->
-  unit ->
-  (result, Awskit.Error.t) Stdlib.result
-(** Like {!val:get_object}, using a prebuilt endpoint configuration. *)
-
-val put_object_with_endpoint_config :
-  region:Awskit.Region.t ->
-  credentials:Awskit.Credentials.t ->
-  now:Ptime.t ->
-  endpoint_config:endpoint_config ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
-  ?options:Put_object.options ->
-  unit ->
-  (result, Awskit.Error.t) Stdlib.result
-(** Like {!val:put_object}, using a prebuilt endpoint configuration. *)
-
-val head_object_with_endpoint_config :
-  region:Awskit.Region.t ->
-  credentials:Awskit.Credentials.t ->
-  now:Ptime.t ->
-  endpoint_config:endpoint_config ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
-  ?options:Head_object.options ->
-  unit ->
-  (result, Awskit.Error.t) Stdlib.result
-(** Like {!val:head_object}, using a prebuilt endpoint configuration. *)
-
-val delete_object_with_endpoint_config :
-  region:Awskit.Region.t ->
-  credentials:Awskit.Credentials.t ->
-  now:Ptime.t ->
-  endpoint_config:endpoint_config ->
-  bucket:Bucket_name.t ->
-  key:Object_key.t ->
-  ?options:Delete_object.options ->
-  unit ->
-  (result, Awskit.Error.t) Stdlib.result
-(** Like {!val:delete_object}, using a prebuilt endpoint configuration. *)
-
-val upload_part_with_endpoint_config :
-  region:Awskit.Region.t ->
-  credentials:Awskit.Credentials.t ->
-  now:Ptime.t ->
-  endpoint_config:endpoint_config ->
-  upload:_ Multipart.Upload.t ->
-  part_number:Multipart.Part_number.t ->
-  ?options:Upload_part.options ->
-  unit ->
-  (result, Awskit.Error.t) Stdlib.result
-(** Like {!val:upload_part}, using a prebuilt endpoint configuration. *)

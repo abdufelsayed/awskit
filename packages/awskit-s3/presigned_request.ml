@@ -26,40 +26,45 @@ module Make (C : Request_context.S) = struct
           (return_result ~operation ~bucket:bucket_context ~key:key_context
              (f credentials))
 
-  let get_object conn ~bucket ~key ?options () =
+  let signer conn credentials =
+    Presigned.Signer.create ~region:(region conn) ~credentials
+      ~endpoint_config:(endpoint_config conn) ()
+
+  let get_object conn ~bucket ~key ?expires_in ?additional_headers
+      ?response_overrides ?options () =
     with_credentials conn ~operation:"GetObject" ~bucket ~key
       (fun credentials ->
-        Presigned.get_object_with_endpoint_config ~region:(region conn)
-          ~credentials ~now:(now conn) ~endpoint_config:(endpoint_config conn)
-          ~bucket ~key ?options ())
+        Presigned.Signer.get_object (signer conn credentials) ~now:(now conn)
+          ~bucket ~key ?expires_in ?additional_headers ?response_overrides
+          ?options ())
 
-  let put_object conn ~bucket ~key ?options () =
+  let put_object conn ~bucket ~key ?expires_in ?additional_headers ?options () =
     with_credentials conn ~operation:"PutObject" ~bucket ~key
       (fun credentials ->
-        Presigned.put_object_with_endpoint_config ~region:(region conn)
-          ~credentials ~now:(now conn) ~endpoint_config:(endpoint_config conn)
-          ~bucket ~key ?options ())
+        Presigned.Signer.put_object (signer conn credentials) ~now:(now conn)
+          ~bucket ~key ?expires_in ?additional_headers ?options ())
 
-  let head_object conn ~bucket ~key ?options () =
+  let head_object conn ~bucket ~key ?expires_in ?additional_headers
+      ?response_overrides ?options () =
     with_credentials conn ~operation:"HeadObject" ~bucket ~key
       (fun credentials ->
-        Presigned.head_object_with_endpoint_config ~region:(region conn)
-          ~credentials ~now:(now conn) ~endpoint_config:(endpoint_config conn)
-          ~bucket ~key ?options ())
+        Presigned.Signer.head_object (signer conn credentials) ~now:(now conn)
+          ~bucket ~key ?expires_in ?additional_headers ?response_overrides
+          ?options ())
 
-  let delete_object conn ~bucket ~key ?options () =
+  let delete_object conn ~bucket ~key ?expires_in ?additional_headers ?options
+      () =
     with_credentials conn ~operation:"DeleteObject" ~bucket ~key
       (fun credentials ->
-        Presigned.delete_object_with_endpoint_config ~region:(region conn)
-          ~credentials ~now:(now conn) ~endpoint_config:(endpoint_config conn)
-          ~bucket ~key ?options ())
+        Presigned.Signer.delete_object (signer conn credentials) ~now:(now conn)
+          ~bucket ~key ?expires_in ?additional_headers ?options ())
 
-  let upload_part conn ~upload ~part_number ?options () =
+  let upload_part conn ~upload ~part_number ?expires_in ?additional_headers
+      ?options () =
     let bucket = Multipart.Upload.bucket upload in
     let key = Multipart.Upload.key upload in
     with_credentials conn ~operation:"UploadPart" ~bucket ~key
       (fun credentials ->
-        Presigned.upload_part_with_endpoint_config ~region:(region conn)
-          ~credentials ~now:(now conn) ~endpoint_config:(endpoint_config conn)
-          ~upload ~part_number ?options ())
+        Presigned.Signer.upload_part (signer conn credentials) ~now:(now conn)
+          ~upload ~part_number ?expires_in ?additional_headers ?options ())
 end

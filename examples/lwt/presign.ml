@@ -23,7 +23,9 @@ let unwrap label = function
 let bucket_name value = Awskit_s3.Bucket_name.of_string_exn value
 let object_key value = Awskit_s3.Object_key.of_string_exn value
 let create_s3 () = S3.create () |> unwrap "create S3 client"
-let expires_in = Ptime.Span.of_int_s (15 * 60)
+
+let expires_in =
+  Awskit_s3.Presigned.Lifetime.of_span_exn (Ptime.Span.of_int_s (15 * 60))
 
 let method_to_string = function
   | `GET -> "GET"
@@ -45,10 +47,8 @@ let print_presigned label (result : Awskit_s3.Presigned.result) =
     (span_to_string (Awskit_s3.Presigned.requested_expires_in result));
   Format.printf "effective expiry: %s@."
     (span_to_string (Awskit_s3.Presigned.effective_expires_in result));
-  (match Awskit_s3.Presigned.expires_at result with
-  | None -> ()
-  | Some expires_at ->
-      Format.printf "expires at: %s@." (Ptime.to_rfc3339 expires_at));
+  Format.printf "expires at: %s@."
+    (Awskit_s3.Presigned.expires_at result |> Ptime.to_rfc3339);
   (match Awskit_s3.Presigned.request_headers result with
   | [] -> ()
   | headers ->
@@ -66,24 +66,18 @@ let run () =
       (env_default "AWSKIT_EXAMPLE_KEY" "awskit-examples/presigned.txt")
   in
   let s3 = create_s3 () in
-  let put_options =
-    {
-      Awskit_s3.Presigned.Put_object.default_options with
-      expires_in = Some expires_in;
-      content_type = Some (Awskit_s3.Content_type.of_string_exn "text/plain");
-    }
+  let content_type = Awskit_s3.Content_type.of_string_exn "text/plain" in
+  let put_options = Awskit_s3.Object.Put.options ~content_type () in
+  let response_overrides =
+    Awskit_s3.Object.Response_overrides.create ~content_type ()
   in
-  let get_options =
-    {
-      Awskit_s3.Presigned.Get_object.default_options with
-      expires_in = Some expires_in;
-      response_content_type =
-        Some (Awskit_s3.Content_type.of_string_exn "text/plain");
-    }
+  let* put =
+    S3.Presigned.put_object s3 ~bucket ~key ~expires_in ~options:put_options ()
   in
-  let* put = S3.Presigned.put_object s3 ~bucket ~key ~options:put_options () in
   print_presigned "presigned PUT" (unwrap "presign put" put);
-  let* get = S3.Presigned.get_object s3 ~bucket ~key ~options:get_options () in
+  let* get =
+    S3.Presigned.get_object s3 ~bucket ~key ~expires_in ~response_overrides ()
+  in
   print_presigned "presigned GET" (unwrap "presign get" get);
   Lwt.return_unit
 

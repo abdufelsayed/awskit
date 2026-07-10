@@ -22,10 +22,8 @@ let print_presigned label result =
     (method_to_string (Awskit_s3.Presigned.method_ result));
   Format.printf "safe uri: %a@." Uri.pp (Awskit_s3.Presigned.safe_uri result);
   Format.printf "summary: %a@." Awskit_s3.Presigned.pp result;
-  (match Awskit_s3.Presigned.expires_at result with
-  | None -> ()
-  | Some expires_at ->
-      Format.printf "expires at: %s@." (Ptime.to_rfc3339 expires_at));
+  Format.printf "expires at: %s@."
+    (Awskit_s3.Presigned.expires_at result |> Ptime.to_rfc3339);
   (match Awskit_s3.Presigned.request_headers result with
   | [] -> ()
   | headers ->
@@ -42,22 +40,17 @@ let () =
   let store = S3.create_store ~clock () in
   let s3 = S3.connect store ~credentials in
   S3.Bucket.create s3 ~bucket () |> unwrap "create bucket" |> ignore;
+  let expires_in =
+    Awskit_s3.Presigned.Lifetime.of_span_exn (Ptime.Span.of_int_s (15 * 60))
+  in
   let put_options =
-    {
-      Awskit_s3.Presigned.Put_object.default_options with
-      expires_in = Some (Ptime.Span.of_int_s (15 * 60));
-      content_type = Some (Awskit_s3.Content_type.of_string_exn "text/plain");
-    }
+    Awskit_s3.Object.Put.options
+      ~content_type:(Awskit_s3.Content_type.of_string_exn "text/plain")
+      ()
   in
-  let get_options =
-    {
-      Awskit_s3.Presigned.Get_object.default_options with
-      expires_in = Some (Ptime.Span.of_int_s (15 * 60));
-    }
-  in
-  S3.Presigned.put_object s3 ~bucket ~key ~options:put_options ()
+  S3.Presigned.put_object s3 ~bucket ~key ~expires_in ~options:put_options ()
   |> unwrap "presign PUT"
   |> print_presigned "presigned PUT";
-  S3.Presigned.get_object s3 ~bucket ~key ~options:get_options ()
+  S3.Presigned.get_object s3 ~bucket ~key ~expires_in ()
   |> unwrap "presign GET"
   |> print_presigned "presigned GET"

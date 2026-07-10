@@ -491,10 +491,14 @@ let prop_presigned_upload_part_safe_uri_keeps_operation_query =
           ~upload_id
       in
       let part_number = Multipart.Part_number.of_int_exn part_number in
+      let signer =
+        Presigned.Signer.create
+          ~region:(Awskit.Region.of_string_exn "us-east-1")
+          ~credentials:Protocol_support.credentials ()
+      in
       match
-        Presigned.upload_part ~region:"us-east-1"
-          ~credentials:Protocol_support.credentials
-          ~now:Protocol_support.test_time ~upload ~part_number ()
+        Presigned.Signer.upload_part signer ~now:Protocol_support.test_time
+          ~upload ~part_number ()
       with
       | Error _ -> false
       | Ok presigned ->
@@ -508,44 +512,20 @@ let prop_presigned_upload_part_safe_uri_keeps_operation_query =
           && List.mem_assoc "host" (Presigned.signed_headers presigned)
           && not (List.mem_assoc "host" (Presigned.request_headers presigned)))
 
-let prop_presigned_rejects_invalid_extra_signed_headers =
+let prop_presigned_rejects_invalid_additional_headers =
   QCheck.Test.make ~count:boundary_count
     ~name:"presigned requests reject invalid extra signed headers"
     (QCheck.make ~print:String.escaped Protocol_generators.newline_header_value)
     (fun value ->
-      let options : Presigned.Get_object.options =
-        {
-          Presigned.Get_object.default_options with
-          extra_signed_headers = [ ("x-extra", value) ];
-        }
-      in
       Result.is_error
-        (Presigned.get_object ~region:"us-east-1"
-           ~credentials:Protocol_support.credentials
-           ~now:Protocol_support.test_time
-           ~bucket:(Protocol_support.bucket_name "bucket")
-           ~key:(Protocol_support.object_key "file.txt")
-           ~options ()))
+        (Presigned.Additional_headers.of_list [ ("x-extra", value) ]))
 
 let prop_presigned_rejects_invalid_expiration_bounds =
   QCheck.Test.make ~count:boundary_count
     ~name:"presigned requests reject invalid expiration bounds"
     (QCheck.make ~print:string_of_int
        Protocol_generators.invalid_presign_expires_seconds) (fun seconds ->
-      let options : Presigned.Get_object.options =
-        {
-          Presigned.Get_object.default_options with
-          expires_in = Some (Ptime.Span.of_int_s seconds);
-        }
-      in
-      match
-        Presigned.get_object ~region:"us-east-1"
-          ~credentials:Protocol_support.credentials
-          ~now:Protocol_support.test_time
-          ~bucket:(Protocol_support.bucket_name "bucket")
-          ~key:(Protocol_support.object_key "file.txt")
-          ~options ()
-      with
+      match Presigned.Lifetime.of_span (Ptime.Span.of_int_s seconds) with
       | Error error -> Awskit.Error.validation_field error = Some "expires_in"
       | Ok _ -> false)
 
@@ -1046,7 +1026,7 @@ let remaining_protocol_properties =
     prop_endpoint_accelerate_rejects_dotted_buckets;
     prop_metadata_rejects_case_insensitive_duplicate_keys;
     prop_presigned_upload_part_safe_uri_keeps_operation_query;
-    prop_presigned_rejects_invalid_extra_signed_headers;
+    prop_presigned_rejects_invalid_additional_headers;
     prop_presigned_rejects_invalid_expiration_bounds;
     prop_tagging_xml_rejects_duplicate_tag_keys;
     prop_download_ranges_cover_content_length;

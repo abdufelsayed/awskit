@@ -233,6 +233,18 @@ module Preconditions = struct
   end
 end
 
+module Response_overrides = struct
+  type t = {
+    content_type : Content_type.t option;
+    content_disposition : Header_value.t option;
+  }
+
+  let none = { content_type = None; content_disposition = None }
+
+  let create ?content_type ?content_disposition () =
+    { content_type; content_disposition }
+end
+
 module Put = struct
   type options = {
     content_type : Content_type.t option;

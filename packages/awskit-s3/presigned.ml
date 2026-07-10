@@ -1,13 +1,9 @@
 module Multipart = Multipart
 module Object = Object
-module Encryption = Encryption
 module Endpoint_resolver = Endpoint_resolver
 
 let ( let* ) = S3_result.( let* )
 
-type addressing_style = Endpoint_config.addressing_style
-type endpoint_variant = Endpoint_config.endpoint_variant
-type endpoint_config = Endpoint_resolver.t
 type method_ = [ `GET | `PUT | `HEAD | `DELETE ]
 
 type result = {
@@ -18,7 +14,7 @@ type result = {
   request_headers : (string * string) list;
   requested_expires_in : Ptime.Span.t;
   effective_expires_in : Ptime.Span.t;
-  expires_at : Ptime.t option;
+  expires_at : Ptime.t;
 }
 
 let method_ t = t.method_
@@ -30,110 +26,69 @@ let effective_expires_in t = t.effective_expires_in
 let expires_at t = t.expires_at
 let reveal_url t = t.url
 
-module Put_object = struct
-  type options = {
-    expires_in : Ptime.Span.t option;
-    content_type : Content_type.t option;
-    checksum : Object.Checksum.value option;
-    encryption : Encryption.Destination.t option;
-    expected_bucket_owner : Account_id.t option;
-    extra_signed_headers : (string * string) list;
-  }
+module Lifetime = struct
+  type t = int
 
-  let default_options =
-    {
-      expires_in = None;
-      content_type = None;
-      checksum = None;
-      encryption = None;
-      expected_bucket_owner = None;
-      extra_signed_headers = [];
-    }
+  let max_seconds = 604_800
+  let default = 3600
+
+  let of_span span =
+    if Ptime.Span.compare span Ptime.Span.zero <= 0 then
+      S3_error_context.invalid ~field:"expires_in" "expires_in must be positive"
+    else
+      match Ptime.Span.to_int_s span with
+      | Some seconds
+        when Ptime.Span.equal span (Ptime.Span.of_int_s seconds)
+             && seconds <= max_seconds ->
+          Ok seconds
+      | Some seconds when seconds > max_seconds ->
+          S3_error_context.invalid ~field:"expires_in"
+            "expires_in must be <= %d seconds" max_seconds
+      | Some _ | None ->
+          S3_error_context.invalid ~field:"expires_in"
+            "expires_in must be a whole number of seconds"
+
+  let of_span_exn span = Awskit.Error.Producer.get_ok_exn (of_span span)
+  let to_span seconds = Ptime.Span.of_int_s seconds
+  let seconds t = t
 end
 
-module Get_object = struct
-  type options = {
-    expires_in : Ptime.Span.t option;
-    response_content_type : Content_type.t option;
-    response_content_disposition : Header_value.t option;
-    version_id : Object.Version_id.t option;
-    source_encryption : Encryption.Source.t option;
-    expected_bucket_owner : Account_id.t option;
-    extra_signed_headers : (string * string) list;
-  }
+module Additional_headers = struct
+  type t = (string * string) list
 
-  let default_options =
-    {
-      expires_in = None;
-      response_content_type = None;
-      response_content_disposition = None;
-      version_id = None;
-      source_encryption = None;
-      expected_bucket_owner = None;
-      extra_signed_headers = [];
-    }
+  let empty = []
+
+  let signer_owned name =
+    match String.lowercase_ascii name with
+    | "host" | "authorization" | "x-amz-algorithm" | "x-amz-credential"
+    | "x-amz-date" | "x-amz-expires" | "x-amz-signedheaders" | "x-amz-signature"
+    | "x-amz-security-token" ->
+        true
+    | _ -> false
+
+  let validate_names headers =
+    let rec loop seen = function
+      | [] -> Ok ()
+      | (name, _) :: rest ->
+          let normalized = String.lowercase_ascii name in
+          if signer_owned normalized then
+            S3_error_context.invalid ~field:"header" "presigner owns header: %s"
+              normalized
+          else if List.exists (String.equal normalized) seen then
+            S3_error_context.invalid ~field:"header"
+              "duplicate additional header: %s" normalized
+          else loop (normalized :: seen) rest
+    in
+    loop [] headers
+
+  let of_list headers =
+    let* () = Awskit.Request.validate_headers headers in
+    let* () = validate_names headers in
+    Ok headers
+
+  let of_list_exn headers = Awskit.Error.Producer.get_ok_exn (of_list headers)
+  let to_list t = t
 end
-
-module Head_object = struct
-  type options = {
-    expires_in : Ptime.Span.t option;
-    response_content_type : Content_type.t option;
-    response_content_disposition : Header_value.t option;
-    version_id : Object.Version_id.t option;
-    source_encryption : Encryption.Source.t option;
-    expected_bucket_owner : Account_id.t option;
-    extra_signed_headers : (string * string) list;
-  }
-
-  let default_options =
-    {
-      expires_in = None;
-      response_content_type = None;
-      response_content_disposition = None;
-      version_id = None;
-      source_encryption = None;
-      expected_bucket_owner = None;
-      extra_signed_headers = [];
-    }
-end
-
-module Upload_part = struct
-  type options = {
-    expires_in : Ptime.Span.t option;
-    checksum : Object.Checksum.value option;
-    customer_key : Encryption.Customer_key.t option;
-    expected_bucket_owner : Account_id.t option;
-    extra_signed_headers : (string * string) list;
-  }
-
-  let default_options =
-    {
-      expires_in = None;
-      checksum = None;
-      customer_key = None;
-      expected_bucket_owner = None;
-      extra_signed_headers = [];
-    }
-end
-
-module Delete_object = struct
-  type options = {
-    expires_in : Ptime.Span.t option;
-    expected_bucket_owner : Account_id.t option;
-    extra_signed_headers : (string * string) list;
-  }
-
-  let default_options =
-    {
-      expires_in = None;
-      expected_bucket_owner = None;
-      extra_signed_headers = [];
-    }
-end
-
-let default_expires = Ptime.Span.of_int_s 3600
-let max_expires = 604_800
-let max_expires_span = Ptime.Span.of_int_s max_expires
 
 let method_to_string = function
   | `GET -> "GET"
@@ -141,18 +96,11 @@ let method_to_string = function
   | `HEAD -> "HEAD"
   | `DELETE -> "DELETE"
 
-let request_method = function
-  | `GET -> `GET
-  | `PUT -> `PUT
-  | `HEAD -> `HEAD
-  | `DELETE -> `DELETE
-
 let pp_span fmt span =
   match Ptime.Span.to_int_s span with
   | Some seconds when Ptime.Span.equal span (Ptime.Span.of_int_s seconds) ->
       Format.fprintf fmt "%ds" seconds
-  | None -> Format.fprintf fmt "%a" Ptime.Span.pp span
-  | Some _ -> Format.fprintf fmt "%a" Ptime.Span.pp span
+  | None | Some _ -> Format.fprintf fmt "%a" Ptime.Span.pp span
 
 let pp_header_names fmt headers =
   match List.map fst headers with
@@ -171,9 +119,7 @@ let pp fmt t =
      }@]"
     (method_to_string t.method_)
     Uri.pp t.safe_uri pp_header_names t.signed_headers pp_span
-    t.requested_expires_in pp_span t.effective_expires_in
-    (Format.pp_print_option Ptime.pp)
-    t.expires_at
+    t.requested_expires_in pp_span t.effective_expires_in Ptime.pp t.expires_at
 
 let validate_unique_header_names headers =
   let rec loop seen = function
@@ -186,34 +132,6 @@ let validate_unique_header_names headers =
         else loop (name :: seen) rest
   in
   loop [] headers
-
-let option_header key = function None -> [] | Some value -> [ (key, value) ]
-
-let option_content_type_header key value =
-  option_header key (Option.map Content_type.to_string value)
-
-let expected_owner_header value =
-  option_header "x-amz-expected-bucket-owner"
-    (Option.map Account_id.to_string value)
-
-let expires_seconds span =
-  if Ptime.Span.compare span Ptime.Span.zero <= 0 then
-    S3_error_context.invalid ~field:"expires_in" "expires_in must be positive"
-  else if Ptime.Span.compare span max_expires_span > 0 then
-    S3_error_context.invalid ~field:"expires_in"
-      "expires_in must be <= %d seconds" max_expires
-  else
-    match Ptime.Span.to_int_s span with
-    | None ->
-        S3_error_context.invalid ~field:"expires_in"
-          "expires_in is outside supported range"
-    | Some seconds when seconds <= 0 ->
-        S3_error_context.invalid ~field:"expires_in"
-          "expires_in must be at least 1 second"
-    | Some seconds when seconds > max_expires ->
-        S3_error_context.invalid ~field:"expires_in"
-          "expires_in must be <= %d seconds" max_expires
-    | Some seconds -> Ok seconds
 
 let credentials_expire_too_soon credentials =
   Error
@@ -257,26 +175,25 @@ let safe_uri_of_url url =
   in
   Uri.with_query uri query
 
-let validate_part_number part_number =
-  if part_number <= 0 then
-    S3_error_context.invalid ~field:"part_number" "part number must be positive"
-  else if part_number > 10_000 then
-    S3_error_context.invalid ~field:"part_number" "part number must be <= 10000"
-  else Ok ()
-
-let parse_region region = Awskit.Region.of_string region
-
-let endpoint_config ?addressing_style ?endpoint_variant () =
-  Endpoint_config.aws ?addressing_style ?endpoint_variant ()
-
-let generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_ ~signed_headers ~query ?expires_in () =
-  let expires_span = Option.value ~default:default_expires expires_in in
+let generate ~region ~credentials ~now ~endpoint_config ~bucket ~key ~method_
+    ~signed_headers ~query ?expires_in ?additional_headers () =
+  let expires_in = Option.value ~default:Lifetime.default expires_in in
+  let additional_headers =
+    Option.value ~default:Additional_headers.empty additional_headers
+    |> Additional_headers.to_list
+  in
+  let requested_seconds = Lifetime.seconds expires_in in
+  let requested_expires_in = Lifetime.to_span expires_in in
   let* () = Awskit.Credentials.validate_fresh credentials ~now in
-  let* expires = expires_seconds expires_span in
-  let requested_expires_in = expires_span in
   let* expires, effective_expires_in =
-    effective_expiration ~credentials ~now ~requested_seconds:expires
+    effective_expiration ~credentials ~now ~requested_seconds
+  in
+  let* expires_at =
+    match Ptime.add_span now effective_expires_in with
+    | Some expires_at -> Ok expires_at
+    | None ->
+        S3_error_context.invalid ~field:"now"
+          "presigned expiration is outside the supported timestamp range"
   in
   let* request =
     Endpoint_resolver.resolve_object_request endpoint_config ~region ~bucket
@@ -290,6 +207,7 @@ let generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
   let credential =
     Fmt.str "%s/%s" (Awskit.Credentials.access_key_id credentials) scope
   in
+  let signed_headers = signed_headers @ additional_headers in
   let raw_signed_header_values =
     ("host", Awskit.Endpoint.authority request.endpoint) :: signed_headers
   in
@@ -350,155 +268,146 @@ let generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
       (Awskit.Endpoint.to_url_prefix request.endpoint)
       request.path query_string signature
   in
-  let safe_uri = safe_uri_of_url url in
   Ok
     {
       url;
       method_;
-      safe_uri;
+      safe_uri = safe_uri_of_url url;
       signed_headers = signed_header_values;
       request_headers;
       requested_expires_in;
       effective_expires_in;
-      expires_at = Ptime.add_span now effective_expires_in;
+      expires_at;
     }
 
-let object_read_query ~response_content_type ~response_content_disposition
-    ~version_id =
-  let add_opt key value acc =
-    match value with None -> acc | Some v -> (key, [ v ]) :: acc
-  in
+let add_opt_header name value headers =
+  match value with None -> headers | Some value -> (name, value) :: headers
+
+let add_owner owner headers =
+  add_opt_header "x-amz-expected-bucket-owner"
+    (Option.map Account_id.to_string owner)
+    headers
+
+let response_override_query (overrides : Object.Response_overrides.t) =
   []
-  |> add_opt "response-content-type"
-       (Option.map Content_type.to_string response_content_type)
-  |> add_opt "response-content-disposition"
-       (Option.map Header_value.to_string response_content_disposition)
-  |> add_opt "versionId" (Option.map Object.Version_id.to_string version_id)
+  |> add_opt_header "response-content-type"
+       (Option.map Content_type.to_string overrides.content_type)
+  |> add_opt_header "response-content-disposition"
+       (Option.map Header_value.to_string overrides.content_disposition)
+  |> List.map (fun (name, value) -> (name, [ value ]))
 
-let get_query (options : Get_object.options) =
-  object_read_query ~response_content_type:options.response_content_type
-    ~response_content_disposition:options.response_content_disposition
-    ~version_id:options.version_id
+let version_query = function
+  | None -> []
+  | Some version_id ->
+      [ ("versionId", [ Object.Version_id.to_string version_id ]) ]
 
-let head_query (options : Head_object.options) =
-  object_read_query ~response_content_type:options.response_content_type
-    ~response_content_disposition:options.response_content_disposition
-    ~version_id:options.version_id
+let get_headers (options : Object.Get.options) =
+  Headers.read_precondition_headers options.preconditions
+  @ Headers.checksum_mode_header options.checksum_mode
+  @ Headers.source_encryption_headers options.source_encryption
+  |> add_opt_header "range" (Option.map Range.to_header options.range)
+  |> add_owner options.expected_bucket_owner
 
-let get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options () =
-  let options = Option.value ~default:Get_object.default_options options in
-  let signed_headers =
-    Headers.source_encryption_headers options.source_encryption
-    @ expected_owner_header options.expected_bucket_owner
-    @ options.extra_signed_headers
-  in
-  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_:`GET ~signed_headers ~query:(get_query options)
-    ?expires_in:options.expires_in ()
+let head_headers (options : Object.Head.options) =
+  Headers.read_precondition_headers options.preconditions
+  @ Headers.checksum_mode_header options.checksum_mode
+  @ Headers.source_encryption_headers options.source_encryption
+  |> add_owner options.expected_bucket_owner
 
-let head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options () =
-  let options = Option.value ~default:Head_object.default_options options in
-  let signed_headers =
-    Headers.source_encryption_headers options.source_encryption
-    @ expected_owner_header options.expected_bucket_owner
-    @ options.extra_signed_headers
-  in
-  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_:`HEAD ~signed_headers ~query:(head_query options)
-    ?expires_in:options.expires_in ()
+let put_headers (options : Object.Put.options) =
+  S3_metadata_headers.to_headers options.metadata
+  @ Headers.write_precondition_headers options.preconditions
+  @ Headers.checksum_value_headers options.checksum
+  @ Headers.destination_encryption_headers options.encryption
+  |> Headers.add_opt_content_type_header "content-type" options.content_type
+  |> add_opt_header "cache-control"
+       (Option.map Header_value.to_string options.cache_control)
+  |> add_opt_header "content-encoding"
+       (Option.map Header_value.to_string options.content_encoding)
+  |> add_opt_header "content-disposition"
+       (Option.map Header_value.to_string options.content_disposition)
+  |> add_opt_header "x-amz-storage-class"
+       (Option.map Storage_class.to_string options.storage_class)
+  |> add_opt_header "x-amz-tagging" (Headers.tags_header options.tags)
+  |> add_owner options.expected_bucket_owner
 
-let put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options () =
-  let options = Option.value ~default:Put_object.default_options options in
-  let headers =
-    option_content_type_header "content-type" options.content_type
-    @ Headers.checksum_value_headers options.checksum
-    @ Headers.destination_encryption_headers options.encryption
-    @ expected_owner_header options.expected_bucket_owner
-    @ options.extra_signed_headers
-  in
-  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_:`PUT ~signed_headers:headers ~query:[]
-    ?expires_in:options.expires_in ()
+let delete_headers (options : Object.Delete.options) =
+  Headers.delete_precondition_headers options.preconditions
+  |> add_owner options.expected_bucket_owner
 
-let delete_object_with_endpoint_config ~region ~credentials ~now
-    ~endpoint_config ~bucket ~key ?options () =
-  let options = Option.value ~default:Delete_object.default_options options in
-  let signed_headers =
-    expected_owner_header options.expected_bucket_owner
-    @ options.extra_signed_headers
-  in
-  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_:`DELETE ~signed_headers ~query:[]
-    ?expires_in:options.expires_in ()
-
-let upload_part_query ~upload_id ~part_number =
+let upload_part_query upload part_number =
   [
     ("partNumber", [ Multipart.Part_number.to_int part_number |> string_of_int ]);
-    ("uploadId", [ Multipart.Upload_id.to_string upload_id ]);
+    ( "uploadId",
+      [ Multipart.Upload.upload_id upload |> Multipart.Upload_id.to_string ] );
   ]
 
-let upload_part_headers (options : Upload_part.options) =
+let upload_part_headers (options : Multipart.Upload_part.options) =
   Headers.checksum_value_headers options.checksum
   @ Headers.customer_key_headers options.customer_key
-  @ expected_owner_header options.expected_bucket_owner
-  @ options.extra_signed_headers
+  |> add_owner options.expected_bucket_owner
 
-let upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~upload ~part_number ?options () =
-  let options = Option.value ~default:Upload_part.default_options options in
-  let bucket = Multipart.Upload.bucket upload in
-  let key = Multipart.Upload.key upload in
-  let upload_id = Multipart.Upload.upload_id upload in
-  generate_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ~method_:`PUT
-    ~signed_headers:(upload_part_headers options)
-    ~query:(upload_part_query ~upload_id ~part_number)
-    ?expires_in:options.expires_in ()
+module Signer = struct
+  type t = {
+    region : Awskit.Region.t;
+    credentials : Awskit.Credentials.t;
+    endpoint_config : Endpoint_config.t;
+  }
 
-let get_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
-    ~bucket ~key ?options () =
-  let* region = parse_region region in
-  let endpoint_config =
-    endpoint_config ?addressing_style ?endpoint_variant ()
-  in
-  get_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options ()
+  let create ~region ~credentials ?(endpoint_config = Endpoint_config.default)
+      () =
+    { region; credentials; endpoint_config }
 
-let head_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
-    ~bucket ~key ?options () =
-  let* region = parse_region region in
-  let endpoint_config =
-    endpoint_config ?addressing_style ?endpoint_variant ()
-  in
-  head_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options ()
+  let get_object t ~now ~bucket ~key ?expires_in ?additional_headers
+      ?(response_overrides = Object.Response_overrides.none) ?options () =
+    let options = Option.value ~default:Object.Get.default_options options in
+    generate ~region:t.region ~credentials:t.credentials ~now
+      ~endpoint_config:t.endpoint_config ~bucket ~key ~method_:`GET
+      ~signed_headers:(get_headers options)
+      ~query:
+        (version_query options.version_id
+        @ response_override_query response_overrides)
+      ?expires_in ?additional_headers ()
 
-let put_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
-    ~bucket ~key ?options () =
-  let* region = parse_region region in
-  let endpoint_config =
-    endpoint_config ?addressing_style ?endpoint_variant ()
-  in
-  put_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options ()
+  let head_object t ~now ~bucket ~key ?expires_in ?additional_headers
+      ?(response_overrides = Object.Response_overrides.none) ?options () =
+    let options = Option.value ~default:Object.Head.default_options options in
+    generate ~region:t.region ~credentials:t.credentials ~now
+      ~endpoint_config:t.endpoint_config ~bucket ~key ~method_:`HEAD
+      ~signed_headers:(head_headers options)
+      ~query:
+        (version_query options.version_id
+        @ response_override_query response_overrides)
+      ?expires_in ?additional_headers ()
 
-let delete_object ~region ~credentials ~now ?addressing_style ?endpoint_variant
-    ~bucket ~key ?options () =
-  let* region = parse_region region in
-  let endpoint_config =
-    endpoint_config ?addressing_style ?endpoint_variant ()
-  in
-  delete_object_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~bucket ~key ?options ()
+  let put_object t ~now ~bucket ~key ?expires_in ?additional_headers ?options ()
+      =
+    let options = Option.value ~default:Object.Put.default_options options in
+    generate ~region:t.region ~credentials:t.credentials ~now
+      ~endpoint_config:t.endpoint_config ~bucket ~key ~method_:`PUT
+      ~signed_headers:(put_headers options) ~query:[] ?expires_in
+      ?additional_headers ()
 
-let upload_part ~region ~credentials ~now ?addressing_style ?endpoint_variant
-    ~upload ~part_number ?options () =
-  let* region = parse_region region in
-  let endpoint_config =
-    endpoint_config ?addressing_style ?endpoint_variant ()
-  in
-  upload_part_with_endpoint_config ~region ~credentials ~now ~endpoint_config
-    ~upload ~part_number ?options ()
+  let delete_object t ~now ~bucket ~key ?expires_in ?additional_headers ?options
+      () =
+    let options = Option.value ~default:Object.Delete.default_options options in
+    generate ~region:t.region ~credentials:t.credentials ~now
+      ~endpoint_config:t.endpoint_config ~bucket ~key ~method_:`DELETE
+      ~signed_headers:(delete_headers options)
+      ~query:(version_query options.version_id)
+      ?expires_in ?additional_headers ()
+
+  let upload_part t ~now ~upload ~part_number ?expires_in ?additional_headers
+      ?options () =
+    let options =
+      Option.value ~default:Multipart.Upload_part.default_options options
+    in
+    generate ~region:t.region ~credentials:t.credentials ~now
+      ~endpoint_config:t.endpoint_config
+      ~bucket:(Multipart.Upload.bucket upload)
+      ~key:(Multipart.Upload.key upload)
+      ~method_:`PUT
+      ~signed_headers:(upload_part_headers options)
+      ~query:(upload_part_query upload part_number)
+      ?expires_in ?additional_headers ()
+end

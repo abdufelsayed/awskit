@@ -214,6 +214,26 @@ module Preconditions : sig
   end
 end
 
+module Response_overrides : sig
+  type t = {
+    content_type : Content_type.t option;
+        (** Override the successful response [Content-Type]. *)
+    content_disposition : Header_value.t option;
+        (** Override the successful response [Content-Disposition]. *)
+  }
+  (** Response-header overrides supported by S3 object read requests. *)
+
+  val none : t
+  (** No response-header overrides. *)
+
+  val create :
+    ?content_type:Content_type.t ->
+    ?content_disposition:Header_value.t ->
+    unit ->
+    t
+  (** Build response-header overrides. *)
+end
+
 module Put : sig
   type options = {
     content_type : Content_type.t option;
