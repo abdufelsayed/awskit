@@ -54,9 +54,13 @@ git log --reverse --oneline main..HEAD
 Update `CHANGES.md` with the entries for the release. Follow
 `docs/changelog.md`:
 
-- Include PR numbers when available.
+- Include earlier contributing PR numbers when they provide useful
+  traceability.
 - Include commit hashes on every entry.
-- Include every PR and commit that materially contributed to a release entry.
+- Include every material commit and useful earlier contributing PR that
+  materially contributed to a release entry.
+- Never cite the current release PR in its own `CHANGES.md` section or release
+  notes preview.
 - Use the timeline as source material, not as one public entry per commit.
 - Order entries by release-branch timeline inside each section.
 - Describe shipped changes.
@@ -86,13 +90,15 @@ gh pr create \
 
 Replace template placeholders with concrete, reviewable content. The release
 notes preview should use the same curated entries as `CHANGES.md`: one bullet
-per meaningful released item, with all material PR and commit references
-attached to that bullet.
+per meaningful released item, with material commit references and any useful
+earlier contributing PR references attached to that bullet. Do not cite the
+current release PR in its own preview.
 
 The release PR body must include:
 
 - a short statement that this is the release vehicle;
-- a release notes preview with PR and commit references visible in the bullets;
+- a release notes preview with material commit references and useful earlier
+  contributing PR references visible in the bullets;
 - release files touched;
 - CI and local validation status;
 - release gates before merge;

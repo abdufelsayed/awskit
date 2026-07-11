@@ -4,23 +4,26 @@
 
 ## Release Notes Preview
 
-<!-- Use CHANGES.md entries with material PR and commit references. Remove empty sections. -->
+<!-- Use CHANGES.md entries with material commit references and any useful
+earlier contributing PR references. Never cite this release PR in its own
+preview. Remove empty sections. -->
 
 ### Breaking
 
-<!-- Add breaking changes with all material PR and commit references. -->
+<!-- Add breaking changes with material commits and any earlier contributing PRs. -->
 
 ### Added
 
-<!-- Add additions with all material PR and commit references. -->
+<!-- Add additions with material commits and any earlier contributing PRs. -->
 
 ### Fixed
 
-<!-- Add fixes with all material PR and commit references. -->
+<!-- Add fixes with material commits and any earlier contributing PRs. -->
 
 ### Documentation, CI, and Release
 
-<!-- Add documentation, CI, and release changes with all material PR and commit references. -->
+<!-- Add documentation, CI, and release changes with material commits and any
+earlier contributing PRs. -->
 
 ## Release Files
 

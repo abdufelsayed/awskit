@@ -15,10 +15,14 @@ Related maintainer docs:
 Every release entry describes a meaningful shipped change and includes
 traceability for the work that materially contributed to that item:
 
-- Use `(#PR, commit)` when the change has an associated pull request.
-- Use `(commit)` when the change does not have an associated pull request.
-- Include multiple PR and commit references when multiple changes contributed
-  to the same release entry.
+- Include the material commit hash for every release entry.
+- Include an earlier contributing PR when it provides useful traceability for
+  the released change.
+- Never cite the current release PR in its own `CHANGES.md` section or release
+  notes preview. The release PR contains the ledger; it is not source work for
+  the release it describes.
+- Include multiple earlier PR and commit references when multiple changes
+  contributed to the same release entry.
 
 Examples:
 
@@ -38,9 +42,10 @@ Examples:
   8c9d012)
 ```
 
-Traceability means every release entry has the PR and commit references that
-materially contributed to that item. It does not mean every commit becomes a
-release entry.
+Traceability means every release entry has the commit references, and any
+useful earlier contributing PR references, that materially contributed to that
+item. It does not mean every commit becomes a release entry. The current
+release PR is never one of those contributing references.
 
 ## Sections
 
@@ -123,7 +128,8 @@ Example:
 
 Before committing `CHANGES.md`:
 
-1. Every bullet has a PR number when available and a commit hash.
+1. Every bullet has its material commit hashes and any useful earlier
+   contributing PR numbers.
 2. Every bullet describes a meaningful public or maintainer-relevant change.
 3. Each section is ordered intentionally.
 4. Breaking changes tell users what changed and what to use now.
@@ -131,3 +137,5 @@ Before committing `CHANGES.md`:
    entry with all material references.
 6. Internal process, unreleased self-repair, and changelog-writing mechanics
    are absent from public entries.
+7. Neither `CHANGES.md` nor its release notes preview cites the current release
+   PR.
