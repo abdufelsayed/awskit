@@ -28,6 +28,7 @@ let expect_error_field field = function
 
 let repeat count value = List.init count (Fun.const value) |> String.concat ""
 let repeat_char count char = String.init count (Fun.const char)
+let base64_digest size char = Base64.encode_exn (String.make size char)
 let qstring gen = QCheck.make ~print:(fun value -> String.escaped value) gen
 
 let qpair pp_left pp_right gen =
@@ -527,7 +528,10 @@ let prop_multipart_parts_preserve_known_checksum_and_size =
       let etag = Object.Etag.of_string_exn "\"etag\"" in
       let checksum =
         Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
-          ~value:checksum_value
+          ~value:
+            (base64_digest 32
+               (if String.equal checksum_value "" then '\000'
+                else checksum_value.[0]))
       in
       match Multipart.Part.create ~part_number ~etag ~checksum ~size () with
       | Error _ -> false
@@ -634,11 +638,18 @@ let test_account_header_and_checksum_boundaries () =
   let checksum =
     expect_ok "checksum"
       (Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Sha256
-         ~value:"provided-sha256")
+         ~value:(base64_digest 32 '\001'))
   in
-  Alcotest.(check string) "checksum value" "provided-sha256" checksum.value;
+  Alcotest.(check string)
+    "checksum value" (base64_digest 32 '\001') checksum.value;
   expect_error_field "checksum_value"
     (Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Sha256 ~value:"");
+  expect_error_field "checksum_value"
+    (Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Sha256
+       ~value:"not-base64");
+  expect_error_field "checksum_value"
+    (Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Crc32c
+       ~value:(base64_digest 3 '\000'));
   expect_error_field "checksum_algorithm"
     (Object.Checksum.Algorithm.of_string "FUTURE");
   let observed = Object.Checksum.Algorithm.observed_of_string "FUTURE" in
@@ -920,7 +931,7 @@ let test_multipart_option_boundaries () =
        [ completion_part ]);
   let sha512 =
     Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha512
-      ~value:"sha512"
+      ~value:(base64_digest 64 '\002')
   in
   expect_error_field "checksum_type"
     (Multipart.Complete.options ~checksum:sha512
@@ -931,7 +942,7 @@ let test_multipart_option_boundaries () =
           ~checksum_type:Object.Checksum.Type.Full_object ()));
   let md5 =
     Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Md5
-      ~value:"md5"
+      ~value:(base64_digest 16 '\003')
   in
   let checksummed_part number checksum size =
     Multipart.Part.create_exn

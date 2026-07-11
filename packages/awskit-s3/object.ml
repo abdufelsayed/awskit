@@ -134,11 +134,34 @@ module Checksum = struct
 
   type value = { algorithm : Algorithm.t; value : string }
 
+  let digest_size = function
+    | Algorithm.Crc32 | Crc32c -> 4
+    | Crc64nvme | Xxhash64 | Xxhash3 -> 8
+    | Md5 | Xxhash128 -> 16
+    | Sha1 -> 20
+    | Sha256 -> 32
+    | Sha512 -> 64
+
   let value ~algorithm ~value =
     let* () =
       S3_validation.validate_header_value ~field:"checksum_value" value
     in
-    Ok { algorithm; value }
+    match Base64.decode value with
+    | Error (`Msg message) ->
+        S3_error_context.invalid ~field:"checksum_value"
+          "invalid Base64 checksum value: %s" message
+    | Ok raw ->
+        if not (String.equal value (Base64.encode_exn raw)) then
+          S3_error_context.invalid ~field:"checksum_value"
+            "checksum value must use canonical padded Base64 encoding"
+        else
+          let expected = digest_size algorithm in
+          let actual = String.length raw in
+          if actual <> expected then
+            S3_error_context.invalid ~field:"checksum_value"
+              "checksum algorithm %s requires %d digest bytes, got %d"
+              (Algorithm.to_string algorithm) expected actual
+          else Ok { algorithm; value }
 
   let value_exn ~algorithm ~value:checksum =
     S3_result.result_exn (value ~algorithm ~value:checksum)

@@ -711,7 +711,7 @@ let multipart_part_exn number size =
 let multipart_checksum_part_exn number =
   let checksum =
     Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
-      ~value:(Fmt.str "sha256-part-%d" number)
+      ~value:(Base64.encode_exn (String.make 32 (Char.chr (number mod 256))))
   in
   Multipart.Part.create_exn
     ~part_number:(Multipart.Part_number.of_int_exn number)

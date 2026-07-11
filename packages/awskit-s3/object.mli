@@ -104,13 +104,13 @@ module Checksum : sig
   end
 
   type value = private { algorithm : Algorithm.t; value : string }
-  (** Explicit validated checksum value supplied by the caller. The value is the
-      base64/string payload expected by the selected algorithm. *)
+  (** Explicit validated checksum value supplied by the caller. [value] is the
+      canonical Base64 encoding of a digest whose width matches [algorithm]. *)
 
   val value :
     algorithm:Algorithm.t -> value:string -> (value, Awskit.Error.t) result
-  (** Validate and wrap an explicit outbound checksum value. Unknown algorithms
-      are rejected because they cannot be rendered safely in request headers. *)
+  (** Validate and wrap an explicit outbound checksum value. Invalid or
+      non-canonical Base64 and algorithm-width mismatches are rejected. *)
 
   val value_exn : algorithm:Algorithm.t -> value:string -> value
   (** Like {!val:value}, but raises [Awskit.Error.Awskit_error] carrying the

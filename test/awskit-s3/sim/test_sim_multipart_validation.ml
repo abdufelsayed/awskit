@@ -23,6 +23,7 @@ let sha256 value = checksum_value Object.Checksum.Algorithm.Sha256 value
 let sha512 value = checksum_value Object.Checksum.Algorithm.Sha512 value
 let md5 value = checksum_value Object.Checksum.Algorithm.Md5 value
 let crc32 value = checksum_value Object.Checksum.Algorithm.Crc32 value
+let zero_digest size = Base64.encode_exn (String.make size '\000')
 
 let complete_parts ?multipart_object_size parts =
   Multipart.Complete.Parts.of_list_exn ?multipart_object_size parts
@@ -45,7 +46,7 @@ let etag_string label = function
 let test_put_rejects_bad_checksum () =
   let conn = make_simulator () in
   let options =
-    Object.Put.options ~checksum:(sha256 "not-the-sha256-of-hello") ()
+    Object.Put.options ~checksum:(sha256 (zero_digest 32)) ()
   in
   expect_service_code "put bad checksum" "BadDigest"
     (Simulator.Object.put_string conn
@@ -72,7 +73,7 @@ let test_upload_part_rejects_bad_checksum () =
   let conn = make_simulator () in
   let created = create_upload conn "bad-part.bin" in
   let options =
-    Multipart.Upload_part.options ~checksum:(sha256 "not-the-sha256-of-part") ()
+    Multipart.Upload_part.options ~checksum:(sha256 (zero_digest 32)) ()
   in
   expect_service_code "upload part bad checksum" "BadDigest"
     (Simulator.Multipart.upload_part conn ~upload:created.upload
@@ -102,7 +103,7 @@ let test_complete_rejects_bad_full_object_checksum () =
   let uploaded = upload_part conn created.upload 1 "final" in
   let options =
     Multipart.Complete.options_exn
-      ~checksum:(sha256 "not-the-sha256-of-final")
+      ~checksum:(sha256 (zero_digest 32))
       ()
   in
   expect_service_code "complete bad checksum" "BadDigest"
@@ -129,7 +130,8 @@ let test_complete_rejects_checksum_policy_mismatch () =
     (Simulator.Multipart.upload_part conn ~upload:created.upload
        ~part_number:(Multipart.Part_number.of_int_exn 1)
        ~body:(Simulator.Body.of_string "final")
-       ~options:(Multipart.Upload_part.options ~checksum:(md5 "value") ())
+       ~options:
+         (Multipart.Upload_part.options ~checksum:(md5 (zero_digest 16)) ())
        ());
   let uploaded =
     Simulator.Multipart.upload_part conn ~upload:created.upload
@@ -196,7 +198,7 @@ let test_checksum_algorithms_are_computed_or_rejected () =
        ~bucket:(bucket_name "test-bucket")
        ~key:(object_key "crc32-put.bin")
        ~contents:"hello"
-       ~options:(Object.Put.options ~checksum:(crc32 "aaaa") ())
+       ~options:(Object.Put.options ~checksum:(crc32 (zero_digest 4)) ())
        ());
   let created =
     Simulator.Multipart.create_upload conn
