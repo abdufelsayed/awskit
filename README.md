@@ -344,7 +344,6 @@ let endpoint_config =
   Awskit_s3.Endpoint_config.local_plaintext
     ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
     ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
-    ~addressing_style:`Path
     ()
   |> Result.get_ok
 ```

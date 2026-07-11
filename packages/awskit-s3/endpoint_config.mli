@@ -39,9 +39,18 @@ val aws :
   ?addressing_style:addressing_style ->
   ?endpoint_variant:endpoint_variant ->
   unit ->
+  (t, Awskit.Error.t) result
+(** Build an AWS S3 endpoint policy. AWS endpoints are HTTPS. Regions in the
+    AWS China partition ([cn-*]) resolve under [amazonaws.com.cn]. Path-style
+    addressing is rejected for transfer-acceleration variants. *)
+
+val aws_exn :
+  ?addressing_style:addressing_style ->
+  ?endpoint_variant:endpoint_variant ->
+  unit ->
   t
-(** Build the default AWS S3 endpoint policy. AWS endpoints are HTTPS. Regions
-    in the AWS China partition ([cn-*]) resolve under [amazonaws.com.cn]. *)
+(** Like {!val:aws}, but raises [Awskit.Error.Awskit_error] carrying the
+    structured validation error on failure. *)
 
 val default : t
 (** Default AWS S3 regional HTTPS endpoint policy. *)
@@ -63,7 +72,6 @@ val s3_compatible :
 val local_plaintext :
   endpoint:Awskit.Endpoint.t ->
   signing_region:Awskit.Region.t ->
-  addressing_style:[ `Path ] ->
   unit ->
   (t, Awskit.Error.t) result
 (** Build a path-style plaintext loopback endpoint policy for local

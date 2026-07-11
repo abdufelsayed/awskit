@@ -120,7 +120,7 @@ let with_server env callback f =
   let endpoint_config =
     Awskit_s3.Endpoint_config.local_plaintext ~endpoint
       ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
-      ~addressing_style:`Path ()
+      ()
     |> ok_or_fail "endpoint config"
   in
   let client =
