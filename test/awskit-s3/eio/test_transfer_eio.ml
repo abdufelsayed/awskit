@@ -330,7 +330,7 @@ let multipart_server state ~cleanup_fails _conn request request_body writer =
   | `GET, false when query_has uri "uploadId" ->
       response ~status:`OK
         ~body:
-          "<ListPartsResult><Bucket>transfer-bucket</Bucket><Key>object.bin</Key><UploadId>upload-1</UploadId><IsTruncated>false</IsTruncated></ListPartsResult>"
+          "<ListPartsResult><Bucket>transfer-bucket</Bucket><Key>object.bin</Key><UploadId>upload-1</UploadId><MaxParts>1000</MaxParts><IsTruncated>true</IsTruncated><NextPartNumberMarker>1000</NextPartNumberMarker></ListPartsResult>"
         writer
   | `PUT, false when query_has uri "partNumber" ->
       state.puts <- state.puts + 1;

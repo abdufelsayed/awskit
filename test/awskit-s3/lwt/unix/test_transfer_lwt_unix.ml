@@ -91,7 +91,7 @@ let install_multipart_transport state ~cleanup_fails =
       | `GET, false when query_has uri "uploadId" ->
           Lwt.return
             (response `OK
-               "<ListPartsResult><Bucket>transfer-bucket</Bucket><Key>object.bin</Key><UploadId>upload-1</UploadId><IsTruncated>false</IsTruncated></ListPartsResult>")
+               "<ListPartsResult><Bucket>transfer-bucket</Bucket><Key>object.bin</Key><UploadId>upload-1</UploadId><MaxParts>1000</MaxParts><IsTruncated>true</IsTruncated><NextPartNumberMarker>1000</NextPartNumberMarker></ListPartsResult>")
       | `PUT, false when query_has uri "partNumber" ->
           state.part_puts <- state.part_puts + 1;
           Lwt.bind (Cohttp_lwt.Body.to_string body) (fun _ ->

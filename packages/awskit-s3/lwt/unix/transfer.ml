@@ -606,11 +606,11 @@ struct
 
   let verify_resume_upload conn ~upload ~options =
     Lwt.bind
-      (S3.Multipart.List_parts.parts conn ~upload
-         ~options:options.Awskit_s3.Transfer.list_parts_options ~max_pages:1 ())
+      (S3.Multipart.list_parts conn ~upload
+         ~options:options.Awskit_s3.Transfer.list_parts_options ())
       (function
       | Error _ as error -> Lwt.return error
-      | Ok _parts -> Lwt.return_ok ())
+      | Ok _page -> Lwt.return_ok ())
 
   let complete_multipart conn ~upload ~options ~bytes_transferred parts =
     let parts = sort_parts parts in

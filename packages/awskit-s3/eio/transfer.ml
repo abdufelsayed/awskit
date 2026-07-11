@@ -536,11 +536,11 @@ struct
 
   let verify_resume_upload conn ~upload ~options =
     match
-      S3.Multipart.List_parts.parts conn ~upload
-        ~options:options.Awskit_s3.Transfer.list_parts_options ~max_pages:1 ()
+      S3.Multipart.list_parts conn ~upload
+        ~options:options.Awskit_s3.Transfer.list_parts_options ()
     with
     | Error _ as error -> error
-    | Ok _parts -> Ok ()
+    | Ok _page -> Ok ()
 
   let complete_multipart conn ~upload ~options ~bytes_transferred parts =
     let parts = sort_parts parts in
