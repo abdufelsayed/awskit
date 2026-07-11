@@ -45,7 +45,9 @@ domains, ownership, and adapter boundaries more explicit.
   object policy that derives consistent PutObject and multipart options.
   Crossing the multipart threshold now changes transport without dropping
   metadata, tags, storage class, encryption, preconditions, or expected-owner
-  checks. (7a378a3)
+  checks. Managed file helpers no longer expose redundant option revalidation
+  functions and do not compute explicit checksum values; checksum-bearing
+  uploads use the direct object or multipart operations. (7a378a3, 4f68b70)
 - Moved Awskit-created multipart handle construction under
   `Multipart.Upload.Runtime_adapter` and changed completed transfer results to
   expose inert bucket, key, and upload ID fields instead of a reusable-looking
