@@ -1,3 +1,57 @@
+# 0.3.0 (unreleased)
+
+Awskit 0.3.0 is a breaking API and codebase cleanup. It keeps the pure core,
+multiple-runtime architecture while making configured clients, request
+domains, ownership, and adapter boundaries more explicit.
+
+## Breaking
+
+- Changed S3 runtime composition so `Awskit_s3.Make` selects an
+  `Awskit.Runtime.S` implementation once and returns a configured service
+  client. Endpoint policy now belongs to that client rather than an
+  S3-specific runtime wrapper. Ready and generic adapters expose one `create`
+  workflow. (565d127, f3782a6, ecfc880)
+- Renamed the advanced adapter-author contract namespace to
+  `Awskit_s3.Runtime_adapter`, made root `S` the configured operation surface,
+  and removed public runtime-construction details from ordinary client
+  signatures. (f3782a6, ecfc880)
+- Made endpoint request resolution private, retained
+  `Awskit_s3.Endpoint_config` as the public endpoint policy, and removed
+  redundant S3 root aliases for core credentials, endpoints, and regions.
+  (9319fa7, ecfc880)
+- Replaced invalid-state bucket, object, encryption, checksum, storage-class,
+  pagination, and multipart inputs with closed sendable domains, separate
+  forward-compatible observed domains, or validated abstract/private values.
+  Unknown response tokens no longer leak into closed outbound vocabularies.
+  (9274ab8, 4a88428, 52809cf, 0dfa5f3, 335e839, 31c4532)
+- Removed one-field option wrappers and fake fallible builders. Operations now
+  use direct labeled arguments for single validated values, plain constructors
+  for invariant-free reusable products, and result-returning constructors only
+  where construction can genuinely fail. (43f9e73, f9247c3, 98fbf11)
+- Unified configured and standalone presigning with ordinary operation domains,
+  a configured `Presigned.Signer`, validated lifetimes and additional headers,
+  and one operation family. (d145c7a)
+- Normalized operation result shapes: object get results compose a consumed
+  value with canonical metadata, response-only wrappers return
+  `Awskit.Response.t`, and semantic operation records retain their own fields.
+  (2d04793)
+- Moved reusable secret material behind explicit `reveal_*` handoff functions
+  and kept safe summaries as the default inspection API. (090324c)
+
+## Changed
+
+- Aligned simulator operations, upload ownership, DeleteObjects cardinality,
+  and response behavior with the runtime-backed contract. (acce2de)
+
+## Documentation, CI, and Release
+
+- Added package-owned verification for generic Lwt S3 composition, credential
+  providers, validation-before-transport behavior, and runtime-native Lwt Unix
+  and Eio transfer cleanup and cancellation contracts. (ecfc880)
+- Triggered Required CI when a draft pull request becomes ready for review,
+  while preserving the default opened, synchronized, and reopened activities.
+  (#23, 0d325c8; ecfc880)
+
 # 0.2.0
 
 Awskit 0.2.0 is a breaking SDK hardening release. It moves the public API
