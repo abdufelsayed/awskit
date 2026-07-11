@@ -228,7 +228,7 @@ Awskit_s3_eio.Object.get s3
 If the response body exceeds [max_bytes], the helper returns a body-classified
 {!type:Awskit.Error.t}. Use {!val:Awskit.Error.pp} or
 {!val:Awskit.Error.to_string_hum} for a human message, and
-{!val:Awskit.Error.kind} when code needs to distinguish body failures from
+{!val:Awskit_s3.Error.kind} when code needs to distinguish body failures from
 other SDK errors.
 
 {2 One-Request File Operations}
@@ -775,7 +775,9 @@ match result with
 | Error err -> log_error err
 ]}
 
-For service failures, [Awskit_s3.Error.service_code] exposes the AWS error
+The S3 module re-exports the common core inspection API, including [kind],
+[context], [retry_class], validation and transport classifiers, and service
+status. For service failures, [Awskit_s3.Error.service_code] exposes the AWS error
 code when present.
 
 Optional lookup helpers keep common not-found handling out of error branches.
