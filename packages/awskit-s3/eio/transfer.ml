@@ -571,8 +571,6 @@ struct
     let options =
       Option.value ~default:Awskit_s3.Transfer.default_upload_options options
     in
-    let* () = Awskit_s3.Transfer.validate_upload_options options in
-    let* () = Awskit_s3.Transfer.validate_upload_multipart_selection options in
     let* content_length = regular_file_length path in
     let* specs =
       Plan.upload_part_seq ~content_length ~part_size:options.part_size
@@ -589,8 +587,6 @@ struct
     let options =
       Option.value ~default:Awskit_s3.Transfer.default_upload_options options
     in
-    let* () = Awskit_s3.Transfer.validate_upload_options options in
-    let* () = Awskit_s3.Transfer.validate_upload_multipart_selection options in
     let* content_length = regular_file_length path in
     let* specs =
       Plan.upload_part_seq ~content_length ~part_size:options.part_size
@@ -647,7 +643,6 @@ struct
     let options =
       Option.value ~default:Awskit_s3.Transfer.default_upload_options options
     in
-    let* () = Awskit_s3.Transfer.validate_upload_options options in
     let* content_length = regular_file_length path in
     if
       Int64.equal content_length 0L
@@ -669,9 +664,6 @@ struct
         (Awskit_s3.Transfer.Put
            { put = result; bytes_transferred = content_length })
     else
-      let* () =
-        Awskit_s3.Transfer.validate_upload_multipart_selection options
-      in
       let* result =
         multipart_upload_file conn ~bucket ~key ~options ?on_progress ~path ()
       in

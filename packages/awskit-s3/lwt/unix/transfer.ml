@@ -639,11 +639,6 @@ struct
     let options =
       Option.value ~default:Awskit_s3.Transfer.default_upload_options options
     in
-    let* () = Lwt.return (Awskit_s3.Transfer.validate_upload_options options) in
-    let* () =
-      Lwt.return
-        (Awskit_s3.Transfer.validate_upload_multipart_selection options)
-    in
     let* content_length = regular_file_length path in
     let* specs =
       Lwt.return
@@ -660,11 +655,6 @@ struct
   let multipart_upload_file conn ~bucket ~key ?options ?on_progress ~path () =
     let options =
       Option.value ~default:Awskit_s3.Transfer.default_upload_options options
-    in
-    let* () = Lwt.return (Awskit_s3.Transfer.validate_upload_options options) in
-    let* () =
-      Lwt.return
-        (Awskit_s3.Transfer.validate_upload_multipart_selection options)
     in
     let* content_length = regular_file_length path in
     let* specs =
@@ -718,43 +708,34 @@ struct
     let options =
       Option.value ~default:Awskit_s3.Transfer.default_upload_options options
     in
-    match Awskit_s3.Transfer.validate_upload_options options with
-    | Error _ as error -> Lwt.return error
-    | Ok () ->
-        Lwt.bind (regular_file_length path) (function
-          | Error _ as error -> Lwt.return error
-          | Ok content_length -> (
-              if
-                Int64.equal content_length 0L
-                || Int64.compare content_length options.multipart_threshold < 0
-              then
-                let upload_progress =
-                  byte_progress_callback on_progress ~direction:Transfer.Upload
-                    ~phase:Transfer.Single_request ~total:content_length ()
-                in
-                let* body = Body.of_path ?on_progress:upload_progress path in
-                let* result =
-                  Lwt.catch
-                    (fun () ->
-                      S3.Object.put conn ~bucket ~key
-                        ~options:options.put_options ~body ())
-                    raise_escaped_callback_or_fail
-                in
-                Lwt.return_ok
-                  (Awskit_s3.Transfer.Put
-                     { put = result; bytes_transferred = content_length })
-              else
-                match
-                  Awskit_s3.Transfer.validate_upload_multipart_selection options
-                with
-                | Error _ as error -> Lwt.return error
-                | Ok () ->
-                    Lwt.bind
-                      (multipart_upload_file conn ~bucket ~key ~options
-                         ?on_progress ~path ()) (function
-                      | Error _ as error -> Lwt.return error
-                      | Ok result ->
-                          Lwt.return_ok (Awskit_s3.Transfer.Multipart result))))
+    Lwt.bind (regular_file_length path) (function
+      | Error _ as error -> Lwt.return error
+      | Ok content_length ->
+          if
+            Int64.equal content_length 0L
+            || Int64.compare content_length options.multipart_threshold < 0
+          then
+            let upload_progress =
+              byte_progress_callback on_progress ~direction:Transfer.Upload
+                ~phase:Transfer.Single_request ~total:content_length ()
+            in
+            let* body = Body.of_path ?on_progress:upload_progress path in
+            let* result =
+              Lwt.catch
+                (fun () ->
+                  S3.Object.put conn ~bucket ~key ~options:options.put_options
+                    ~body ())
+                raise_escaped_callback_or_fail
+            in
+            Lwt.return_ok
+              (Awskit_s3.Transfer.Put
+                 { put = result; bytes_transferred = content_length })
+          else
+            Lwt.bind
+              (multipart_upload_file conn ~bucket ~key ~options ?on_progress
+                 ~path ()) (function
+              | Error _ as error -> Lwt.return error
+              | Ok result -> Lwt.return_ok (Awskit_s3.Transfer.Multipart result)))
 
   let head_options_of_get_options (options : Awskit_s3.Object.Get.options) :
       Awskit_s3.Object.Head.options =

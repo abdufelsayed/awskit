@@ -193,7 +193,9 @@ val upload_options :
   unit ->
   (upload_options, Awskit.Error.t) result
 (** Build and validate high-level upload options. Object semantics are supplied
-    once and derived for both PutObject and multipart execution. *)
+    once and derived for both PutObject and multipart execution. Managed file
+    uploads do not precompute checksum values; use direct object or multipart
+    operations when explicit checksum headers are required. *)
 
 val upload_options_exn :
   ?multipart_threshold:int64 ->
@@ -278,14 +280,6 @@ val download_overwrite : download_options -> overwrite
 
 val download_get_options : download_options -> Object.Get.options
 (** Return options used by single-request and ranged [GetObject] downloads. *)
-
-val validate_upload_options : upload_options -> (unit, Awskit.Error.t) result
-(** Validate upload thresholds, part size, concurrency, and nested options. *)
-
-val validate_upload_multipart_selection :
-  upload_options -> (unit, Awskit.Error.t) result
-(** Validate that multipart-specific settings are usable when multipart upload
-    is selected. *)
 
 val validate_download_options :
   download_options -> (unit, Awskit.Error.t) result
