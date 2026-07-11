@@ -607,8 +607,7 @@ struct
   let verify_resume_upload conn ~upload ~options =
     Lwt.bind
       (S3.Multipart.list_parts conn ~upload
-         ~options:options.Awskit_s3.Transfer.list_parts_options ())
-      (function
+         ~options:options.Awskit_s3.Transfer.list_parts_options ()) (function
       | Error _ as error -> Lwt.return error
       | Ok _page -> Lwt.return_ok ())
 

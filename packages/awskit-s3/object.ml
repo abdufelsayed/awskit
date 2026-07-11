@@ -160,7 +160,8 @@ module Checksum = struct
           if actual <> expected then
             S3_error_context.invalid ~field:"checksum_value"
               "checksum algorithm %s requires %d digest bytes, got %d"
-              (Algorithm.to_string algorithm) expected actual
+              (Algorithm.to_string algorithm)
+              expected actual
           else Ok { algorithm; value }
 
   let value_exn ~algorithm ~value:checksum =

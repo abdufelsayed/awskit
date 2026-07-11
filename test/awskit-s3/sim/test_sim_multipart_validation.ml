@@ -45,9 +45,7 @@ let etag_string label = function
 
 let test_put_rejects_bad_checksum () =
   let conn = make_simulator () in
-  let options =
-    Object.Put.options ~checksum:(sha256 (zero_digest 32)) ()
-  in
+  let options = Object.Put.options ~checksum:(sha256 (zero_digest 32)) () in
   expect_service_code "put bad checksum" "BadDigest"
     (Simulator.Object.put_string conn
        ~bucket:(bucket_name "test-bucket")
@@ -102,9 +100,7 @@ let test_complete_rejects_bad_full_object_checksum () =
   let created = create_upload conn "bad-complete.bin" in
   let uploaded = upload_part conn created.upload 1 "final" in
   let options =
-    Multipart.Complete.options_exn
-      ~checksum:(sha256 (zero_digest 32))
-      ()
+    Multipart.Complete.options_exn ~checksum:(sha256 (zero_digest 32)) ()
   in
   expect_service_code "complete bad checksum" "BadDigest"
     (Simulator.Multipart.complete_upload conn ~upload:created.upload ~options

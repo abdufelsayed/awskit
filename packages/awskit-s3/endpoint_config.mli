@@ -40,8 +40,8 @@ val aws :
   ?endpoint_variant:endpoint_variant ->
   unit ->
   (t, Awskit.Error.t) result
-(** Build an AWS S3 endpoint policy. AWS endpoints are HTTPS. Regions in the
-    AWS China partition ([cn-*]) resolve under [amazonaws.com.cn]. Path-style
+(** Build an AWS S3 endpoint policy. AWS endpoints are HTTPS. Regions in the AWS
+    China partition ([cn-*]) resolve under [amazonaws.com.cn]. Path-style
     addressing is rejected for transfer-acceleration variants. *)
 
 val aws_exn :

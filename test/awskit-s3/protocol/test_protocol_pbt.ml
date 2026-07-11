@@ -266,7 +266,9 @@ let endpoint_or_fail label config ~region =
 let test_endpoint_config_rejects_path_style_acceleration () =
   List.iter
     (fun endpoint_variant ->
-      match Endpoint_config.aws ~addressing_style:`Path ~endpoint_variant () with
+      match
+        Endpoint_config.aws ~addressing_style:`Path ~endpoint_variant ()
+      with
       | Error error ->
           Alcotest.(check (option string))
             "validation field" (Some "addressing_style")
