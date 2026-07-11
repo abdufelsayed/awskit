@@ -944,7 +944,7 @@ module type Client = sig
     Presigned_operations with type client = t and type 'a io = 'a io
 end
 
-module type Runtime_client = sig
+module type S = sig
   (** Runtime composition surface returned by {!Awskit_s3.Make}. *)
 
   include Client

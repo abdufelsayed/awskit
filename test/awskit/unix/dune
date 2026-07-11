@@ -1,0 +1,11 @@
+(test
+ (name test_credentials_unix)
+ (package awskit-unix)
+ (libraries awskit awskit-unix alcotest))
+
+(rule
+ (alias unix-credential-contracts)
+ (package awskit-unix)
+ (deps test_credentials_unix.exe)
+ (action
+  (run ./test_credentials_unix.exe)))

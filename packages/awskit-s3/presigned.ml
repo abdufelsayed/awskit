@@ -1,6 +1,6 @@
 module Multipart = Multipart
 module Object = Object
-module Resolver = Endpoint_config.Resolver
+module Resolver = Endpoint_resolution
 
 let ( let* ) = S3_result.( let* )
 

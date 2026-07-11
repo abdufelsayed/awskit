@@ -38,3 +38,15 @@
  (package awskit-lwt)
  (deps
   (alias runtime-http-contracts)))
+
+(test
+ (name test_credentials_lwt)
+ (package awskit-lwt)
+ (libraries awskit awskit-lwt alcotest lwt.unix))
+
+(rule
+ (alias lwt-credential-contracts)
+ (package awskit-lwt)
+ (deps test_credentials_lwt.exe)
+ (action
+  (run ./test_credentials_lwt.exe)))

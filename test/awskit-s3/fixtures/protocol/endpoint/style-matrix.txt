@@ -1,13 +1,7 @@
 [virtual-hosted]
-endpoint=https://bucket.s3.us-east-1.amazonaws.com
-path=/photos/cat%20space.jpg
-signing_path=/photos/cat space.jpg
-signing_region=us-east-1
-style=virtual-hosted
+safe-uri=https://bucket.s3.us-east-1.amazonaws.com/photos/cat%20space.jpg
+addressing=virtual-hosted
 
 [path-style]
-endpoint=https://s3.us-east-1.amazonaws.com
-path=/bucket.example/photos/cat%20space.jpg
-signing_path=/bucket.example/photos/cat space.jpg
-signing_region=us-east-1
-style=path
+safe-uri=https://s3.us-east-1.amazonaws.com/bucket.example/photos/cat%20space.jpg
+addressing=path

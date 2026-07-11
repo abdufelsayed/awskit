@@ -5,9 +5,13 @@
   (alias awskit-test-contracts)
   (alias awskit-core-contracts)
   (alias awskit-runtime-contracts)
+  (alias credential-contracts)
   (alias runtime-http-contracts)
+  (alias s3-lwt-contracts)
   (alias s3-simulator)
   (alias s3-transfer-faults)
+  (alias eio-transfer-contracts)
+  (alias lwt-unix-transfer-contracts)
   (alias s3-domain-laws)
   (alias s3-protocol-laws)
   (alias s3-protocol-fixtures)
@@ -38,6 +42,11 @@
   (alias test/awskit/lwt/runtime-http-contracts)))
 
 (alias
+ (name s3-lwt-contracts)
+ (deps
+  (alias test/awskit-s3/lwt/s3-lwt-contracts)))
+
+(alias
  (name awskit-core-contracts)
  (deps
   (alias test/awskit/awskit-core-contracts)))
@@ -46,6 +55,14 @@
  (name awskit-runtime-contracts)
  (deps
   (alias test/awskit/runtime/awskit-runtime-contracts)))
+
+(alias
+ (name credential-contracts)
+ (deps
+  (alias awskit-core-contracts)
+  (alias test/awskit/unix/unix-credential-contracts)
+  (alias test/awskit/lwt/lwt-credential-contracts)
+  (alias test/awskit/lwt/unix/lwt-unix-credential-contracts)))
 
 (alias
  (name s3-simulator)
@@ -57,6 +74,16 @@
  (name s3-transfer-faults)
  (deps
   (alias test/awskit-s3/sim/transfer-faults)))
+
+(alias
+ (name eio-transfer-contracts)
+ (deps
+  (alias test/awskit-s3/eio/eio-transfer-contracts)))
+
+(alias
+ (name lwt-unix-transfer-contracts)
+ (deps
+  (alias test/awskit-s3/lwt/unix/lwt-unix-transfer-contracts)))
 
 (alias
  (name s3-domain-laws)

@@ -55,7 +55,7 @@ type service = private {
     Service values returned through public accessors and public diagnostics are
     safe for logs: secret-bearing headers are redacted and response bodies are
     replaced with a redaction marker. Use {!module:Unsafe_diagnostics} when an
-    implementor or test needs the raw service headers or body. *)
+    adapter author or test needs the raw service headers or body. *)
 
 type body = private { message : string; limit : int64 option }
 (** Request or response body failure. *)

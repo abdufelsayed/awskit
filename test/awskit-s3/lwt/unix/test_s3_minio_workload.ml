@@ -1237,7 +1237,7 @@ let test_object_metadata_tags_and_delete () =
       Alcotest.(check string) "metadata body" "metadata-body" read.value;
       Alcotest.(check (list (pair string string)))
         "get metadata" (metadata_to_set metadata)
-        (metadata_to_set read.metadata);
+        (metadata_to_set read.info.metadata);
       let tag_result =
         await_ok "get object tags" (S3.Object.Tagging.get conn ~bucket ~key ())
       in
@@ -1345,7 +1345,8 @@ let test_manual_multipart_lifecycle () =
               ~parts:
                 (Multipart.Complete.Parts.of_list_exn
                    ~multipart_object_size:
-                     (Int64.of_int (String.length first_body + second_body))
+                     (Int64.of_int
+                        (String.length first_body + String.length second_body))
                    [ first.part; second.part ])
               ())
           : Multipart.Complete.result);
@@ -1359,7 +1360,7 @@ let test_manual_multipart_lifecycle () =
       Alcotest.(check string) "manual multipart body" body object_.value;
       Alcotest.(check (list (pair string string)))
         "manual multipart metadata" (metadata_to_set metadata)
-        (metadata_to_set object_.metadata);
+        (metadata_to_set object_.info.metadata);
       let tags =
         await_ok "manual multipart tags"
           (S3.Object.Tagging.get conn ~bucket ~key ())

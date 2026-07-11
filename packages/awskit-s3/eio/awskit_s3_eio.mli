@@ -35,7 +35,7 @@ module Body : sig
   type t
 
   include
-    Awskit_s3.Implementor.Request_body with type 'a io := 'a and type t := t
+    Awskit_s3.Runtime_adapter.Request_body with type 'a io := 'a and type t := t
 
   val of_flow :
     content_length:int64 ->
@@ -58,7 +58,9 @@ module Reader : sig
   type t
 
   include
-    Awskit_s3.Implementor.Response_reader with type 'a io := 'a and type t := t
+    Awskit_s3.Runtime_adapter.Response_reader
+      with type 'a io := 'a
+       and type t := t
 
   val to_flow :
     ?on_progress:(int64 -> unit) ->
@@ -79,7 +81,7 @@ end
 
 module Object : sig
   include
-    Awskit_s3.Implementor.Object_operations
+    Awskit_s3.Runtime_adapter.Object_operations
       with type client := t
        and type 'a io := 'a
        and type request_body := Body.t
@@ -142,13 +144,13 @@ end
 
 (** Bucket operations using direct-style Eio results. *)
 module Bucket :
-  Awskit_s3.Implementor.Bucket_operations
+  Awskit_s3.Runtime_adapter.Bucket_operations
     with type client := t
      and type 'a io := 'a
 
 (** Multipart operations using direct-style Eio results. *)
 module Multipart :
-  Awskit_s3.Implementor.Multipart_operations
+  Awskit_s3.Runtime_adapter.Multipart_operations
     with type client := t
      and type 'a io := 'a
      and type request_body := Body.t
@@ -156,6 +158,6 @@ module Multipart :
 (** Presigned request artifact helpers using the client's region, credentials,
     clock, and endpoint configuration. *)
 module Presigned :
-  Awskit_s3.Implementor.Presigned_operations
+  Awskit_s3.Runtime_adapter.Presigned_operations
     with type client := t
      and type 'a io := 'a

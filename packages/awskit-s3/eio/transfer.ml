@@ -214,12 +214,12 @@ module Make_body_reader
     (Runtime : Awskit.Runtime.S with type 'a t = 'a)
     (S3 : sig
       module Body :
-        Awskit_s3.Implementor.Request_body
+        Awskit_s3.Runtime_adapter.Request_body
           with type 'a io := 'a
            and type t = Runtime.request_body
 
       module Reader :
-        Awskit_s3.Implementor.Response_reader
+        Awskit_s3.Runtime_adapter.Response_reader
           with type 'a io := 'a
            and type t = Runtime.response_body_reader
     end) =
@@ -331,7 +331,7 @@ module Make
       end
 
       module Multipart :
-        Awskit_s3.Implementor.Multipart_operations
+        Awskit_s3.Runtime_adapter.Multipart_operations
           with type client := t
            and type 'a io := 'a
            and type request_body := Runtime.request_body

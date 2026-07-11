@@ -9,6 +9,34 @@ Awskit Lwt runtime.
 Use it when an application needs a custom Lwt HTTP backend. Use the
 [awskit-s3-lwt-unix] package when the ready Lwt + Unix S3 client is enough.
 
+{1 Client Construction}
+
+Apply {!module:Awskit_s3_lwt.Make} once to the caller-supplied Cohttp client,
+then create and reuse one configured S3 client:
+
+{[
+module S3 = Awskit_s3_lwt.Make (My_http_client)
+
+let s3 =
+  S3.create
+    ~region:"us-east-1"
+    ~credentials
+    ~clock
+    ~retry_policy:Awskit.Retry.disabled
+    ~endpoint_config
+    ()
+  |> Result.get_ok
+
+let result =
+  S3.Object.get_string s3 ~bucket ~key ~max_bytes:1_048_576L ()
+]}
+
+This adapter composes [Awskit_lwt.Make] and [Awskit_s3.Make] internally, so
+applications using a custom Cohttp Lwt client do not apply those two functors
+or construct two client values themselves. Direct composition through
+[Awskit_s3.Make] is the lower-level interface for new runtime adapters and for
+applications that deliberately share one runtime connection across services.
+
 {1 Runtime Shape}
 
 Use {!module:Awskit_s3_lwt.Make} with a [Cohttp_lwt.S.Client] implementation

@@ -66,7 +66,11 @@
    (>= v0.16.3))
   ptime
   (fmt
-   (>= 0.11.0))))
+   (>= 0.11.0))
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))))
 
 (package
  (name awskit-lwt)
@@ -131,7 +135,11 @@
   lwt
   uri
   ptime
-  yojson))
+  yojson
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))))
 
 (package
  (name awskit-eio)
@@ -259,8 +267,16 @@
    (= :version))
   (cohttp-lwt
    (>= 6.2.1))
+  (cohttp-lwt-unix
+   (and
+    :with-test
+    (>= 6.2.1)))
   lwt
-  ptime))
+  ptime
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))))
 
 (package
  (name awskit-s3-lwt-unix)
@@ -283,7 +299,11 @@
   lwt
   (fmt
    (>= 0.11.0))
-  ptime))
+  ptime
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))))
 
 (package
  (name awskit-s3-eio)
@@ -303,4 +323,16 @@
    (>= 0.11.0))
   (eio
    (>= 1.3))
-  ptime))
+  ptime
+  (cohttp-eio
+   (and
+    :with-test
+    (>= 6.2.1)))
+  (eio_main
+   (and
+    :with-test
+    (>= 1.3)))
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))))

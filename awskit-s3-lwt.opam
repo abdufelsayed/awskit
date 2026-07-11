@@ -15,8 +15,10 @@ depends: [
   "awskit-lwt" {= version}
   "awskit-s3" {= version}
   "cohttp-lwt" {>= "6.2.1"}
+  "cohttp-lwt-unix" {with-test & >= "6.2.1"}
   "lwt"
   "ptime"
+  "alcotest" {with-test & >= "1.9.1"}
   "odoc" {with-doc}
 ]
 build: [

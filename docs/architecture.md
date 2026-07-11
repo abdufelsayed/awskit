@@ -60,6 +60,11 @@ and adapter-specific tests.
   adapter modules.
 - Use module signatures or small adapter modules for dependency injection when
   tests, simulators, or runtime backends need swappable behavior.
+- Apply public runtime functors once, then pass configured client values to
+  ordinary operations. Adapter-author contracts live under
+  `Awskit_s3.Runtime_adapter`; they are not a second caller workflow.
+- Share runtime-neutral transfer options and plans, but keep Lwt Unix and Eio
+  file execution native so cancellation and resource ownership stay explicit.
 
 ## Error Model
 

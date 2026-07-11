@@ -554,6 +554,13 @@ and a known total-size mismatch before any request is sent.
 
 {1 Custom Runtime Composition}
 
+This is the lower-level composition surface for authors of new runtime
+adapters and applications that deliberately share one runtime connection
+across services. Applications that only need a caller-supplied Cohttp Lwt
+backend should instead apply [Awskit_s3_lwt.Make] once and use its single
+[create] function. Ready Lwt Unix applications should use
+[Awskit_s3_lwt_unix.create].
+
 Custom runtimes implement the ordinary {!module-type:Awskit.Runtime.S}
 contract. Apply {!module:Awskit_s3.Make} once to select the runtime
 implementation, create the runtime connection once, then wrap it once with

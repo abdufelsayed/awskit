@@ -1,10 +1,7 @@
-module Implementor = Implementor
+module Runtime_adapter = Runtime_adapter
 
-module type S = Implementor.Client
+module type S = Runtime_adapter.Client
 
-module Credentials = Awskit.Credentials
-module Endpoint = Awskit.Endpoint
-module Region = Awskit.Region
 module Error = S3_error
 module Bucket_name = Bucket_name
 module Object_key = Object_key
@@ -72,14 +69,14 @@ module Make (R : Awskit.Runtime.S) = struct
           match Object_key.of_string key with
           | Error _ as error -> error
           | Ok key ->
-              Endpoint_config.Resolver.resolve_object_request
-                (endpoint_config conn) ~region:(region conn) ~bucket ~key)
+              Endpoint_resolution.resolve_object_request (endpoint_config conn)
+                ~region:(region conn) ~bucket ~key)
 
     let bucket_request conn ~bucket ~suffix ~signing_suffix =
       match Bucket_name.of_string bucket with
       | Error _ as error -> error
       | Ok bucket ->
-          Endpoint_config.Resolver.resolve_bucket_request (endpoint_config conn)
+          Endpoint_resolution.resolve_bucket_request (endpoint_config conn)
             ~region:(region conn) ~bucket ~suffix ~signing_suffix
 
     let root_request conn =
@@ -90,7 +87,7 @@ module Make (R : Awskit.Runtime.S) = struct
       | Ok endpoint ->
           Ok
             {
-              Endpoint_config.Resolver.Request.endpoint;
+              Endpoint_resolution.Request.endpoint;
               path = "/";
               signing_path = "/";
               signing_region =
@@ -143,9 +140,8 @@ module Make (R : Awskit.Runtime.S) = struct
         ~headers:(Awskit.Response.headers response)
         ?body ()
 
-    let signed_request conn ~method_
-        ~(request : Endpoint_config.Resolver.Request.t) ~query ~headers
-        ~payload_hash =
+    let signed_request conn ~method_ ~(request : Endpoint_resolution.Request.t)
+        ~query ~headers ~payload_hash =
       let headers =
         ("host", Awskit.Endpoint.authority request.endpoint) :: headers
       in

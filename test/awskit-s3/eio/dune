@@ -1,0 +1,20 @@
+(test
+ (name test_transfer_eio)
+ (package awskit-s3-eio)
+ (libraries
+  awskit
+  awskit-eio
+  awskit-s3
+  awskit-s3-eio
+  alcotest
+  cohttp-eio
+  eio
+  eio_main
+  unix))
+
+(rule
+ (alias eio-transfer-contracts)
+ (package awskit-s3-eio)
+ (deps test_transfer_eio.exe)
+ (action
+  (run ./test_transfer_eio.exe)))

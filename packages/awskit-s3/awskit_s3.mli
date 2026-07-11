@@ -2,21 +2,16 @@
 
     [Awskit_s3] is the main entrypoint for AWS S3 bucket and object storage:
     object operations, bucket operations and configuration, multipart upload,
-    presigned request artifacts, endpoint resolution, and runtime-backed
-    clients. *)
+    presigned request artifacts, endpoint policy, and runtime-backed clients. *)
 
-module Implementor = Implementor
+module Runtime_adapter = Runtime_adapter
 (** Shared signatures for runtime adapters and direct functor composition.
 
     Application code normally uses a ready runtime package or the complete
     {!module-type:S} operation surface. *)
 
-module type S = Implementor.Client
+module type S = Runtime_adapter.Client
 (** Complete configured S3 operation surface for one runtime. *)
-
-module Credentials = Awskit.Credentials
-module Endpoint = Awskit.Endpoint
-module Region = Awskit.Region
 
 module Error : sig
   type t = Awskit.Error.t
@@ -73,7 +68,7 @@ module Policy = Policy
 module Presigned = Presigned
 
 module Make (R : Awskit.Runtime.S) :
-  Implementor.Runtime_client
+  Runtime_adapter.S
     with type runtime_connection = R.connection
      and type 'a io = 'a R.t
      and type request_body = R.request_body

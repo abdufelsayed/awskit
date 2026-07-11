@@ -16,8 +16,8 @@ module Runtime = struct
   }
 
   type connection = {
-    region : Region.t;
-    credentials : Credentials.t;
+    region : Awskit.Region.t;
+    credentials : Awskit.Credentials.t;
     retry_policy : Awskit.Retry.t;
     mutable calls : call list;
     mutable responses : response list;
@@ -35,7 +35,7 @@ module Runtime = struct
     mutable offset : int;
   }
 
-  let connect ?(region = Region.of_string_exn "us-east-1")
+  let connect ?(region = Awskit.Region.of_string_exn "us-east-1")
       ?(credentials = Protocol_support.credentials)
       ?(retry_policy = Awskit.Retry.default) responses =
     { region; credentials; retry_policy; calls = []; responses; sleeps = [] }

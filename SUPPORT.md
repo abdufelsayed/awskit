@@ -41,10 +41,10 @@ branch until the next release replaces it.
 | Credential source | Status | Notes |
 | --- | --- | --- |
 | Explicit static credentials | supported | Useful for tests and controlled configuration. Long-lived credentials in source code are not recommended. |
-| Environment variables | supported, scoped | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN`. Covered by the core provider-chain contract and package docs; provider-specific parser evidence is a follow-up target. |
-| Shared credentials/config profiles | supported, scoped | Static profiles from standard AWS files. Covered by the core provider-chain contract and package docs; provider-specific parser evidence is a follow-up target. |
-| ECS/container credentials | supported in Lwt Unix, scoped | Uses the Lwt Unix metadata provider where implemented. Metadata-provider parser, cache, and endpoint-policy evidence is a follow-up target. |
-| EC2 IMDS credentials | supported in Lwt Unix, scoped | Uses IMDSv2 when available and supports documented opt-outs/fallback controls. Metadata-provider parser, cache, timeout, cancellation, and fallback-policy evidence is a follow-up target. |
+| Environment variables | supported, scoped | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN`. Package-owned tests cover complete and partial environments plus provider-chain stop behavior. |
+| Shared credentials/config profiles | supported, scoped | Static profiles from standard AWS files. Package-owned tests cover credentials-file precedence, config profile sections, invalid partial profiles, and unsupported assume-role profiles. |
+| ECS/container credentials | supported in Lwt Unix, scoped | Package-owned tests cover relative and safe full endpoints, authorization headers, JSON parsing, refresh-window caching, timeout, and native cancellation. |
+| EC2 IMDS credentials | supported in Lwt Unix, scoped | Package-owned tests cover IMDSv2 token/role/credentials flow, disabled metadata, explicit and environment-driven IMDSv1 fallback policy, timeout, and native cancellation. |
 | Web identity, process, SSO, STS assume-role profiles | unsupported | Add executable provider evidence before documenting these as supported. |
 
 ## S3 Scope
@@ -81,6 +81,8 @@ The supported scope is backed by a layered test model:
 - protocol property tests and golden fixtures;
 - simulator contracts;
 - runtime HTTP workloads;
+- package-owned credential, generic Lwt S3, and runtime-native file-transfer
+  contracts;
 - local-service integration tests for the stated S3-compatible target;
 - odoc builds and compile-tested example executables.
 

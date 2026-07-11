@@ -1,0 +1,18 @@
+(test
+ (name test_awskit_s3_lwt)
+ (package awskit-s3-lwt)
+ (libraries
+  awskit
+  awskit-s3
+  awskit-s3-lwt
+  alcotest
+  cohttp-lwt-unix
+  lwt.unix
+  ptime))
+
+(rule
+ (alias s3-lwt-contracts)
+ (package awskit-s3-lwt)
+ (deps test_awskit_s3_lwt.exe)
+ (action
+  (run ./test_awskit_s3_lwt.exe)))

@@ -28,10 +28,10 @@ let header_or_empty name headers =
   | None -> ""
   | Some value -> value
 
-let presigner () =
+let presigner ?endpoint_config () =
   Presigned.Signer.create
     ~region:(Awskit.Region.of_string_exn "us-east-1")
-    ~credentials:Protocol_support.credentials ()
+    ~credentials:Protocol_support.credentials ?endpoint_config ()
 
 let test_presigned_get_fixture () =
   let expires_in = Presigned.Lifetime.of_span_exn (Ptime.Span.of_int_s 900) in
@@ -147,7 +147,7 @@ let test_signing_artifact_fixture () =
   let payload_hash = Awskit.Body.Payload_hash.sha256_of_string "body" in
   let signed =
     Awskit.Signing.sign_request_params ~credentials:Protocol_support.credentials
-      ~region:(Region.of_string_exn "us-east-1")
+      ~region:(Awskit.Region.of_string_exn "us-east-1")
       ~service:"s3" ~method_:`PUT ~path:"/photos/cat space.jpg"
       ~query_params:
         [
@@ -195,66 +195,50 @@ let test_signing_artifact_fixture () =
     ~actual
 
 let test_endpoint_resolution_fixture () =
-  let region = Region.of_string_exn "us-east-1" in
-  let resolved =
-    Endpoint_config.Resolver.resolve_object_request Endpoint_config.default
-      ~region
+  let request =
+    Presigned.Signer.get_object (presigner ()) ~now:Protocol_support.test_time
       ~bucket:(Protocol_support.bucket_name "bucket")
       ~key:(Protocol_support.object_key "photos/cat.jpg")
+      ()
     |> Protocol_support.ok_or_fail "endpoint fixture"
   in
-  let style =
-    match resolved.style with
-    | `Path -> "path"
-    | `Virtual_hosted -> "virtual-hosted"
-  in
   let actual =
-    Fmt.str "endpoint=%s\npath=%s\nsigning_path=%s\nsigning_region=%s\nstyle=%s"
-      (Awskit.Endpoint.to_url_prefix resolved.endpoint)
-      resolved.path resolved.signing_path
-      (Region.to_string resolved.signing_region)
-      style
+    Fmt.str "safe-uri=%s\naddressing=virtual-hosted"
+      (Presigned.safe_uri request |> Uri.to_string)
   in
   check_fixture "endpoint resolution"
     [ "endpoint"; "default-object.txt" ]
     ~actual
 
-let describe_resolved_endpoint label
-    (resolved : Endpoint_config.Resolver.Request.t) =
-  let style =
-    match resolved.style with
-    | `Path -> "path"
-    | `Virtual_hosted -> "virtual-hosted"
-  in
-  Fmt.str
-    "[%s]\nendpoint=%s\npath=%s\nsigning_path=%s\nsigning_region=%s\nstyle=%s"
-    label
-    (Awskit.Endpoint.to_url_prefix resolved.endpoint)
-    resolved.path resolved.signing_path
-    (Region.to_string resolved.signing_region)
-    style
+let describe_presigned_endpoint label addressing request =
+  Fmt.str "[%s]\nsafe-uri=%s\naddressing=%s" label
+    (Presigned.safe_uri request |> Uri.to_string)
+    addressing
 
-let resolve_object_or_fail label config ~bucket ~key =
-  Endpoint_config.Resolver.resolve_object_request config
-    ~region:(Region.of_string_exn "us-east-1")
+let presign_object_or_fail label config ~bucket ~key =
+  Presigned.Signer.get_object
+    (presigner ~endpoint_config:config ())
+    ~now:Protocol_support.test_time
     ~bucket:(Protocol_support.bucket_name bucket)
     ~key:(Protocol_support.object_key key)
+    ()
   |> Protocol_support.ok_or_fail label
 
 let test_endpoint_style_matrix_fixture () =
   let virtual_hosted =
-    resolve_object_or_fail "virtual-hosted endpoint fixture"
+    presign_object_or_fail "virtual-hosted endpoint fixture"
       Endpoint_config.default ~bucket:"bucket" ~key:"photos/cat space.jpg"
   in
   let path_style =
-    resolve_object_or_fail "path-style endpoint fixture" Endpoint_config.default
+    presign_object_or_fail "path-style endpoint fixture" Endpoint_config.default
       ~bucket:"bucket.example" ~key:"photos/cat space.jpg"
   in
   let actual =
     String.concat "\n\n"
       [
-        describe_resolved_endpoint "virtual-hosted" virtual_hosted;
-        describe_resolved_endpoint "path-style" path_style;
+        describe_presigned_endpoint "virtual-hosted" "virtual-hosted"
+          virtual_hosted;
+        describe_presigned_endpoint "path-style" "path" path_style;
       ]
   in
   check_fixture "endpoint style matrix"
@@ -592,10 +576,10 @@ let test_bucket_create_region_selection_fixture () =
   in
   let actual =
     Fmt.str "[configured]\n%s\n\n[override]\n%s"
-      (create (Region.of_string_exn "eu-west-1"))
+      (create (Awskit.Region.of_string_exn "eu-west-1"))
       (create
-         ~region:(Region.of_string_exn "eu-central-1")
-         (Region.of_string_exn "ap-south-1"))
+         ~region:(Awskit.Region.of_string_exn "eu-central-1")
+         (Awskit.Region.of_string_exn "ap-south-1"))
   in
   check_fixture "bucket create region selection"
     [ "bucket"; "create-regions.expected" ]

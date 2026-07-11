@@ -53,6 +53,24 @@ let object_path key =
 
 let path_style_object_path ~bucket ~key = "/" ^ bucket ^ object_path key
 
+let presigned_get ?(endpoint_config = Endpoint_config.default) ~bucket ~key () =
+  let signer =
+    Presigned.Signer.create ~region:test_region
+      ~credentials:Protocol_support.credentials ~endpoint_config ()
+  in
+  Presigned.Signer.get_object signer ~now:Protocol_support.test_time
+    ~bucket:(Bucket_name.of_string_exn bucket)
+    ~key:(Object_key.of_string_exn key)
+    ()
+
+let presigned_safe_uri ?endpoint_config ~bucket ~key () =
+  presigned_get ?endpoint_config ~bucket ~key ()
+  |> Result.map Presigned.safe_uri
+
+let safe_uri_is ~host ~path uri =
+  let expected = Fmt.str "https://%s%s" host path in
+  Uri.equal (Uri.of_string expected) uri
+
 let query_values name uri =
   Uri.query uri |> List.assoc_opt name |> Option.value ~default:[]
 
@@ -230,33 +248,17 @@ let prop_endpoint_auto_virtual_hosted_object_paths =
          pair Protocol_generators.valid_bucket_name
            Protocol_generators.protocol_object_key))
     (fun (bucket, key) ->
-      let typed_bucket = Bucket_name.of_string_exn bucket in
-      let typed_key = Object_key.of_string_exn key in
-      match
-        Endpoint_config.Resolver.resolve_object_request Endpoint_config.default
-          ~region:test_region ~bucket:typed_bucket ~key:typed_key
-      with
+      match presigned_safe_uri ~bucket ~key () with
       | Error _ -> false
-      | Ok resolved ->
+      | Ok uri ->
           if String.equal key "soap" then
-            String.equal "s3.us-east-1.amazonaws.com"
-              (Awskit.Endpoint.authority resolved.endpoint)
-            && String.equal (path_style_object_path ~bucket ~key) resolved.path
-            && String.equal ("/" ^ bucket ^ "/" ^ key) resolved.signing_path
-            && resolved.style = `Path
-            && Awskit.Region.equal test_region resolved.signing_region
+            safe_uri_is ~host:"s3.us-east-1.amazonaws.com"
+              ~path:(path_style_object_path ~bucket ~key)
+              uri
           else
-            String.equal
-              (bucket ^ ".s3.us-east-1.amazonaws.com")
-              (Awskit.Endpoint.authority resolved.endpoint)
-            && String.equal (object_path key) resolved.path
-            && String.equal ("/" ^ key) resolved.signing_path
-            && resolved.style = `Virtual_hosted
-            && Awskit.Region.equal test_region resolved.signing_region)
-
-let resolved_style_to_string = function
-  | `Path -> "path"
-  | `Virtual_hosted -> "virtual-hosted"
+            safe_uri_is
+              ~host:(bucket ^ ".s3.us-east-1.amazonaws.com")
+              ~path:(object_path key) uri)
 
 let endpoint_or_fail label config ~region =
   Endpoint_config.endpoint config ~region |> Protocol_support.ok_or_fail label
@@ -293,55 +295,36 @@ let test_endpoint_china_partition_hosts () =
         (Awskit.Endpoint.host endpoint))
     cases
 
-let resolve_object_or_fail label config ~bucket ~key =
-  Endpoint_config.Resolver.resolve_object_request config ~region:test_region
-    ~bucket:(Bucket_name.of_string_exn bucket)
-    ~key:(Object_key.of_string_exn key)
-  |> Protocol_support.ok_or_fail label
-
 let test_endpoint_soap_key_addressing () =
   let auto =
-    resolve_object_or_fail "auto soap object" Endpoint_config.default
-      ~bucket:"bucket" ~key:"soap"
+    presigned_safe_uri ~bucket:"bucket" ~key:"soap" ()
+    |> Protocol_support.ok_or_fail "auto soap object"
   in
   Alcotest.(check string)
     "auto soap host" "s3.us-east-1.amazonaws.com"
-    (Awskit.Endpoint.authority auto.endpoint);
-  Alcotest.(check string) "auto soap path" "/bucket/soap" auto.path;
-  Alcotest.(check string)
-    "auto soap signing path" "/bucket/soap" auto.signing_path;
-  Alcotest.(check string)
-    "auto soap style" "path"
-    (resolved_style_to_string auto.style);
+    (Uri.host auto |> Option.value ~default:"");
+  Alcotest.(check string) "auto soap path" "/bucket/soap" (Uri.path auto);
   let normal =
-    resolve_object_or_fail "auto soapbox object" Endpoint_config.default
-      ~bucket:"bucket" ~key:"soapbox"
+    presigned_safe_uri ~bucket:"bucket" ~key:"soapbox" ()
+    |> Protocol_support.ok_or_fail "auto soapbox object"
   in
   Alcotest.(check string)
     "auto soapbox host" "bucket.s3.us-east-1.amazonaws.com"
-    (Awskit.Endpoint.authority normal.endpoint);
-  Alcotest.(check string)
-    "auto soapbox style" "virtual-hosted"
-    (resolved_style_to_string normal.style);
+    (Uri.host normal |> Option.value ~default:"");
   let virtual_hosted =
     Endpoint_config.aws ~addressing_style:`Virtual_hosted ()
   in
   match
-    Endpoint_config.Resolver.resolve_object_request virtual_hosted
-      ~region:test_region
-      ~bucket:(Bucket_name.of_string_exn "bucket")
-      ~key:(Object_key.of_string_exn "soap")
+    presigned_get ~endpoint_config:virtual_hosted ~bucket:"bucket" ~key:"soap"
+      ()
   with
   | Error error ->
       Alcotest.(check (option string))
         "virtual-hosted soap validation field" (Some "key")
         (Awskit.Error.validation_field error)
-  | Ok resolved ->
-      Alcotest.failf
-        "expected virtual-hosted soap to fail, got endpoint=%s path=%s style=%s"
-        (Awskit.Endpoint.to_url_prefix resolved.endpoint)
-        resolved.path
-        (resolved_style_to_string resolved.style)
+  | Ok request ->
+      Alcotest.failf "expected virtual-hosted soap to fail, got safe URI %s"
+        (Presigned.safe_uri request |> Uri.to_string)
 
 let prop_endpoint_auto_dotted_bucket_uses_path_style =
   QCheck.Test.make ~count:default_count
@@ -351,20 +334,12 @@ let prop_endpoint_auto_dotted_bucket_uses_path_style =
          pair Protocol_generators.valid_dotted_bucket_name
            Protocol_generators.protocol_object_key))
     (fun (bucket, key) ->
-      let typed_bucket = Bucket_name.of_string_exn bucket in
-      let typed_key = Object_key.of_string_exn key in
-      match
-        Endpoint_config.Resolver.resolve_object_request Endpoint_config.default
-          ~region:test_region ~bucket:typed_bucket ~key:typed_key
-      with
+      match presigned_safe_uri ~bucket ~key () with
       | Error _ -> false
-      | Ok resolved ->
-          String.equal "s3.us-east-1.amazonaws.com"
-            (Awskit.Endpoint.authority resolved.endpoint)
-          && String.equal (path_style_object_path ~bucket ~key) resolved.path
-          && String.equal ("/" ^ bucket ^ "/" ^ key) resolved.signing_path
-          && resolved.style = `Path
-          && Awskit.Region.equal test_region resolved.signing_region)
+      | Ok uri ->
+          safe_uri_is ~host:"s3.us-east-1.amazonaws.com"
+            ~path:(path_style_object_path ~bucket ~key)
+            uri)
 
 let prop_endpoint_paths_preserve_percent_encoded_object_keys =
   QCheck.Test.make ~count:boundary_count
@@ -373,29 +348,18 @@ let prop_endpoint_paths_preserve_percent_encoded_object_keys =
     (fun key ->
       match Object_key.of_string key with
       | Error _ -> true
-      | Ok typed_key -> (
+      | Ok _ -> (
           let path_bucket = "bucket.example" in
           match
-            ( Endpoint_config.Resolver.resolve_object_request
-                Endpoint_config.default ~region:test_region
-                ~bucket:(Bucket_name.of_string_exn "bucket")
-                ~key:typed_key,
-              Endpoint_config.Resolver.resolve_object_request
-                Endpoint_config.default ~region:test_region
-                ~bucket:(Bucket_name.of_string_exn path_bucket)
-                ~key:typed_key )
+            ( presigned_safe_uri ~bucket:"bucket" ~key (),
+              presigned_safe_uri ~bucket:path_bucket ~key () )
           with
           | Ok virtual_hosted, Ok path_style ->
-              String.equal (object_path key) virtual_hosted.path
-              && String.equal ("/" ^ key) virtual_hosted.signing_path
-              && virtual_hosted.style = `Virtual_hosted
-              && String.equal
-                   (path_style_object_path ~bucket:path_bucket ~key)
-                   path_style.path
-              && String.equal
-                   ("/" ^ path_bucket ^ "/" ^ key)
-                   path_style.signing_path
-              && path_style.style = `Path
+              safe_uri_is ~host:"bucket.s3.us-east-1.amazonaws.com"
+                ~path:(object_path key) virtual_hosted
+              && safe_uri_is ~host:"s3.us-east-1.amazonaws.com"
+                   ~path:(path_style_object_path ~bucket:path_bucket ~key)
+                   path_style
           | Error _, _ | _, Error _ -> false))
 
 let prop_endpoint_accelerate_rejects_dotted_buckets =
@@ -409,12 +373,7 @@ let prop_endpoint_accelerate_rejects_dotted_buckets =
       let endpoint_config =
         Endpoint_config.aws ~endpoint_variant:`Accelerate ()
       in
-      let typed_bucket = Bucket_name.of_string_exn bucket in
-      let typed_key = Object_key.of_string_exn key in
-      match
-        Endpoint_config.Resolver.resolve_object_request endpoint_config
-          ~region:test_region ~bucket:typed_bucket ~key:typed_key
-      with
+      match presigned_get ~endpoint_config ~bucket ~key () with
       | Error error -> Awskit.Error.validation_field error = Some "bucket"
       | Ok _ -> false)
 
@@ -794,6 +753,75 @@ let prop_complete_upload_rejects_checksum_part_gaps =
       | Error error -> Awskit.Error.validation_field error = Some "part_number"
       | Ok _ -> false)
 
+let expect_validation_without_request label conn result =
+  (match result with
+  | Error error ->
+      Alcotest.(check bool)
+        (label ^ " is validation") true
+        (Awskit.Error.is_validation error)
+  | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label);
+  Alcotest.(check int)
+    (label ^ " request count") 0
+    (List.length (Protocol_recording_runtime.calls conn))
+
+let test_negative_max_bytes_rejected_before_request () =
+  let module S3 = Protocol_recording_runtime.S3 in
+  let bucket = Protocol_support.bucket_name "bucket" in
+  let key = Protocol_support.object_key "file.txt" in
+  let check label call =
+    let conn = Protocol_recording_runtime.connect [] in
+    expect_validation_without_request label conn (call conn)
+  in
+  check "get_string" (fun conn ->
+      S3.Object.get_string conn ~bucket ~key ~max_bytes:(-1L) ());
+  check "get_bytes" (fun conn ->
+      S3.Object.get_bytes conn ~bucket ~key ~max_bytes:(-1L) ());
+  check "find_string" (fun conn ->
+      S3.Object.find_string conn ~bucket ~key ~max_bytes:(-1L) ());
+  check "find_bytes" (fun conn ->
+      S3.Object.find_bytes conn ~bucket ~key ~max_bytes:(-1L) ())
+
+let test_invalid_max_pages_rejected_before_request () =
+  let module S3 = Protocol_recording_runtime.S3 in
+  let bucket = Protocol_support.bucket_name "bucket" in
+  let key = Protocol_support.object_key "file.txt" in
+  let upload =
+    Multipart.Upload.resume ~bucket ~key
+      ~upload_id:(Multipart.Upload_id.of_string_exn "upload-1")
+  in
+  let check label call =
+    let conn = Protocol_recording_runtime.connect [] in
+    expect_validation_without_request label conn (call conn)
+  in
+  check "list fold_pages" (fun conn ->
+      S3.Object.List.fold_pages conn ~bucket ~max_pages:0 ~init:()
+        ~f:(fun () _page -> Ok ())
+        ());
+  check "list pages" (fun conn ->
+      S3.Object.List.pages conn ~bucket ~max_pages:0 ());
+  check "list objects" (fun conn ->
+      S3.Object.List.objects conn ~bucket ~max_pages:(-1) ());
+  check "list keys" (fun conn ->
+      S3.Object.List.keys conn ~bucket ~max_pages:0 ());
+  check "versions fold_pages" (fun conn ->
+      S3.Object.Versions.fold_pages conn ~bucket ~max_pages:0 ~init:()
+        ~f:(fun () _page -> Ok ())
+        ());
+  check "versions pages" (fun conn ->
+      S3.Object.Versions.pages conn ~bucket ~max_pages:0 ());
+  check "versions object_versions" (fun conn ->
+      S3.Object.Versions.object_versions conn ~bucket ~max_pages:(-1) ());
+  check "versions delete_markers" (fun conn ->
+      S3.Object.Versions.delete_markers conn ~bucket ~max_pages:0 ());
+  check "list-parts fold_pages" (fun conn ->
+      S3.Multipart.List_parts.fold_pages conn ~upload ~max_pages:0 ~init:()
+        ~f:(fun () _page -> Ok ())
+        ());
+  check "list-parts pages" (fun conn ->
+      S3.Multipart.List_parts.pages conn ~upload ~max_pages:0 ());
+  check "list-parts parts" (fun conn ->
+      S3.Multipart.List_parts.parts conn ~upload ~max_pages:(-1) ())
+
 type protocol_generator_sample =
   | Sample_query of (string * string list) list
   | Sample_duplicate_query of (string * string list) list
@@ -1091,6 +1119,10 @@ let suite =
            test_endpoint_soap_key_addressing
       :: Alcotest.test_case "property family registration coverage" `Quick
            test_protocol_property_family_registration
+      :: Alcotest.test_case "negative max_bytes rejected before request" `Quick
+           test_negative_max_bytes_rejected_before_request
+      :: Alcotest.test_case "invalid max_pages rejected before request" `Quick
+           test_invalid_max_pages_rejected_before_request
       :: List.map Protocol_support.to_alcotest
            (List.map snd protocol_family_properties
            @ remaining_protocol_properties) );

@@ -18,6 +18,9 @@ depends: [
   "fmt" {>= "0.11.0"}
   "eio" {>= "1.3"}
   "ptime"
+  "cohttp-eio" {with-test & >= "6.2.1"}
+  "eio_main" {with-test & >= "1.3"}
+  "alcotest" {with-test & >= "1.9.1"}
   "odoc" {with-doc}
 ]
 build: [

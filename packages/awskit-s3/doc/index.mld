@@ -90,6 +90,8 @@ Main modules:
   {li {!module:Awskit_s3.Presigned} — runtime-agnostic presigned request
     artifact generation}
   {li {!module:Awskit_s3.Policy} — validated bucket policy JSON payloads}
+  {li {!module:Awskit_s3.Runtime_adapter} — advanced contracts for runtime
+    adapter authors}
   {li {!module:Awskit_s3.Make} — functor for wiring S3 operations to a custom
     [Awskit.Runtime.S] implementation}
 }
@@ -115,8 +117,10 @@ Eio Unix aggregate adapter.
 
 [Awskit_s3_lwt] provides a functor over [Cohttp_lwt.S.Client].
 Operations return [Lwt.t]. It is the right package for custom Lwt HTTP
-backends; use [awskit-s3-lwt-unix] for Unix local-path body, reader, and
-managed transfer helpers.
+backends. Its functor composes the generic Lwt runtime and S3 service functors
+behind one client constructor; callers do not construct a separate runtime and
+S3 client. Use [awskit-s3-lwt-unix] for Unix local-path body, reader, and managed
+transfer helpers.
 
 {2 awskit-s3-lwt-unix}
 

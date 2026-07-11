@@ -10,6 +10,7 @@
   bucket_result_xml
   bucket_versioning_xml
   bucket_xml_support
+  endpoint_resolution
   headers
   multipart_request
   multipart_xml
@@ -33,6 +34,7 @@
   s3_validation
   streaming
   tagging_xml)
+ (modules_without_implementation runtime_adapter)
  (libraries
   awskit
   digestif

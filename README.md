@@ -64,7 +64,7 @@ profile configuration.
 | `awskit-lwt` | Generic Lwt runtime adapter over a caller-supplied Cohttp Lwt client. |
 | `awskit-lwt-unix` | Ready-to-use Lwt + Unix runtime adapter using Cohttp Lwt Unix. |
 | `awskit-eio` | Direct-style Eio runtime adapter using Cohttp Eio and a caller-provided HTTPS policy. |
-| `awskit-s3` | Runtime-agnostic AWS S3 core: buckets, objects, multipart upload, presigned request artifacts, policies, and endpoint resolution. |
+| `awskit-s3` | Runtime-agnostic AWS S3 core: buckets, objects, multipart upload, presigned request artifacts, policies, and endpoint configuration. |
 | `awskit-s3-sim` | Deterministic in-memory S3 implementation for tests. |
 | `awskit-s3-lwt` | S3 adapter over the generic Awskit Lwt runtime. |
 | `awskit-s3-lwt-unix` | Ready-to-use S3 client for Lwt + Unix applications. |

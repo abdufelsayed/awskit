@@ -33,7 +33,7 @@ module Body : sig
   type t
 
   include
-    Awskit_s3.Implementor.Request_body
+    Awskit_s3.Runtime_adapter.Request_body
       with type 'a io := 'a Lwt.t
        and type t := t
 
@@ -65,7 +65,7 @@ module Reader : sig
   type t
 
   include
-    Awskit_s3.Implementor.Response_reader
+    Awskit_s3.Runtime_adapter.Response_reader
       with type 'a io := 'a Lwt.t
        and type t := t
 
@@ -88,7 +88,7 @@ end
 
 module Object : sig
   include
-    Awskit_s3.Implementor.Object_operations
+    Awskit_s3.Runtime_adapter.Object_operations
       with type client := t
        and type 'a io := 'a Lwt.t
        and type request_body := Body.t
@@ -153,13 +153,13 @@ end
 
 (** Bucket operations returning [Lwt.t]. *)
 module Bucket :
-  Awskit_s3.Implementor.Bucket_operations
+  Awskit_s3.Runtime_adapter.Bucket_operations
     with type client := t
      and type 'a io := 'a Lwt.t
 
 (** Multipart operations returning [Lwt.t]. *)
 module Multipart :
-  Awskit_s3.Implementor.Multipart_operations
+  Awskit_s3.Runtime_adapter.Multipart_operations
     with type client := t
      and type 'a io := 'a Lwt.t
      and type request_body := Body.t
@@ -167,6 +167,6 @@ module Multipart :
 (** Presigned request artifact helpers using the client's resolved region,
     credentials, clock, and endpoint configuration. *)
 module Presigned :
-  Awskit_s3.Implementor.Presigned_operations
+  Awskit_s3.Runtime_adapter.Presigned_operations
     with type client := t
      and type 'a io := 'a Lwt.t

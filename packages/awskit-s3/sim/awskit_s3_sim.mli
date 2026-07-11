@@ -59,7 +59,7 @@ module Body : sig
   type t
 
   include
-    Awskit_s3.Implementor.Request_body with type 'a io := 'a and type t := t
+    Awskit_s3.Runtime_adapter.Request_body with type 'a io := 'a and type t := t
 end
 
 (** In-memory simulator response-body readers. *)
@@ -67,7 +67,9 @@ module Reader : sig
   type t
 
   include
-    Awskit_s3.Implementor.Response_reader with type 'a io := 'a and type t := t
+    Awskit_s3.Runtime_adapter.Response_reader
+      with type 'a io := 'a
+       and type t := t
 end
 
 (** Deterministic fault kinds that can be injected before operations. *)
@@ -142,7 +144,7 @@ val objects_as_strings :
 
 (** Object operations against the in-memory simulator store. *)
 module Object :
-  Awskit_s3.Implementor.Object_operations
+  Awskit_s3.Runtime_adapter.Object_operations
     with type client := t
      and type 'a io := 'a
      and type request_body := Body.t
@@ -150,13 +152,13 @@ module Object :
 
 (** Bucket operations against the in-memory simulator store. *)
 module Bucket :
-  Awskit_s3.Implementor.Bucket_operations
+  Awskit_s3.Runtime_adapter.Bucket_operations
     with type client := t
      and type 'a io := 'a
 
 (** Multipart operations against the in-memory simulator store. *)
 module Multipart :
-  Awskit_s3.Implementor.Multipart_operations
+  Awskit_s3.Runtime_adapter.Multipart_operations
     with type client := t
      and type 'a io := 'a
      and type request_body := Body.t
@@ -164,6 +166,6 @@ module Multipart :
 (** Presigned request artifact helpers using the simulator client's credentials
     and deterministic clock. *)
 module Presigned :
-  Awskit_s3.Implementor.Presigned_operations
+  Awskit_s3.Runtime_adapter.Presigned_operations
     with type client := t
      and type 'a io := 'a

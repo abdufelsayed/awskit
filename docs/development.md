@@ -40,7 +40,11 @@ Awskit APIs should make correct AWS usage obvious at the call site.
 - Preserve the established module pattern: a module's primary type is `t`, and
   functions that operate on `t` take it as the first argument unless the
   surrounding API already uses a different shape.
-- Use option records for operation inputs that callers build directly.
+- Use a record when fields form a reusable product. Use direct labeled
+  arguments when a wrapper would carry only one already-validated value.
+- Make construction infallible when a record adds no invariant; use a private
+  or abstract type with a result-returning constructor when fields have a real
+  intrinsic invariant.
 - Use result records for structured operation outputs, especially when AWS may
   add fields later.
 - Keep convenience helpers and advanced helpers on the same domain vocabulary:
@@ -70,6 +74,8 @@ relearning the SDK.
 - `Credentials`, `Endpoint`, `Retry`, and `Timeout` name their domain modules.
 - `S` is the primary module type in a role namespace.
 - `Make` names public functors, including custom runtime composition.
+- `Runtime_adapter` contains contracts for adapter authors. Ordinary callers
+  use the configured operation surface returned by `Make` or a ready package.
 
 `Internal` is not a public extension role. Use private Dune modules for
 implementation details, or choose a real role name when the contract is meant
@@ -208,6 +214,9 @@ restructuring.
   interface.
 - Add a functor only when shared behavior genuinely depends on a module
   contract.
+- Keep Lwt and Eio transfer executors runtime-native when sharing them would
+  hide cancellation, filesystem ownership, or cleanup policy; share pure
+  plans and domains instead.
 - Avoid classes and objects for Awskit internals unless an external dependency
   requires them.
 - Do not use `Obj` in production code.

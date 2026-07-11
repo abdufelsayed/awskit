@@ -21,17 +21,17 @@ module type S = sig
     connection ->
     bucket:string ->
     key:string ->
-    (Endpoint_config.Resolver.Request.t, Error.t) result
+    (Endpoint_resolution.Request.t, Error.t) result
 
   val bucket_request :
     connection ->
     bucket:string ->
     suffix:string ->
     signing_suffix:string ->
-    (Endpoint_config.Resolver.Request.t, Error.t) result
+    (Endpoint_resolution.Request.t, Error.t) result
 
   val root_request :
-    connection -> (Endpoint_config.Resolver.Request.t, Error.t) result
+    connection -> (Endpoint_resolution.Request.t, Error.t) result
 
   val read_body :
     response_body_reader -> max_size:int64 -> (string, Error.t) result io
@@ -47,7 +47,7 @@ module type S = sig
   val with_response :
     connection ->
     method_:Awskit.Request.Method.t ->
-    request:Endpoint_config.Resolver.Request.t ->
+    request:Endpoint_resolution.Request.t ->
     query:(string * string list) list ->
     headers:(string * string) list ->
     payload_hash:Awskit.Body.Payload_hash.t ->
@@ -58,7 +58,7 @@ module type S = sig
   val with_empty_response :
     connection ->
     method_:Awskit.Request.Method.t ->
-    request:Endpoint_config.Resolver.Request.t ->
+    request:Endpoint_resolution.Request.t ->
     query:(string * string list) list ->
     headers:(string * string) list ->
     f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
@@ -67,7 +67,7 @@ module type S = sig
   val with_retryable_embedded_response :
     connection ->
     method_:Awskit.Request.Method.t ->
-    request:Endpoint_config.Resolver.Request.t ->
+    request:Endpoint_resolution.Request.t ->
     query:(string * string list) list ->
     headers:(string * string) list ->
     payload_hash:Awskit.Body.Payload_hash.t ->

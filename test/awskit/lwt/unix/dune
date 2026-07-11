@@ -1,0 +1,11 @@
+(test
+ (name test_credentials_lwt_unix)
+ (package awskit-lwt-unix)
+ (libraries awskit awskit-lwt awskit-lwt-unix alcotest lwt.unix))
+
+(rule
+ (alias lwt-unix-credential-contracts)
+ (package awskit-lwt-unix)
+ (deps test_credentials_lwt_unix.exe)
+ (action
+  (run ./test_credentials_lwt_unix.exe)))

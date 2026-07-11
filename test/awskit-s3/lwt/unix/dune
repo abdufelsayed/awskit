@@ -14,6 +14,26 @@
   qcheck-alcotest
   unix))
 
+(test
+ (name test_transfer_lwt_unix)
+ (package awskit-s3-lwt-unix)
+ (libraries
+  awskit
+  awskit-lwt-unix
+  awskit-s3
+  awskit-s3-lwt-unix
+  alcotest
+  cohttp-lwt-unix
+  lwt.unix
+  unix))
+
+(rule
+ (alias lwt-unix-transfer-contracts)
+ (package awskit-s3-lwt-unix)
+ (deps test_transfer_lwt_unix.exe)
+ (action
+  (run ./test_transfer_lwt_unix.exe)))
+
 (rule
  (alias local-service)
  (package awskit-s3-lwt-unix)

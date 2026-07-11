@@ -283,12 +283,14 @@ not imply support for arbitrary S3-compatible providers.
   {li {b Simulator coverage}: no direct filesystem helper. The simulator covers
     the underlying S3 operations and transfer planning is runtime-neutral.}
   {li {b MinIO test coverage}: yes through Lwt Unix MinIO tests for path
-    upload/download streaming and resumed multipart path transfer.}
+    upload/download streaming, multipart upload, and ranged download.}
   {li {b Notes and boundaries}: small uploads/downloads use one S3 request;
     larger uploads use multipart upload, and larger downloads use ranged
     [GetObject] requests. Download helpers publish through private temporary
     files. Awskit-created multipart uploads are aborted on helper failure;
-    caller-owned resumed uploads remain caller-owned.}
+    caller-owned resumed uploads remain caller-owned. Package-owned Lwt Unix
+    and Eio contracts cover atomic publication, progress, native cancellation,
+    cleanup failure composition, and resumed-upload non-abort behavior.}
 }
 
 {1 Presigned Request Artifacts}
