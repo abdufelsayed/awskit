@@ -148,6 +148,9 @@ module Create = struct
     metadata : Metadata.t;
     storage_class : Storage_class.t option;
     tags : Tag.Set.t;
+    cache_control : Header_value.t option;
+    content_encoding : Header_value.t option;
+    content_disposition : Header_value.t option;
     checksum : Checksum.t option;
     encryption : Encryption.Destination.t option;
     expected_bucket_owner : Account_id.t option;
@@ -164,18 +167,25 @@ module Create = struct
       metadata = Metadata.empty;
       storage_class = None;
       tags = Tag.Set.empty;
+      cache_control = None;
+      content_encoding = None;
+      content_disposition = None;
       checksum = None;
       encryption = None;
       expected_bucket_owner = None;
     }
 
   let options ?content_type ?(metadata = Metadata.empty) ?storage_class
-      ?(tags = Tag.Set.empty) ?checksum ?encryption ?expected_bucket_owner () =
+      ?(tags = Tag.Set.empty) ?cache_control ?content_encoding
+      ?content_disposition ?checksum ?encryption ?expected_bucket_owner () =
     {
       content_type;
       metadata;
       storage_class;
       tags;
+      cache_control;
+      content_encoding;
+      content_disposition;
       checksum;
       encryption;
       expected_bucket_owner;
@@ -302,6 +312,7 @@ module Complete = struct
   end
 
   type options = {
+    preconditions : Object.Preconditions.Write.t;
     expected_bucket_owner : Account_id.t option;
     checksum : Object.Checksum.value option;
     checksum_type : Object.Checksum.Type.t option;
@@ -317,13 +328,15 @@ module Complete = struct
 
   let default_options =
     {
+      preconditions = Object.Preconditions.Write.none;
       expected_bucket_owner = None;
       checksum = None;
       checksum_type = None;
       customer_key = None;
     }
 
-  let options ?expected_bucket_owner ?checksum ?checksum_type ?customer_key () =
+  let options ?(preconditions = Object.Preconditions.Write.none)
+      ?expected_bucket_owner ?checksum ?checksum_type ?customer_key () =
     let* () =
       match checksum with
       | Some (checksum : Object.Checksum.value)
@@ -335,12 +348,20 @@ module Complete = struct
             (Object.Checksum.Algorithm.to_string checksum.algorithm)
       | _ -> Ok ()
     in
-    Ok { expected_bucket_owner; checksum; checksum_type; customer_key }
+    Ok
+      {
+        preconditions;
+        expected_bucket_owner;
+        checksum;
+        checksum_type;
+        customer_key;
+      }
 
-  let options_exn ?expected_bucket_owner ?checksum ?checksum_type ?customer_key
-      () =
+  let options_exn ?preconditions ?expected_bucket_owner ?checksum ?checksum_type
+      ?customer_key () =
     S3_result.result_exn
-      (options ?expected_bucket_owner ?checksum ?checksum_type ?customer_key ())
+      (options ?preconditions ?expected_bucket_owner ?checksum ?checksum_type
+         ?customer_key ())
 end
 
 module List_parts = struct

@@ -1013,6 +1013,87 @@ let test_delete_many_object_boundaries () =
   in
   expect_error_field "objects" (Object.Delete_many.Objects.of_list too_many)
 
+let test_transfer_upload_policy_is_strategy_invariant () =
+  let content_type = Content_type.of_string_exn "application/octet-stream" in
+  let metadata = Metadata.of_list_exn [ ("origin", "managed-transfer") ] in
+  let tags =
+    Tag.Set.of_list_exn [ Tag.create_exn ~key:"purpose" ~value:"contract" ]
+  in
+  let storage_class = Storage_class.Standard_ia in
+  let customer_key =
+    Encryption.Customer_key.of_bytes_exn (Bytes.make 32 '\001')
+  in
+  let encryption = Encryption.Destination.sse_c customer_key in
+  let expected_bucket_owner = Account_id.of_string_exn "123456789012" in
+  let cache_control =
+    Header_value.of_string_exn ~field:"cache_control" "max-age=60"
+  in
+  let content_encoding =
+    Header_value.of_string_exn ~field:"content_encoding" "gzip"
+  in
+  let content_disposition =
+    Header_value.of_string_exn ~field:"content_disposition" "attachment"
+  in
+  let preconditions = Object.Preconditions.Write.if_absent in
+  let options =
+    Transfer.upload_options_exn ~content_type ~metadata ~tags ~storage_class
+      ~cache_control ~content_encoding ~content_disposition ~preconditions
+      ~encryption ~expected_bucket_owner ()
+  in
+  let put = Transfer.upload_put_options options in
+  let create = Transfer.upload_create_options options in
+  let upload_part = Transfer.upload_part_options options in
+  let complete = Transfer.upload_complete_options options in
+  Alcotest.(check bool)
+    "put content type" true
+    (put.content_type = Some content_type);
+  Alcotest.(check bool)
+    "create content type" true
+    (create.content_type = Some content_type);
+  Alcotest.(check bool) "put metadata" true (put.metadata = metadata);
+  Alcotest.(check bool) "create metadata" true (create.metadata = metadata);
+  Alcotest.(check bool) "put tags" true (put.tags = tags);
+  Alcotest.(check bool) "create tags" true (create.tags = tags);
+  Alcotest.(check bool)
+    "put storage class" true
+    (put.storage_class = Some storage_class);
+  Alcotest.(check bool)
+    "create storage class" true
+    (create.storage_class = Some storage_class);
+  Alcotest.(check bool) "put encryption" true (put.encryption = Some encryption);
+  Alcotest.(check bool)
+    "create encryption" true
+    (create.encryption = Some encryption);
+  Alcotest.(check bool)
+    "part customer key" true
+    (upload_part.customer_key = Some customer_key);
+  Alcotest.(check bool)
+    "complete customer key" true
+    (complete.customer_key = Some customer_key);
+  Alcotest.(check bool)
+    "complete preconditions" true
+    (complete.preconditions = preconditions);
+  Alcotest.(check bool)
+    "put expected owner" true
+    (put.expected_bucket_owner = Some expected_bucket_owner);
+  Alcotest.(check bool)
+    "create expected owner" true
+    (create.expected_bucket_owner = Some expected_bucket_owner);
+  Alcotest.(check bool)
+    "part expected owner" true
+    (upload_part.expected_bucket_owner = Some expected_bucket_owner);
+  Alcotest.(check bool)
+    "complete expected owner" true
+    (complete.expected_bucket_owner = Some expected_bucket_owner);
+  Alcotest.(check bool)
+    "abort expected owner" true
+    (Transfer.upload_abort_expected_bucket_owner options
+    = Some expected_bucket_owner);
+  Alcotest.(check bool)
+    "list expected owner" true
+    ((Transfer.upload_list_parts_options options).expected_bucket_owner
+    = Some expected_bucket_owner)
+
 let suite =
   [
     ( "pbt:awskit-s3:domain:bucket",
@@ -1089,6 +1170,8 @@ let suite =
           test_multipart_option_boundaries;
         Alcotest.test_case "delete-many object boundaries" `Quick
           test_delete_many_object_boundaries;
+        Alcotest.test_case "transfer upload policy is strategy invariant" `Quick
+          test_transfer_upload_policy_is_strategy_invariant;
       ] );
   ]
 

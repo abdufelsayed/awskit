@@ -1,10 +1,11 @@
 (** High-level S3 transfer configuration shared by object transfer helpers.
 
-    Transfer options cover strategy selection, local file behavior, and the S3
-    operation option records used by helper implementations. Retry and timeout
-    policies remain client/runtime construction policy; transfer helpers execute
-    ordinary S3 operations through that configured client instead of carrying
-    separate per-transfer retry or timeout placeholders. *)
+    Transfer options cover strategy selection, local file behavior, and object
+    semantics shared across the S3 operations used by helper implementations.
+    Retry and timeout policies remain client/runtime construction policy;
+    transfer helpers execute ordinary S3 operations through that configured
+    client instead of carrying separate per-transfer retry or timeout
+    placeholders. *)
 
 val min_part_size : int
 (** Minimum multipart part size accepted by S3, except for the final part. *)
@@ -65,9 +66,10 @@ type upload_options = private {
       (** Options used when verifying caller-owned uploads before resumed file
           transfer writes fresh parts. *)
 }
-(** High-level upload behavior. [put_options] are used for single-request
-    uploads; multipart option records are used when the selected strategy is
-    multipart or when writing into a caller-owned upload. *)
+(** High-level upload behavior. The constructor accepts object semantics once,
+    then derives these operation records so threshold-based strategy selection
+    cannot silently change metadata, encryption, preconditions, or ownership
+    checks. *)
 
 (** Local target behavior for high-level download helpers.
 
@@ -175,26 +177,35 @@ val upload_options :
   ?multipart_threshold:int64 ->
   ?part_size:int ->
   ?concurrency:int ->
-  ?put_options:Object.Put.options ->
-  ?create_options:Multipart.Create.options ->
-  ?upload_part_options:Multipart.Upload_part.options ->
-  ?complete_options:Multipart.Complete.options ->
-  ?abort_expected_bucket_owner:Account_id.t ->
-  ?list_parts_options:Multipart.List_parts.options ->
+  ?content_type:Content_type.t ->
+  ?metadata:Metadata.t ->
+  ?storage_class:Storage_class.t ->
+  ?tags:Tag.Set.t ->
+  ?cache_control:Header_value.t ->
+  ?content_encoding:Header_value.t ->
+  ?content_disposition:Header_value.t ->
+  ?preconditions:Object.Preconditions.Write.t ->
+  ?encryption:Encryption.Destination.t ->
+  ?expected_bucket_owner:Account_id.t ->
   unit ->
   (upload_options, Awskit.Error.t) result
-(** Build and validate high-level upload options. *)
+(** Build and validate high-level upload options. Object semantics are supplied
+    once and derived for both PutObject and multipart execution. *)
 
 val upload_options_exn :
   ?multipart_threshold:int64 ->
   ?part_size:int ->
   ?concurrency:int ->
-  ?put_options:Object.Put.options ->
-  ?create_options:Multipart.Create.options ->
-  ?upload_part_options:Multipart.Upload_part.options ->
-  ?complete_options:Multipart.Complete.options ->
-  ?abort_expected_bucket_owner:Account_id.t ->
-  ?list_parts_options:Multipart.List_parts.options ->
+  ?content_type:Content_type.t ->
+  ?metadata:Metadata.t ->
+  ?storage_class:Storage_class.t ->
+  ?tags:Tag.Set.t ->
+  ?cache_control:Header_value.t ->
+  ?content_encoding:Header_value.t ->
+  ?content_disposition:Header_value.t ->
+  ?preconditions:Object.Preconditions.Write.t ->
+  ?encryption:Encryption.Destination.t ->
+  ?expected_bucket_owner:Account_id.t ->
   unit ->
   upload_options
 (** Like {!val:upload_options}, but raises [Awskit.Error.Awskit_error] carrying

@@ -79,17 +79,61 @@ let download_bytes_transferred = function
 let progress ~direction ~phase ~transferred ?total ?part_number () =
   { direction; phase; transferred; total; part_number }
 
+let customer_key_of_encryption = function
+  | Some (Encryption.Destination.Sse_c customer_key) -> Some customer_key
+  | Some (Sse_s3 | Sse_kms _ | Dsse_kms _) | None -> None
+
+let derived_upload_stage_options ?content_type ?(metadata = Metadata.empty)
+    ?storage_class ?(tags = Tag.Set.empty) ?cache_control ?content_encoding
+    ?content_disposition ?(preconditions = Object.Preconditions.Write.none)
+    ?encryption ?expected_bucket_owner () =
+  let customer_key = customer_key_of_encryption encryption in
+  let put_options =
+    Object.Put.options ?content_type ~metadata ?storage_class ~tags
+      ?cache_control ?content_encoding ?content_disposition ~preconditions
+      ?encryption ?expected_bucket_owner ()
+  in
+  let create_options =
+    Multipart.Create.options ?content_type ~metadata ?storage_class ~tags
+      ?cache_control ?content_encoding ?content_disposition ?encryption
+      ?expected_bucket_owner ()
+  in
+  let upload_part_options =
+    Multipart.Upload_part.options ?customer_key ?expected_bucket_owner ()
+  in
+  let complete_options =
+    Multipart.Complete.options_exn ~preconditions ?customer_key
+      ?expected_bucket_owner ()
+  in
+  let list_parts_options =
+    Multipart.List_parts.options_exn ?expected_bucket_owner ()
+  in
+  ( put_options,
+    create_options,
+    upload_part_options,
+    complete_options,
+    expected_bucket_owner,
+    list_parts_options )
+
 let default_upload_options =
+  let ( put_options,
+        create_options,
+        upload_part_options,
+        complete_options,
+        abort_expected_bucket_owner,
+        list_parts_options ) =
+    derived_upload_stage_options ()
+  in
   {
     multipart_threshold = default_multipart_threshold;
     part_size = default_part_size;
     concurrency = default_concurrency;
-    put_options = Object.Put.default_options;
-    create_options = Multipart.Create.default_options;
-    upload_part_options = Multipart.Upload_part.default_options;
-    complete_options = Multipart.Complete.default_options;
-    abort_expected_bucket_owner = None;
-    list_parts_options = Multipart.List_parts.default_options;
+    put_options;
+    create_options;
+    upload_part_options;
+    complete_options;
+    abort_expected_bucket_owner;
+    list_parts_options;
   }
 
 let default_download_options =
@@ -260,12 +304,19 @@ let validate_download_options (options : download_options) =
 
 let upload_options ?(multipart_threshold = default_multipart_threshold)
     ?(part_size = default_part_size) ?(concurrency = default_concurrency)
-    ?(put_options = Object.Put.default_options)
-    ?(create_options = Multipart.Create.default_options)
-    ?(upload_part_options = Multipart.Upload_part.default_options)
-    ?(complete_options = Multipart.Complete.default_options)
-    ?abort_expected_bucket_owner
-    ?(list_parts_options = Multipart.List_parts.default_options) () =
+    ?content_type ?metadata ?storage_class ?tags ?cache_control
+    ?content_encoding ?content_disposition ?preconditions ?encryption
+    ?expected_bucket_owner () =
+  let ( put_options,
+        create_options,
+        upload_part_options,
+        complete_options,
+        abort_expected_bucket_owner,
+        list_parts_options ) =
+    derived_upload_stage_options ?content_type ?metadata ?storage_class ?tags
+      ?cache_control ?content_encoding ?content_disposition ?preconditions
+      ?encryption ?expected_bucket_owner ()
+  in
   let options =
     {
       multipart_threshold;
@@ -282,13 +333,14 @@ let upload_options ?(multipart_threshold = default_multipart_threshold)
   let* () = validate_upload_options options in
   Ok options
 
-let upload_options_exn ?multipart_threshold ?part_size ?concurrency ?put_options
-    ?create_options ?upload_part_options ?complete_options
-    ?abort_expected_bucket_owner ?list_parts_options () =
+let upload_options_exn ?multipart_threshold ?part_size ?concurrency
+    ?content_type ?metadata ?storage_class ?tags ?cache_control
+    ?content_encoding ?content_disposition ?preconditions ?encryption
+    ?expected_bucket_owner () =
   Awskit.Error.Producer.get_ok_exn
-    (upload_options ?multipart_threshold ?part_size ?concurrency ?put_options
-       ?create_options ?upload_part_options ?complete_options
-       ?abort_expected_bucket_owner ?list_parts_options ())
+    (upload_options ?multipart_threshold ?part_size ?concurrency ?content_type
+       ?metadata ?storage_class ?tags ?cache_control ?content_encoding
+       ?content_disposition ?preconditions ?encryption ?expected_bucket_owner ())
 
 let download_options ?(multipart_threshold = default_multipart_threshold)
     ?(part_size = default_part_size) ?(concurrency = default_concurrency)

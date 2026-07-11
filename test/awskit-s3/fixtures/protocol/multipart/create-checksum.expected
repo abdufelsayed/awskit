@@ -3,3 +3,6 @@ path=/large.bin
 query=uploads=
 checksum-algorithm=CRC32C
 checksum-type=FULL_OBJECT
+cache-control=max-age=3600
+content-encoding=gzip
+content-disposition=attachment; filename=large.bin
