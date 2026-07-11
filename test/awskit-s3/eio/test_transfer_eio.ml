@@ -1,4 +1,5 @@
 module S3 = Awskit_s3_eio
+module Client_contract : Awskit_s3.S = S3
 module Transfer = Awskit_s3.Transfer
 
 type server_state = { mutable object_body : string; mutable requests : int }

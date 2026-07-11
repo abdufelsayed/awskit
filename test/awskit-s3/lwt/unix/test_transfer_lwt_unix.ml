@@ -1,4 +1,5 @@
 module S3 = Awskit_s3_lwt_unix
+module Client_contract : Awskit_s3.S = S3
 module Transfer = Awskit_s3.Transfer
 
 type state = {

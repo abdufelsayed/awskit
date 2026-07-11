@@ -1,3 +1,5 @@
+module Client_contract : Awskit_s3.S = Awskit_s3_sim
+
 let () =
   Alcotest.run "awskit-s3-sim"
     (Test_sim_multipart_validation.suite

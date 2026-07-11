@@ -71,5 +71,5 @@ module Make (R : Awskit.Runtime.S) :
   Runtime_adapter.S
     with type runtime_connection = R.connection
      and type 'a io = 'a R.t
-     and type request_body = R.request_body
-     and type response_body_reader = R.response_body_reader
+     and type Body.t = R.request_body
+     and type Reader.t = R.response_body_reader

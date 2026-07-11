@@ -912,36 +912,30 @@ module type Client = sig
   type +'a io
   (** Runtime effect type. *)
 
-  type request_body
-  (** Runtime-owned request body type. *)
-
-  type response_body_reader
-  (** Scoped runtime response-body reader type. *)
-
+  module Body : Request_body with type 'a io := 'a io
   (** Request-body constructors for this runtime adapter. *)
-  module Body : Request_body with type 'a io = 'a io and type t = request_body
 
+  module Reader : Response_reader with type 'a io := 'a io
   (** Response-body readers for object [consume] callbacks. *)
-  module Reader :
-    Response_reader with type 'a io = 'a io and type t = response_body_reader
 
   module Object :
     Object_operations
-      with type client = t
-       and type 'a io = 'a io
-       and type request_body = request_body
-       and type response_body_reader = response_body_reader
+      with type client := t
+       and type 'a io := 'a io
+       and type request_body := Body.t
+       and type response_body_reader := Reader.t
 
-  module Bucket : Bucket_operations with type client = t and type 'a io = 'a io
+  module Bucket :
+    Bucket_operations with type client := t and type 'a io := 'a io
 
   module Multipart :
     Multipart_operations
-      with type client = t
-       and type 'a io = 'a io
-       and type request_body = request_body
+      with type client := t
+       and type 'a io := 'a io
+       and type request_body := Body.t
 
   module Presigned :
-    Presigned_operations with type client = t and type 'a io = 'a io
+    Presigned_operations with type client := t and type 'a io := 'a io
 end
 
 module type S = sig

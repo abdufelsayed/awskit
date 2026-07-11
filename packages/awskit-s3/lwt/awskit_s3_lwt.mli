@@ -8,6 +8,8 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
   type t
   (** Configured S3 client for the supplied Cohttp client. *)
 
+  type +'a io = 'a Lwt.t
+
   val create :
     ?ctx:Client.ctx ->
     ?endpoint_config:Awskit_s3.Endpoint_config.t ->

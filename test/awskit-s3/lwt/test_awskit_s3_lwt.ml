@@ -1,5 +1,6 @@
 open Awskit_s3
 module S3 = Awskit_s3_lwt.Make (Cohttp_lwt_unix.Client)
+module Client_contract : Awskit_s3.S = S3
 
 type response = { status : int; body : string }
 

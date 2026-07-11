@@ -14,6 +14,7 @@ module Runtime = Simulator_runtime.Runtime
 module S3 = Awskit_s3.Make (Runtime)
 
 type t = S3.t
+type +'a io = 'a
 
 let connect store ~credentials =
   Simulator_state.connect store ~credentials |> S3.create
