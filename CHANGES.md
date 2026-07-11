@@ -46,6 +46,10 @@ domains, ownership, and adapter boundaries more explicit.
   Crossing the multipart threshold now changes transport without dropping
   metadata, tags, storage class, encryption, preconditions, or expected-owner
   checks. (7a378a3)
+- Moved Awskit-created multipart handle construction under
+  `Multipart.Upload.Runtime_adapter` and changed completed transfer results to
+  expose inert bucket, key, and upload ID fields instead of a reusable-looking
+  handle for a terminal upload. (f0b7314)
 
 ## Changed
 
@@ -53,6 +57,9 @@ domains, ownership, and adapter boundaries more explicit.
   and response behavior with the runtime-backed contract. (acce2de)
 - Validated explicit checksum values as canonical Base64 with the digest width
   required by the selected algorithm. (2c1fe24)
+- Re-exported common structured error inspection and classification functions
+  from `Awskit_s3.Error`, so S3 application code can stay within one namespace.
+  (55082dd)
 
 ## Fixed
 
