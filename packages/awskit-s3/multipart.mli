@@ -81,13 +81,15 @@ module Upload : sig
       phantom tracks whether Awskit created the upload or the caller resumed it.
   *)
 
-  val created :
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
-    upload_id:Upload_id.t ->
-    created t
-  (** Create an Awskit-owned handle after a successful [CreateMultipartUpload]
-      response. This is primarily for runtime and simulator implementations. *)
+  module Runtime_adapter : sig
+    val created :
+      bucket:Bucket_name.t ->
+      key:Object_key.t ->
+      upload_id:Upload_id.t ->
+      created t
+    (** Create an Awskit-owned handle after a successful [CreateMultipartUpload]
+        response. Application code should use {!val:resume}. *)
+  end
 
   val resume :
     bucket:Bucket_name.t ->

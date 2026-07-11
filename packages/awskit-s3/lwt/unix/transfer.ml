@@ -626,8 +626,10 @@ struct
           | Ok complete ->
               Lwt.return_ok
                 {
-                  Awskit_s3.Transfer.upload =
-                    Awskit_s3.Multipart.Upload.as_caller_owned upload;
+                  Awskit_s3.Transfer.bucket =
+                    Awskit_s3.Multipart.Upload.bucket upload;
+                  key = Awskit_s3.Multipart.Upload.key upload;
+                  upload_id = Awskit_s3.Multipart.Upload.upload_id upload;
                   parts;
                   complete;
                   bytes_transferred;

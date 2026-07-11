@@ -43,7 +43,9 @@ type download_strategy = [ `Get | `Ranged ]
 type put_upload_result = { put : Object.Put.result; bytes_transferred : int64 }
 
 type multipart_upload_result = {
-  upload : Multipart.Upload.caller_owned Multipart.Upload.t;
+  bucket : Bucket_name.t;
+  key : Object_key.t;
+  upload_id : Multipart.Upload_id.t;
   parts : Multipart.Part.t list;
   complete : Multipart.Complete.result;
   bytes_transferred : int64;

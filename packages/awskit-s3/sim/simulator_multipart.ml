@@ -39,7 +39,7 @@ module Multipart = struct
   let created_upload_of_strings ~bucket ~key ~upload_id =
     let* bucket = Bucket_name.of_string bucket in
     let* key = Object_key.of_string key in
-    Ok (Multipart_model.Upload.created ~bucket ~key ~upload_id)
+    Ok (Multipart_model.Upload.Runtime_adapter.created ~bucket ~key ~upload_id)
 
   let create_upload conn ~bucket ~key ?options () =
     let options =

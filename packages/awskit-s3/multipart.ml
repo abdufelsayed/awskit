@@ -65,7 +65,10 @@ module Upload = struct
     upload_id : Upload_id.t;
   }
 
-  let created ~bucket ~key ~upload_id = { bucket; key; upload_id }
+  module Runtime_adapter = struct
+    let created ~bucket ~key ~upload_id = { bucket; key; upload_id }
+  end
+
   let resume ~bucket ~key ~upload_id = { bucket; key; upload_id }
 
   let of_strings ~bucket ~key ~upload_id =

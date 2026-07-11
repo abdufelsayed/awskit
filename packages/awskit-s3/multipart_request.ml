@@ -54,8 +54,8 @@ module Make (C : Request_context.S) = struct
                 Ok
                   {
                     Create_multipart_upload.upload =
-                      Multipart.Upload.created ~bucket:typed_bucket
-                        ~key:typed_key ~upload_id;
+                      Multipart.Upload.Runtime_adapter.created
+                        ~bucket:typed_bucket ~key:typed_key ~upload_id;
                     response;
                   }))
 

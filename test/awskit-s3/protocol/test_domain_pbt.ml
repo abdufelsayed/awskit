@@ -823,7 +823,7 @@ let test_multipart_boundaries () =
     "resume upload id" "upload-1"
     (Multipart.Upload.upload_id resumed |> Multipart.Upload_id.to_string);
   let caller_owned =
-    Multipart.Upload.created ~bucket ~key ~upload_id
+    Multipart.Upload.Runtime_adapter.created ~bucket ~key ~upload_id
     |> Multipart.Upload.as_caller_owned
   in
   Alcotest.(check string)

@@ -106,8 +106,10 @@ type put_upload_result = {
 (** Result of a single-request upload. *)
 
 type multipart_upload_result = {
-  upload : Multipart.Upload.caller_owned Multipart.Upload.t;
-      (** Caller-owned handle describing the upload that was completed. *)
+  bucket : Bucket_name.t;  (** Bucket containing the completed object. *)
+  key : Object_key.t;  (** Key of the completed object. *)
+  upload_id : Multipart.Upload_id.t;
+      (** Identity of the now-terminal multipart upload. *)
   parts : Multipart.Part.t list;
       (** Completed parts in ascending part-number order. *)
   complete : Multipart.Complete.result;
@@ -115,7 +117,8 @@ type multipart_upload_result = {
   bytes_transferred : int64;
       (** Number of local file bytes streamed into multipart part requests. *)
 }
-(** Result of a completed multipart upload. *)
+(** Result of a completed multipart upload. The identity fields are inert and
+    cannot be passed back to multipart operations as a live upload handle. *)
 
 type upload_result =
   | Put of put_upload_result
