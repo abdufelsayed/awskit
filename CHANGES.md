@@ -37,11 +37,37 @@ domains, ownership, and adapter boundaries more explicit.
   (2d04793)
 - Moved reusable secret material behind explicit `reveal_*` handoff functions
   and kept safe summaries as the default inspection API. (090324c)
+- Made AWS endpoint policy construction reject path-style transfer
+  acceleration before client creation. `Endpoint_config.aws` now returns a
+  result, `aws_exn` provides the exception bridge, and `local_plaintext` no
+  longer takes its redundant path-style argument. (c603942)
+- Replaced independently configurable managed-upload stage records with one
+  object policy that derives consistent PutObject and multipart options.
+  Crossing the multipart threshold now changes transport without dropping
+  metadata, tags, storage class, encryption, preconditions, or expected-owner
+  checks. Managed file helpers no longer expose redundant option revalidation
+  functions and do not compute explicit checksum values; checksum-bearing
+  uploads use the direct object or multipart operations. (7a378a3, 4f68b70)
+- Moved Awskit-created multipart handle construction under
+  `Multipart.Upload.Runtime_adapter` and changed completed transfer results to
+  expose inert bucket, key, and upload ID fields instead of a reusable-looking
+  handle for a terminal upload. (f0b7314)
 
 ## Changed
 
 - Aligned simulator operations, upload ownership, DeleteObjects cardinality,
   and response behavior with the runtime-backed contract. (acce2de)
+- Validated explicit checksum values as canonical Base64 with the digest width
+  required by the selected algorithm. (2c1fe24)
+- Re-exported common structured error inspection and classification functions
+  from `Awskit_s3.Error`, so S3 application code can stay within one namespace.
+  (55082dd)
+
+## Fixed
+
+- Allowed multipart file uploads to resume when the first successful
+  `ListParts` verification page is truncated, including uploads with more than
+  1,000 existing parts. (ce49b5f)
 
 ## Documentation, CI, and Release
 

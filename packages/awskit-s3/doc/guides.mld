@@ -228,7 +228,7 @@ Awskit_s3_eio.Object.get s3
 If the response body exceeds [max_bytes], the helper returns a body-classified
 {!type:Awskit.Error.t}. Use {!val:Awskit.Error.pp} or
 {!val:Awskit.Error.to_string_hum} for a human message, and
-{!val:Awskit.Error.kind} when code needs to distinguish body failures from
+{!val:Awskit_s3.Error.kind} when code needs to distinguish body failures from
 other SDK errors.
 
 {2 One-Request File Operations}
@@ -345,7 +345,9 @@ multipart upload if an Awskit-created upload fails before completion:
 
 {[
 let options =
-  Awskit_s3.Transfer.upload_options_exn ~concurrency:4 ()
+  Awskit_s3.Transfer.upload_options_exn ~concurrency:4
+    ~content_type:(Awskit_s3.Content_type.of_string_exn "application/x-tar")
+    ()
 in
 let* result =
   Awskit_s3_lwt_unix.Object.Transfer.multipart_upload_file s3
@@ -357,6 +359,12 @@ let* result =
       Fmt.pr "uploaded %Ld bytes@." progress.transferred)
     ()
 ]}
+
+Upload object semantics such as content type, metadata, tags, storage class,
+encryption, preconditions, and expected bucket owner are supplied once on
+[Transfer.upload_options]. The helper derives consistent [PutObject] and
+multipart operation options, so crossing the multipart threshold changes only
+the transfer strategy.
 
 To continue a caller-owned multipart upload, persist the bucket, key, and
 [upload_id], then rebuild an upload handle. The resume helper verifies the
@@ -416,6 +424,7 @@ let endpoint_config =
     ~endpoint_variant:`Dualstack
     ~addressing_style:`Auto
     ()
+  |> Result.get_ok
 in
 let s3 =
   Awskit_s3_eio.create
@@ -438,7 +447,6 @@ let endpoint_config =
   Awskit_s3.Endpoint_config.local_plaintext
     ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
     ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
-    ~addressing_style:`Path
     ()
   |> Result.get_ok
 in
@@ -628,7 +636,6 @@ let endpoint_config =
   Awskit_s3.Endpoint_config.local_plaintext
     ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
     ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
-    ~addressing_style:`Path
     ()
   |> Result.get_ok
 in
@@ -768,7 +775,9 @@ match result with
 | Error err -> log_error err
 ]}
 
-For service failures, [Awskit_s3.Error.service_code] exposes the AWS error
+The S3 module re-exports the common core inspection API, including [kind],
+[context], [retry_class], validation and transport classifiers, and service
+status. For service failures, [Awskit_s3.Error.service_code] exposes the AWS error
 code when present.
 
 Optional lookup helpers keep common not-found handling out of error branches.

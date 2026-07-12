@@ -7,6 +7,8 @@
 type t
 (** Configured Eio S3 client. Create with {!val:create}. *)
 
+type +'a io = 'a
+
 val create :
   sw:Eio.Switch.t ->
   env:< clock : _ Eio.Time.clock ; net : _ Eio.Net.t ; .. > ->

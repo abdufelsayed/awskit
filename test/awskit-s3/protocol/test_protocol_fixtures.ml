@@ -958,7 +958,17 @@ let test_multipart_create_checksum_headers_fixture () =
       ~algorithm:Object.Checksum.Algorithm.Crc32c
       ~checksum_type:Object.Checksum.Type.Full_object ()
   in
-  let options = Multipart.Create.options ~checksum () in
+  let options =
+    Multipart.Create.options ~checksum
+      ~cache_control:
+        (Header_value.of_string_exn ~field:"cache_control" "max-age=3600")
+      ~content_encoding:
+        (Header_value.of_string_exn ~field:"content_encoding" "gzip")
+      ~content_disposition:
+        (Header_value.of_string_exn ~field:"content_disposition"
+           "attachment; filename=large.bin")
+      ()
+  in
   let conn =
     Protocol_recording_runtime.connect
       [
@@ -976,12 +986,22 @@ let test_multipart_create_checksum_headers_fixture () =
   let target = request.Awskit.Request.target in
   let actual =
     Fmt.str
-      "method=%s\npath=%s\nquery=%s\nchecksum-algorithm=%s\nchecksum-type=%s"
+      "method=%s\n\
+       path=%s\n\
+       query=%s\n\
+       checksum-algorithm=%s\n\
+       checksum-type=%s\n\
+       cache-control=%s\n\
+       content-encoding=%s\n\
+       content-disposition=%s"
       (Awskit.Request.Method.to_string request.method_)
       target.path
       (query_to_string target.query)
       (header_or_empty "x-amz-checksum-algorithm" request.headers)
       (header_or_empty "x-amz-checksum-type" request.headers)
+      (header_or_empty "cache-control" request.headers)
+      (header_or_empty "content-encoding" request.headers)
+      (header_or_empty "content-disposition" request.headers)
   in
   check_fixture "create multipart checksum headers"
     [ "multipart"; "create-checksum.expected" ]
@@ -1007,14 +1027,26 @@ let test_multipart_complete_xml_fixture () =
           {|<CompleteMultipartUploadResult><ETag>"final"</ETag></CompleteMultipartUploadResult>|};
       ]
   in
+  let options =
+    Multipart.Complete.options_exn
+      ~preconditions:Object.Preconditions.Write.if_absent ()
+  in
   ignore
     (Protocol_recording_runtime.S3.Multipart.complete_upload conn ~upload
+       ~options
        ~parts:
          (Multipart.Complete.Parts.of_list_exn
-            [ part 1 "sha256-part-1"; part 2 "sha256-part-2" ])
+            [
+              part 1 "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
+              part 2 "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
+            ])
        ()
     |> Protocol_support.ok_or_fail "complete multipart fixture");
-  let body = (Protocol_recording_runtime.last_call conn).body in
+  let call = Protocol_recording_runtime.last_call conn in
+  Alcotest.(check (option string))
+    "complete multipart write precondition" (Some "*")
+    (Protocol_support.header "if-none-match" call.request.headers);
+  let body = call.body in
   check_fixture "complete multipart XML"
     [ "multipart"; "complete.xml" ]
     ~actual:body

@@ -290,7 +290,9 @@ not imply support for arbitrary S3-compatible providers.
     files. Awskit-created multipart uploads are aborted on helper failure;
     caller-owned resumed uploads remain caller-owned. Package-owned Lwt Unix
     and Eio contracts cover atomic publication, progress, native cancellation,
-    cleanup failure composition, and resumed-upload non-abort behavior.}
+    cleanup failure composition, and resumed-upload non-abort behavior. Managed
+    file helpers do not precompute explicit checksum values; use direct object
+    or multipart operations for checksum-bearing uploads.}
 }
 
 {1 Presigned Request Artifacts}

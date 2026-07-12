@@ -1,4 +1,5 @@
 module S3 = Awskit_s3_lwt_unix
+module Client_contract : Awskit_s3.S = S3
 module Transfer = Awskit_s3.Transfer
 
 type state = {
@@ -90,7 +91,7 @@ let install_multipart_transport state ~cleanup_fails =
       | `GET, false when query_has uri "uploadId" ->
           Lwt.return
             (response `OK
-               "<ListPartsResult><Bucket>transfer-bucket</Bucket><Key>object.bin</Key><UploadId>upload-1</UploadId><IsTruncated>false</IsTruncated></ListPartsResult>")
+               "<ListPartsResult><Bucket>transfer-bucket</Bucket><Key>object.bin</Key><UploadId>upload-1</UploadId><MaxParts>1000</MaxParts><IsTruncated>true</IsTruncated><NextPartNumberMarker>1000</NextPartNumberMarker></ListPartsResult>")
       | `PUT, false when query_has uri "partNumber" ->
           state.part_puts <- state.part_puts + 1;
           Lwt.bind (Cohttp_lwt.Body.to_string body) (fun _ ->
@@ -116,7 +117,7 @@ let create_client () =
   let endpoint_config =
     Awskit_s3.Endpoint_config.local_plaintext ~endpoint
       ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
-      ~addressing_style:`Path ()
+      ()
     |> ok_or_fail "endpoint config"
   in
   S3.create ~endpoint_config ~region:"us-east-1" ~credentials

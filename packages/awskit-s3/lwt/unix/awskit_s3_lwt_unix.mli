@@ -7,6 +7,8 @@
 type t
 (** Ready-to-use configured Lwt + Unix S3 client. Create with {!val:create}. *)
 
+type +'a io = 'a Lwt.t
+
 val create :
   ?ctx:Cohttp_lwt_unix.Client.ctx ->
   ?endpoint_config:Awskit_s3.Endpoint_config.t ->

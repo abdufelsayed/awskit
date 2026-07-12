@@ -1,4 +1,5 @@
 module S3 = Awskit_s3_eio
+module Client_contract : Awskit_s3.S = S3
 module Transfer = Awskit_s3.Transfer
 
 type server_state = { mutable object_body : string; mutable requests : int }
@@ -119,7 +120,7 @@ let with_server env callback f =
   let endpoint_config =
     Awskit_s3.Endpoint_config.local_plaintext ~endpoint
       ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
-      ~addressing_style:`Path ()
+      ()
     |> ok_or_fail "endpoint config"
   in
   let client =
@@ -329,7 +330,7 @@ let multipart_server state ~cleanup_fails _conn request request_body writer =
   | `GET, false when query_has uri "uploadId" ->
       response ~status:`OK
         ~body:
-          "<ListPartsResult><Bucket>transfer-bucket</Bucket><Key>object.bin</Key><UploadId>upload-1</UploadId><IsTruncated>false</IsTruncated></ListPartsResult>"
+          "<ListPartsResult><Bucket>transfer-bucket</Bucket><Key>object.bin</Key><UploadId>upload-1</UploadId><MaxParts>1000</MaxParts><IsTruncated>true</IsTruncated><NextPartNumberMarker>1000</NextPartNumberMarker></ListPartsResult>"
         writer
   | `PUT, false when query_has uri "partNumber" ->
       state.puts <- state.puts + 1;
@@ -407,6 +408,18 @@ let test_multipart_upload_strategy env () =
           Alcotest.(check int64)
             "multipart bytes" (Int64.of_int length)
             (Transfer.upload_bytes_transferred result);
+          (match result with
+          | Transfer.Put _ -> Alcotest.fail "multipart result used Put"
+          | Transfer.Multipart multipart ->
+              Alcotest.(check bool)
+                "completed bucket" true
+                (Awskit_s3.Bucket_name.equal multipart.bucket bucket);
+              Alcotest.(check bool)
+                "completed key" true
+                (Awskit_s3.Object_key.equal multipart.key key);
+              Alcotest.(check string)
+                "completed upload id" "upload-1"
+                (Awskit_s3.Multipart.Upload_id.to_string multipart.upload_id));
           Alcotest.(check int) "two uploaded parts" 2 state.puts;
           let final = final_progress !progress in
           Alcotest.(check bool)

@@ -20,15 +20,57 @@ module Error : sig
   val pp : Format.formatter -> t -> unit
   (** Pretty-print an error. *)
 
+  val pp_sexp : Format.formatter -> t -> unit
+  (** Pretty-print the structured S-expression representation. *)
+
   val equal : t -> t -> bool
   (** Compare two errors structurally. *)
 
   val to_string_hum : t -> string
   (** Render an error for humans. *)
 
+  val to_sexp_string_hum : t -> string
+  (** Render the structured S-expression representation. *)
+
+  val sexp_of_t : t -> Base.Sexp.t
+  (** Convert an error to its redacted S-expression representation. *)
+
+  val kind : t -> Awskit.Error.kind
+  (** Return the redacted top-level error kind. *)
+
+  val context : t -> Awskit.Error.context list
+  (** Return the redacted context stack, newest first. *)
+
+  val retry_class : t -> Awskit.Error.retry_class
+  (** Return the coarse caller-handling class. *)
+
+  val is_validation : t -> bool
+  (** Return whether the error contains a validation failure. *)
+
+  val is_credentials : t -> bool
+  (** Return whether the error contains a credentials failure. *)
+
+  val is_endpoint : t -> bool
+  (** Return whether the error contains an endpoint failure. *)
+
+  val is_transport : t -> bool
+  (** Return whether the error contains a transport failure. *)
+
+  val is_timeout : t -> bool
+  (** Return whether the error contains a timeout. *)
+
+  val is_cancelled : t -> bool
+  (** Return whether the error contains cancellation. *)
+
+  val validation_field : t -> string option
+  (** Return the invalid field for a validation failure, when available. *)
+
   val service_code : t -> string option
   (** Return the S3 service error code, when the error came from a modeled
       service response. *)
+
+  val service_status : t -> int option
+  (** Return the HTTP status for a service failure, when available. *)
 
   val is_not_found : t -> bool
   (** Return [true] for S3 not-found errors recognized by lookup helpers. *)
@@ -71,5 +113,5 @@ module Make (R : Awskit.Runtime.S) :
   Runtime_adapter.S
     with type runtime_connection = R.connection
      and type 'a io = 'a R.t
-     and type request_body = R.request_body
-     and type response_body_reader = R.response_body_reader
+     and type Body.t = R.request_body
+     and type Reader.t = R.response_body_reader

@@ -48,6 +48,8 @@ val create_store : ?config:config -> clock:Clock.t -> unit -> store
 type t
 (** Configured simulator S3 client. *)
 
+type +'a io = 'a
+
 val connect : store -> credentials:Awskit.Credentials.t -> t
 (** Connect to a store with credentials used by presigning/signing helpers. *)
 

@@ -15,7 +15,7 @@ let to_alcotest test = QCheck_alcotest.to_alcotest ~speed_level:`Quick test
 let header name headers = List.assoc_opt name headers
 
 let is_decode_error error =
-  match Awskit.Error.kind error with Decode _ -> true | _ -> false
+  match Awskit_s3.Error.kind error with Decode _ -> true | _ -> false
 
 let tag key value = Tag.create_exn ~key ~value
 let tag_set tags = Tag.Set.of_list_exn tags

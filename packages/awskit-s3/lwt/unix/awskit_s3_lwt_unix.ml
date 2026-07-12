@@ -2,6 +2,7 @@ module Runtime = Awskit_lwt_unix.Runtime
 module S3 = Awskit_s3.Make (Runtime)
 
 type t = S3.t
+type +'a io = 'a Lwt.t
 
 module File_transfer = Transfer
 module Body_reader = File_transfer.Make_body_reader (Runtime) (S3)

@@ -54,8 +54,8 @@ module Make (C : Request_context.S) = struct
                 Ok
                   {
                     Create_multipart_upload.upload =
-                      Multipart.Upload.created ~bucket:typed_bucket
-                        ~key:typed_key ~upload_id;
+                      Multipart.Upload.Runtime_adapter.created
+                        ~bucket:typed_bucket ~key:typed_key ~upload_id;
                     response;
                   }))
 
@@ -86,6 +86,12 @@ module Make (C : Request_context.S) = struct
           @ checksum_headers
           @ destination_encryption_headers options.encryption
           |> add_opt_content_type_header "content-type" options.content_type
+          |> add_opt_header "cache-control"
+               (Option.map Header_value.to_string options.cache_control)
+          |> add_opt_header "content-encoding"
+               (Option.map Header_value.to_string options.content_encoding)
+          |> add_opt_header "content-disposition"
+               (Option.map Header_value.to_string options.content_disposition)
           |> add_opt_header "x-amz-storage-class"
                (Option.map Storage_class.to_string options.storage_class)
           |> add_opt_header "x-amz-tagging" (tags_header options.tags)
@@ -246,6 +252,7 @@ module Make (C : Request_context.S) = struct
                    [ ("uploadId", [ Multipart.Upload_id.to_string upload_id ]) ]
                  ~headers:
                    ([ ("content-type", "application/xml") ]
+                    @ write_precondition_headers options.preconditions
                     @ checksum_value_headers options.checksum
                     @ checksum_type_header options.checksum_type
                     @ customer_key_headers options.customer_key

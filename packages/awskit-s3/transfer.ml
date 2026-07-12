@@ -43,7 +43,9 @@ type download_strategy = [ `Get | `Ranged ]
 type put_upload_result = { put : Object.Put.result; bytes_transferred : int64 }
 
 type multipart_upload_result = {
-  upload : Multipart.Upload.caller_owned Multipart.Upload.t;
+  bucket : Bucket_name.t;
+  key : Object_key.t;
+  upload_id : Multipart.Upload_id.t;
   parts : Multipart.Part.t list;
   complete : Multipart.Complete.result;
   bytes_transferred : int64;
@@ -79,17 +81,61 @@ let download_bytes_transferred = function
 let progress ~direction ~phase ~transferred ?total ?part_number () =
   { direction; phase; transferred; total; part_number }
 
+let customer_key_of_encryption = function
+  | Some (Encryption.Destination.Sse_c customer_key) -> Some customer_key
+  | Some (Sse_s3 | Sse_kms _ | Dsse_kms _) | None -> None
+
+let derived_upload_stage_options ?content_type ?(metadata = Metadata.empty)
+    ?storage_class ?(tags = Tag.Set.empty) ?cache_control ?content_encoding
+    ?content_disposition ?(preconditions = Object.Preconditions.Write.none)
+    ?encryption ?expected_bucket_owner () =
+  let customer_key = customer_key_of_encryption encryption in
+  let put_options =
+    Object.Put.options ?content_type ~metadata ?storage_class ~tags
+      ?cache_control ?content_encoding ?content_disposition ~preconditions
+      ?encryption ?expected_bucket_owner ()
+  in
+  let create_options =
+    Multipart.Create.options ?content_type ~metadata ?storage_class ~tags
+      ?cache_control ?content_encoding ?content_disposition ?encryption
+      ?expected_bucket_owner ()
+  in
+  let upload_part_options =
+    Multipart.Upload_part.options ?customer_key ?expected_bucket_owner ()
+  in
+  let complete_options =
+    Multipart.Complete.options_exn ~preconditions ?customer_key
+      ?expected_bucket_owner ()
+  in
+  let list_parts_options =
+    Multipart.List_parts.options_exn ?expected_bucket_owner ()
+  in
+  ( put_options,
+    create_options,
+    upload_part_options,
+    complete_options,
+    expected_bucket_owner,
+    list_parts_options )
+
 let default_upload_options =
+  let ( put_options,
+        create_options,
+        upload_part_options,
+        complete_options,
+        abort_expected_bucket_owner,
+        list_parts_options ) =
+    derived_upload_stage_options ()
+  in
   {
     multipart_threshold = default_multipart_threshold;
     part_size = default_part_size;
     concurrency = default_concurrency;
-    put_options = Object.Put.default_options;
-    create_options = Multipart.Create.default_options;
-    upload_part_options = Multipart.Upload_part.default_options;
-    complete_options = Multipart.Complete.default_options;
-    abort_expected_bucket_owner = None;
-    list_parts_options = Multipart.List_parts.default_options;
+    put_options;
+    create_options;
+    upload_part_options;
+    complete_options;
+    abort_expected_bucket_owner;
+    list_parts_options;
   }
 
 let default_download_options =
@@ -127,27 +173,6 @@ let planned_part_count ~content_length ~part_size =
     let part_size64 = Int64.of_int part_size in
     Int64.succ (Int64.div (Int64.pred content_length) part_size64)
 
-let validate_upload_options (options : upload_options) =
-  let* () =
-    validate_common ~multipart_threshold:options.multipart_threshold
-      ~concurrency:options.concurrency
-  in
-  let* () = validate_upload_part_size options.part_size in
-  if Option.is_some options.create_options.checksum then
-    S3_error_context.invalid ~field:"create_options.checksum"
-      "multipart file helpers do not compute per-part checksums"
-  else if Option.is_some options.upload_part_options.checksum then
-    S3_error_context.invalid ~field:"upload_part_options.checksum"
-      "multipart file helpers require per-part checksum values from low-level \
-       multipart calls"
-  else if Option.is_some options.complete_options.checksum then
-    S3_error_context.invalid ~field:"complete_options.checksum"
-      "multipart file helpers do not compute complete-object checksums"
-  else if Option.is_some options.complete_options.checksum_type then
-    S3_error_context.invalid ~field:"complete_options.checksum_type"
-      "multipart file helpers do not compute complete-object checksums"
-  else Ok ()
-
 let validate_multipart_part_count ~content_length ~part_size =
   if Int64.compare content_length 0L < 0 then
     S3_error_context.invalid ~field:"content_length"
@@ -160,13 +185,6 @@ let validate_multipart_part_count ~content_length ~part_size =
       S3_error_context.invalid ~field:"part_count"
         "multipart file transfer would exceed 10000 parts"
     else Ok ()
-
-let validate_upload_multipart_selection (options : upload_options) =
-  match options.put_options.checksum with
-  | Some _ ->
-      S3_error_context.invalid ~field:"put_options.checksum"
-        "optimized multipart file upload cannot use a single object checksum"
-  | None -> Ok ()
 
 module Plan = struct
   type upload_part = {
@@ -260,12 +278,19 @@ let validate_download_options (options : download_options) =
 
 let upload_options ?(multipart_threshold = default_multipart_threshold)
     ?(part_size = default_part_size) ?(concurrency = default_concurrency)
-    ?(put_options = Object.Put.default_options)
-    ?(create_options = Multipart.Create.default_options)
-    ?(upload_part_options = Multipart.Upload_part.default_options)
-    ?(complete_options = Multipart.Complete.default_options)
-    ?abort_expected_bucket_owner
-    ?(list_parts_options = Multipart.List_parts.default_options) () =
+    ?content_type ?metadata ?storage_class ?tags ?cache_control
+    ?content_encoding ?content_disposition ?preconditions ?encryption
+    ?expected_bucket_owner () =
+  let ( put_options,
+        create_options,
+        upload_part_options,
+        complete_options,
+        abort_expected_bucket_owner,
+        list_parts_options ) =
+    derived_upload_stage_options ?content_type ?metadata ?storage_class ?tags
+      ?cache_control ?content_encoding ?content_disposition ?preconditions
+      ?encryption ?expected_bucket_owner ()
+  in
   let options =
     {
       multipart_threshold;
@@ -279,16 +304,21 @@ let upload_options ?(multipart_threshold = default_multipart_threshold)
       list_parts_options;
     }
   in
-  let* () = validate_upload_options options in
+  let* () =
+    validate_common ~multipart_threshold:options.multipart_threshold
+      ~concurrency:options.concurrency
+  in
+  let* () = validate_upload_part_size options.part_size in
   Ok options
 
-let upload_options_exn ?multipart_threshold ?part_size ?concurrency ?put_options
-    ?create_options ?upload_part_options ?complete_options
-    ?abort_expected_bucket_owner ?list_parts_options () =
+let upload_options_exn ?multipart_threshold ?part_size ?concurrency
+    ?content_type ?metadata ?storage_class ?tags ?cache_control
+    ?content_encoding ?content_disposition ?preconditions ?encryption
+    ?expected_bucket_owner () =
   Awskit.Error.Producer.get_ok_exn
-    (upload_options ?multipart_threshold ?part_size ?concurrency ?put_options
-       ?create_options ?upload_part_options ?complete_options
-       ?abort_expected_bucket_owner ?list_parts_options ())
+    (upload_options ?multipart_threshold ?part_size ?concurrency ?content_type
+       ?metadata ?storage_class ?tags ?cache_control ?content_encoding
+       ?content_disposition ?preconditions ?encryption ?expected_bucket_owner ())
 
 let download_options ?(multipart_threshold = default_multipart_threshold)
     ?(part_size = default_part_size) ?(concurrency = default_concurrency)

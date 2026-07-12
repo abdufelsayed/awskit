@@ -28,6 +28,7 @@ let expect_error_field field = function
 
 let repeat count value = List.init count (Fun.const value) |> String.concat ""
 let repeat_char count char = String.init count (Fun.const char)
+let base64_digest size char = Base64.encode_exn (String.make size char)
 let qstring gen = QCheck.make ~print:(fun value -> String.escaped value) gen
 
 let qpair pp_left pp_right gen =
@@ -527,7 +528,10 @@ let prop_multipart_parts_preserve_known_checksum_and_size =
       let etag = Object.Etag.of_string_exn "\"etag\"" in
       let checksum =
         Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
-          ~value:checksum_value
+          ~value:
+            (base64_digest 32
+               (if String.equal checksum_value "" then '\000'
+                else checksum_value.[0]))
       in
       match Multipart.Part.create ~part_number ~etag ~checksum ~size () with
       | Error _ -> false
@@ -634,11 +638,18 @@ let test_account_header_and_checksum_boundaries () =
   let checksum =
     expect_ok "checksum"
       (Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Sha256
-         ~value:"provided-sha256")
+         ~value:(base64_digest 32 '\001'))
   in
-  Alcotest.(check string) "checksum value" "provided-sha256" checksum.value;
+  Alcotest.(check string)
+    "checksum value" (base64_digest 32 '\001') checksum.value;
   expect_error_field "checksum_value"
     (Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Sha256 ~value:"");
+  expect_error_field "checksum_value"
+    (Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Sha256
+       ~value:"not-base64");
+  expect_error_field "checksum_value"
+    (Object.Checksum.value ~algorithm:Object.Checksum.Algorithm.Crc32c
+       ~value:(base64_digest 3 '\000'));
   expect_error_field "checksum_algorithm"
     (Object.Checksum.Algorithm.of_string "FUTURE");
   let observed = Object.Checksum.Algorithm.observed_of_string "FUTURE" in
@@ -812,7 +823,7 @@ let test_multipart_boundaries () =
     "resume upload id" "upload-1"
     (Multipart.Upload.upload_id resumed |> Multipart.Upload_id.to_string);
   let caller_owned =
-    Multipart.Upload.created ~bucket ~key ~upload_id
+    Multipart.Upload.Runtime_adapter.created ~bucket ~key ~upload_id
     |> Multipart.Upload.as_caller_owned
   in
   Alcotest.(check string)
@@ -920,7 +931,7 @@ let test_multipart_option_boundaries () =
        [ completion_part ]);
   let sha512 =
     Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha512
-      ~value:"sha512"
+      ~value:(base64_digest 64 '\002')
   in
   expect_error_field "checksum_type"
     (Multipart.Complete.options ~checksum:sha512
@@ -931,7 +942,7 @@ let test_multipart_option_boundaries () =
           ~checksum_type:Object.Checksum.Type.Full_object ()));
   let md5 =
     Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Md5
-      ~value:"md5"
+      ~value:(base64_digest 16 '\003')
   in
   let checksummed_part number checksum size =
     Multipart.Part.create_exn
@@ -1001,6 +1012,87 @@ let test_delete_many_object_boundaries () =
     member "overflow" :: Object.Delete_many.Objects.to_list maximum
   in
   expect_error_field "objects" (Object.Delete_many.Objects.of_list too_many)
+
+let test_transfer_upload_policy_is_strategy_invariant () =
+  let content_type = Content_type.of_string_exn "application/octet-stream" in
+  let metadata = Metadata.of_list_exn [ ("origin", "managed-transfer") ] in
+  let tags =
+    Tag.Set.of_list_exn [ Tag.create_exn ~key:"purpose" ~value:"contract" ]
+  in
+  let storage_class = Storage_class.Standard_ia in
+  let customer_key =
+    Encryption.Customer_key.of_bytes_exn (Bytes.make 32 '\001')
+  in
+  let encryption = Encryption.Destination.sse_c customer_key in
+  let expected_bucket_owner = Account_id.of_string_exn "123456789012" in
+  let cache_control =
+    Header_value.of_string_exn ~field:"cache_control" "max-age=60"
+  in
+  let content_encoding =
+    Header_value.of_string_exn ~field:"content_encoding" "gzip"
+  in
+  let content_disposition =
+    Header_value.of_string_exn ~field:"content_disposition" "attachment"
+  in
+  let preconditions = Object.Preconditions.Write.if_absent in
+  let options =
+    Transfer.upload_options_exn ~content_type ~metadata ~tags ~storage_class
+      ~cache_control ~content_encoding ~content_disposition ~preconditions
+      ~encryption ~expected_bucket_owner ()
+  in
+  let put = Transfer.upload_put_options options in
+  let create = Transfer.upload_create_options options in
+  let upload_part = Transfer.upload_part_options options in
+  let complete = Transfer.upload_complete_options options in
+  Alcotest.(check bool)
+    "put content type" true
+    (put.content_type = Some content_type);
+  Alcotest.(check bool)
+    "create content type" true
+    (create.content_type = Some content_type);
+  Alcotest.(check bool) "put metadata" true (put.metadata = metadata);
+  Alcotest.(check bool) "create metadata" true (create.metadata = metadata);
+  Alcotest.(check bool) "put tags" true (put.tags = tags);
+  Alcotest.(check bool) "create tags" true (create.tags = tags);
+  Alcotest.(check bool)
+    "put storage class" true
+    (put.storage_class = Some storage_class);
+  Alcotest.(check bool)
+    "create storage class" true
+    (create.storage_class = Some storage_class);
+  Alcotest.(check bool) "put encryption" true (put.encryption = Some encryption);
+  Alcotest.(check bool)
+    "create encryption" true
+    (create.encryption = Some encryption);
+  Alcotest.(check bool)
+    "part customer key" true
+    (upload_part.customer_key = Some customer_key);
+  Alcotest.(check bool)
+    "complete customer key" true
+    (complete.customer_key = Some customer_key);
+  Alcotest.(check bool)
+    "complete preconditions" true
+    (complete.preconditions = preconditions);
+  Alcotest.(check bool)
+    "put expected owner" true
+    (put.expected_bucket_owner = Some expected_bucket_owner);
+  Alcotest.(check bool)
+    "create expected owner" true
+    (create.expected_bucket_owner = Some expected_bucket_owner);
+  Alcotest.(check bool)
+    "part expected owner" true
+    (upload_part.expected_bucket_owner = Some expected_bucket_owner);
+  Alcotest.(check bool)
+    "complete expected owner" true
+    (complete.expected_bucket_owner = Some expected_bucket_owner);
+  Alcotest.(check bool)
+    "abort expected owner" true
+    (Transfer.upload_abort_expected_bucket_owner options
+    = Some expected_bucket_owner);
+  Alcotest.(check bool)
+    "list expected owner" true
+    ((Transfer.upload_list_parts_options options).expected_bucket_owner
+    = Some expected_bucket_owner)
 
 let suite =
   [
@@ -1078,6 +1170,8 @@ let suite =
           test_multipart_option_boundaries;
         Alcotest.test_case "delete-many object boundaries" `Quick
           test_delete_many_object_boundaries;
+        Alcotest.test_case "transfer upload policy is strategy invariant" `Quick
+          test_transfer_upload_policy_is_strategy_invariant;
       ] );
   ]
 

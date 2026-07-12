@@ -4,6 +4,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
   module S3 = Awskit_s3.Make (Runtime)
 
   type t = S3.t
+  type +'a io = 'a Lwt.t
 
   module Body = struct
     include S3.Body

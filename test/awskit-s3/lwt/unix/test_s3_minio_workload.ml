@@ -144,8 +144,7 @@ let endpoint_config () =
         ~addressing_style:`Path ()
   | `Http -> (
       match
-        Awskit_s3.Endpoint_config.local_plaintext ~endpoint ~signing_region
-          ~addressing_style:`Path ()
+        Awskit_s3.Endpoint_config.local_plaintext ~endpoint ~signing_region ()
       with
       | Ok config -> config
       | Error _ ->

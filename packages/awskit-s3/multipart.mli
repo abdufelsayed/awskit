@@ -81,13 +81,15 @@ module Upload : sig
       phantom tracks whether Awskit created the upload or the caller resumed it.
   *)
 
-  val created :
-    bucket:Bucket_name.t ->
-    key:Object_key.t ->
-    upload_id:Upload_id.t ->
-    created t
-  (** Create an Awskit-owned handle after a successful [CreateMultipartUpload]
-      response. This is primarily for runtime and simulator implementations. *)
+  module Runtime_adapter : sig
+    val created :
+      bucket:Bucket_name.t ->
+      key:Object_key.t ->
+      upload_id:Upload_id.t ->
+      created t
+    (** Create an Awskit-owned handle after a successful [CreateMultipartUpload]
+        response. Application code should use {!val:resume}. *)
+  end
 
   val resume :
     bucket:Bucket_name.t ->
@@ -198,6 +200,12 @@ module Create : sig
     storage_class : Storage_class.t option;
         (** Storage class for the final object. *)
     tags : Tag.Set.t;  (** Tags for the final object. *)
+    cache_control : Header_value.t option;
+        (** Optional [Cache-Control] metadata for the final object. *)
+    content_encoding : Header_value.t option;
+        (** Optional [Content-Encoding] metadata for the final object. *)
+    content_disposition : Header_value.t option;
+        (** Optional [Content-Disposition] metadata for the final object. *)
     checksum : Checksum.t option;
         (** Valid checksum policy requested for the multipart upload. *)
     encryption : Encryption.Destination.t option;
@@ -221,6 +229,9 @@ module Create : sig
     ?metadata:Metadata.t ->
     ?storage_class:Storage_class.t ->
     ?tags:Tag.Set.t ->
+    ?cache_control:Header_value.t ->
+    ?content_encoding:Header_value.t ->
+    ?content_disposition:Header_value.t ->
     ?checksum:Checksum.t ->
     ?encryption:Encryption.Destination.t ->
     ?expected_bucket_owner:Account_id.t ->
@@ -284,6 +295,8 @@ module Complete : sig
   end
 
   type options = private {
+    preconditions : Object.Preconditions.Write.t;
+        (** Conditional headers checked when committing the final object. *)
     expected_bucket_owner : Account_id.t option;
         (** [x-amz-expected-bucket-owner]. *)
     checksum : Object.Checksum.value option;
@@ -309,6 +322,7 @@ module Complete : sig
   val default_options : options
 
   val options :
+    ?preconditions:Object.Preconditions.Write.t ->
     ?expected_bucket_owner:Account_id.t ->
     ?checksum:Object.Checksum.value ->
     ?checksum_type:Object.Checksum.Type.t ->
@@ -321,6 +335,7 @@ module Complete : sig
       initiation policy. *)
 
   val options_exn :
+    ?preconditions:Object.Preconditions.Write.t ->
     ?expected_bucket_owner:Account_id.t ->
     ?checksum:Object.Checksum.value ->
     ?checksum_type:Object.Checksum.Type.t ->

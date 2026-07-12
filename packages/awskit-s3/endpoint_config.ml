@@ -35,9 +35,16 @@ let invalid ?field message =
   Error (Awskit.Error.Producer.validation ?field message)
 
 let aws ?(addressing_style = `Auto) ?(endpoint_variant = `Regional) () =
-  Aws { addressing_style; endpoint_variant }
+  match (addressing_style, endpoint_variant) with
+  | `Path, (`Accelerate | `Accelerate_dualstack) ->
+      invalid ~field:"addressing_style"
+        "S3 Transfer Acceleration requires virtual-hosted addressing"
+  | _ -> Ok (Aws { addressing_style; endpoint_variant })
 
-let default = aws ()
+let aws_exn ?addressing_style ?endpoint_variant () =
+  S3_result.result_exn (aws ?addressing_style ?endpoint_variant ())
+
+let default = Aws { addressing_style = `Auto; endpoint_variant = `Regional }
 
 let is_localhost = function
   | "localhost" | "::1" -> true
@@ -87,10 +94,8 @@ let s3_compatible ~endpoint ~signing_region ~addressing_style ~tls_policy
          feature_policy;
        })
 
-let local_plaintext ~endpoint ~signing_region ~(addressing_style : [ `Path ]) ()
-    =
-  let addressing_style = (addressing_style :> addressing_style) in
-  s3_compatible ~endpoint ~signing_region ~addressing_style
+let local_plaintext ~endpoint ~signing_region () =
+  s3_compatible ~endpoint ~signing_region ~addressing_style:`Path
     ~tls_policy:`Http_local_only ~feature_policy:`S3_compatible ()
 
 let unsafe_plaintext ~endpoint ~signing_region ~addressing_style () =

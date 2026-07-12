@@ -263,23 +263,43 @@ let prop_endpoint_auto_virtual_hosted_object_paths =
 let endpoint_or_fail label config ~region =
   Endpoint_config.endpoint config ~region |> Protocol_support.ok_or_fail label
 
+let test_endpoint_config_rejects_path_style_acceleration () =
+  List.iter
+    (fun endpoint_variant ->
+      match
+        Endpoint_config.aws ~addressing_style:`Path ~endpoint_variant ()
+      with
+      | Error error ->
+          Alcotest.(check (option string))
+            "validation field" (Some "addressing_style")
+            (Awskit.Error.validation_field error)
+      | Ok _ -> Alcotest.fail "path-style acceleration must be rejected")
+    [ `Accelerate; `Accelerate_dualstack ];
+  ignore
+    (Endpoint_config.aws ~addressing_style:`Path ~endpoint_variant:`Regional ()
+    |> Protocol_support.ok_or_fail "regional path style");
+  ignore
+    (Endpoint_config.aws ~addressing_style:`Virtual_hosted
+       ~endpoint_variant:`Accelerate ()
+    |> Protocol_support.ok_or_fail "virtual-hosted acceleration")
+
 let test_endpoint_china_partition_hosts () =
   let cases =
     [
       ( "regional cn-north-1",
-        Endpoint_config.aws ~endpoint_variant:`Regional (),
+        Endpoint_config.aws_exn ~endpoint_variant:`Regional (),
         "cn-north-1",
         "s3.cn-north-1.amazonaws.com.cn" );
       ( "dualstack cn-northwest-1",
-        Endpoint_config.aws ~endpoint_variant:`Dualstack (),
+        Endpoint_config.aws_exn ~endpoint_variant:`Dualstack (),
         "cn-northwest-1",
         "s3.dualstack.cn-northwest-1.amazonaws.com.cn" );
       ( "accelerate cn-north-1",
-        Endpoint_config.aws ~endpoint_variant:`Accelerate (),
+        Endpoint_config.aws_exn ~endpoint_variant:`Accelerate (),
         "cn-north-1",
         "s3-accelerate.amazonaws.com.cn" );
       ( "fips dualstack cn-northwest-1",
-        Endpoint_config.aws ~endpoint_variant:`Fips_dualstack (),
+        Endpoint_config.aws_exn ~endpoint_variant:`Fips_dualstack (),
         "cn-northwest-1",
         "s3-fips.dualstack.cn-northwest-1.amazonaws.com.cn" );
     ]
@@ -312,7 +332,7 @@ let test_endpoint_soap_key_addressing () =
     "auto soapbox host" "bucket.s3.us-east-1.amazonaws.com"
     (Uri.host normal |> Option.value ~default:"");
   let virtual_hosted =
-    Endpoint_config.aws ~addressing_style:`Virtual_hosted ()
+    Endpoint_config.aws_exn ~addressing_style:`Virtual_hosted ()
   in
   match
     presigned_get ~endpoint_config:virtual_hosted ~bucket:"bucket" ~key:"soap"
@@ -371,7 +391,7 @@ let prop_endpoint_accelerate_rejects_dotted_buckets =
            Protocol_generators.protocol_object_key))
     (fun (bucket, key) ->
       let endpoint_config =
-        Endpoint_config.aws ~endpoint_variant:`Accelerate ()
+        Endpoint_config.aws_exn ~endpoint_variant:`Accelerate ()
       in
       match presigned_get ~endpoint_config ~bucket ~key () with
       | Error error -> Awskit.Error.validation_field error = Some "bucket"
@@ -693,7 +713,7 @@ let multipart_part_exn number size =
 let multipart_checksum_part_exn number =
   let checksum =
     Object.Checksum.value_exn ~algorithm:Object.Checksum.Algorithm.Sha256
-      ~value:(Fmt.str "sha256-part-%d" number)
+      ~value:(Base64.encode_exn (String.make 32 (Char.chr (number mod 256))))
   in
   Multipart.Part.create_exn
     ~part_number:(Multipart.Part_number.of_int_exn number)
@@ -1113,6 +1133,8 @@ let suite =
     ( "workload:awskit-s3:protocol-wire",
       Alcotest.test_case "generator sample observability (not replay coverage)"
         `Quick test_protocol_generator_sample_observability
+      :: Alcotest.test_case "endpoint config rejects path-style acceleration"
+           `Quick test_endpoint_config_rejects_path_style_acceleration
       :: Alcotest.test_case "AWS China endpoint partition hosts" `Quick
            test_endpoint_china_partition_hosts
       :: Alcotest.test_case "soap object key addressing" `Quick
