@@ -9,40 +9,74 @@ The left-hand snippets show 0.2 and the right-hand snippets show 0.3. The
 examples use the public adapter APIs; runtime implementors should also read the
 runtime-adapter signatures in [Awskit_s3.Runtime_adapter].
 
-{1 Bind a runtime once and configure S3 once}
+{1 Ready-made adapters keep one-step client construction}
 
-In 0.2, custom S3 composition exposed an S3-specific runtime module and
-operations used the runtime connection directly. In 0.3, apply
-[Awskit_s3.Make] to the ordinary [Awskit.Runtime.S] contract, create the
-runtime connection, then bind endpoint policy with [S3.create]. Ready-made
-Eio and Lwt adapters already perform these steps inside their [create] helper.
+Applications using a supplied Cohttp Lwt client should use
+[Awskit_s3_lwt.Make]. Its [create] helper configured both the runtime and S3
+in 0.2, and it continues to do so in 0.3. Do not compose [Awskit_lwt.Make]
+and [Awskit_s3.Make] separately for this case.
 
 {[(* 0.2 *)
-module Aws = Awskit_lwt.Make (My_cohttp_client)
-module S3 = Awskit_s3.Make (Aws.Runtime)
+module S3 = Awskit_s3_lwt.Make (My_cohttp_client)
 
-let runtime =
-  Aws.create ~region:"us-east-1" ~credentials ~clock ()
+let s3 =
+  S3.create ~region:"us-east-1" ~credentials ~clock ?endpoint_config ()
   |> Result.get_ok
 
-let result = S3.Object.get_string runtime ~bucket ~key ~max_bytes:1_048_576L ()
-]}
-
-{[(* 0.3 *)
-module Aws = Awskit_lwt.Make (My_cohttp_client)
-module S3 = Awskit_s3.Make (Aws.Runtime)
-
-let runtime =
-  Aws.create ~region:"us-east-1" ~credentials ~clock ()
-  |> Result.get_ok
-
-let s3 = S3.create ?endpoint_config runtime
 let result = S3.Object.get_string s3 ~bucket ~key ~max_bytes:1_048_576L ()
 ]}
 
-The returned [s3] value is the configured operation client. Keep the runtime
-connection only for other runtime-level work; ordinary S3 calls should receive
-[s3]. [Awskit_s3.Runtime_adapter] is the advanced implementor contract, not a
+{[(* 0.3 *)
+module S3 = Awskit_s3_lwt.Make (My_cohttp_client)
+
+let s3 =
+  S3.create ~region:"us-east-1" ~credentials ~clock ?endpoint_config ()
+  |> Result.get_ok
+
+let result = S3.Object.get_string s3 ~bucket ~key ~max_bytes:1_048_576L ()
+]}
+
+The same one-step path is available through the ready-made Eio and Lwt Unix
+adapters. Their returned [s3] value remains the configured operation client.
+
+{1 Custom runtimes bind S3 policy after runtime construction}
+
+This changes only direct users of [Awskit_s3.Make]. In 0.2 its input had to
+implement [Awskit_s3.RUNTIME], which extended the generic runtime with an
+[S3_endpoint] module, and operations received the resulting raw runtime
+connection. In 0.3 the functor accepts the ordinary [Awskit.Runtime.S]
+contract; [S3.create] binds the S3-specific endpoint policy to a runtime
+connection once, and operations receive that configured S3 client.
+
+{[(* 0.2 *)
+module Runtime = struct
+  include My_runtime
+
+  module S3_endpoint = struct
+    type nonrec connection = connection
+
+    let s3_endpoint_config _ = endpoint_config
+  end
+end
+
+module S3 = Awskit_s3.Make (Runtime)
+
+let result =
+  S3.Object.get_string runtime ~bucket ~key ~max_bytes:1_048_576L ()
+]}
+
+{[(* 0.3 *)
+module S3 = Awskit_s3.Make (My_runtime)
+
+let s3 = S3.create ~endpoint_config runtime
+
+let result =
+  S3.Object.get_string s3 ~bucket ~key ~max_bytes:1_048_576L ()
+]}
+
+This separates generic transport policy from S3 addressing and signing policy,
+and allows one runtime connection to back independently configured S3 clients.
+[Awskit_s3.Runtime_adapter] is the advanced implementor contract, not a
 replacement for the configured operation surface.
 
 {1 Root aliases and endpoint policy}
