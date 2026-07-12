@@ -68,6 +68,13 @@ domains, ownership, and adapter boundaries more explicit.
 - Allowed multipart file uploads to resume when the first successful
   `ListParts` verification page is truncated, including uploads with more than
   1,000 existing parts. (#26, b06374e)
+- Rejected `PutObject` and `UploadPart` bodies above S3's 5 GiB request limit
+  before transport, rejected oversized managed-upload part sizes, and forced
+  managed uploads above the single-request limit to use multipart transfer.
+  (5307e2c)
+- Rejected multipart completion collections that mix checksummed and
+  non-checksummed parts, while preserving checksum-free completion workflows.
+  (5307e2c)
 
 ## Documentation, CI, and Release
 
@@ -77,6 +84,9 @@ domains, ownership, and adapter boundaries more explicit.
 - Triggered Required CI when a draft pull request becomes ready for review,
   while preserving the default opened, synchronized, and reopened activities.
   (ecfc880)
+- Added migration guides for the 0.1-to-0.2 and 0.2-to-0.3 breaking releases,
+  linked them from the core and S3 package documentation, and aligned the
+  release PR template with every changelog section. (f42d889)
 
 # 0.2.0
 
