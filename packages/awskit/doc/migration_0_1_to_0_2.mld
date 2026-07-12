@@ -1,0 +1,245 @@
+{0 Migrating from 0.1 to 0.2}
+
+Awskit 0.2 is a source-breaking hardening release. It keeps the package
+names and the runtime split, but moves S3 calls to validated domain values,
+scoped body helpers, structured errors, and bounded transfer APIs. Update all
+Awskit packages together; the adapter, core, and S3 packages share these
+types.
+
+The first snippets below show 0.1 call sites and the second snippets show their
+0.2 replacements. If you are moving directly to 0.3, apply this guide first and then
+{{!page-migration_0_2_to_0_3}the 0.2 to 0.3 guide}.
+
+{1 Create clients and endpoint policy}
+
+Runtime constructors now validate string regions and endpoint policy at the
+boundary, return a structured error, and keep Eio HTTPS setup with the
+application. S3 endpoint, addressing, and scheme settings move into one
+endpoint policy value.
+
+{2 Eio}
+
+{[(* 0.1 *)
+let region = Awskit.Region.of_string_exn "us-east-1"
+let endpoint = Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ()
+
+let s3 =
+  Awskit_s3_eio.create ~sw ~env ~region ~credentials ~endpoint
+    ~addressing_style:`Path ~scheme:`Http ()
+]}
+
+{[(* 0.2 *)
+let endpoint_config =
+  Awskit_s3.Endpoint_config.local_plaintext
+    ~endpoint:(Awskit.Endpoint.http_exn ~host:"127.0.0.1" ~port:9000 ())
+    ~signing_region:(Awskit.Region.of_string_exn "us-east-1")
+    ~addressing_style:`Path ()
+  |> Result.get_ok
+
+let s3 =
+  Awskit_s3_eio.create ~sw ~env ~https:Awskit_eio.http_only
+    ~region:"us-east-1" ~credentials ~endpoint_config ()
+  |> Result.get_ok
+]}
+
+For an HTTPS endpoint, replace [Awskit_eio.http_only] with the connector used
+by the Eio examples. Handle the [Error] case instead of assuming that a
+malformed region or endpoint can only fail later during a request. The Lwt
+Unix adapter follows the same shape: use [~region:string],
+[?endpoint_config], and unwrap the result from
+[Awskit_s3_lwt_unix.create].
+
+{1 Typed S3 domains and operation names}
+
+Bucket and object arguments are now validated once and carried as
+[Bucket_name.t] and [Object_key.t]. The old positional in-memory helpers are
+also named [put_string], [put_bytes], [get_string], and [get_bytes].
+
+{[(* 0.1 *)
+let put =
+  S3.Object.put_string conn ~bucket:"my-bucket" ~key:"hello.txt" "hello"
+
+let got =
+  S3.Object.get_as_string conn ~bucket:"my-bucket" ~key:"hello.txt"
+    ~max_bytes:1_048_576L ()
+]}
+
+{[(* 0.2 *)
+let bucket = Awskit_s3.Bucket_name.of_string_exn "my-bucket"
+let key = Awskit_s3.Object_key.of_string_exn "hello.txt"
+
+let put = S3.Object.put_string conn ~bucket ~key ~contents:"hello" ()
+
+let got = S3.Object.get_string conn ~bucket ~key ~max_bytes:1_048_576L ()
+let body =
+  match got with
+  | Ok result -> result.value
+  | Error error -> raise (Awskit.Error.Awskit_error error)
+]}
+
+Replace raw strings in object, bucket, copy, tagging, listing, and multipart
+calls. Replace [Object.get_as_string] and [Object.get_as_bytes] with the
+corresponding [get_string] and [get_bytes] helpers. Listing helpers moved from
+[Object.List_objects_v2] and [Object.List_object_versions] to [Object.List]
+and [Object.Versions]; collection helpers should receive an explicit
+[~max_pages] bound and return typed keys.
+
+{1 Request bodies and scoped readers}
+
+Runtime-owned body constructors are exposed as adapter [Body] and [Reader]
+modules. Response readers remain valid only during the [consume] callback, and
+custom streams must declare replayability and a known length.
+
+{[(* 0.1 *)
+let body = S3.Runtime.Request_body.of_string "hello"
+
+let result =
+  S3.Object.get conn ~bucket:"my-bucket" ~key:"hello.txt"
+    ~consume:(fun reader ->
+      S3.Runtime.Response_body.read reader bytes ~off:0 ~len:(Bytes.length bytes))
+    ()
+]}
+
+{[(* 0.2 *)
+let body = S3.Body.of_string "hello"
+
+let result =
+  S3.Object.get conn ~bucket ~key
+    ~consume:(fun reader -> S3.Reader.read reader bytes ~off:0 ~len:(Bytes.length bytes))
+    ()
+]}
+
+For a custom producer, replace the old runtime descriptor call with
+[S3.Body.of_stream ~content_length ~replayable ~write], which returns a result.
+Use [S3.Reader.to_string] or [S3.Reader.to_bytes] only with an explicit
+[~max_bytes] limit. Do not retain the reader after [consume] returns.
+
+{1 Options and structured errors}
+
+Option fields that carry S3 syntax now use validated values such as
+[Content_type.t], [Header_value.t], [Metadata.t], [Tag.Set.t], and
+[Account_id.t]. Build them with their public constructors rather than
+record-updating raw strings.
+
+{[(* 0.1 *)
+let options =
+  { Awskit_s3.Object.Put.default_options with
+    content_type = Some "text/plain";
+    metadata = [ ("source", "migration") ] }
+]}
+
+{[(* 0.2 *)
+let options =
+  Awskit_s3.Object.Put.options_exn
+    ~content_type:(Awskit_s3.Content_type.of_string_exn "text/plain")
+    ~metadata:(Awskit_s3.Metadata.of_list_exn [ ("source", "migration") ])
+    ()
+]}
+
+The [Awskit.Error.t] type is opaque in 0.2. Application code should classify
+errors with [Awskit.Error.is_validation], [is_not_found], [retry_class], and
+[service_code], then render them with [pp] or [to_string_hum]. Runtime and
+service implementors construct errors through [Awskit.Error.Producer]; callers
+should not pattern-match or construct the old public error variants.
+
+{[(* 0.1 *)
+match error with
+| Awskit.Error.Validation { field; message } -> report field message
+| Awskit.Error.Service service -> report_status service.status
+| _ -> report_generic error
+]}
+
+{[(* 0.2 *)
+if Awskit.Error.is_validation error then
+  report_field (Awskit.Error.validation_field error)
+else if Awskit.Error.is_not_found error then
+  handle_missing ()
+else
+  report (Awskit.Error.to_string_hum error)
+]}
+
+{1 Multipart uploads}
+
+Multipart calls now carry a typed upload handle, typed part numbers, and typed
+bucket/key values. The handle keeps the upload identity together and prevents
+callers from accidentally mixing an upload id with another object.
+
+{[(* 0.1 *)
+let result =
+  S3.Multipart.upload_part conn ~bucket:"my-bucket" ~key:"large.bin"
+    ~upload_id ~part_number:1 ~body ()
+]}
+
+{[(* 0.2 *)
+let upload =
+  Awskit_s3.Multipart.Upload.resume ~bucket ~key ~upload_id
+let part_number = Awskit_s3.Multipart.Part_number.of_int_exn 1
+
+let result =
+  S3.Multipart.upload_part conn ~upload ~part_number ~body ()
+]}
+
+Use [Multipart.Complete.Parts.of_list] when a completion list needs validation,
+and pass the resulting collection to [complete_upload]. A caller-owned handle
+for a persisted upload is built with [Multipart.Upload.resume] or
+[Multipart.Upload.of_strings]; an upload returned by [create_upload] is the
+handle used for the new upload's subsequent parts.
+
+{1 Presigned requests}
+
+Presigned results became safe opaque artifacts in 0.2. The URL is no longer a
+public record field; log [safe_uri] and reveal the bearer URL only at the HTTP
+client handoff. Send every non-host value returned by [request_headers].
+
+{[(* 0.1 *)
+match
+  Awskit_s3.Presigned.get_object ~region:"us-east-1" ~credentials ~now
+    ~bucket:"my-bucket" ~key:"hello.txt" ()
+with
+| Ok request -> send request.url
+| Error error -> report error
+]}
+
+{[(* 0.2 *)
+match
+  Awskit_s3.Presigned.get_object ~region ~credentials ~now
+    ~bucket:"my-bucket" ~key:"hello.txt" ()
+with
+| Ok request ->
+    log_safe (Awskit_s3.Presigned.safe_uri request);
+    send
+      ~url:(Awskit_s3.Presigned.reveal_url request)
+      ~headers:(Awskit_s3.Presigned.request_headers request)
+| Error error -> report error
+]}
+
+{1 Transfers}
+
+Transfer option records are private and are built with
+[Transfer.upload_options] or [upload_options_exn]. Progress callbacks receive
+a [Transfer.progress] record instead of a raw byte count, and result variants
+carry the selected strategy.
+
+{[(* 0.1 *)
+let options =
+  { Awskit_s3.Transfer.default_upload_options with
+    part_size = 16 * 1024 * 1024 }
+
+S3.Object.Transfer.upload_file conn ~bucket:"my-bucket" ~key:"large.bin"
+  ~options ~on_progress:(fun bytes -> report bytes) ~path ()
+]}
+
+{[(* 0.2 *)
+let options =
+  Awskit_s3.Transfer.upload_options_exn ~part_size:(16 * 1024 * 1024) ()
+
+let on_progress (progress : Awskit_s3.Transfer.progress) =
+  report progress.transferred
+
+S3.Object.Transfer.upload_file conn ~bucket ~key ~options ~on_progress ~path ()
+]}
+
+Use [Transfer.upload_strategy] and [download_strategy] to branch on [Put],
+[Multipart], [Get], or [Ranged] results instead of relying on which helper was
+called. The transfer planner and validation helpers keep part count,
+concurrency, and thresholds explicit.

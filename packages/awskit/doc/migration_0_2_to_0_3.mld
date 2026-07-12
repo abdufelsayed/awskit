@@ -1,0 +1,275 @@
+{0 Migrating from 0.2 to 0.3}
+
+Awskit 0.3 is an intentionally breaking API cleanup. It keeps the runtime
+agnostic package split, but makes configured clients, outbound domains,
+ownership, result records, and secret handoffs explicit. Apply the
+{{!page-migration_0_1_to_0_2}0.1 to 0.2 guide} first when upgrading from 0.1.
+
+The left-hand snippets show 0.2 and the right-hand snippets show 0.3. The
+examples use the public adapter APIs; runtime implementors should also read the
+runtime-adapter signatures in [Awskit_s3.Runtime_adapter].
+
+{1 Bind a runtime once and configure S3 once}
+
+In 0.2, custom S3 composition exposed an S3-specific runtime module and
+operations used the runtime connection directly. In 0.3, apply
+[Awskit_s3.Make] to the ordinary [Awskit.Runtime.S] contract, create the
+runtime connection, then bind endpoint policy with [S3.create]. Ready-made
+Eio and Lwt adapters already perform these steps inside their [create] helper.
+
+{[(* 0.2 *)
+module Aws = Awskit_lwt.Make (My_cohttp_client)
+module S3 = Awskit_s3.Make (Aws.Runtime)
+
+let runtime =
+  Aws.create ~region:"us-east-1" ~credentials ~clock ()
+  |> Result.get_ok
+
+let result = S3.Object.get_string runtime ~bucket ~key ~max_bytes:1_048_576L ()
+]}
+
+{[(* 0.3 *)
+module Aws = Awskit_lwt.Make (My_cohttp_client)
+module S3 = Awskit_s3.Make (Aws.Runtime)
+
+let runtime =
+  Aws.create ~region:"us-east-1" ~credentials ~clock ()
+  |> Result.get_ok
+
+let s3 = S3.create ?endpoint_config runtime
+let result = S3.Object.get_string s3 ~bucket ~key ~max_bytes:1_048_576L ()
+]}
+
+The returned [s3] value is the configured operation client. Keep the runtime
+connection only for other runtime-level work; ordinary S3 calls should receive
+[s3]. [Awskit_s3.Runtime_adapter] is the advanced implementor contract, not a
+replacement for the configured operation surface.
+
+{1 Root aliases and endpoint policy}
+
+Use the core modules directly. The old [Awskit_s3.Region],
+[Awskit_s3.Credentials], [Awskit_s3.Endpoint], and endpoint-resolution request
+helpers are no longer part of the ordinary S3 facade.
+
+{[(* 0.2 *)
+let region = Awskit_s3.Region.of_string_exn "us-east-1"
+let endpoint = Awskit_s3.Endpoint.https_exn ~host:"s3.example.test" ()
+let credentials = Awskit_s3.Credentials.create_exn ~access_key_id ~secret_access_key ()
+]}
+
+{[(* 0.3 *)
+let region = Awskit.Region.of_string_exn "us-east-1"
+let endpoint = Awskit.Endpoint.https_exn ~host:"s3.example.test" ()
+let credentials =
+  Awskit.Credentials.create_exn ~access_key_id ~secret_access_key ()
+]}
+
+Endpoint policy builders are also stricter: [Endpoint_config.aws] returns a
+result and rejects path-style transfer acceleration, while
+[local_plaintext] no longer takes a redundant addressing-style argument.
+Handle the result at construction time and use [s3_compatible] or
+[unsafe_plaintext] when a non-loopback service really needs a different policy.
+
+{[(* 0.2 *)
+let endpoint_config =
+  Awskit_s3.Endpoint_config.aws ~endpoint_variant:`Accelerate
+    ~addressing_style:`Virtual_hosted ()
+]}
+
+{[(* 0.3 *)
+let endpoint_config =
+  Awskit_s3.Endpoint_config.aws ~endpoint_variant:`Accelerate
+    ~addressing_style:`Virtual_hosted ()
+  |> Result.get_ok
+]}
+
+{1 Option builders and direct operation arguments}
+
+0.3 removes one-field option wrappers and fake fallibility. Operations with
+only an expected owner now take [~expected_bucket_owner] directly, and option
+builders return plain values when all supplied fields are already validated.
+Keep using result-returning constructors for values that can genuinely fail,
+such as metadata collections, checksum values, endpoint policy, and completion
+part collections.
+
+{[(* 0.2 *)
+let options =
+  Awskit_s3.Object.Get.options ~expected_bucket_owner:owner ()
+  |> Result.get_ok
+
+let head = S3.Object.head s3 ~bucket ~key ~options ()
+]}
+
+{[(* 0.3 *)
+let options = Awskit_s3.Object.Get.options ~expected_bucket_owner:owner ()
+let head = S3.Object.head s3 ~bucket ~key ~options ()
+
+let bucket_head =
+  S3.Bucket.head s3 ~bucket ~expected_bucket_owner:owner ()
+]}
+
+For [DeleteObjects], construct the validated non-empty collection before the
+request. This replaces passing a raw list and makes the 1--1,000 member bound
+explicit.
+
+{[(* 0.2 *)
+S3.Object.delete_objects s3 ~bucket ~objects:[ first; second ] ()
+]}
+
+{[(* 0.3 *)
+let objects =
+  Awskit_s3.Object.Delete_many.Objects.of_list_exn [ first; second ]
+
+S3.Object.delete_objects s3 ~bucket ~objects ()
+]}
+
+{1 Result records}
+
+Object GET results now group response metadata under [result.info], so the
+consumed value and the metadata have stable, separate names.
+
+{[(* 0.2 *)
+match S3.Object.get_string s3 ~bucket ~key ~max_bytes:1_048_576L () with
+| Ok result ->
+    use result.value;
+    log_etag result.etag
+| Error error -> report error
+]}
+
+{[(* 0.3 *)
+match S3.Object.get_string s3 ~bucket ~key ~max_bytes:1_048_576L () with
+| Ok result ->
+    use result.value;
+    log_etag result.info.etag
+| Error error -> report error
+]}
+
+Transfer results retain the strategy tag but expose byte counts and inert
+identity fields. A completed multipart result no longer contains a reusable
+upload handle; persist or resume a caller-owned handle before completion when
+future operations need the upload identity.
+
+{[(* 0.2 *)
+match upload_result with
+| Awskit_s3.Transfer.Multipart { upload; complete; _ } ->
+    use upload;
+    use complete
+| Awskit_s3.Transfer.Put result -> use result
+]}
+
+{[(* 0.3 *)
+match upload_result with
+| Awskit_s3.Transfer.Multipart result ->
+    use result.bucket;
+    use result.key;
+    use result.upload_id;
+    use result.bytes_transferred;
+    use result.complete
+| Awskit_s3.Transfer.Put result ->
+    use result.put;
+    use result.bytes_transferred
+]}
+
+{1 Multipart ownership and completion invariants}
+
+Only runtime adapters and simulators may construct an Awskit-created upload
+handle. Application code resumes a persisted upload with an explicit
+caller-owned handle. Completion lists are validated once and then passed as an
+abstract collection.
+
+{[(* 0.2 *)
+let upload =
+  Awskit_s3.Multipart.Upload.created ~bucket ~key ~upload_id
+
+let part_number = Awskit_s3.Multipart.Part_number.of_int_exn 1
+let part =
+  Awskit_s3.Multipart.Part.create_exn ~part_number ~etag ()
+
+S3.Multipart.complete_upload s3 ~upload ~parts:[ part ] ()
+]}
+
+{[(* 0.3 *)
+let upload = Awskit_s3.Multipart.Upload.resume ~bucket ~key ~upload_id
+let part_number = Awskit_s3.Multipart.Part_number.of_int_exn 1
+let part =
+  Awskit_s3.Multipart.Part.create_exn ~part_number ~etag ()
+let parts = Awskit_s3.Multipart.Complete.Parts.of_list_exn [ part ]
+
+S3.Multipart.complete_upload s3 ~upload ~parts ()
+]}
+
+Use [Multipart.Upload.Runtime_adapter.created] only inside an adapter or
+simulator after [CreateMultipartUpload] succeeds. Use [Multipart.Upload.resume]
+for a persisted [caller_owned] upload; a terminal result's [upload_id] is
+identity data, not a live handle.
+
+{1 Presigning and secrets}
+
+Configured presigning now follows the same operation domains as ordinary S3
+calls. Standalone signing uses [Presigned.Signer]. Signed header names are
+separate from the deliberately revealed header values, and secret material
+such as SSE-C headers is available only through an explicit [reveal_*] call.
+
+{[(* 0.2 *)
+let request =
+  S3.Presigned.get_object s3 ~bucket ~key ()
+  |> Result.get_ok
+
+let headers = Awskit_s3.Presigned.request_headers request
+let url = Awskit_s3.Presigned.reveal_url request
+]}
+
+{[(* 0.3 *)
+let request =
+  S3.Presigned.get_object s3 ~bucket ~key ()
+  |> Result.get_ok
+
+let header_names = Awskit_s3.Presigned.request_header_names request
+let headers = Awskit_s3.Presigned.reveal_request_headers request
+let url = Awskit_s3.Presigned.reveal_url request
+]}
+
+Use [safe_uri], [signed_header_names], [request_header_names], and [pp] for
+logs and diagnostics. For customer-key encryption, replace direct key accessors
+with [Encryption.Customer_key.reveal_headers] or
+[reveal_copy_source_headers], and keep the returned values only for the HTTP
+handoff.
+
+{1 Managed transfer options}
+
+Managed uploads now accept one object policy and derive matching single-request
+and multipart options. This prevents crossing the threshold from dropping
+metadata, tags, storage class, encryption, preconditions, or expected-owner
+checks.
+
+{[(* 0.2 *)
+let options =
+  Awskit_s3.Transfer.upload_options_exn
+    ~part_size:16_777_216
+    ~put_options
+    ~create_options
+    ~upload_part_options
+    ~complete_options
+    ~abort_options
+    ~list_parts_options
+    ()
+]}
+
+{[(* 0.3 *)
+let options =
+  Awskit_s3.Transfer.upload_options_exn
+    ~part_size:16_777_216
+    ~content_type
+    ~metadata
+    ~storage_class
+    ~tags
+    ~preconditions
+    ~encryption
+    ~expected_bucket_owner
+    ()
+]}
+
+Managed file helpers no longer compute explicit checksum values. Use direct
+[Object.put] or multipart operations when the application already has a
+checksum value to send; use the transfer policy for transport strategy and
+shared object semantics.

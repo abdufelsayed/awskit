@@ -1,3 +1,3 @@
 (documentation
  (package awskit)
- (mld_files index guides))
+ (mld_files index guides migration_0_1_to_0_2 migration_0_2_to_0_3))

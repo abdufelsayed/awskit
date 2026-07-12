@@ -16,6 +16,10 @@ preview. Remove empty sections. -->
 
 <!-- Add additions with material commits and any earlier contributing PRs. -->
 
+### Changed
+
+<!-- Add behavior changes with material commits and any earlier contributing PRs. -->
+
 ### Fixed
 
 <!-- Add fixes with material commits and any earlier contributing PRs. -->

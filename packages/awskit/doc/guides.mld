@@ -396,3 +396,14 @@ a runtime capability.
 Run [opam exec -- dune build @runtime-http-contracts] when changing a runtime
 implementation; the workload checks shared runtime HTTP behavior, including
 bodiless responses, framing, body-reader, and error-path behavior.
+
+{1 Migration Guides}
+
+{ul
+  {li {{!page-migration_0_1_to_0_2}Migrating from 0.1 to 0.2} — typed S3
+    domains, scoped bodies, structured errors, presigning, multipart, and
+    transfer call-site changes}
+  {li {{!page-migration_0_2_to_0_3}Migrating from 0.2 to 0.3} — configured
+    clients, validated outbound domains, ownership, result records, and secret
+    handoffs}
+}

@@ -212,6 +212,12 @@ let run () =
 {ul
   {li {{!page-guides}S3 Guides} — objects, buffers, transfers, endpoint setup,
     buckets, multipart, presigning, and errors}
+  {li {{:../awskit/migration_0_1_to_0_2.html}Migration from 0.1 to 0.2} —
+    typed S3 domains, scoped bodies, structured errors, presigning, multipart,
+    and transfer call-site changes}
+  {li {{:../awskit/migration_0_2_to_0_3.html}Migration from 0.2 to 0.3} —
+    configured clients, validated outbound domains, ownership, result records,
+    and secret handoffs}
   {li {{!page-support_matrix}S3 Support Matrix} — supported feature scope,
     runtime coverage, simulator evidence, MinIO profile notes, and unsupported
     S3 families}

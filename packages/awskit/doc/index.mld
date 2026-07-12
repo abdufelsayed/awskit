@@ -230,4 +230,10 @@ AWS_DEFAULT_REGION
 {ul
   {li {{!page-guides}Guides} — credentials, regions, endpoints, signing,
     structured errors, streaming runtime bodies, and adapter selection}
+  {li {{!page-migration_0_1_to_0_2}Migration from 0.1 to 0.2} — typed S3
+    domains, scoped bodies, structured errors, presigning, multipart, and
+    transfer call-site changes}
+  {li {{!page-migration_0_2_to_0_3}Migration from 0.2 to 0.3} — configured
+    clients, validated outbound domains, ownership, result records, and secret
+    handoffs}
 }
