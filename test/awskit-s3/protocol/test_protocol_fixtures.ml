@@ -21,6 +21,26 @@ let option_to_string render = function
   | None -> "none"
   | Some value -> render value
 
+let request_body_with_content_length content_length :
+    Protocol_recording_runtime.Runtime.request_body =
+  let descriptor =
+    Awskit.Body.Request.descriptor_exn ~content_length
+      ~payload_hash:Awskit.Body.Payload_hash.unsigned_payload ~replayable:true
+      ()
+  in
+  { Protocol_recording_runtime.Runtime.body = Ok ""; descriptor }
+
+let expect_validation_before_transport label conn = function
+  | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label
+  | Error error ->
+      Alcotest.(check (option string))
+        (label ^ " field") (Some "content_length")
+        (Awskit_s3.Error.validation_field error);
+      Alcotest.(check int)
+        (label ^ " transport calls")
+        0
+        (List.length (Protocol_recording_runtime.calls conn))
+
 let query_to_string query = Awskit.Signing.canonical_query_params query
 
 let header_or_empty name headers =
@@ -299,6 +319,38 @@ let test_put_object_metadata_tags_fixture () =
   check_fixture "put object metadata and tags"
     [ "object"; "put-metadata-tags.expected" ]
     ~actual
+
+let test_put_object_rejects_oversized_body_before_transport () =
+  let conn = Protocol_recording_runtime.connect [] in
+  let body =
+    request_body_with_content_length
+      (Int64.succ Transfer.max_single_request_size)
+  in
+  let result =
+    Protocol_recording_runtime.S3.Object.put conn
+      ~bucket:(Protocol_support.bucket_name "bucket")
+      ~key:(Protocol_support.object_key "too-large.bin")
+      ~body ()
+  in
+  expect_validation_before_transport "PutObject oversized body" conn result
+
+let test_upload_part_rejects_oversized_body_before_transport () =
+  let conn = Protocol_recording_runtime.connect [] in
+  let upload =
+    Multipart.Upload.resume
+      ~bucket:(Protocol_support.bucket_name "bucket")
+      ~key:(Protocol_support.object_key "too-large.bin")
+      ~upload_id:(Multipart.Upload_id.of_string_exn "upload-1")
+  in
+  let body =
+    request_body_with_content_length (Int64.succ Transfer.max_part_size)
+  in
+  let result =
+    Protocol_recording_runtime.S3.Multipart.upload_part conn ~upload
+      ~part_number:(Multipart.Part_number.of_int_exn 1)
+      ~body ()
+  in
+  expect_validation_before_transport "UploadPart oversized body" conn result
 
 let describe_destination_encryption encryption =
   let options = Object.Put.options ~encryption () in
@@ -1064,6 +1116,10 @@ let suite =
           test_endpoint_style_matrix_fixture;
         Alcotest.test_case "PUT metadata/tags" `Quick
           test_put_object_metadata_tags_fixture;
+        Alcotest.test_case "PutObject rejects oversized bodies" `Quick
+          test_put_object_rejects_oversized_body_before_transport;
+        Alcotest.test_case "UploadPart rejects oversized bodies" `Quick
+          test_upload_part_rejects_oversized_body_before_transport;
         Alcotest.test_case "destination encryption headers" `Quick
           test_destination_encryption_headers_fixture;
         Alcotest.test_case "object checksum observed unknowns" `Quick

@@ -235,16 +235,21 @@ module Complete = struct
             "multipart object size does not match completed part sizes"
       | _ -> Ok ()
 
-    let validate_checksum_algorithm expected part =
-      match (expected, Part.checksum part) with
-      | None, None -> Ok None
-      | None, Some checksum -> Ok (Some checksum.algorithm)
-      | Some algorithm, None -> Ok (Some algorithm)
-      | Some algorithm, Some checksum when algorithm = checksum.algorithm ->
-          Ok (Some algorithm)
-      | Some _, Some _ ->
-          S3_error_context.invalid ~field:"checksum_algorithm"
-            "completed part checksums must use one algorithm"
+    let validate_checksum_algorithm ~checksummed_parts expected part =
+      match Part.checksum part with
+      | None when checksummed_parts ->
+          S3_error_context.invalid ~field:"checksum"
+            "every completed part must include a checksum when any checksum is \
+             present"
+      | None -> Ok None
+      | Some checksum -> (
+          match expected with
+          | None -> Ok (Some checksum.algorithm)
+          | Some algorithm when algorithm = checksum.algorithm ->
+              Ok (Some algorithm)
+          | Some _ ->
+              S3_error_context.invalid ~field:"checksum_algorithm"
+                "completed part checksums must use one algorithm")
 
     let of_list ?multipart_object_size values =
       let* () = validate_object_size multipart_object_size in
@@ -283,7 +288,8 @@ module Complete = struct
               else Ok ()
             in
             let* checksum_algorithm =
-              validate_checksum_algorithm checksum_algorithm part
+              validate_checksum_algorithm ~checksummed_parts checksum_algorithm
+                part
             in
             let* () =
               match (rest, Part.size part) with

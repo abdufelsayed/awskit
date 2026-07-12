@@ -9,6 +9,13 @@ type state = {
   mutable part_puts : int;
 }
 
+type strategy_state = {
+  mutable creates : int;
+  mutable single_puts : int;
+  mutable part_puts : int;
+  mutable deletes : int;
+}
+
 exception Progress_failed
 
 let credentials =
@@ -27,6 +34,12 @@ let write_file path contents =
   Fun.protect
     ~finally:(fun () -> close_out_noerr channel)
     (fun () -> output_string channel contents)
+
+let write_sparse_file path length =
+  let fd = Unix.openfile path [ Unix.O_CREAT; Unix.O_RDWR ] 0o600 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close fd)
+    (fun () -> Unix.LargeFile.ftruncate fd length)
 
 let read_file path =
   let channel = open_in_bin path in
@@ -109,6 +122,35 @@ let install_multipart_transport state ~cleanup_fails =
           else Lwt.return (response `No_content "")
       | method_, _ ->
           Alcotest.failf "unexpected multipart method %s uri=%s"
+            (Cohttp.Code.string_of_method method_)
+            (Uri.to_string uri))
+
+let install_forced_multipart_transport state =
+  Cohttp_lwt_unix.Client.set_cache
+    (fun ?headers:_ ?(body = Cohttp_lwt.Body.empty) ?absolute_form:_ meth uri ->
+      match (meth, query_has uri "uploads") with
+      | `POST, true ->
+          state.creates <- state.creates + 1;
+          Lwt.return
+            (response `OK
+               "<InitiateMultipartUploadResult><Bucket>transfer-bucket</Bucket><Key>object.bin</Key><UploadId>upload-1</UploadId></InitiateMultipartUploadResult>")
+      | `PUT, false when query_has uri "partNumber" ->
+          state.part_puts <- state.part_puts + 1;
+          Lwt.return
+            (response `Internal_server_error
+               "<Error><Code>InternalError</Code><Message>part \
+                failed</Message></Error>")
+      | `PUT, false ->
+          state.single_puts <- state.single_puts + 1;
+          Lwt.return
+            (response `Internal_server_error
+               "<Error><Code>InternalError</Code><Message>unexpected \
+                PutObject</Message></Error>")
+      | `DELETE, false when query_has uri "uploadId" ->
+          state.deletes <- state.deletes + 1;
+          Lwt.return (response `No_content "")
+      | method_, _ ->
+          Alcotest.failf "unexpected forced strategy method %s uri=%s"
             (Cohttp.Code.string_of_method method_)
             (Uri.to_string uri))
 
@@ -250,6 +292,34 @@ let test_callback_and_cancellation_cleanup () =
     "awskit-lwt-cancel"
     (function Lwt.Canceled -> true | _ -> false)
 
+let test_oversized_upload_forces_multipart () =
+  let path = Filename.temp_file "awskit-lwt-oversized-upload" ".bin" in
+  let content_length = Int64.succ Transfer.max_single_request_size in
+  write_sparse_file path content_length;
+  Fun.protect
+    ~finally:(fun () -> remove_file path)
+    (fun () ->
+      let state =
+        { creates = 0; single_puts = 0; part_puts = 0; deletes = 0 }
+      in
+      install_forced_multipart_transport state;
+      let client = create_client () in
+      let options =
+        Transfer.upload_options_exn
+          ~multipart_threshold:(Int64.succ Transfer.max_single_request_size)
+          ~concurrency:1 ()
+      in
+      (match
+         await
+           (S3.Object.Transfer.upload_file client ~bucket ~key ~options ~path ())
+       with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "forced multipart upload unexpectedly succeeded");
+      Alcotest.(check int) "multipart upload created" 1 state.creates;
+      Alcotest.(check int) "multipart part attempted" 1 state.part_puts;
+      Alcotest.(check int) "single PutObject not selected" 0 state.single_puts;
+      Alcotest.(check int) "failed upload aborted" 1 state.deletes)
+
 let test_multipart_cleanup_ownership () =
   let path = Filename.temp_file "awskit-lwt-multipart" ".bin" in
   write_file path (String.make Transfer.min_part_size 'x');
@@ -308,6 +378,8 @@ let () =
             `Quick test_roundtrip_publication_and_preflight;
           Alcotest.test_case "callback and cancellation cleanup" `Quick
             test_callback_and_cancellation_cleanup;
+          Alcotest.test_case "oversized upload forces multipart" `Quick
+            test_oversized_upload_forces_multipart;
           Alcotest.test_case "multipart cleanup ownership" `Quick
             test_multipart_cleanup_ownership;
         ] );

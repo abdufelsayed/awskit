@@ -1094,6 +1094,15 @@ let test_transfer_upload_policy_is_strategy_invariant () =
     ((Transfer.upload_list_parts_options options).expected_bucket_owner
     = Some expected_bucket_owner)
 
+let test_transfer_upload_part_size_rejects_s3_overflow () =
+  if Int64.compare (Int64.of_int max_int) Transfer.max_part_size <= 0 then
+    Alcotest.skip ()
+  else
+    expect_error_field "part_size"
+      (Transfer.upload_options
+         ~part_size:(Int64.succ Transfer.max_part_size |> Int64.to_int)
+         ())
+
 let suite =
   [
     ( "pbt:awskit-s3:domain:bucket",
@@ -1172,6 +1181,8 @@ let suite =
           test_delete_many_object_boundaries;
         Alcotest.test_case "transfer upload policy is strategy invariant" `Quick
           test_transfer_upload_policy_is_strategy_invariant;
+        Alcotest.test_case "transfer upload part size upper bound" `Quick
+          test_transfer_upload_part_size_rejects_s3_overflow;
       ] );
   ]
 

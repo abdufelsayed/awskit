@@ -59,6 +59,11 @@ let raise_escaped_callback_or_raise = function
       | Some escaped -> raise escaped
       | None -> raise exn)
 
+let use_multipart_upload ~content_length ~multipart_threshold =
+  Int64.compare content_length Awskit_s3.Transfer.max_single_request_size > 0
+  || Int64.compare content_length 0L > 0
+     && Int64.compare content_length multipart_threshold >= 0
+
 let regular_file_length path =
   try
     let stat = Eio.Path.stat ~follow:true path in
@@ -645,8 +650,9 @@ struct
     in
     let* content_length = regular_file_length path in
     if
-      Int64.equal content_length 0L
-      || Int64.compare content_length options.multipart_threshold < 0
+      not
+        (use_multipart_upload ~content_length
+           ~multipart_threshold:options.multipart_threshold)
     then
       let upload_progress =
         byte_progress_callback on_progress ~direction:Transfer.Upload

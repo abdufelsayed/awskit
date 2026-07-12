@@ -54,7 +54,14 @@ module Make (C : Request_context.S) = struct
                  "S3 uploads require a known content length before SigV4 \
                   chunked streaming")
         | Some content_length -> (
-            match Awskit.Body.Request.validate_descriptor descriptor with
+            let validation =
+              match Awskit.Body.Request.validate_descriptor descriptor with
+              | Error _ as error -> error
+              | Ok () ->
+                  S3_validation.validate_put_object_content_length
+                    content_length
+            in
+            match validation with
             | Error error -> return_error error
             | Ok () -> (
                 let headers =

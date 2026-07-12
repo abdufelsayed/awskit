@@ -10,6 +10,13 @@
 val min_part_size : int
 (** Minimum multipart part size accepted by S3, except for the final part. *)
 
+val max_part_size : int64
+(** Maximum multipart part size accepted by S3, in bytes (5 GiB). *)
+
+val max_single_request_size : int64
+(** Maximum object size accepted by a single [PutObject] request, in bytes (5
+    GiB). *)
+
 val default_part_size : int
 (** Default multipart transfer part size in bytes. *)
 

@@ -28,6 +28,12 @@ let zero_digest size = Base64.encode_exn (String.make size '\000')
 let complete_parts ?multipart_object_size parts =
   Multipart.Complete.Parts.of_list_exn ?multipart_object_size parts
 
+let synthetic_part ?checksum part_number =
+  Multipart.Part.create_exn ?checksum
+    ~part_number:(Multipart.Part_number.of_int_exn part_number)
+    ~etag:(Object.Etag.of_string_exn (Printf.sprintf "etag-%d" part_number))
+    ()
+
 let single_checksum_value label algorithm (checksum : Object.Checksum.response)
     =
   match
@@ -370,6 +376,46 @@ let test_complete_rejects_undersized_nonfinal_part () =
     (Multipart.Complete.Parts.of_list ~multipart_object_size:1L
        [ large.part; final.part ])
 
+let test_complete_parts_checksum_shape () =
+  let all_none =
+    [ synthetic_part 3; synthetic_part 8 ]
+    |> Multipart.Complete.Parts.of_list
+    |> ok_or_fail "all-none completion parts"
+  in
+  Alcotest.(check int)
+    "all-none part count" 2
+    (List.length (Multipart.Complete.Parts.to_list all_none));
+  let checksum = sha256 (zero_digest 32) in
+  let all_same =
+    [ synthetic_part ~checksum 1; synthetic_part ~checksum 2 ]
+    |> Multipart.Complete.Parts.of_list
+    |> ok_or_fail "all-same completion checksums"
+  in
+  Alcotest.(check int)
+    "all-same part count" 2
+    (List.length (Multipart.Complete.Parts.to_list all_same));
+  let different_algorithms =
+    Multipart.Complete.Parts.of_list
+      [
+        synthetic_part ~checksum 1;
+        synthetic_part ~checksum:(md5 (zero_digest 16)) 2;
+      ]
+  in
+  expect_validation_field "different completion checksum algorithms"
+    "checksum_algorithm" different_algorithms;
+  let checksum_then_missing =
+    Multipart.Complete.Parts.of_list
+      [ synthetic_part ~checksum 1; synthetic_part 2 ]
+  in
+  expect_validation_field "checksum followed by missing checksum" "checksum"
+    checksum_then_missing;
+  let missing_then_checksum =
+    Multipart.Complete.Parts.of_list
+      [ synthetic_part 1; synthetic_part ~checksum 2 ]
+  in
+  expect_validation_field "missing checksum followed by checksum" "checksum"
+    missing_then_checksum
+
 let test_complete_rejects_part_checksum_mismatch () =
   let conn = make_simulator () in
   let created = create_upload conn "checksummed.bin" in
@@ -453,6 +499,8 @@ let suite =
           test_complete_validation_failure_keeps_upload;
         Alcotest.test_case "rejects undersized non-final part" `Quick
           test_complete_rejects_undersized_nonfinal_part;
+        Alcotest.test_case "validates completion checksum shape" `Quick
+          test_complete_parts_checksum_shape;
         Alcotest.test_case "rejects checksum mismatch" `Quick
           test_complete_rejects_part_checksum_mismatch;
         Alcotest.test_case "list-parts pagination" `Quick

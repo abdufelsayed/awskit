@@ -279,10 +279,11 @@ module Complete : sig
     val of_list :
       ?multipart_object_size:int64 -> Part.t list -> (t, Awskit.Error.t) result
     (** Validate a completion list. The list must be non-empty and strictly
-        ordered. When checksums are present, part numbers start at one, remain
-        consecutive, and checksum algorithms agree. Known non-final part sizes
-        must be at least 5 MiB. [multipart_object_size], when supplied, is
-        non-negative and must equal the sum when every part size is known. *)
+        ordered. When checksums are present, every part must include one, part
+        numbers start at one and remain consecutive, and checksum algorithms
+        agree. Known non-final part sizes must be at least 5 MiB.
+        [multipart_object_size], when supplied, is non-negative and must equal
+        the sum when every part size is known. *)
 
     val of_list_exn : ?multipart_object_size:int64 -> Part.t list -> t
     (** Like {!val:of_list}, but raises on validation failure. *)

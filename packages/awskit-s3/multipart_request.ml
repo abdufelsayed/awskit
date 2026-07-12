@@ -193,7 +193,14 @@ module Make (C : Request_context.S) = struct
               (Awskit.Error.Producer.validation ~field:"content_length"
                  "S3 multipart uploads require a known content length")
         | Some content_length -> (
-            match Awskit.Body.Request.validate_descriptor descriptor with
+            let validation =
+              match Awskit.Body.Request.validate_descriptor descriptor with
+              | Error _ as error -> error
+              | Ok () ->
+                  S3_validation.validate_upload_part_content_length
+                    content_length
+            in
+            match validation with
             | Error error -> return_error error
             | Ok () -> send ~content_length descriptor))
 

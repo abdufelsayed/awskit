@@ -1,5 +1,7 @@
 let ( let* ) = S3_result.( let* )
 let min_part_size = 5 * 1024 * 1024
+let max_part_size = S3_validation.max_part_size
+let max_single_request_size = S3_validation.max_single_request_size
 let default_part_size = 8 * 1024 * 1024
 let default_multipart_threshold = Int64.mul 8L (Int64.mul 1024L 1024L)
 let default_concurrency = 4
@@ -159,6 +161,10 @@ let validate_upload_part_size part_size =
   if part_size < min_part_size then
     S3_error_context.invalid ~field:"part_size"
       "part_size must be at least 5 MiB for S3 multipart upload"
+  else if Int64.compare (Int64.of_int part_size) max_part_size > 0 then
+    S3_error_context.invalid ~field:"part_size"
+      "part_size must be at most 5 GiB (5368709120 bytes) for S3 multipart \
+       upload"
   else Ok ()
 
 let validate_download_part_size part_size =
