@@ -338,80 +338,92 @@ module Multipart = struct
                     with
                     | Some error -> return_error error
                     | None -> (
-                        let part_bodies =
-                          part_values
-                          |> List.map (fun (part : Multipart_model.Part.t) ->
-                              (Hashtbl.find upload.parts
-                                 (completed_part_number part))
-                                .body)
-                        in
-                        let body = String.concat "" part_bodies in
-                        let etag = multipart_etag part_bodies in
-                        match checksum_for_value ~body options.checksum with
+                        match
+                          ensure_write_preconditions
+                            (current_object bucket_state key)
+                            options.preconditions
+                        with
                         | Error error -> return_error error
-                        | Ok supplied_checksum -> (
-                            match
-                              match supplied_checksum.values with
-                              | [] ->
-                                  checksum_for_algorithm ~body
-                                    (Option.map
-                                       (fun (checksum :
-                                              Multipart_model.Create.Checksum.t)
-                                          -> checksum.algorithm)
-                                       upload.checksum)
-                              | _ -> Ok supplied_checksum
-                            with
+                        | Ok () -> (
+                            let part_bodies =
+                              part_values
+                              |> List.map
+                                   (fun (part : Multipart_model.Part.t) ->
+                                     (Hashtbl.find upload.parts
+                                        (completed_part_number part))
+                                       .body)
+                            in
+                            let body = String.concat "" part_bodies in
+                            let etag = multipart_etag part_bodies in
+                            match checksum_for_value ~body options.checksum with
                             | Error error -> return_error error
-                            | Ok checksum ->
-                                let checksum =
-                                  {
-                                    checksum with
-                                    checksum_type =
-                                      Option.map
-                                        (fun checksum_type ->
-                                          Object_model.Checksum.Type.Known
-                                            checksum_type)
-                                        (match options.checksum_type with
-                                        | Some _ as value -> value
-                                        | None ->
-                                            Option.bind upload.checksum
-                                              (fun
-                                                (checksum :
+                            | Ok supplied_checksum -> (
+                                match
+                                  match supplied_checksum.values with
+                                  | [] ->
+                                      checksum_for_algorithm ~body
+                                        (Option.map
+                                           (fun (checksum :
                                                   Multipart_model.Create
                                                   .Checksum
-                                                  .t)
-                                              -> checksum.checksum_type));
-                                  }
-                                in
-                                let obj =
-                                  {
-                                    body;
-                                    etag;
-                                    version_id = None;
-                                    content_type = upload.content_type;
-                                    metadata = upload.metadata;
-                                    storage_class = upload.storage_class;
-                                    tags = upload.tags;
-                                    checksum;
-                                    last_modified = now conn;
-                                  }
-                                in
-                                let obj =
-                                  store_object conn bucket_state key obj
-                                in
-                                Hashtbl.remove bucket_state.multipart_uploads
-                                  (upload_key upload_id);
-                                Ok
-                                  {
-                                    Multipart_model.Complete.etag = Some etag;
-                                    version_id = obj.version_id;
-                                    checksum;
-                                    response =
-                                      response 200
-                                        ~headers:
-                                          (version_headers obj.version_id
-                                          @ checksum_response_headers checksum);
-                                  }))))))
+                                                  .t) -> checksum.algorithm)
+                                           upload.checksum)
+                                  | _ -> Ok supplied_checksum
+                                with
+                                | Error error -> return_error error
+                                | Ok checksum ->
+                                    let checksum =
+                                      {
+                                        checksum with
+                                        checksum_type =
+                                          Option.map
+                                            (fun checksum_type ->
+                                              Object_model.Checksum.Type.Known
+                                                checksum_type)
+                                            (match options.checksum_type with
+                                            | Some _ as value -> value
+                                            | None ->
+                                                Option.bind upload.checksum
+                                                  (fun
+                                                    (checksum :
+                                                      Multipart_model.Create
+                                                      .Checksum
+                                                      .t)
+                                                  -> checksum.checksum_type));
+                                      }
+                                    in
+                                    let obj =
+                                      {
+                                        body;
+                                        etag;
+                                        version_id = None;
+                                        content_type = upload.content_type;
+                                        metadata = upload.metadata;
+                                        storage_class = upload.storage_class;
+                                        tags = upload.tags;
+                                        checksum;
+                                        last_modified = now conn;
+                                      }
+                                    in
+                                    let obj =
+                                      store_object conn bucket_state key obj
+                                    in
+                                    Hashtbl.remove
+                                      bucket_state.multipart_uploads
+                                      (upload_key upload_id);
+                                    Ok
+                                      {
+                                        Multipart_model.Complete.etag =
+                                          Some etag;
+                                        version_id = obj.version_id;
+                                        checksum;
+                                        response =
+                                          response 200
+                                            ~headers:
+                                              (version_headers obj.version_id
+                                              @ checksum_response_headers
+                                                  checksum);
+                                      })))))))
 
   let abort_upload conn ~upload ?expected_bucket_owner:_ () =
     let bucket = upload_handle_bucket upload in

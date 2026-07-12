@@ -294,6 +294,42 @@ let test_complete_success_removes_upload () =
   in
   Alcotest.(check string) "completed body" "final" stored.value
 
+let test_complete_enforces_write_preconditions () =
+  let conn = make_simulator () in
+  let bucket = bucket_name "test-bucket" in
+  let key = object_key "conditional-complete.bin" in
+  let existing =
+    Simulator.Object.put_string conn ~bucket ~key ~contents:"old" ()
+    |> ok_or_fail "put existing object"
+  in
+  let existing_etag =
+    match existing.etag with
+    | Some etag -> etag
+    | None -> Alcotest.fail "existing object is missing an etag"
+  in
+  let created = create_upload conn "conditional-complete.bin" in
+  let uploaded = upload_part conn created.upload 1 "new" in
+  let parts = complete_parts [ uploaded.part ] in
+  let complete_with preconditions =
+    Simulator.Multipart.complete_upload conn ~upload:created.upload ~parts
+      ~options:(Multipart.Complete.options_exn ~preconditions ())
+      ()
+  in
+  expect_service_code "complete if-absent" "PreconditionFailed"
+    (complete_with Object.Preconditions.Write.if_absent);
+  expect_service_code "complete wrong etag" "PreconditionFailed"
+    (complete_with
+       (Object.Preconditions.Write.if_etag
+          (Object.Etag.of_string_exn {|"wrong"|})));
+  ignore
+    (complete_with (Object.Preconditions.Write.if_etag existing_etag)
+    |> ok_or_fail "complete matching etag");
+  let stored =
+    Simulator.Object.get_string conn ~bucket ~key ~max_bytes:16L ()
+    |> ok_or_fail "get conditionally completed object"
+  in
+  Alcotest.(check string) "conditionally completed body" "new" stored.value
+
 let test_complete_validation_failure_keeps_upload () =
   let conn = make_simulator () in
   let created = create_upload conn "retryable.bin" in
@@ -411,6 +447,8 @@ let suite =
           test_checksum_algorithms_are_computed_or_rejected;
         Alcotest.test_case "complete removes upload" `Quick
           test_complete_success_removes_upload;
+        Alcotest.test_case "complete enforces write preconditions" `Quick
+          test_complete_enforces_write_preconditions;
         Alcotest.test_case "failed complete keeps upload" `Quick
           test_complete_validation_failure_keeps_upload;
         Alcotest.test_case "rejects undersized non-final part" `Quick
