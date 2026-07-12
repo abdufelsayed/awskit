@@ -9,20 +9,12 @@ The left-hand snippets show 0.2 and the right-hand snippets show 0.3. The
 examples use the public adapter APIs; runtime implementors should also read the
 runtime-adapter signatures in [Awskit_s3.Runtime_adapter].
 
-{1 Low-level runtime composition changed; adapter construction did not}
+{1 Migrate runtime modules and direct functor composition}
 
-No migration is required for client construction through
-[Awskit_s3_lwt.Make], [Awskit_s3_lwt_unix], or [Awskit_s3_eio]: their [create]
-signatures and the pattern of passing the returned client to operations keep
-the same shape in 0.3. Individual operation arguments and results may still
-require the migrations described below.
-
-This section applies only to code that referenced an adapter's public
-[Runtime] module or applied [Awskit_s3.Make] directly. Adapter [Runtime]
-modules and [Awskit_s3.RUNTIME] were removed. Use the adapter's [Body] and
-[Reader] modules for streaming integrations. Custom runtime implementors now
-provide the ordinary [Awskit.Runtime.S] contract rather than adding the
-S3-specific [S3_endpoint] capability.
+Adapter [Runtime] modules and [Awskit_s3.RUNTIME] were removed. Replace raw
+adapter runtime-body access with the adapter's [Body] and [Reader] modules.
+Custom runtime implementors now provide the ordinary [Awskit.Runtime.S]
+contract rather than adding the S3-specific [S3_endpoint] capability.
 
 In 0.2, direct functor composition passed the extended runtime connection to
 operations. In 0.3, apply [Awskit_s3.Make] to the ordinary runtime module,
