@@ -1,23 +1,22 @@
 # Observability
 
-Awskit models each operation once as a typed lifecycle and projects its
-completion to Logs, metrics, and traces. Applications choose projections per
-client and own every process
-resource around them: Logs reporters and levels, metric reporters, tracers,
-meters, exporters, sampling, queues, transport, flushing, and shutdown.
+Awskit can show you what your S3 calls are doing through the logging,
+metrics, and tracing tools you already use. Every operation the SDK performs —
+an S3 request, a retry, a signing step, a file transfer — has one well-defined
+lifecycle, and Awskit reports it through the `Logs` library, through optional
+metric and trace sinks that you supply, or not at all.
 
-The released package graph does not include Metrics, Trace, OpenTelemetry, or
-an Awskit observability PPX or syntax-extension package. Private adapters under
-`test/observability/projections` compile and run against those libraries to
-prove the public sink contracts without turning one telemetry stack into an SDK
-dependency. The repository's existing deriving and protocol PPXs are unrelated
-implementation dependencies.
+Awskit never starts background workers, exporters, or network connections for
+telemetry. Reporters, samplers, queues, transport, flushing, and shutdown
+belong to your application, and Awskit's packages do not depend on Metrics,
+Trace, or OpenTelemetry — those integrations are optional and live in your
+code.
 
-## Start With Logs
+## Quick Start: Logs
 
-`default ()` creates fresh per-client observer state with the built-in Logs
-projection enabled. The application still installs the reporter and selects
-levels on Awskit's sources:
+The fastest way to see what the SDK is doing is `default ()`, which enables
+log reporting through `Logs`. You install a reporter and choose levels per
+source, as with any `Logs`-based library:
 
 ```ocaml
 let () =
@@ -35,36 +34,46 @@ let s3 =
   |> Result.get_ok
 ```
 
-`Awskit_eio.Observability.default ()` is the direct-style equivalent. Pass
-`Awskit_lwt.Observability.none` or `Awskit_eio.Observability.none` when a client
-must have a hard-off fast path: no source check, payload builder, clock read,
-context activation, health mutation, or sink callback runs.
+`Awskit_eio.Observability.default ()` is the direct-style equivalent. If you
+omit `~observability`, the built-in clients behave as if you had passed
+`default ()`.
 
-The sources are stable values owned by their domains:
+Pass `Awskit_lwt.Observability.none` or `Awskit_eio.Observability.none` to
+turn observation off completely for a client: no source checks, no clock
+reads, no per-call work of any kind.
 
-| Source value | Logs source | Meaning |
+### Sources and levels
+
+Log output is organized into stable sources, one per SDK activity:
+
+| Source value | Logs source | What it covers |
 | --- | --- | --- |
 | `Awskit_s3.Observability.Sources.operation` | `awskit.s3.operation` | One caller-visible S3 operation |
 | `.attempt` | `awskit.s3.attempt` | One retry iteration |
-| `.signing` | `awskit.s3.signing` | One S3 signing operation |
+| `.signing` | `awskit.s3.signing` | One S3 request signing |
 | `.retry` | `awskit.s3.retry` | A scheduled or denied retry decision |
 | `.transfer` | `awskit.s3.transfer` | One high-level upload or download |
-| `.artifact` | `awskit.s3.artifact` | One connection-bound presigned-artifact generation |
-| `.artifact_signing` | `awskit.s3.artifact.signing` | The signing child of one presigned artifact |
-| `Awskit.Observability.Sources.http` | `awskit.http` | Physical HTTP attempts and exposed body phases |
+| `.artifact` | `awskit.s3.artifact` | One presigned-URL generation |
+| `.artifact_signing` | `awskit.s3.artifact.signing` | The signing step of a presigned-URL generation |
+| `Awskit.Observability.Sources.http` | `awskit.http` | Physical HTTP requests and body phases |
 | `.credentials` | `awskit.credentials` | Credential resolution |
 
-Definitions choose their own level and lazy human message from the terminal
-outcome. Routine successes are normally suppressed, cancellation and expected
-not-found/conflict outcomes can remain at Debug, throttling uses Warning, and
-terminal failures use Error. Call sites do not choose levels or emit a second
-completion message. Typed safe values are attached with
-`Awskit.Observability.Logs_tags.operation_completion` or `.event`; Logs records
-are never counted as metrics.
+You do not choose levels at call sites; the SDK does, based on how the
+operation ended. Routine successes are silent. Expected outcomes such as
+not-found or cancellation log at `Debug`, throttling at `Warning`, and
+terminal failures at `Error`. Your per-source levels then decide what is
+actually emitted, so a typical production setup silences successes entirely
+and keeps warnings and errors. Log messages are built lazily: nothing is
+formatted for a level that is disabled.
 
-## Add Metrics Or Traces
+If you read `Logs` records yourself, the structured completion or event is
+attached under `Awskit.Observability.Logs_tags.operation_completion` or
+`.event`. Log messages are never also counted as metrics.
 
-Create sinks at the application edge and inject them into a client observer:
+## Metrics And Traces
+
+For metrics and tracing you write a small sink and hand it to an observer,
+along with a monotonic clock:
 
 ```ocaml
 let monotonic_ns () = Mtime_clock.now () |> Mtime.to_uint64_ns
@@ -77,55 +86,37 @@ let observability =
     ()
 ```
 
-`Awskit.Observability.Metric_sink.create` receives exact metric observations.
-Its view contains family metadata, the family-specific finite labels, and one
-numeric value; the type has no diagnostic accessor. A bridge should cache its
-reporter instrument by `Metric.Family.id`, verify descriptors when names are
-shared, and construct exactly the tags returned by `Metric.Family.labels`.
-It must not match operation names to recreate a universal label bag.
+A metric sink is built with `Awskit.Observability.Metric_sink.create`. Its
+`observe` callback receives one observation at a time: family metadata (name,
+documentation, aggregation, unit), the family's exact label values, and one
+number. That is the whole contract — there is no way for arbitrary text to
+reach your sink, so you can forward observations to any metrics library
+without sanitizing them. Cache your reporter's instruments by
+`Metric.Family.id` and build tags from `Metric.Family.labels`.
 
-`Awskit_lwt.Observability.Trace_sink.create` and
-`Awskit_eio.Observability.Trace_sink.create` receive safe operation/event
-views. Their activation installs the telemetry library's promise-local or
-fiber-local context around the supplied callback and returns validated trace
-correlation through `Awskit.Observability.Correlation`. The callbacks can only
-receive `Diagnostic.Public.t`; raw diagnostic constructors and sensitive
-diagnostics are outside the projection interface.
+A trace sink is built with `Awskit_lwt.Observability.Trace_sink.create` (or
+the Eio equivalent). Your `start` callback receives the operation's safe
+start view and returns an activation whose `within` function runs the SDK
+callback inside your tracing library's promise-local or fiber-local context.
+You can pass trace IDs back to Awskit through
+`Awskit.Observability.Correlation`, which validates them. Both sinks are
+synchronous: keep the callbacks fast and non-blocking.
 
-Sink exceptions are contained and never replace an SDK value, error,
-exception, or native cancellation. The runtime also defends callback invocation
-and result semantics when a trace wrapper invokes more than once, substitutes
-a result, returns without invoking, or raises. A wrapper that does not return
-can still stall the operation, even if it already invoked the callback, so
-wrappers are defended for invocation and result semantics and trusted for
-liveness.
+Two guarantees matter when writing sinks:
 
-Observer values own no asynchronous resources and therefore have no misleading
-`shutdown` function. Stop SDK use first, then flush and shut down the handles
-owned by the chosen reporter or exporter.
+- If your callback raises, the failure is contained: the SDK call returns
+  whatever it would have returned anyway, and the failure is counted in
+  observer health (below).
+- A trace `within` function is defended against misuse — calling the SDK
+  callback twice, skipping it, substituting its result, or raising — and the
+  SDK always sees the callback's real result. What Awskit cannot defend is a
+  `within` that never returns: that stalls the SDK call, so treat liveness as
+  your responsibility.
 
-## Inspect Observer Health
+## What You Will See: Operations, Attempts, And Retries
 
-Projection failures are observer-local and bounded. A snapshot lists configured
-projection identities and non-zero counters keyed by projection plus one phase:
-`Enablement`, `Start`, `Finish`, `Event`, `Instrument`, or `Context`.
-
-```ocaml
-let snapshot = Awskit_lwt.Observability.health observability
-
-let failures = Awskit.Observability.Health.failures snapshot
-```
-
-Each failure exposes its projection's local integer ID, kind, display name,
-phase, and saturating count. The display name is for operators; it is never a
-metric dimension or canonical field. Health stores no exception text, request
-ID, host ID, sink tag, or other unbounded failure data. If an application
-exports observer health, use only the closed projection kind and phase as
-dimensions.
-
-## Operation Topology
-
-One caller-visible S3 operation may own several physical attempts:
+One S3 call from your code is one **operation**. Each retry iteration is an
+**attempt**, and attempts are siblings under the operation:
 
 ```text
 S3 operation
@@ -141,75 +132,73 @@ S3 operation
     HTTP request
 ```
 
-The retry decision is emitted while its causing attempt is current. That
-attempt closes before backoff starts, and the next attempt is its sibling, so
-attempt duration never includes sleep. Credential or signing failure still
-belongs to the attempt even when no physical HTTP request is made.
+A few consequences worth knowing when reading logs or dashboards:
 
-A timed operation has one terminal completion, which may produce a conditional
-completion log, count, duration/value distributions, and a span. Retry
-scheduled or denied is a separate event because the policy decision and chosen
-action are facts of their own. Operations, attempts, transfers, and streaming
-bytes in flight are lifecycle-owned gauges rather than synthetic start/finish
-events.
+- The retry decision is reported on the attempt that caused it, and that
+  attempt finishes before backoff starts. Attempt durations therefore never
+  include sleep time.
+- Credential or signing failures belong to their attempt even when no HTTP
+  request was made. Validation failures before any attempt produce one
+  operation completion with zero attempts — they do not invent HTTP traffic.
+- Retry scheduled and denied decisions are reported as events (not log-only
+  messages) because they carry policy facts: the decision, retry class,
+  replayability, chosen delay, and remaining budget.
+- To compute retry amplification, divide the `awskit.s3.attempts` counter
+  rate by the `awskit.s3.operations` counter rate. Awskit deliberately does
+  not emit a point-in-time ratio.
+- Convenience helpers such as `get_string` or `exists` produce exactly one
+  operation, and paginated listing produces one operation per page fetch.
 
-## Connector Phases, Cleanup, And Byte Accounting
+High-level file transfers and presigned-URL generation follow the same model:
+a transfer is one operation with byte and part summaries, and a presign is
+reported as an artifact generation with its own source and metrics, never as
+an HTTP request.
 
-The Lwt and Eio adapters bracket four boundaries they directly own:
+## Phases, Connections, And Byte Counting
 
-- execution of a streaming request-body producer;
-- the connector call until response headers are returned;
-- caller response-body pulls; and
-- runtime cleanup or explicit-discard pulls.
+The Lwt and Eio adapters measure four boundaries directly, because they own
+them:
 
-These intervals may overlap. Awskit does not add or subtract them to infer DNS,
-TCP, TLS, pool, socket, queue, or TTFB timing, because the current Cohttp
-connectors do not expose those lower boundaries.
+- producing a streaming request body;
+- waiting for response headers;
+- the caller reading the response body; and
+- draining or discarding the rest of the response body.
 
-Physical HTTP completions report bytes handed to or pulled by the configured
-connector boundary, split between caller-consumed response bytes and cleanup or
-explicit-discard bytes. These values are not socket or wire byte claims, and
-phase completions report only their own bytes.
+Awskit does not report DNS, TCP, TLS, connection-pool, or time-to-first-byte
+phases: the Cohttp connectors do not expose them, and Awskit does not infer
+timings it cannot observe. The measured intervals may overlap.
 
-Native static Lwt and Eio request bodies retain their Cohttp representation, so
-their per-attempt connector request count is absent even when the descriptor
-supplies a logical length. Streaming request bodies report bytes handed to the
-connector producer path in their production phase, while connector request
-bytes count only bytes the connector actually pulls. Caller-consumed response
-pulls and cleanup or explicit-discard pulls remain separate measurements.
+Byte counts follow the same honesty rules:
 
-A logical S3 completion reports request bytes once and response bytes only when
-the caller-visible operation succeeds. Retry responses, service-error bodies,
-failed decodes, explicit discard, and automatic cleanup drain never inflate the
-logical response value. High-level transfers similarly report logical bytes
-and parts while their constituent requests retain independent connector-boundary
-accounting.
+- Per-attempt request and response byte counts describe bytes handed to or
+  pulled by the connector — not socket or wire bytes.
+- A static string or bytes request body stays a static connector body, so it
+  has no per-attempt connector byte count; its descriptor length still
+  appears as the operation's logical request size.
+- An operation's logical request bytes describe your payload once, and its
+  logical response bytes count only data your code successfully received.
+  Error bodies, retried attempts, and cleanup drains never inflate it.
 
-Cleanup guarantees depend on the selected Lwt connector contract.
-`Awskit_lwt.Make (Client)` accepts any `Cohttp_lwt.S.Client`, whose interface
-does not expose an in-flight request or response connection to abort. Awskit
-preserves the primary SDK result, exception, or `Lwt.Canceled` and performs no
-detached background drain, but it cannot promptly stop a client that ignores
-Lwt cancellation while response headers are pending, or guarantee reuse of an
-abandoned response connection after bounded cleanup fails.
+Cleanup guarantees depend on the Lwt backend you choose. `Awskit_lwt.Make
+(Client)` works with any `Cohttp_lwt.S.Client`, but that interface exposes no
+way to abort an in-flight call, so a client that ignores `Lwt` cancellation
+cannot be stopped while waiting for headers. `Awskit_lwt.For_connector.Make`
+accepts connectors that do own their calls. The ready-made `awskit-lwt-unix`
+adapter opens one fresh connection per HTTP call and closes it at end of body
+or on abandonment; it does not pool connections. The Eio adapter scopes every
+call in its own switch, so cleanup and cancellation behave the same way on
+every path.
 
-`Awskit_lwt.For_connector.Make` is the expert alternative for connectors that
-own an in-flight call. Its idempotent abort is awaited before the physical HTTP
-attempt returns, so cancellation or cleanup cannot advance retry ahead of
-connector termination. The built-in `Awskit_lwt_unix` adapter implements that
-contract with one exclusive fresh lower-level Cohttp connection per call,
-matching Cohttp 6.2.1's no-cache baseline. It does not pool connections and
-closes each one at response EOF or abandonment. The Eio adapter similarly owns
-each physical call in a nested switch, so body cleanup and switch teardown
-finish before the attempt leaves while native cancellation remains native.
+## Metrics Reference
 
-## Exact Metric Families
+Every metric family has a fixed set of labels, and every label value comes
+from a small declared set — no free-form strings, no optional label slots, no
+placeholder values. Families that would sometimes lack a value are split
+instead: HTTP status has its own family because failed requests have no
+status, and credential source has its own family because a failed resolution
+may have no safe source.
 
-Every label comes from a finite enum declared by the owning domain. Every
-sample contains exactly the labels in its family, in declaration order; there
-are no optional slots or `"none"` fillers.
-
-| Families | Aggregation | Exact labels |
+| Families | Aggregation | Labels |
 | --- | --- | --- |
 | `awskit.s3.operations`, `awskit.s3.operation.duration` | counter, histogram | `aws.operation`, `outcome` |
 | `awskit.s3.logical_request_bytes`, `awskit.s3.logical_response_bytes` | histogram | `aws.operation` |
@@ -237,74 +226,84 @@ are no optional slots or `"none"` fillers.
 | `awskit.s3.transfer.logical_bytes`, `awskit.s3.transfer.parts` | histogram | `transfer.direction` |
 | `awskit.s3.transfers_in_flight` | gauge | `transfer.direction` |
 
-HTTP status and credential source have separate families because transport
-failures have no status and unsuccessful resolutions may have no safe source.
-S3 attempt retry class is likewise a failure-only family rather than a made-up
-success value. Retry amplification is the aligned rate of
-`awskit.s3.attempts` divided by `awskit.s3.operations`; Awskit does not emit a
-point-in-time ratio sample.
+Current in-flight values for the gauge families are available on demand from
+the observer (`snapshot`), so a scraper can poll at whatever cadence your
+metrics setup prefers; Awskit does not run a polling loop for you.
 
 ## Tracing And OpenTelemetry
 
-The private OpenTelemetry projection adapter names logical client spans
-`S3.<Operation>` and maps them to `rpc.system.name = "aws-api"` plus the same
-fully qualified `rpc.method`, for example `S3.GetObject`. Physical HTTP client
-spans use the HTTP method as their name; S3 attempts, credentials, signing,
-presigned-artifact generation, artifact signing, and connector phases are
-internal spans.
-Retry decisions are span events on the causing attempt. Caller cancellation
-does not set error status, while a failed physical HTTP response retains its
-status-derived error type.
+A trace sink receives one span-shaped view per operation. If you map spans to
+OpenTelemetry, the natural mapping is: S3 operations become client spans
+named `S3.<Operation>` (for example `S3.GetObject`), physical HTTP requests
+become client spans named by method, and attempts, credentials, signing,
+phases, transfers, and presign generations become internal spans. Retry
+decisions are span events on the attempt that caused them. Caller
+cancellation is not an error status; a failed HTTP response keeps its
+status-derived error.
 
-The adapter intentionally omits raw URLs, paths, query strings, and arbitrary
-endpoint values because presigned URLs, signatures, and tokens must never
-cross the canonical safe interface. It also omits server/region attributes
-that the current canonical model cannot provide safely, and it does not invent
-lower transport phases. This is a deliberately incomplete safe mapping of the
-current
-[AWS SDK](https://opentelemetry.io/docs/specs/semconv/cloud-providers/aws-sdk/)
-and [HTTP span](https://opentelemetry.io/docs/specs/semconv/http/http-spans/)
-conventions rather than full HTTP semantic-convention conformance: required
-HTTP target attributes are intentionally unavailable at the safe projection
-boundary.
+For safety, spans never carry URLs, paths, query strings, or endpoint values,
+so presigned URLs, signatures, and tokens can never leak through tracing.
+That also means full conformance with the OpenTelemetry HTTP semantic
+conventions is intentionally out of reach: attributes that would require
+those values are simply absent.
 
-## Diagnostics And Cardinality
+## What Can Never Appear In Telemetry
 
-Dimensions, measurements, and diagnostics are different OCaml types.
-Operations and finite status/retry classes are bounded dimensions; durations,
-bytes, counts, delays, and budgets are numeric measurements; request IDs, host
-IDs, safe status codes, and trace correlation are diagnostics.
+Awskit separates three kinds of values and treats them differently:
 
-Only `Diagnostic.Public.t` reaches Logs or trace callbacks. Sensitive values are
-removed before that interface is built, and metric sinks cannot name a
-diagnostic API. Credentials, authorization material, tokens, signatures, raw
-presigned URLs, and unredacted exception text are prohibited from canonical
-observations entirely. Bucket names, object keys, request IDs, host IDs, and
-endpoint URLs never become metric labels.
+- **Labels** on metrics come only from small declared sets (operations,
+  outcomes, retry classes, status classes, methods, directions). Cardinality
+  stays bounded no matter what your buckets and keys are named.
+- **Diagnostics** such as AWS request IDs, host IDs, and HTTP status codes
+  may appear in logs and traces after validation, but never become metric
+  labels.
+- **Sensitive values** — credentials, authorization material, tokens,
+  signatures, presigned URLs, signed query parameters, raw provider error
+  bodies, and arbitrary exception text — never appear in any signal, and
+  there is no public API that could promote them into one.
 
-## Extension Roles
+If a provider sends a malformed request ID (for example containing control
+characters), Awskit drops it rather than forwarding it to your logs.
 
-Ordinary applications use runtime `Observability` modules, source values,
-`Metric_sink.create`, safe `Trace_sink.create`, Logs tags, and health snapshots.
-The remaining roles are explicit expert contracts:
+## Checking Sink Health
 
-- `Awskit.Observability.For_service` lets future service packages own typed
-  definitions, exact metric families, lazy log policy, events, and instruments.
-- `Awskit.Observability.For_runtime` supplies context and finalization
-  contracts, semantic observer composition, and adapter-owned HTTP definitions;
-  its lifecycle engine and scope types remain sealed.
-- `Awskit.Observability.For_projection` is a read-only, public-diagnostic-only
-  view for application adapters.
-- `Awskit_s3.Observability.For_runtime` and `.For_simulator` are narrow roles
-  required by the existing S3 sibling packages.
+Sinks can fail without affecting SDK results, so each observer keeps a small
+set of failure counters you can inspect:
 
-There is no Awskit observability syntax extension: definitions are ordinary
-typed module values, and production call sites use small semantic wrappers such
-as `with_operation`, `with_attempt`, `with_signing`, and `emit_retry`. This
-keeps service logic visible without adding observability PPX build coupling or
-exposing lifecycle machinery to applications.
+```ocaml
+let snapshot = Awskit_lwt.Observability.health observability
 
-The simulator records `Awskit_s3_sim.observations` in a per-connection terminal
-completion stream that is independent of request history. Each entry has the
-same safe logical completion shape as the real S3 client, while its physical
-attempt measurement is absent because the simulator performs no transport.
+let failures = Awskit.Observability.Health.failures snapshot
+```
+
+Each failure names its sink (by the `name` you gave it), a phase
+(`Enablement`, `Start`, `Finish`, `Event`, `Instrument`, or `Context`), and a
+saturating count. Snapshots contain counters only — never exception text or
+request data — so it is safe to export them, using only the projection kind
+and phase as dimensions. A health snapshot is never itself logged or counted
+through the same observer.
+
+## Shutting Down
+
+Observers hold no background resources, so there is no `shutdown` to call on
+them. When your application exits: stop making SDK calls first, then flush
+and shut down the reporter, exporter, or tracer handles you created.
+
+## Advanced: Runtime And Service Integration
+
+Most applications only need the modules above. Three additional interfaces
+exist for authors of SDK extensions, and ordinary application code should not
+need them:
+
+- `Awskit.Observability.For_service` lets a future service package (say, an
+  EC2 client) describe its own operations, metric families, and log policies
+  with the same guarantees S3 gets.
+- `Awskit.Observability.For_runtime` is how the Lwt and Eio packages supply
+  timing, context, and cancellation behavior; you only touch it when writing
+  a new runtime adapter.
+- `Awskit_s3.Observability.For_runtime` and `.For_simulator` wire those
+  runtimes and the simulator into the S3 client.
+
+The simulator keeps its own per-connection record of operation completions,
+available as `Awskit_s3_sim.observations`, which test suites can assert
+against without any observer configured.
