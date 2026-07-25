@@ -8,19 +8,26 @@
   metric families, public-diagnostic-only Logs/trace views, and
   application-owned metric/trace integration resources. Metrics, Trace,
   and OpenTelemetry adapters remain private contract tests; no observability
-  PPX or other released package was added.
+  PPX or other released package was added. (#28, a7565c2)
 
 ## Changed
 
-- Runtime implementations now expose exact-once observation scopes,
-  runtime-native cancellation classification, and caller-consumed response byte
-  accounting. Lwt and Eio adapters measure only streaming request production,
-  response-header wait, response consumption, and drain boundaries they own;
-  native static bodies retain their connector representation and do not claim
-  a connector request-byte sample. The generic Lwt functor cannot abort a
-  client that ignores cancellation, while the built-in Unix adapter owns and
-  closes one exclusive fresh connection per call. Retry backoff remains outside
-  each S3 attempt.
+- Changed the `awskit-lwt-unix` adapter to own and close one exclusive fresh
+  connection per HTTP call instead of relying on connector connection reuse,
+  and documented that the generic `awskit-lwt` functor cannot abort a client
+  that ignores cancellation or guarantee reuse after abandoned-body cleanup.
+  (#28, a7565c2)
+
+## Documentation, CI, and Release
+
+- Added `docs/observability.md` covering observation semantics, public sink
+  contracts, the exact metric-family inventory, and application-owned
+  reporter/exporter policy, and updated the README plus the architecture,
+  testing, and security threat model guides for the new surface. (#28,
+  a7565c2)
+- Added observability validation gates for observer and projection contracts,
+  S3 attempt-topology protocol workloads, installed-interface compile-fail
+  checks, and a focused observability benchmark. (#28, a7565c2)
 
 # 0.2.0
 
