@@ -47,3 +47,6 @@ _opam/
 
 # DS_Store
 .DS_Store
+
+# Agents
+.agents
