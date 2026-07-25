@@ -86,21 +86,7 @@ val disable_random_faults : t -> unit
 (** Disable random fault injection. Queued explicit faults are unchanged. *)
 
 type operation_record = {
-  op :
-    [ `Put_object
-    | `Get_object
-    | `Head_object
-    | `Delete_object
-    | `List_objects_v2
-    | `List_object_versions
-    | `Copy_object
-    | `Delete_objects
-    | `Create_multipart_upload
-    | `Upload_part
-    | `Complete_multipart_upload
-    | `Abort_multipart_upload
-    | `List_parts ];
-      (** Operation kind. *)
+  op : Awskit_s3.Operation.t;  (** Canonical S3 service operation kind. *)
   bucket : string;  (** Bucket targeted by the operation. *)
   key : string option;
       (** Object key targeted by object/multipart operations. *)
@@ -131,6 +117,16 @@ val history : store -> operation_record list
 
 val clear_history : store -> unit
 (** Clear recorded operation history. *)
+
+val observations :
+  t -> Awskit.Observability.For_projection.Operation.Completion.t list
+(** Return terminal logical-operation completions recorded on this connection.
+
+    Completions are connection-local even when connections share a store, and
+    contain no physical HTTP or retry observations. *)
+
+val clear_observations : t -> unit
+(** Clear connection-local completions without changing store history. *)
 
 val objects_as_strings :
   store -> bucket:Awskit_s3.Bucket_name.t -> (string * string) list

@@ -1,0 +1,3 @@
+(library
+ (name awskit_observability_metrics)
+ (libraries awskit awskit-s3 base metrics))

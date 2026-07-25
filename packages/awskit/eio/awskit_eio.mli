@@ -24,6 +24,69 @@ val http_only : 'flow https
 (** Disable HTTPS connections. Use only with plain HTTP endpoints, such as local
     tests. *)
 
+module Observability : sig
+  (** Per-client Eio observability configuration. *)
+
+  module Trace_sink : sig
+    (** Safe trace adapter with fiber-local context activation. *)
+
+    type activation = {
+      within : 'a. (unit -> 'a) -> 'a;
+          (** Install trace context around the supplied SDK callback.
+
+              Awskit defends callback invocation and result semantics when this
+              wrapper misbehaves, but trusts the wrapper to remain live: a
+              wrapper that does not return can stall the SDK operation even if
+              it already invoked the callback. *)
+      correlation : Awskit.Observability.Diagnostic.Public.t list;
+          (** Validated public trace-correlation diagnostics. *)
+      finish :
+        Awskit.Observability.For_projection.Operation.Completion.t -> unit;
+          (** Close the trace operation from its safe terminal completion. *)
+    }
+
+    type t
+
+    val create :
+      name:string ->
+      needs_clock:bool ->
+      enabled:(Awskit.Observability.For_projection.Operation.Info.t -> bool) ->
+      start:
+        (Awskit.Observability.For_projection.Operation.Start.t -> activation) ->
+      event_enabled:(Awskit.Observability.For_projection.Event.Info.t -> bool) ->
+      event:(Awskit.Observability.For_projection.Event.t -> unit) ->
+      t
+    (** Construct a synchronous, failure-contained trace sink. *)
+  end
+
+  type t
+
+  val default : unit -> t
+  (** Fresh observer with the built-in Logs projection enabled. *)
+
+  val none : t
+  (** Shared hard-off observer with no callbacks, clock reads, or health
+      mutation. *)
+
+  val create :
+    ?logs:bool ->
+    ?clock:(unit -> int64) ->
+    ?metric_sinks:Awskit.Observability.Metric_sink.t list ->
+    ?trace_sinks:Trace_sink.t list ->
+    unit ->
+    t
+  (** Create fresh observer-local state. [logs] defaults to [true]. Supply a
+      monotonic nanosecond [clock] whenever a configured sink requires one. *)
+
+  val health : t -> Awskit.Observability.Health.snapshot
+  (** Inspect contained projection failures. Observer values own no exporter or
+      reporter resources and therefore have no shutdown operation. *)
+
+  val instrument_snapshot :
+    t -> Awskit.Observability.For_projection.Metric.Observation.t list
+  (** Read current owned-state gauges for application-controlled polling. *)
+end
+
 (** Direct-style runtime implementation used by service packages. *)
 module Runtime : sig
   type conn
@@ -35,6 +98,12 @@ end
 
 type t = Runtime.conn
 (** Eio connection handle. Create with {!val:create}. *)
+
+(** Expert service-package observation port bound to this runtime. *)
+module Runtime_observer :
+  Awskit.Observability.For_service.Observer
+    with type 'a io = 'a
+     and type connection = t
 
 val create :
   env:< clock : _ Eio.Time.clock ; net : _ Eio.Net.t ; .. > ->
@@ -48,6 +117,7 @@ val create :
   ?timeout_policy:Awskit.Timeout.policy ->
   ?endpoint:string ->
   ?max_response_drain_bytes:int ->
+  ?observability:Observability.t ->
   unit ->
   (t, Awskit.Error.t) result
 (** Create an Eio connection.
@@ -67,6 +137,8 @@ val create :
     [Awskit.Timeout.default]. [max_response_drain_bytes] defaults to 64 MiB. If
     a response consumer succeeds but the remaining body exceeds this drain
     limit, the operation fails with a body-limit error. If the consumer fails,
-    the consumer error is returned. [operation] timeouts in [timeout_policy]
-    apply to one runtime transport operation; service-level retries get a fresh
-    operation timer for each attempt. *)
+    the consumer error is returned. Each physical HTTP call runs in a nested Eio
+    switch, so bounded body cleanup and switch teardown finish before the
+    attempt returns while native cancellation remains native. [operation]
+    timeouts in [timeout_policy] apply to one runtime transport operation;
+    service-level retries get a fresh operation timer for each attempt. *)

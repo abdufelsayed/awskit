@@ -1,3 +1,5 @@
 (documentation
  (package awskit-eio)
  (mld_files index))
+
+(include_subdirs no)

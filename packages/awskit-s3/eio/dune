@@ -1,3 +1,5 @@
+(include_subdirs no)
+
 (library
  (name awskit_s3_eio)
  (public_name awskit-s3-eio)

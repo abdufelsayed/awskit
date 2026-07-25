@@ -95,6 +95,10 @@ module type Response_body = sig
   val discard : t -> (unit, Error.t) result io
   (** Drain and ignore the response body, subject to the runtime drain timeout
       and byte limit. *)
+
+  val consumed_bytes : t -> int64
+  (** Return response bytes consumed by the caller or service decoder, excluding
+      bytes read only by explicit or automatic draining. *)
 end
 
 module type Transport = sig

@@ -78,7 +78,20 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     end
   end
 
-  module S3 = Awskit_s3.Make (Runtime)
+  module Observer = struct
+    type 'a io = 'a Lwt.t
+    type connection = runtime_connection
+    type lease = Aws.Runtime_observer.lease
+
+    let with_operation t = Aws.Runtime_observer.with_operation t.aws
+    let emit_event t = Aws.Runtime_observer.emit_event t.aws
+    let acquire t = Aws.Runtime_observer.acquire t.aws
+    let add = Aws.Runtime_observer.add
+    let release = Aws.Runtime_observer.release
+    let with_instrument t = Aws.Runtime_observer.with_instrument t.aws
+  end
+
+  module S3 = Awskit_s3.Observability.For_runtime.Make (Runtime) (Observer)
 
   module Body = struct
     include S3.Body
@@ -101,10 +114,11 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
   let create ?ctx ?(endpoint_config = Awskit_s3.default_endpoint_config) ~region
       ~credentials ~clock ?retry_policy ?sleep ?random_float ?timeout_policy
-      ?max_response_drain_bytes () =
+      ?max_response_drain_bytes ?observability () =
     match
       Aws.create ?ctx ~region ~credentials ~clock ?retry_policy ?sleep
-        ?random_float ?timeout_policy ?max_response_drain_bytes ()
+        ?random_float ?timeout_policy ?max_response_drain_bytes ?observability
+        ()
     with
     | Error _ as error -> error
     | Ok aws -> Ok { aws; endpoint_config }

@@ -1013,6 +1013,72 @@ module Encryption = Encryption
 module Endpoint_config = Endpoint_config
 module Endpoint_resolver = Endpoint_resolver
 
+module Operation : sig
+  (** Bounded S3 service-operation identity. *)
+
+  type t =
+    | Abort_multipart_upload
+    | Complete_multipart_upload
+    | Copy_object
+    | Create_bucket
+    | Create_multipart_upload
+    | Delete_bucket
+    | Delete_bucket_cors
+    | Delete_bucket_encryption
+    | Delete_bucket_ownership_controls
+    | Delete_bucket_policy
+    | Delete_bucket_tagging
+    | Delete_object
+    | Delete_object_tagging
+    | Delete_objects
+    | Delete_public_access_block
+    | Get_bucket_cors
+    | Get_bucket_encryption
+    | Get_bucket_location
+    | Get_bucket_ownership_controls
+    | Get_bucket_policy
+    | Get_bucket_tagging
+    | Get_bucket_versioning
+    | Get_object
+    | Get_object_tagging
+    | Get_public_access_block
+    | Head_bucket
+    | Head_object
+    | List_buckets
+    | List_object_versions
+    | List_objects_v2
+    | List_parts
+    | Put_bucket_cors
+    | Put_bucket_encryption
+    | Put_bucket_ownership_controls
+    | Put_bucket_policy
+    | Put_bucket_tagging
+    | Put_bucket_versioning
+    | Put_object
+    | Put_object_tagging
+    | Put_public_access_block
+    | Upload_part
+
+  val equal : t -> t -> bool
+  val to_string : t -> string
+  val all : t list
+end
+
+module Artifact_operation : sig
+  (** Bounded identity for connection-bound presigned-artifact generation. *)
+
+  type t =
+    | Presign_get_object
+    | Presign_put_object
+    | Presign_head_object
+    | Presign_delete_object
+    | Presign_upload_part
+
+  val equal : t -> t -> bool
+  val to_string : t -> string
+  val all : t list
+end
+
 type addressing_style = Endpoint_config.addressing_style
 type endpoint_variant = Endpoint_config.endpoint_variant
 type endpoint_config = Endpoint_resolver.t
@@ -1047,3 +1113,77 @@ module Make (R : RUNTIME) :
      and type 'a io = 'a R.t
      and type request_body = R.request_body
      and type response_body_reader = R.response_body_reader
+
+module Observability : sig
+  (** S3-owned observation identities and expert composition roles. *)
+
+  module Sources : sig
+    val operation : Logs.src
+    val attempt : Logs.src
+    val signing : Logs.src
+    val artifact : Logs.src
+    val artifact_signing : Logs.src
+    val retry : Logs.src
+    val transfer : Logs.src
+  end
+
+  module For_runtime : sig
+    module Transfer : sig
+      type summary = { logical_bytes : int64; parts : int }
+
+      module Make (Observer : Awskit.Observability.For_service.Observer) : sig
+        val with_upload :
+          Observer.connection ->
+          summarize:('a -> summary) ->
+          (unit -> ('a, Awskit.Error.t) Result.t Observer.io) ->
+          ('a, Awskit.Error.t) Result.t Observer.io
+
+        val with_download :
+          Observer.connection ->
+          summarize:('a -> summary) ->
+          (unit -> ('a, Awskit.Error.t) Result.t Observer.io) ->
+          ('a, Awskit.Error.t) Result.t Observer.io
+      end
+    end
+
+    module Make
+        (Runtime : RUNTIME)
+        (Observer :
+          Awskit.Observability.For_service.Observer
+            with type 'a io = 'a Runtime.t
+             and type connection = Runtime.connection) :
+      S
+        with type connection = Runtime.connection
+         and type 'a io = 'a Runtime.t
+         and type request_body = Runtime.request_body
+         and type response_body_reader = Runtime.response_body_reader
+  end
+
+  module For_simulator : sig
+    val complete :
+      operation:Operation.t ->
+      outcome:Awskit.Observability.Outcome.t ->
+      ?retry_class:Awskit.Error.retry_class ->
+      ?logical_request_bytes:int64 ->
+      ?logical_response_bytes:int64 ->
+      unit ->
+      Awskit.Observability.For_projection.Operation.Completion.t
+
+    val complete_artifact :
+      operation:Artifact_operation.t ->
+      outcome:Awskit.Observability.Outcome.t ->
+      unit ->
+      Awskit.Observability.For_projection.Operation.Completion.t
+
+    val complete_artifact_signing :
+      operation:Artifact_operation.t ->
+      outcome:Awskit.Observability.Outcome.t ->
+      unit ->
+      Awskit.Observability.For_projection.Operation.Completion.t
+
+    val complete_credential_resolution :
+      credentials:Awskit.Credentials.t ->
+      unit ->
+      Awskit.Observability.For_projection.Operation.Completion.t
+  end
+end

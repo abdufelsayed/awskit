@@ -5,6 +5,9 @@
   (alias awskit-test-contracts)
   (alias awskit-core-contracts)
   (alias awskit-runtime-contracts)
+  (alias observability-contracts)
+  (alias observability-interfaces)
+  (alias observability-protocol)
   (alias runtime-http-contracts)
   (alias s3-simulator)
   (alias s3-transfer-faults)
@@ -46,6 +49,38 @@
  (name awskit-runtime-contracts)
  (deps
   (alias test/awskit/runtime/awskit-runtime-contracts)))
+
+(alias
+ (name observability-contracts)
+ (deps
+  (alias test/observability/observability-contracts)))
+
+(rule
+ (alias observability-interfaces)
+ (deps
+  awskit.install
+  awskit-lwt.install
+  awskit-eio.install
+  awskit-s3.install
+  test/observability/interfaces/check_install_surface.sh)
+ (action
+  (run
+   bash
+   test/observability/interfaces/check_install_surface.sh
+   awskit.install
+   awskit-lwt.install
+   awskit-eio.install
+   awskit-s3.install)))
+
+(alias
+ (name observability-protocol)
+ (deps
+  (alias test/awskit-s3/protocol/observability-protocol)))
+
+(alias
+ (name observability-bench)
+ (deps
+  (alias bench/observability/observability-bench)))
 
 (alias
  (name s3-simulator)

@@ -18,6 +18,11 @@ depends: [
   "fmt" {>= "0.11.0"}
   "eio" {>= "1.3"}
   "ptime"
+  "base" {with-test & >= "v0.16.3"}
+  "eio_main" {with-test & >= "1.3"}
+  "alcotest" {with-test & >= "1.9.1"}
+  "logs" {with-test}
+  "trace" {with-test & >= "0.12"}
   "odoc" {with-doc}
 ]
 build: [

@@ -76,7 +76,20 @@ module Runtime = struct
   end
 end
 
-module S3 = Awskit_s3.Make (Runtime)
+module Observer = struct
+  type 'a io = 'a
+  type connection = runtime_connection
+  type lease = Awskit_eio.Runtime_observer.lease
+
+  let with_operation t = Awskit_eio.Runtime_observer.with_operation t.aws
+  let emit_event t = Awskit_eio.Runtime_observer.emit_event t.aws
+  let acquire t = Awskit_eio.Runtime_observer.acquire t.aws
+  let add = Awskit_eio.Runtime_observer.add
+  let release = Awskit_eio.Runtime_observer.release
+  let with_instrument t = Awskit_eio.Runtime_observer.with_instrument t.aws
+end
+
+module S3 = Awskit_s3.Observability.For_runtime.Make (Runtime) (Observer)
 module File_transfer = Transfer
 module Body_reader = File_transfer.Make_body_reader (Runtime) (S3)
 module Body = Body_reader.Body
@@ -84,10 +97,10 @@ module Reader = Body_reader.Reader
 
 let create ~sw ~env ~https ~region ~credentials ?retry_policy ?random_float
     ?timeout_policy ?(endpoint_config = Awskit_s3.default_endpoint_config)
-    ?max_response_drain_bytes () =
+    ?max_response_drain_bytes ?observability () =
   match
     Awskit_eio.create ~sw ~env ~https ~region ~credentials ?retry_policy
-      ?random_float ?timeout_policy ?max_response_drain_bytes ()
+      ?random_float ?timeout_policy ?max_response_drain_bytes ?observability ()
   with
   | Error _ as error -> error
   | Ok aws -> Ok { aws; endpoint_config }
@@ -96,7 +109,7 @@ module Object = struct
   include S3.Object
 
   module Transfer = struct
-    include File_transfer.Make (Runtime) (S3) (Body) (Reader)
+    include File_transfer.Make (Runtime) (Observer) (S3) (Body) (Reader)
   end
 end
 

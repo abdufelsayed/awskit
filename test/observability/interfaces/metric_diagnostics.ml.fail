@@ -1,0 +1,4 @@
+module P = Awskit.Observability.For_projection
+
+let diagnostics (observation : P.Metric.Observation.t) =
+  P.Metric.Observation.diagnostics observation

@@ -1,3 +1,27 @@
+# Unreleased
+
+## Added
+
+- Added runtime-neutral typed observability for logical S3 operations, S3
+  attempt coordination, signing, physical HTTP attempts, retry decisions,
+  adapter-owned body/header phases, high-level transfers, exact bounded
+  metric families, public-diagnostic-only Logs/trace views, and
+  application-owned metric/trace integration resources. Metrics, Trace,
+  and OpenTelemetry adapters remain private contract tests; no observability
+  PPX or other released package was added.
+
+## Changed
+
+- Runtime implementations now expose exact-once observation scopes,
+  runtime-native cancellation classification, and caller-consumed response byte
+  accounting. Lwt and Eio adapters measure only streaming request production,
+  response-header wait, response consumption, and drain boundaries they own;
+  native static bodies retain their connector representation and do not claim
+  a connector request-byte sample. The generic Lwt functor cannot abort a
+  client that ignores cancellation, while the built-in Unix adapter owns and
+  closes one exclusive fresh connection per call. Retry backoff remains outside
+  each S3 attempt.
+
 # 0.2.0
 
 Awskit 0.2.0 is a breaking SDK hardening release. It moves the public API

@@ -1,4 +1,26 @@
 open Awskit_s3
+module O = Awskit.Observability
+module P = O.For_projection
+
+let observation_name completion =
+  completion |> P.Operation.Completion.info |> P.Operation.Info.name
+
+let check_failed_logical_observation path conn =
+  let logical =
+    Protocol_recording_runtime.observations conn
+    |> List.filter (fun completion ->
+        String.equal "awskit.s3.operation" (observation_name completion))
+  in
+  Alcotest.(check int)
+    (path ^ " logical completion count")
+    1 (List.length logical);
+  match logical with
+  | [ completion ] ->
+      Alcotest.(check string)
+        (path ^ " logical completion outcome")
+        "error"
+        (completion |> P.Operation.Completion.outcome |> O.Outcome.to_string)
+  | _ -> ()
 
 let check_record_metadata path record =
   Protocol_fixture_diff.check_string
@@ -57,7 +79,8 @@ let run_replay path =
           ()
       with
       | Error error when Protocol_support.is_decode_error error ->
-          check_expected_error path record error
+          check_expected_error path record error;
+          check_failed_logical_observation path conn
       | Error error ->
           Alcotest.failf "%s unexpected error: %a" path Error.pp error
       | Ok _ -> Alcotest.failf "%s unexpectedly decoded as tagging XML" path)

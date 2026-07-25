@@ -5,6 +5,7 @@ open Simulator_error
 open Simulator_store
 open Simulator_checksum
 module Object = Awskit_s3.Object
+module Operation = Awskit_s3.Operation
 
 let validate_opt f = function None -> Ok () | Some value -> f value
 
@@ -13,11 +14,12 @@ let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
   let options = Option.value ~default:Object.Copy.default_options options in
   let source_error error =
     Error
-      (with_operation `Copy_object ~bucket:source_bucket ~key:source_key error)
+      (with_operation Operation.Copy_object ~bucket:source_bucket
+         ~key:source_key error)
   in
   let return_error error =
     Error
-      (with_operation `Copy_object ~bucket:destination_bucket
+      (with_operation Operation.Copy_object ~bucket:destination_bucket
          ~key:destination_key error)
   in
   match validate_bucket_key source_bucket source_key with
@@ -49,8 +51,8 @@ let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
                   | Error error -> return_error error
                   | Ok destination_bucket_state -> (
                       match
-                        operation_fault conn `Copy_object destination_bucket
-                          (Some destination_key)
+                        operation_fault conn Operation.Copy_object
+                          destination_bucket (Some destination_key)
                       with
                       | Some error -> return_error error
                       | None -> (

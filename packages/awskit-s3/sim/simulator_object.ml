@@ -14,6 +14,7 @@ open Simulator_object_versions
 module Bucket_name = Awskit_s3.Bucket_name
 module Error = Awskit_s3.Error
 module Object_model = Awskit_s3.Object
+module Operation = Awskit_s3.Operation
 
 module Object = struct
   type connection = t
@@ -47,7 +48,7 @@ module Object = struct
       Option.value ~default:Object_model.Versions.default_options options
     in
     let return_error error =
-      Error (with_operation `List_object_versions ~bucket error)
+      Error (with_operation Operation.List_object_versions ~bucket error)
     in
     match validate_bucket bucket with
     | Error error -> return_error error
@@ -59,7 +60,8 @@ module Object = struct
             | Error error -> return_error error
             | Ok bucket_state -> (
                 match
-                  operation_fault conn `List_object_versions bucket None
+                  operation_fault conn Operation.List_object_versions bucket
+                    None
                 with
                 | Some error -> return_error error
                 | None ->
@@ -122,7 +124,7 @@ module Object = struct
       Option.value ~default:Object_model.List.default_options options
     in
     let return_error error =
-      Error (with_operation `List_objects_v2 ~bucket error)
+      Error (with_operation Operation.List_objects_v2 ~bucket error)
     in
     match validate_bucket bucket with
     | Error error -> return_error error
@@ -133,7 +135,9 @@ module Object = struct
             match require_bucket conn bucket with
             | Error error -> return_error error
             | Ok bucket_state -> (
-                match operation_fault conn `List_objects_v2 bucket None with
+                match
+                  operation_fault conn Operation.List_objects_v2 bucket None
+                with
                 | Some error -> return_error error
                 | None ->
                     Ok
@@ -170,7 +174,10 @@ module Object = struct
           | Some _ -> None);
       }
 
-    let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
+    let fetch_page conn ~bucket ~options () = list conn ~bucket ~options ()
+
+    let fold_pages_until_with ~fetch conn ~bucket ?options ?max_pages ~init ~f
+        () =
       match validate_max_pages max_pages with
       | Error error -> Error error
       | Ok () ->
@@ -179,9 +186,9 @@ module Object = struct
           in
           let rec loop continuation_token page_count acc =
             let options = options_for_page base continuation_token in
-            match list conn ~bucket ~options () with
+            match fetch conn ~bucket ~options () with
             | Error error -> Error error
-            | Ok page -> (
+            | Ok (page : Object_model.List.page) -> (
                 match f acc page with
                 | Error error -> Error error
                 | Ok (Stop acc) -> Ok acc
@@ -202,21 +209,29 @@ module Object = struct
           in
           loop base.continuation_token 0 init
 
-    let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
-      fold_pages_until conn ~bucket ?options ?max_pages ~init
+    let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
+      fold_pages_until_with ~fetch:fetch_page conn ~bucket ?options ?max_pages
+        ~init ~f ()
+
+    let fold_pages_with ~fetch conn ~bucket ?options ?max_pages ~init ~f () =
+      fold_pages_until_with ~fetch conn ~bucket ?options ?max_pages ~init
         ~f:(fun acc page -> Result.map (fun acc -> Continue acc) (f acc page))
         ()
 
-    let collect_pages conn ~bucket ?options ~max_pages ~init ~f () =
+    let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
+      fold_pages_with ~fetch:fetch_page conn ~bucket ?options ?max_pages ~init
+        ~f ()
+
+    let collect_pages_with ~fetch conn ~bucket ?options ~max_pages ~init ~f () =
       let* () = validate_required_max_pages max_pages in
       let base =
         Option.value ~default:Object_model.List.default_options options
       in
       let rec loop continuation_token page_count acc =
         let options = options_for_page base continuation_token in
-        match list conn ~bucket ~options () with
+        match fetch conn ~bucket ~options () with
         | Error error -> Error error
-        | Ok page -> (
+        | Ok (page : Object_model.List.page) -> (
             match f acc page with
             | Error error -> Error error
             | Ok acc -> (
@@ -235,31 +250,43 @@ module Object = struct
       in
       loop base.continuation_token 0 init
 
-    let pages conn ~bucket ?options ~max_pages () =
-      Result.map Stdlib.List.rev
-        (collect_pages conn ~bucket ?options ~max_pages ~init:[]
+    let collect_pages conn ~bucket ?options ~max_pages ~init ~f () =
+      collect_pages_with ~fetch:fetch_page conn ~bucket ?options ~max_pages
+        ~init ~f ()
+
+    let pages_with ~fetch conn ~bucket ?options ~max_pages () =
+      Result.map Base.List.rev
+        (collect_pages_with ~fetch conn ~bucket ?options ~max_pages ~init:[]
            ~f:(fun pages page -> Ok (page :: pages))
            ())
 
-    let objects conn ~bucket ?options ~max_pages () =
-      Result.map Stdlib.List.rev
-        (collect_pages conn ~bucket ?options ~max_pages ~init:[]
+    let pages conn ~bucket ?options ~max_pages () =
+      pages_with ~fetch:fetch_page conn ~bucket ?options ~max_pages ()
+
+    let objects_with ~fetch conn ~bucket ?options ~max_pages () =
+      Result.map Base.List.rev
+        (collect_pages_with ~fetch conn ~bucket ?options ~max_pages ~init:[]
            ~f:(fun objects (page : Object_model.List.page) ->
-             Ok (Stdlib.List.rev_append page.objects objects))
+             Ok (Base.List.rev_append page.objects objects))
+           ())
+
+    let objects conn ~bucket ?options ~max_pages () =
+      objects_with ~fetch:fetch_page conn ~bucket ?options ~max_pages ()
+
+    let keys_with ~fetch conn ~bucket ?options ~max_pages () =
+      Result.map Base.List.rev
+        (collect_pages_with ~fetch conn ~bucket ?options ~max_pages ~init:[]
+           ~f:(fun keys (page : Object_model.List.page) ->
+             let page_keys =
+               Base.List.map page.objects
+                 ~f:(fun (object_ : Object_model.List.object_summary) ->
+                   object_.key)
+             in
+             Ok (Base.List.rev_append page_keys keys))
            ())
 
     let keys conn ~bucket ?options ~max_pages () =
-      Result.map Stdlib.List.rev
-        (collect_pages conn ~bucket ?options ~max_pages ~init:[]
-           ~f:(fun keys (page : Object_model.List.page) ->
-             let page_keys =
-               Stdlib.List.map
-                 (fun (object_ : Object_model.List.object_summary) ->
-                   object_.key)
-                 page.objects
-             in
-             Ok (Stdlib.List.rev_append page_keys keys))
-           ())
+      keys_with ~fetch:fetch_page conn ~bucket ?options ~max_pages ()
   end
 
   module Versions = struct
@@ -288,7 +315,11 @@ module Object = struct
         version_id_marker = page.next_version_id_marker;
       }
 
-    let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
+    let fetch_page conn ~bucket ~options () =
+      list_versions conn ~bucket ~options ()
+
+    let fold_pages_until_with ~fetch conn ~bucket ?options ?max_pages ~init ~f
+        () =
       match validate_max_pages max_pages with
       | Error error -> Error error
       | Ok () ->
@@ -296,9 +327,9 @@ module Object = struct
             Option.value ~default:Object_model.Versions.default_options options
           in
           let rec loop options page_count acc =
-            match list_versions conn ~bucket ~options () with
+            match fetch conn ~bucket ~options () with
             | Error error -> Error error
-            | Ok page -> (
+            | Ok (page : Object_model.Versions.page) -> (
                 match f acc page with
                 | Error error -> Error error
                 | Ok (Stop acc) -> Ok acc
@@ -321,20 +352,28 @@ module Object = struct
           in
           loop base 0 init
 
-    let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
-      fold_pages_until conn ~bucket ?options ?max_pages ~init
+    let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
+      fold_pages_until_with ~fetch:fetch_page conn ~bucket ?options ?max_pages
+        ~init ~f ()
+
+    let fold_pages_with ~fetch conn ~bucket ?options ?max_pages ~init ~f () =
+      fold_pages_until_with ~fetch conn ~bucket ?options ?max_pages ~init
         ~f:(fun acc page -> Result.map (fun acc -> Continue acc) (f acc page))
         ()
 
-    let collect_pages conn ~bucket ?options ~max_pages ~init ~f () =
+    let fold_pages conn ~bucket ?options ?max_pages ~init ~f () =
+      fold_pages_with ~fetch:fetch_page conn ~bucket ?options ?max_pages ~init
+        ~f ()
+
+    let collect_pages_with ~fetch conn ~bucket ?options ~max_pages ~init ~f () =
       let* () = validate_required_max_pages max_pages in
       let base =
         Option.value ~default:Object_model.Versions.default_options options
       in
       let rec loop options page_count acc =
-        match list_versions conn ~bucket ~options () with
+        match fetch conn ~bucket ~options () with
         | Error error -> Error error
-        | Ok page -> (
+        | Ok (page : Object_model.Versions.page) -> (
             match f acc page with
             | Error error -> Error error
             | Ok acc -> (
@@ -355,25 +394,38 @@ module Object = struct
       in
       loop base 0 init
 
-    let pages conn ~bucket ?options ~max_pages () =
-      Result.map Stdlib.List.rev
-        (collect_pages conn ~bucket ?options ~max_pages ~init:[]
+    let collect_pages conn ~bucket ?options ~max_pages ~init ~f () =
+      collect_pages_with ~fetch:fetch_page conn ~bucket ?options ~max_pages
+        ~init ~f ()
+
+    let pages_with ~fetch conn ~bucket ?options ~max_pages () =
+      Result.map Base.List.rev
+        (collect_pages_with ~fetch conn ~bucket ?options ~max_pages ~init:[]
            ~f:(fun pages page -> Ok (page :: pages))
            ())
 
-    let object_versions conn ~bucket ?options ~max_pages () =
-      Result.map Stdlib.List.rev
-        (collect_pages conn ~bucket ?options ~max_pages ~init:[]
+    let pages conn ~bucket ?options ~max_pages () =
+      pages_with ~fetch:fetch_page conn ~bucket ?options ~max_pages ()
+
+    let object_versions_with ~fetch conn ~bucket ?options ~max_pages () =
+      Result.map Base.List.rev
+        (collect_pages_with ~fetch conn ~bucket ?options ~max_pages ~init:[]
            ~f:(fun versions (page : Object_model.Versions.page) ->
-             Ok (Stdlib.List.rev_append page.versions versions))
+             Ok (Base.List.rev_append page.versions versions))
+           ())
+
+    let object_versions conn ~bucket ?options ~max_pages () =
+      object_versions_with ~fetch:fetch_page conn ~bucket ?options ~max_pages ()
+
+    let delete_markers_with ~fetch conn ~bucket ?options ~max_pages () =
+      Result.map Base.List.rev
+        (collect_pages_with ~fetch conn ~bucket ?options ~max_pages ~init:[]
+           ~f:(fun markers (page : Object_model.Versions.page) ->
+             Ok (Base.List.rev_append page.delete_markers markers))
            ())
 
     let delete_markers conn ~bucket ?options ~max_pages () =
-      Result.map Stdlib.List.rev
-        (collect_pages conn ~bucket ?options ~max_pages ~init:[]
-           ~f:(fun markers (page : Object_model.Versions.page) ->
-             Ok (Stdlib.List.rev_append page.delete_markers markers))
-           ())
+      delete_markers_with ~fetch:fetch_page conn ~bucket ?options ~max_pages ()
   end
 
   module Tagging = Simulator_object_tagging.Tagging

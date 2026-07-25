@@ -10,7 +10,12 @@ module Runtime = struct
     materialize : unit -> (string, Awskit.Error.t) result;
   }
 
-  type response_body = { body : string; read_fault : Awskit.Error.t option }
+  type response_body = {
+    body : string;
+    read_fault : Awskit.Error.t option;
+    consumed_bytes : int64 ref;
+    draining : bool ref;
+  }
 
   type request_body_writer = {
     buffer : Buffer.t;
@@ -23,6 +28,8 @@ module Runtime = struct
     mutable offset : int;
     mutable read_fault : Awskit.Error.t option;
     mutable active : bool;
+    consumed_bytes : int64 ref;
+    draining : bool ref;
   }
 
   let descriptor_for_string body =
@@ -55,10 +62,10 @@ module Runtime = struct
     | None -> Ok ()
     | Some remaining ->
         let length = Int64.of_int (String.length value) in
-        if Stdlib.Int64.compare length remaining > 0 then
+        if Int64.compare length remaining > 0 then
           Error (body_error "request body exceeded declared content_length")
         else (
-          writer.remaining := Some (Stdlib.Int64.sub remaining length);
+          writer.remaining := Some (Int64.sub remaining length);
           Ok ())
 
   let check_finished_length writer =
@@ -116,12 +123,20 @@ module Runtime = struct
               let copied = min len remaining in
               String.blit reader.body reader.offset bytes off copied;
               reader.offset <- reader.offset + copied;
+              if not !(reader.draining) then
+                reader.consumed_bytes :=
+                  Int64.add !(reader.consumed_bytes) (Int64.of_int copied);
               Ok copied
 
-  let response_body ?read_fault body : response_body = { body; read_fault }
+  let response_body_reader_consumed_bytes (reader : response_body_reader) =
+    !(reader.consumed_bytes)
+
+  let response_body ?read_fault body : response_body =
+    { body; read_fault; consumed_bytes = ref 0L; draining = ref false }
+
   let close_response_body_reader reader = reader.active <- false
 
-  let discard_reader reader =
+  let drain_reader reader =
     let buffer = Bytes.create 8192 in
     let rec loop () =
       match
@@ -133,6 +148,18 @@ module Runtime = struct
     in
     loop ()
 
+  let discard_reader (body : response_body) reader =
+    let was_draining = !(body.draining) in
+    body.draining := true;
+    match drain_reader reader with
+    | result ->
+        body.draining := was_draining;
+        result
+    | exception exn ->
+        body.draining := was_draining;
+        let backtrace = Printexc.get_raw_backtrace () in
+        Printexc.raise_with_backtrace exn backtrace
+
   let with_response_body (body : response_body) ~consume =
     let reader =
       {
@@ -140,16 +167,18 @@ module Runtime = struct
         offset = 0;
         read_fault = body.read_fault;
         active = true;
+        consumed_bytes = body.consumed_bytes;
+        draining = body.draining;
       }
     in
     match consume reader with
     | exception exn ->
         let backtrace = Printexc.get_raw_backtrace () in
-        ignore (discard_reader reader : (unit, Awskit.Error.t) result);
+        ignore (discard_reader body reader : (unit, Awskit.Error.t) result);
         close_response_body_reader reader;
         Printexc.raise_with_backtrace exn backtrace
     | Ok _ as result -> (
-        match discard_reader reader with
+        match discard_reader body reader with
         | Ok () ->
             close_response_body_reader reader;
             result
@@ -157,7 +186,7 @@ module Runtime = struct
             close_response_body_reader reader;
             error)
     | Error _ as error -> (
-        match discard_reader reader with
+        match discard_reader body reader with
         | Ok () | Error _ ->
             close_response_body_reader reader;
             error)
@@ -169,9 +198,11 @@ module Runtime = struct
         offset = 0;
         read_fault = body.read_fault;
         active = true;
+        consumed_bytes = body.consumed_bytes;
+        draining = body.draining;
       }
     in
-    let result = discard_reader reader in
+    let result = discard_reader body reader in
     close_response_body_reader reader;
     result
 
@@ -217,6 +248,7 @@ module Runtime = struct
 
     let with_reader = with_response_body
     let discard = discard_response_body
+    let consumed_bytes (body : response_body) = !(body.consumed_bytes)
   end
 
   module IO = struct

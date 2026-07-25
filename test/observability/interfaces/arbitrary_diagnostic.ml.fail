@@ -1,0 +1,5 @@
+module F = Awskit.Observability.For_service
+
+let bearer_artifact =
+  F.Diagnostic.public_string ~name:"url"
+    "https://example.invalid/?X-Amz-Credential=AK&X-Amz-Signature=secret&X-Amz-Security-Token=token"

@@ -7,11 +7,12 @@ open Simulator_checksum
 open Simulator_runtime
 open Simulator_object_body
 module Object = Awskit_s3.Object
+module Operation = Awskit_s3.Operation
 
 let validate_opt f = function None -> Ok () | Some value -> f value
 
 let with_put_context ~bucket ~key error =
-  with_operation `Put_object ~bucket ~key error
+  with_operation Operation.Put_object ~bucket ~key error
 
 let put conn ~bucket ~key ?options ~body () =
   let options = Option.value ~default:Object.Put.default_options options in
@@ -37,7 +38,8 @@ let put conn ~bucket ~key ?options ~body () =
                   | Error error -> return_error error
                   | Ok () -> (
                       match
-                        operation_fault conn `Put_object bucket (Some key)
+                        operation_fault conn Operation.Put_object bucket
+                          (Some key)
                       with
                       | Some error -> return_error error
                       | None -> (

@@ -1,6 +1,8 @@
 (** Eio runtime adapter for AWS. Thin wrapper over the pure awskit package. *)
 
 module Runtime = Runtime
+module Observability = Observer
+module Runtime_observer = Runtime.Observability
 
 type t = Runtime.conn
 type 'flow https = 'flow Runtime.https

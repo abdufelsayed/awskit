@@ -38,6 +38,7 @@ module type Response_body = sig
     t -> consume:(reader -> ('a, Error.t) result io) -> ('a, Error.t) result io
 
   val discard : t -> (unit, Error.t) result io
+  val consumed_bytes : t -> int64
 end
 
 module type Transport = sig

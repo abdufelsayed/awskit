@@ -9,7 +9,7 @@ module Complete_multipart_upload = Multipart.Complete
 module Abort_multipart_upload = Multipart.Abort
 module List_parts = Multipart.List_parts
 
-module Make (C : Request_context.S) = struct
+module Make (C : Execution_request_context.S) = struct
   open C
 
   let ( let* ) = bind
@@ -151,7 +151,7 @@ module Make (C : Request_context.S) = struct
                     response;
                   }))
 
-  let create_upload conn ~bucket ~key ?options () =
+  let create_upload_in_session session conn ~bucket ~key ?options () =
     let typed_bucket = bucket in
     let typed_key = key in
     let bucket = Bucket_name.to_string typed_bucket in
@@ -161,7 +161,7 @@ module Make (C : Request_context.S) = struct
     in
     let return_error =
       S3_error_context.return_s3_error return_error
-        ~operation:"CreateMultipartUpload" ~bucket ~key
+        ~operation:Operation.Create_multipart_upload ~bucket ~key
     in
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -185,7 +185,8 @@ module Make (C : Request_context.S) = struct
             | Error error -> return_error error
             | Ok request ->
                 with_operation_result return_error return_ok
-                  (with_empty_response conn ~method_:`POST ~request
+                  (with_empty_response_in_session conn ~session ~method_:`POST
+                     ~request
                      ~query:[ ("uploads", []) ]
                      ~headers
                      ~f:(fun response body ->
@@ -199,14 +200,20 @@ module Make (C : Request_context.S) = struct
                              (create_upload_result ~typed_bucket ~typed_key
                                 response body)))))
 
-  let upload_part conn ~upload ~part_number ~body ?options () =
+  let create_upload conn ~bucket ~key ?options () =
+    with_operation conn ~operation:Operation.Create_multipart_upload
+      (fun session ->
+        create_upload_in_session session conn ~bucket ~key ?options ())
+
+  let upload_part_in_session session conn ~upload ~part_number ~body ?options ()
+      =
     let bucket = upload_bucket upload in
     let key = upload_key upload in
     let upload_id = upload_id upload in
     let options = Option.value ~default:Upload_part.default_options options in
     let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"UploadPart"
-        ~bucket ~key
+      S3_error_context.return_s3_error return_error
+        ~operation:Operation.Upload_part ~bucket ~key
     in
     let handle_response ~content_length response body =
       let* discarded = discard_response_body body in
@@ -251,8 +258,9 @@ module Make (C : Request_context.S) = struct
       | Error error -> return_error error
       | Ok request ->
           with_operation_result return_error return_ok
-            (with_response conn ~method_:`PUT ~request ~query ~headers
-               ~payload_hash:descriptor.payload_hash body
+            (with_discarded_response_in_session conn ~session ~method_:`PUT
+               ~request ~query ~headers ~payload_hash:descriptor.payload_hash
+               body
                ~f:(handle_response ~content_length))
     in
     match S3_validation.validate_bucket_key bucket key with
@@ -272,7 +280,12 @@ module Make (C : Request_context.S) = struct
                 | Error error -> return_error error
                 | Ok () -> send ~content_length descriptor)))
 
-  let complete_upload conn ~upload ?options ~parts () =
+  let upload_part conn ~upload ~part_number ~body ?options () =
+    with_operation conn ~operation:Operation.Upload_part (fun session ->
+        upload_part_in_session session conn ~upload ~part_number ~body ?options
+          ())
+
+  let complete_upload_in_session session conn ~upload ?options ~parts () =
     let bucket = upload_bucket upload in
     let key = upload_key upload in
     let upload_id = upload_id upload in
@@ -281,7 +294,7 @@ module Make (C : Request_context.S) = struct
     in
     let return_error =
       S3_error_context.return_s3_error return_error
-        ~operation:"CompleteMultipartUpload" ~bucket ~key
+        ~operation:Operation.Complete_multipart_upload ~bucket ~key
     in
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -327,8 +340,8 @@ module Make (C : Request_context.S) = struct
                 | Error error -> return_error error
                 | Ok request ->
                     with_operation_result return_error return_ok
-                      (with_retryable_embedded_response conn ~method_:`POST
-                         ~request
+                      (with_retryable_embedded_response_in_session conn ~session
+                         ~method_:`POST ~request
                          ~query:
                            [
                              ( "uploadId",
@@ -358,7 +371,12 @@ module Make (C : Request_context.S) = struct
                                | Error error -> return_error error
                                | Ok result -> return_ok result))))))
 
-  let abort_upload conn ~upload ?options () =
+  let complete_upload conn ~upload ?options ~parts () =
+    with_operation conn ~operation:Operation.Complete_multipart_upload
+      (fun session ->
+        complete_upload_in_session session conn ~upload ?options ~parts ())
+
+  let abort_upload_in_session session conn ~upload ?options () =
     let bucket = upload_bucket upload in
     let key = upload_key upload in
     let upload_id = upload_id upload in
@@ -367,7 +385,7 @@ module Make (C : Request_context.S) = struct
     in
     let return_error =
       S3_error_context.return_s3_error return_error
-        ~operation:"AbortMultipartUpload" ~bucket ~key
+        ~operation:Operation.Abort_multipart_upload ~bucket ~key
     in
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -376,7 +394,8 @@ module Make (C : Request_context.S) = struct
         | Error error -> return_error error
         | Ok request ->
             with_operation_result return_error return_ok
-              (with_empty_response conn ~method_:`DELETE ~request
+              (with_empty_discarded_response_in_session conn ~session
+                 ~method_:`DELETE ~request
                  ~query:
                    [ ("uploadId", [ Multipart.Upload_id.to_string upload_id ]) ]
                  ~headers:
@@ -389,20 +408,24 @@ module Make (C : Request_context.S) = struct
                    | Error error -> return_error error
                    | Ok () -> return_ok { Abort_multipart_upload.response })))
 
+  let abort_upload conn ~upload ?options () =
+    with_operation conn ~operation:Operation.Abort_multipart_upload
+      (fun session -> abort_upload_in_session session conn ~upload ?options ())
+
   let validate_list_parts_options (options : List_parts.options) =
     List_parts.options ?max_parts:options.max_parts
       ?part_number_marker:options.part_number_marker
       ?expected_bucket_owner:options.expected_bucket_owner ()
     |> Result.map ignore
 
-  let list_parts conn ~upload ?options () =
+  let list_parts_in_session session conn ~upload ?options () =
     let bucket = upload_bucket upload in
     let key = upload_key upload in
     let upload_id = upload_id upload in
     let options = Option.value ~default:List_parts.default_options options in
     let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"ListParts"
-        ~bucket ~key
+      S3_error_context.return_s3_error return_error
+        ~operation:Operation.List_parts ~bucket ~key
     in
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -436,7 +459,8 @@ module Make (C : Request_context.S) = struct
                       options.part_number_marker
                 in
                 with_operation_result return_error return_ok
-                  (with_empty_response conn ~method_:`GET ~request ~query
+                  (with_empty_response_in_session conn ~session ~method_:`GET
+                     ~request ~query
                      ~headers:
                        ([]
                        |> add_opt_account_id_header
@@ -539,6 +563,10 @@ module Make (C : Request_context.S) = struct
                                            response;
                                          })))))))
 
+  let list_parts conn ~upload ?options () =
+    with_operation conn ~operation:Operation.List_parts (fun session ->
+        list_parts_in_session session conn ~upload ?options ())
+
   module List_parts = struct
     let validate_max_pages = function
       | None -> Ok ()
@@ -556,8 +584,9 @@ module Make (C : Request_context.S) = struct
 
     let fold_pages conn ~upload ?options ?max_pages ~init ~f () =
       let return_context_error =
-        S3_error_context.return_s3_error return_error ~operation:"ListParts"
-          ~bucket:(upload_bucket upload) ~key:(upload_key upload)
+        S3_error_context.return_s3_error return_error
+          ~operation:Operation.List_parts ~bucket:(upload_bucket upload)
+          ~key:(upload_key upload)
       in
       match validate_max_pages max_pages with
       | Error error -> return_context_error error
@@ -592,8 +621,9 @@ module Make (C : Request_context.S) = struct
 
     let collect_pages conn ~upload ?options ?max_pages ~init ~f () =
       let return_context_error =
-        S3_error_context.return_s3_error return_error ~operation:"ListParts"
-          ~bucket:(upload_bucket upload) ~key:(upload_key upload)
+        S3_error_context.return_s3_error return_error
+          ~operation:Operation.List_parts ~bucket:(upload_bucket upload)
+          ~key:(upload_key upload)
       in
       match validate_max_pages max_pages with
       | Error error -> return_context_error error

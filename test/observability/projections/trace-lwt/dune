@@ -1,0 +1,3 @@
+(library
+ (name awskit_observability_trace_lwt)
+ (libraries awskit awskit-lwt base lwt trace.core))

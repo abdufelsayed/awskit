@@ -1,3 +1,5 @@
 (documentation
  (package awskit-lwt-unix)
  (mld_files index))
+
+(include_subdirs no)

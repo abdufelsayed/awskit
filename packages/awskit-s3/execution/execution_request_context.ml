@@ -1,18 +1,11 @@
 module Error = S3_error
 
-module type RUNTIME = sig
-  include Awskit.Runtime.S
-
-  module S3_endpoint : sig
-    type nonrec connection = connection
-
-    val s3_endpoint_config : connection -> Endpoint_resolver.t
-  end
-end
+module type RUNTIME = Execution_runtime.S
 
 module type S = sig
   module R : RUNTIME
 
+  type session
   type connection = R.connection
   type 'a io = 'a R.t
   type request_body = R.request_body
@@ -52,37 +45,67 @@ module type S = sig
     R.response_body -> max_size:int64 -> (string, Error.t) result io
 
   val discard_response_body : R.response_body -> (unit, Error.t) result io
-
-  val with_response :
-    connection ->
-    method_:Awskit.Request.Method.t ->
-    request:Endpoint_resolver.Request.t ->
-    query:(string * string list) list ->
-    headers:(string * string) list ->
-    payload_hash:Awskit.Body.Payload_hash.t ->
-    request_body ->
-    f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
-    ('a, Error.t) result io
-
-  val with_empty_response :
-    connection ->
-    method_:Awskit.Request.Method.t ->
-    request:Endpoint_resolver.Request.t ->
-    query:(string * string list) list ->
-    headers:(string * string) list ->
-    f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
-    ('a, Error.t) result io
-
-  val with_retryable_embedded_response :
-    connection ->
-    method_:Awskit.Request.Method.t ->
-    request:Endpoint_resolver.Request.t ->
-    query:(string * string list) list ->
-    headers:(string * string) list ->
-    payload_hash:Awskit.Body.Payload_hash.t ->
-    request_body ->
-    f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
-    ('a, Error.t) result io
-
   val content_md5 : string -> string
+
+  val with_operation :
+    connection ->
+    operation:Operation.t ->
+    (session -> ('a, Error.t) result io) ->
+    ('a, Error.t) result io
+
+  val with_response_in_session :
+    connection ->
+    session:session ->
+    method_:Awskit.Request.Method.t ->
+    request:Endpoint_resolver.Request.t ->
+    query:(string * string list) list ->
+    headers:(string * string) list ->
+    payload_hash:Awskit.Body.Payload_hash.t ->
+    request_body ->
+    f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
+    ('a, Error.t) result io
+
+  val with_discarded_response_in_session :
+    connection ->
+    session:session ->
+    method_:Awskit.Request.Method.t ->
+    request:Endpoint_resolver.Request.t ->
+    query:(string * string list) list ->
+    headers:(string * string) list ->
+    payload_hash:Awskit.Body.Payload_hash.t ->
+    request_body ->
+    f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
+    ('a, Error.t) result io
+
+  val with_empty_response_in_session :
+    connection ->
+    session:session ->
+    method_:Awskit.Request.Method.t ->
+    request:Endpoint_resolver.Request.t ->
+    query:(string * string list) list ->
+    headers:(string * string) list ->
+    f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
+    ('a, Error.t) result io
+
+  val with_empty_discarded_response_in_session :
+    connection ->
+    session:session ->
+    method_:Awskit.Request.Method.t ->
+    request:Endpoint_resolver.Request.t ->
+    query:(string * string list) list ->
+    headers:(string * string) list ->
+    f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
+    ('a, Error.t) result io
+
+  val with_retryable_embedded_response_in_session :
+    connection ->
+    session:session ->
+    method_:Awskit.Request.Method.t ->
+    request:Endpoint_resolver.Request.t ->
+    query:(string * string list) list ->
+    headers:(string * string) list ->
+    payload_hash:Awskit.Body.Payload_hash.t ->
+    request_body ->
+    f:(Awskit.Response.t -> R.response_body -> ('a, Error.t) result io) ->
+    ('a, Error.t) result io
 end

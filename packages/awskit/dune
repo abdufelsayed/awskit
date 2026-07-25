@@ -1,7 +1,21 @@
+(include_subdirs unqualified)
+
 (library
  (name awskit)
  (public_name awskit)
- (private_modules aws_uri aws_validation)
- (libraries base digestif ptime fmt)
+ (private_modules
+  aws_uri
+  aws_validation
+  observability_core
+  fields
+  metric
+  value
+  definition
+  health
+  logs_projection
+  engine
+  http
+  credentials_observation)
+ (libraries base digestif ptime fmt logs)
  (preprocess
   (pps ppx_deriving.show ppx_deriving.eq ppx_sexp_conv)))

@@ -1,0 +1,10 @@
+(library
+ (name awskit_observability_opentelemetry_lwt)
+ (libraries
+  awskit
+  awskit-s3
+  awskit-lwt
+  base
+  lwt
+  opentelemetry
+  opentelemetry-lwt))

@@ -17,6 +17,14 @@ depends: [
   "cohttp-lwt" {>= "6.2.1"}
   "lwt"
   "ptime"
+  "base" {with-test & >= "v0.16.3"}
+  "cohttp-lwt-unix" {with-test & >= "6.2.1"}
+  "alcotest" {with-test & >= "1.9.1"}
+  "logs" {with-test}
+  "metrics" {with-test & >= "0.5"}
+  "trace" {with-test & >= "0.12"}
+  "opentelemetry" {with-test & >= "0.91.1"}
+  "opentelemetry-lwt" {with-test & >= "0.91.1"}
   "odoc" {with-doc}
 ]
 build: [

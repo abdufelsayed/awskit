@@ -94,10 +94,17 @@ Core modules:
     helpers}
   {li {!module:Awskit.Error} — structured errors and retry classification}
   {li {!module:Awskit.Retry} — shared retry policy used by service packages}
+  {li {!module:Awskit.Observability} — typed outcomes, safe projection views,
+    sink contracts, Logs tags, and explicit service/runtime expert roles}
   {li {!module:Awskit.Signing} — pure AWS Signature Version 4 signing}
   {li {!module-type:Awskit.Runtime.S} — runtime abstraction used by service
     packages}
 }
+
+Metrics, Trace, and OpenTelemetry projections are application integrations;
+the repository verifies their sink contracts with private adapters. See
+{{:https://github.com/abdufelsayed/awskit/blob/main/docs/observability.md}[Observability]}
+for runtime setup, package boundaries, and data-safety rules.
 
 {2 awskit-eio}
 

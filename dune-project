@@ -31,6 +31,7 @@
   ptime
   (fmt
    (>= 0.11.0))
+  logs
   ppx_deriving
   ppx_sexp_conv
   (dune-release :with-dev-setup)
@@ -106,7 +107,11 @@
   (qcheck-alcotest
    (and
     :with-test
-    (>= 0.91)))))
+    (>= 0.91)))
+  (mtime
+   (and
+    :with-test
+    (>= 2.1.0)))))
 
 (package
  (name awskit-lwt-unix)
@@ -184,6 +189,9 @@
    (>= 4.14))
   (awskit
    (= :version))
+  (base
+   (>= v0.16.3))
+  logs
   (digestif
    (>= 1.3.0))
   ptime
@@ -223,6 +231,8 @@
    (= :version))
   (awskit-s3
    (= :version))
+  (base
+   (>= v0.16.3))
   (digestif
    (>= 1.3.0))
   ptime
@@ -260,7 +270,36 @@
   (cohttp-lwt
    (>= 6.2.1))
   lwt
-  ptime))
+  ptime
+  (base
+   (and
+    :with-test
+    (>= v0.16.3)))
+  (cohttp-lwt-unix
+   (and
+    :with-test
+    (>= 6.2.1)))
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))
+  (logs :with-test)
+  (metrics
+   (and
+    :with-test
+    (>= 0.5)))
+  (trace
+   (and
+    :with-test
+    (>= 0.12)))
+  (opentelemetry
+   (and
+    :with-test
+    (>= 0.91.1)))
+  (opentelemetry-lwt
+   (and
+    :with-test
+    (>= 0.91.1)))))
 
 (package
  (name awskit-s3-lwt-unix)
@@ -303,4 +342,21 @@
    (>= 0.11.0))
   (eio
    (>= 1.3))
-  ptime))
+  ptime
+  (base
+   (and
+    :with-test
+    (>= v0.16.3)))
+  (eio_main
+   (and
+    :with-test
+    (>= 1.3)))
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))
+  (logs :with-test)
+  (trace
+   (and
+    :with-test
+    (>= 0.12)))))

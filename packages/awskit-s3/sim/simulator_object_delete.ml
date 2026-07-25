@@ -4,6 +4,7 @@ open Simulator_state
 open Simulator_store
 module Object = Awskit_s3.Object
 module Object_key = Awskit_s3.Object_key
+module Operation = Awskit_s3.Operation
 
 let delete_result ?delete_marker ?version_id () =
   {
@@ -31,7 +32,7 @@ let delete_objects_conditions_match object_ = function
 let delete conn ~bucket ~key ?options () =
   let options = Option.value ~default:Object.Delete.default_options options in
   let return_error error =
-    Error (with_operation `Delete_object ~bucket ~key error)
+    Error (with_operation Operation.Delete_object ~bucket ~key error)
   in
   match validate_bucket_key bucket key with
   | Error error -> return_error error
@@ -39,7 +40,9 @@ let delete conn ~bucket ~key ?options () =
       match require_bucket conn bucket with
       | Error error -> return_error error
       | Ok bucket_state -> (
-          match operation_fault conn `Delete_object bucket (Some key) with
+          match
+            operation_fault conn Operation.Delete_object bucket (Some key)
+          with
           | Some error -> return_error error
           | None -> (
               match options.version_id with
@@ -99,7 +102,7 @@ let delete conn ~bucket ~key ?options () =
 let delete_objects conn ~bucket ~objects ?options:_ () =
   let key_string key = Object_key.to_string key in
   let return_error error =
-    Error (with_operation `Delete_objects ~bucket error)
+    Error (with_operation Operation.Delete_objects ~bucket error)
   in
   match validate_bucket bucket with
   | Error error -> return_error error
@@ -107,7 +110,7 @@ let delete_objects conn ~bucket ~objects ?options:_ () =
       match require_bucket conn bucket with
       | Error error -> return_error error
       | Ok bucket_state -> (
-          match operation_fault conn `Delete_objects bucket None with
+          match operation_fault conn Operation.Delete_objects bucket None with
           | Some error -> return_error error
           | None ->
               let deleted, errors =

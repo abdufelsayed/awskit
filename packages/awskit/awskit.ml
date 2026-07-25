@@ -11,4 +11,5 @@ module Timeout = Timeout
 module Signing = Signing
 module Request = Request
 module Response = Response
+module Observability = Observability
 module Runtime = Runtime

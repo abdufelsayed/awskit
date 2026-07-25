@@ -1,3 +1,5 @@
 (documentation
  (package awskit)
  (mld_files index guides))
+
+(include_subdirs no)

@@ -21,6 +21,7 @@ val create :
   ?timeout_policy:Awskit.Timeout.policy ->
   ?endpoint_config:Awskit_s3.Endpoint_config.t ->
   ?max_response_drain_bytes:int ->
+  ?observability:Awskit_eio.Observability.t ->
   unit ->
   (t, Awskit_s3.Error.t) result
 (** Create an Eio S3 client.
@@ -32,7 +33,8 @@ val create :
     endpoint variants, local S3-compatible tests, or explicit endpoints that use
     S3-compatible signing/addressing rules. [retry_policy] defaults to
     [Awskit.Retry.default]. [max_response_drain_bytes] controls how much
-    response body the runtime drains after successful consumers. *)
+    response body the runtime drains after successful consumers. [observability]
+    installs application-selected projections. *)
 
 module Body : sig
   include Awskit_s3.BODY with type 'a io := 'a and type t = Runtime.request_body

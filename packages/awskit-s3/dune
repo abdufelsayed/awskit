@@ -1,8 +1,29 @@
+(include_subdirs unqualified)
+
 (library
  (name awskit_s3)
  (public_name awskit-s3)
  (private_modules
   awskit_s3_header_helpers
+  execution
+  execution_attempt
+  execution_kernel
+  execution_request_context
+  execution_retry
+  execution_runtime
+  execution_session
+  execution_streaming
+  observation
+  observation_artifact
+  observation_artifact_signing
+  observation_attempt
+  observation_dimensions
+  observation_logical_operation
+  observation_operation
+  observation_signing
+  observation_sources
+  observation_transfer
+  observation_types
   bucket_access_xml
   bucket_cors_xml
   bucket_encryption_xml
@@ -19,7 +40,6 @@
   object_tagging_request
   object_versions_xml
   presigned_request
-  request_context
   response
   s3_error_context
   s3_error
@@ -31,10 +51,11 @@
   s3_xml
   s3_utf8
   s3_validation
-  streaming
   tagging_xml)
  (libraries
   awskit
+  base
+  logs
   digestif
   ptime
   fmt

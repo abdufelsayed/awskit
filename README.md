@@ -21,6 +21,9 @@ Awskit currently focuses on AWS S3.
 - A deterministic in-memory S3 simulator for fast tests.
 - Streaming request and response bodies with explicit size, hash, and
   replayability metadata.
+- Typed logical-operation, HTTP-attempt, retry, transfer, and credential
+  observations with sink contracts for application-owned metrics and tracing
+  integrations.
 - Unix helpers for AWS environment variables, shared credentials, and shared
   config files.
 
@@ -55,14 +58,21 @@ transport and TLS policy with the caller. Use `awskit-s3-lwt-unix` when you
 want a ready-to-use Lwt client that can read the standard AWS environment and
 profile configuration.
 
+The generic `awskit-lwt` adapter accepts any `Cohttp_lwt.S.Client`, so it cannot
+force an implementation that ignores Lwt cancellation to stop while response
+headers are pending or guarantee reuse after abandoned-body cleanup. The ready
+`awskit-lwt-unix` adapter owns one exclusive fresh connection per call and
+closes it at response EOF or abandonment; use it when that cleanup guarantee
+matters.
+
 ## Packages
 
 | Package | Description |
 | --- | --- |
 | `awskit` | Runtime-agnostic AWS core: credentials, regions, endpoints, SigV4 signing, retries, request/response types, errors, and the runtime module type. |
 | `awskit-unix` | Unix helpers for clocks, environment variables, shared AWS credentials, and config files. |
-| `awskit-lwt` | Generic Lwt runtime adapter over a caller-supplied Cohttp Lwt client. |
-| `awskit-lwt-unix` | Ready-to-use Lwt + Unix runtime adapter using Cohttp Lwt Unix. |
+| `awskit-lwt` | Generic Lwt runtime adapter over a caller-supplied Cohttp Lwt client, with cleanup limited by that client's public contract. |
+| `awskit-lwt-unix` | Ready-to-use Lwt + Unix runtime adapter with an owned fresh connection per HTTP call. |
 | `awskit-eio` | Direct-style Eio runtime adapter using Cohttp Eio and a caller-provided HTTPS policy. |
 | `awskit-s3` | Runtime-agnostic AWS S3 core: buckets, objects, multipart upload, presigned request artifacts, policies, and endpoint resolution. |
 | `awskit-s3-sim` | Deterministic in-memory S3 implementation for tests. |
@@ -73,6 +83,10 @@ profile configuration.
 The `awskit` and `awskit-s3` packages do not depend on Unix, Eio, Lwt, or
 Cohttp runtime packages. Use `awskit-s3-sim` in tests when you want deterministic
 S3 behavior without HTTP requests. Adapter packages carry runtime dependencies.
+
+See [docs/observability.md](docs/observability.md) for the public observation
+and sink contracts plus the logical-operation versus physical-attempt
+accounting model.
 
 ## Support And Security
 

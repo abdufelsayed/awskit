@@ -845,6 +845,38 @@ let test_exn_apis_raise_sdk_exception () =
         "validation exception" true
         (Awskit.Error.is_validation error)
 
+type bounded_dimension = Alpha | Beta | Omitted
+
+let equal_bounded_dimension left right =
+  match (left, right) with
+  | Alpha, Alpha | Beta, Beta | Omitted, Omitted -> true
+  | Alpha, (Beta | Omitted) | Beta, (Alpha | Omitted) | Omitted, (Alpha | Beta)
+    ->
+      false
+
+let test_finite_dimension_declaration () =
+  let module Dimension = Awskit.Observability.For_service.Dimension in
+  let module Projected = Awskit.Observability.For_projection.Dimension in
+  let declaration =
+    Dimension.Enum.define ~name:"test.bound" ~equal:equal_bounded_dimension
+      ~values:[ (Alpha, "alpha"); (Beta, "beta") ]
+  in
+  Alcotest.(check int)
+    "declared cardinality" 2
+    (Dimension.Enum.cardinality declaration);
+  let alpha = Dimension.Enum.value declaration Alpha in
+  Alcotest.(check string) "dimension name" "test.bound" (Projected.name alpha);
+  Alcotest.(check string) "encoded value" "alpha" (Projected.value alpha);
+  (match Dimension.Enum.value declaration Omitted with
+  | _ -> Alcotest.fail "undeclared domain value was accepted"
+  | exception Invalid_argument _ -> ());
+  match
+    Dimension.Enum.define ~name:"test.duplicate" ~equal:equal_bounded_dimension
+      ~values:[ (Alpha, "first"); (Alpha, "second") ]
+  with
+  | _ -> Alcotest.fail "duplicate domain value was accepted"
+  | exception Invalid_argument _ -> ()
+
 let suite =
   [
     ( "unit:awskit:error-redaction",
@@ -884,6 +916,8 @@ let suite =
           test_error_context_and_multiple_classification;
         Alcotest.test_case "exn APIs raise SDK exception" `Quick
           test_exn_apis_raise_sdk_exception;
+        Alcotest.test_case "finite dimension declarations" `Quick
+          test_finite_dimension_declaration;
       ] );
     ( "pbt:awskit:retry",
       [

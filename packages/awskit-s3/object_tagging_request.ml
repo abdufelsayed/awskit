@@ -1,7 +1,7 @@
 open Headers
 open Tagging_xml
 
-module Make (C : Request_context.S) = struct
+module Make (C : Execution_request_context.S) = struct
   open C
 
   let ( let* ) = bind
@@ -19,7 +19,7 @@ module Make (C : Request_context.S) = struct
     |> add_opt_account_id_header "x-amz-expected-bucket-owner"
          options.Object.Tagging.expected_bucket_owner
 
-  let get conn ~bucket ~key ?options () =
+  let get_in_session session conn ~bucket ~key ?options () =
     let bucket = Bucket_name.to_string bucket in
     let key = Object_key.to_string key in
     let options =
@@ -27,7 +27,7 @@ module Make (C : Request_context.S) = struct
     in
     let return_error =
       S3_error_context.return_s3_error return_error
-        ~operation:"GetObjectTagging" ~bucket ~key
+        ~operation:Operation.Get_object_tagging ~bucket ~key
     in
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -36,7 +36,8 @@ module Make (C : Request_context.S) = struct
         | Error error -> return_error error
         | Ok request ->
             with_operation_result return_error return_ok
-              (with_empty_response conn ~method_:`GET ~request
+              (with_empty_response_in_session conn ~session ~method_:`GET
+                 ~request
                  ~query:[ ("tagging", []) ]
                  ~headers:(owner_headers options)
                  ~f:(fun response body ->
@@ -49,7 +50,11 @@ module Make (C : Request_context.S) = struct
                             (fun tags -> { Object.Tagging.tags; response })
                             (parse_tags body)))))
 
-  let put conn ~bucket ~key ?options ~tags () =
+  let get conn ~bucket ~key ?options () =
+    with_operation conn ~operation:Operation.Get_object_tagging (fun session ->
+        get_in_session session conn ~bucket ~key ?options ())
+
+  let put_in_session session conn ~bucket ~key ?options ~tags () =
     let bucket = Bucket_name.to_string bucket in
     let key = Object_key.to_string key in
     let options =
@@ -57,7 +62,7 @@ module Make (C : Request_context.S) = struct
     in
     let return_error =
       S3_error_context.return_s3_error return_error
-        ~operation:"PutObjectTagging" ~bucket ~key
+        ~operation:Operation.Put_object_tagging ~bucket ~key
     in
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -78,7 +83,8 @@ module Make (C : Request_context.S) = struct
             | Error error -> return_error error
             | Ok request ->
                 with_operation_result return_error return_ok
-                  (with_response conn ~method_:`PUT ~request
+                  (with_discarded_response_in_session conn ~session
+                     ~method_:`PUT ~request
                      ~query:[ ("tagging", []) ]
                      ~headers
                      ~payload_hash:
@@ -89,7 +95,11 @@ module Make (C : Request_context.S) = struct
                        | Error error -> return_error error
                        | Ok () -> return_ok response))))
 
-  let delete conn ~bucket ~key ?options () =
+  let put conn ~bucket ~key ?options ~tags () =
+    with_operation conn ~operation:Operation.Put_object_tagging (fun session ->
+        put_in_session session conn ~bucket ~key ?options ~tags ())
+
+  let delete_in_session session conn ~bucket ~key ?options () =
     let bucket = Bucket_name.to_string bucket in
     let key = Object_key.to_string key in
     let options =
@@ -97,7 +107,7 @@ module Make (C : Request_context.S) = struct
     in
     let return_error =
       S3_error_context.return_s3_error return_error
-        ~operation:"DeleteObjectTagging" ~bucket ~key
+        ~operation:Operation.Delete_object_tagging ~bucket ~key
     in
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -106,7 +116,8 @@ module Make (C : Request_context.S) = struct
         | Error error -> return_error error
         | Ok request ->
             with_operation_result return_error return_ok
-              (with_empty_response conn ~method_:`DELETE ~request
+              (with_empty_discarded_response_in_session conn ~session
+                 ~method_:`DELETE ~request
                  ~query:[ ("tagging", []) ]
                  ~headers:(owner_headers options)
                  ~f:(fun response body ->
@@ -114,4 +125,8 @@ module Make (C : Request_context.S) = struct
                    match discarded with
                    | Error error -> return_error error
                    | Ok () -> return_ok response)))
+
+  let delete conn ~bucket ~key ?options () =
+    with_operation conn ~operation:Operation.Delete_object_tagging
+      (fun session -> delete_in_session session conn ~bucket ~key ?options ())
 end

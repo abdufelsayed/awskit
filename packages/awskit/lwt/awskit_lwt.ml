@@ -52,6 +52,8 @@ module Credentials = struct
   end
 end
 
+module Observability = Observer
+
 let provider_resolution_to_result resolution =
   let open Credentials.Provider in
   match resolution with
@@ -63,23 +65,50 @@ let provider_resolution_to_result resolution =
            reason)
   | Invalid error | Failed error -> Error error
 
+module For_connector = struct
+  module type S = Runtime.CONNECTOR
+
+  module Make (Connector : S) = struct
+    module Inner = Runtime.Make_with_connector (Connector)
+
+    type t = Inner.t
+
+    module Runtime = Inner.Runtime
+    module Runtime_observer = Inner.Runtime.Observability
+
+    let create = Inner.create
+
+    let create_with_credentials_provider ?ctx ?endpoint ~region
+        ~credentials_provider ~clock ?retry_policy ?sleep ?random_float
+        ?timeout_policy ?max_response_drain_bytes ?observability () =
+      let credentials_provider () =
+        Lwt.map provider_resolution_to_result
+          (Credentials.Provider.resolve credentials_provider)
+      in
+      Inner.create_with_credentials_provider ?ctx ?endpoint ~region
+        ~credentials_provider ~clock ?retry_policy ?sleep ?random_float
+        ?timeout_policy ?max_response_drain_bytes ?observability ()
+  end
+end
+
 module Make (Client : Cohttp_lwt.S.Client) = struct
   module Inner = Runtime.Make (Client)
 
   type t = Inner.t
 
   module Runtime = Inner.Runtime
+  module Runtime_observer = Inner.Runtime.Observability
 
   let create = Inner.create
 
   let create_with_credentials_provider ?ctx ?endpoint ~region
       ~credentials_provider ~clock ?retry_policy ?sleep ?random_float
-      ?timeout_policy ?max_response_drain_bytes () =
+      ?timeout_policy ?max_response_drain_bytes ?observability () =
     let credentials_provider () =
       Lwt.map provider_resolution_to_result
         (Credentials.Provider.resolve credentials_provider)
     in
     Inner.create_with_credentials_provider ?ctx ?endpoint ~region
       ~credentials_provider ~clock ?retry_policy ?sleep ?random_float
-      ?timeout_policy ?max_response_drain_bytes ()
+      ?timeout_policy ?max_response_drain_bytes ?observability ()
 end

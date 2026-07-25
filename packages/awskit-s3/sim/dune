@@ -1,8 +1,8 @@
+(include_subdirs no)
+
 (copy_files ../awskit_s3_header_helpers.ml)
 
 (copy_files ../awskit_s3_header_helpers.mli)
-
-(copy_files ../s3_error_context.ml)
 
 (library
  (name awskit_s3_sim)
@@ -30,4 +30,4 @@
   simulator_store
   simulator_support
   s3_error_context)
- (libraries awskit awskit-s3 digestif ptime fmt base64 uri))
+ (libraries awskit awskit-s3 base digestif ptime fmt base64 uri))
