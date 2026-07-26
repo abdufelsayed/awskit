@@ -322,7 +322,19 @@
   lwt
   (fmt
    (>= 0.11.0))
-  ptime))
+  ptime
+  (base
+   (and
+    :with-test
+    (>= v0.16.3)))
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))
+  (qcheck-alcotest
+   (and
+    :with-test
+    (>= 0.91)))))
 
 (package
  (name awskit-s3-eio)
@@ -359,4 +371,8 @@
   (trace
    (and
     :with-test
-    (>= 0.12)))))
+    (>= 0.12)))
+  (qcheck-alcotest
+   (and
+    :with-test
+    (>= 0.91)))))

@@ -23,6 +23,7 @@ depends: [
   "alcotest" {with-test & >= "1.9.1"}
   "logs" {with-test}
   "trace" {with-test & >= "0.12"}
+  "qcheck-alcotest" {with-test & >= "0.91"}
   "odoc" {with-doc}
 ]
 build: [
