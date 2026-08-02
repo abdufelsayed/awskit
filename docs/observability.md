@@ -235,6 +235,24 @@ Current in-flight values for the gauge families are available on demand from
 the observer (`snapshot`), so a scraper can poll at whatever cadence your
 metrics setup prefers; Awskit does not run a polling loop for you.
 
+## Units And Backend Conventions
+
+Duration measurements are int64 nanoseconds (`ns`) and byte measurements are
+UCUM bytes (`By`), declared on each metric family and measurement so a sink
+always knows what it received. Awskit keeps nanoseconds in its own contract
+because they are lossless and match OCaml's `Mtime` conventions; conversion
+to backend conventions happens once, in your sink:
+
+- **OpenTelemetry** semantic conventions express durations in seconds.
+  Convert nanosecond values to float seconds and declare unit `s` when
+  building instruments, as the private OpenTelemetry contract adapter does.
+- **Prometheus** expects base units encoded in metric names. Convert
+  durations to seconds and expose duration families with a `_seconds`
+  suffix (for example `awskit_s3_operation_duration_seconds`); byte
+  families keep their values and take a `_bytes` suffix.
+- The `Metrics` library records units as source metadata only, so
+  nanosecond values flow through unchanged there.
+
 ## Tracing And OpenTelemetry
 
 A trace sink receives one span-shaped view per operation. If you map spans to

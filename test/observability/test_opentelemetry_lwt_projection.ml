@@ -183,7 +183,21 @@ let canonical_projection () =
       Alcotest.(check bool)
         (name ^ " excluded from metrics")
         false
-        (List.mem metric_attributes name ~equal:String.equal))
+        (List.mem metric_attributes name ~equal:String.equal));
+  let duration_metric =
+    List.find_exn capture.metrics ~f:(fun (metric : Otel.Metrics.t) ->
+        String.equal metric.name "awskit.s3.operation.duration")
+  in
+  Alcotest.(check string)
+    "duration exported with seconds unit" "s" duration_metric.unit_;
+  match duration_metric.data with
+  | Some (Histogram histogram) ->
+      List.iter histogram.data_points ~f:(fun point ->
+          Alcotest.(check bool)
+            "duration converted from nanoseconds to seconds" true
+            (Float.( > ) point.sum 0. && Float.( < ) point.sum 1.))
+  | Some (Gauge _ | Sum _ | Exponential_histogram _ | Summary _) | None ->
+      Alcotest.fail "duration was not exported as a histogram"
 
 let retry_semantics () =
   Bridge.setup_ambient_context ();

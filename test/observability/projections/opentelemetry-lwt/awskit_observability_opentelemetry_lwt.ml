@@ -232,19 +232,24 @@ let value_as_float = function
   | Int64 value -> Int64.to_float value
   | Float value -> value
 
-let number_point ~meter ~attributes = function
-  | P.Metric.Value.Int value ->
-      Otel.Metrics.int ~attrs:attributes
-        ~now:(Otel.Clock.now meter.Otel.Meter.clock)
-        value
-  | Int64 value ->
-      Otel.Metrics.float ~attrs:attributes
-        ~now:(Otel.Clock.now meter.Otel.Meter.clock)
-        (Int64.to_float value)
-  | Float value ->
-      Otel.Metrics.float ~attrs:attributes
-        ~now:(Otel.Clock.now meter.Otel.Meter.clock)
-        value
+(** OpenTelemetry semantic conventions express durations in seconds. Awskit
+    reports durations as nanoseconds, so this bridge converts nanosecond
+    families to float seconds at the export boundary and declares unit [s];
+    every other unit passes through unchanged. *)
+let unit_and_scale = function
+  | Some "ns" -> (Some "s", 1e-9)
+  | unit_ -> (unit_, 1.)
+
+let number_point ~meter ~attributes ~scale value =
+  let now = Otel.Clock.now meter.Otel.Meter.clock in
+  match (value, Float.equal scale 1.) with
+  | P.Metric.Value.Int value, true ->
+      Otel.Metrics.int ~attrs:attributes ~now value
+  | Int value, false ->
+      Otel.Metrics.float ~attrs:attributes ~now (Float.of_int value *. scale)
+  | Int64 value, _ ->
+      Otel.Metrics.float ~attrs:attributes ~now (Int64.to_float value *. scale)
+  | Float value, _ -> Otel.Metrics.float ~attrs:attributes ~now (value *. scale)
 
 let observe_metric (meter : Otel.Meter.t) observation =
   let family = P.Metric.Observation.family observation in
@@ -252,24 +257,25 @@ let observe_metric (meter : Otel.Meter.t) observation =
   let attributes = metric_attributes observation in
   let name = P.Metric.Family.name family in
   let description = P.Metric.Family.doc family in
-  let unit_ = P.Metric.Family.unit_ family in
+  let unit_, scale = unit_and_scale (P.Metric.Family.unit_ family) in
   match P.Metric.Family.aggregation family with
   | Counter ->
       Otel.Meter.emit1 meter
         (Otel.Metrics.sum ~name ~description ?unit_
            ~aggregation_temporality:Otel.Metrics.Aggregation_temporality_delta
            ~is_monotonic:true
-           [ number_point ~meter ~attributes value ])
+           [ number_point ~meter ~attributes ~scale value ])
   | Gauge ->
       Otel.Meter.emit1 meter
         (Otel.Metrics.gauge ~name ~description ?unit_
-           [ number_point ~meter ~attributes value ])
+           [ number_point ~meter ~attributes ~scale value ])
   | Histogram ->
       let point =
         Otel.Metrics.histogram_data_point ~attrs:attributes
           ~now:(Otel.Clock.now meter.clock)
-          ~count:1L ~sum:(value_as_float value) ~bucket_counts:[ 1L ]
-          ~explicit_bounds:[] ()
+          ~count:1L
+          ~sum:(value_as_float value *. scale)
+          ~bucket_counts:[ 1L ] ~explicit_bounds:[] ()
       in
       Otel.Meter.emit1 meter
         (Otel.Metrics.histogram ~name ~description ?unit_
