@@ -971,9 +971,5 @@ module Make (R : RUNTIME) = Make_with_observer (R) (Hard_off (R))
 
 module Observability = struct
   include S3_observability
-
-  module For_runtime = struct
-    include S3_observability.For_runtime
-    module Make = Make_with_observer
-  end
+  module Make = Make_with_observer
 end

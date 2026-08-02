@@ -91,7 +91,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let with_instrument t = Aws.Runtime_observer.with_instrument t.aws
   end
 
-  module S3 = Awskit_s3.Observability.For_runtime.Make (Runtime) (Observer)
+  module S3 = Awskit_s3.Observability.Make (Runtime) (Observer)
 
   module Body = struct
     include S3.Body

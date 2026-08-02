@@ -301,8 +301,9 @@ need them:
 - `Awskit.Observability.For_runtime` is how the Lwt and Eio packages supply
   timing, context, and cancellation behavior; you only touch it when writing
   a new runtime adapter.
-- `Awskit_s3.Observability.For_runtime` and `.For_simulator` wire those
-  runtimes and the simulator into the S3 client.
+- `Awskit_s3.Observability.Make` and `.For_simulator` wire those runtimes
+  and the simulator into the S3 client. `Awskit_s3.Observability.For_transfer`
+  observes the high-level upload and download boundaries.
 
 The simulator keeps its own per-connection record of operation completions,
 available as `Awskit_s3_sim.observations`, which test suites can assert

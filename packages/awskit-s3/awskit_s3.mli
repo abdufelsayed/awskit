@@ -1127,36 +1127,34 @@ module Observability : sig
     val transfer : Logs.src
   end
 
-  module For_runtime : sig
-    module Transfer : sig
-      type summary = { logical_bytes : int64; parts : int }
+  module Make
+      (Runtime : RUNTIME)
+      (Observer :
+        Awskit.Observability.For_service.Observer
+          with type 'a io = 'a Runtime.t
+           and type connection = Runtime.connection) :
+    S
+      with type connection = Runtime.connection
+       and type 'a io = 'a Runtime.t
+       and type request_body = Runtime.request_body
+       and type response_body_reader = Runtime.response_body_reader
 
-      module Make (Observer : Awskit.Observability.For_service.Observer) : sig
-        val with_upload :
-          Observer.connection ->
-          summarize:('a -> summary) ->
-          (unit -> ('a, Awskit.Error.t) Result.t Observer.io) ->
-          ('a, Awskit.Error.t) Result.t Observer.io
+  module For_transfer : sig
+    type summary = { logical_bytes : int64; parts : int }
 
-        val with_download :
-          Observer.connection ->
-          summarize:('a -> summary) ->
-          (unit -> ('a, Awskit.Error.t) Result.t Observer.io) ->
-          ('a, Awskit.Error.t) Result.t Observer.io
-      end
+    module Make (Observer : Awskit.Observability.For_service.Observer) : sig
+      val with_upload :
+        Observer.connection ->
+        summarize:('a -> summary) ->
+        (unit -> ('a, Awskit.Error.t) Result.t Observer.io) ->
+        ('a, Awskit.Error.t) Result.t Observer.io
+
+      val with_download :
+        Observer.connection ->
+        summarize:('a -> summary) ->
+        (unit -> ('a, Awskit.Error.t) Result.t Observer.io) ->
+        ('a, Awskit.Error.t) Result.t Observer.io
     end
-
-    module Make
-        (Runtime : RUNTIME)
-        (Observer :
-          Awskit.Observability.For_service.Observer
-            with type 'a io = 'a Runtime.t
-             and type connection = Runtime.connection) :
-      S
-        with type connection = Runtime.connection
-         and type 'a io = 'a Runtime.t
-         and type request_body = Runtime.request_body
-         and type response_body_reader = Runtime.response_body_reader
   end
 
   module For_simulator : sig

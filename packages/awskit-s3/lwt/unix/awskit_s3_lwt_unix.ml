@@ -94,7 +94,7 @@ module Observer = struct
   let with_instrument t = Awskit_lwt_unix.Runtime_observer.with_instrument t.aws
 end
 
-module S3 = Awskit_s3.Observability.For_runtime.Make (Runtime) (Observer)
+module S3 = Awskit_s3.Observability.Make (Runtime) (Observer)
 module File_transfer = Transfer
 module Body_reader = File_transfer.Make_body_reader (Runtime) (S3)
 module Body = Body_reader.Body

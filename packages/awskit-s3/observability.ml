@@ -13,15 +13,13 @@ module Simulator_logical_operation = Observation.Logical_operation.Make (struct
   let source = Sources.operation
 end)
 
-module For_runtime = struct
-  module Transfer = struct
-    type summary = Transfer_definition.summary = {
-      logical_bytes : int64;
-      parts : int;
-    }
+module For_transfer = struct
+  type summary = Transfer_definition.summary = {
+    logical_bytes : int64;
+    parts : int;
+  }
 
-    module Make = Transfer_definition.Make
-  end
+  module Make = Transfer_definition.Make
 end
 
 module For_simulator = struct

@@ -671,8 +671,7 @@ module Observation_port = struct
   let with_instrument = Runtime.with_instrument
 end
 
-module S3 =
-  Awskit_s3.Observability.For_runtime.Make (Runtime) (Observation_port)
+module S3 = Awskit_s3.Observability.Make (Runtime) (Observation_port)
 
 type response = Runtime.response
 type call = Runtime.call

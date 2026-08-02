@@ -358,7 +358,7 @@ struct
   module Plan = Transfer.Plan
 
   module Transfer_observation =
-    Awskit_s3.Observability.For_runtime.Transfer.Make (Observer)
+    Awskit_s3.Observability.For_transfer.Make (Observer)
 
   let notify_transfer_progress callback ~direction ~phase ?total ?part_number
       transferred =
@@ -825,14 +825,14 @@ struct
       | Awskit_s3.Transfer.Put _ -> 1
       | Multipart result -> Base.List.length result.parts
     in
-    Awskit_s3.Observability.For_runtime.Transfer.
+    Awskit_s3.Observability.For_transfer.
       {
         logical_bytes = Awskit_s3.Transfer.upload_bytes_transferred result;
         parts;
       }
 
   let multipart_summary (result : Awskit_s3.Transfer.multipart_upload_result) =
-    Awskit_s3.Observability.For_runtime.Transfer.
+    Awskit_s3.Observability.For_transfer.
       {
         logical_bytes = result.bytes_transferred;
         parts = Base.List.length result.parts;
@@ -844,7 +844,7 @@ struct
       | Awskit_s3.Transfer.Get _ -> 1
       | Ranged result -> result.parts
     in
-    Awskit_s3.Observability.For_runtime.Transfer.
+    Awskit_s3.Observability.For_transfer.
       {
         logical_bytes = Awskit_s3.Transfer.download_bytes_transferred result;
         parts;

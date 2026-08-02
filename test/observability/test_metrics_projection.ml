@@ -76,7 +76,7 @@ module Sync_runtime = struct
 end
 
 module Transfer_observation =
-  Awskit_s3.Observability.For_runtime.Transfer.Make (Sync_runtime)
+  Awskit_s3.Observability.For_transfer.Make (Sync_runtime)
 
 let with_reporter callback =
   let observations = ref [] in
@@ -216,8 +216,7 @@ let exact_family_labels_and_semantics () =
   let transfer =
     Transfer_observation.with_upload transfer_observer
       ~summarize:(fun () ->
-        Awskit_s3.Observability.For_runtime.Transfer.
-          { logical_bytes = 4L; parts = 1 })
+        Awskit_s3.Observability.For_transfer.{ logical_bytes = 4L; parts = 1 })
       (fun () -> Ok ())
   in
   Alcotest.(check bool) "transfer wrapper succeeds" true (Result.is_ok transfer);

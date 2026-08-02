@@ -13,25 +13,23 @@ module Sources : sig
   val transfer : Logs.src
 end
 
-module For_runtime : sig
-  (** Narrow role used by the existing high-level transfer runtime packages. *)
+module For_transfer : sig
+  (** Narrow role used by the high-level transfer runtime packages. *)
 
-  module Transfer : sig
-    type summary = { logical_bytes : int64; parts : int }
+  type summary = { logical_bytes : int64; parts : int }
 
-    module Make (Runtime : Awskit.Observability.For_service.Observer) : sig
-      val with_upload :
-        Runtime.connection ->
-        summarize:('a -> summary) ->
-        (unit -> ('a, Awskit.Error.t) Result.t Runtime.io) ->
-        ('a, Awskit.Error.t) Result.t Runtime.io
+  module Make (Runtime : Awskit.Observability.For_service.Observer) : sig
+    val with_upload :
+      Runtime.connection ->
+      summarize:('a -> summary) ->
+      (unit -> ('a, Awskit.Error.t) Result.t Runtime.io) ->
+      ('a, Awskit.Error.t) Result.t Runtime.io
 
-      val with_download :
-        Runtime.connection ->
-        summarize:('a -> summary) ->
-        (unit -> ('a, Awskit.Error.t) Result.t Runtime.io) ->
-        ('a, Awskit.Error.t) Result.t Runtime.io
-    end
+    val with_download :
+      Runtime.connection ->
+      summarize:('a -> summary) ->
+      (unit -> ('a, Awskit.Error.t) Result.t Runtime.io) ->
+      ('a, Awskit.Error.t) Result.t Runtime.io
   end
 end
 
