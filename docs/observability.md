@@ -190,9 +190,11 @@ way to abort an in-flight call, so a client that ignores `Lwt` cancellation
 cannot be stopped while waiting for headers. `Awskit_lwt.For_connector.Make`
 accepts connectors that do own their calls. The ready-made `awskit-lwt-unix`
 adapter opens one fresh connection per HTTP call and closes it at end of body
-or on abandonment; it does not pool connections. The Eio adapter scopes every
-call in its own switch, so cleanup and cancellation behave the same way on
-every path.
+or on abandonment; it does not pool connections. Pooling behind a connector
+that owns its calls is planned future work; the `For_connector.Make` contract
+was designed to admit it, so safe reuse can arrive without changing the
+client surface. The Eio adapter scopes every call in its own switch, so
+cleanup and cancellation behave the same way on every path.
 
 ## Metrics Reference
 

@@ -63,7 +63,9 @@ force an implementation that ignores Lwt cancellation to stop while response
 headers are pending or guarantee reuse after abandoned-body cleanup. The ready
 `awskit-lwt-unix` adapter owns one exclusive fresh connection per call and
 closes it at response EOF or abandonment; use it when that cleanup guarantee
-matters.
+matters. Connection reuse behind a safe pool is planned future work: the
+`Awskit_lwt.For_connector` contract already admits connectors that own pooled
+calls, so reuse can arrive without changing the client surface.
 
 ## Packages
 
