@@ -1,3 +1,5 @@
+(include_subdirs no)
+
 (library
  (name awskit_unix)
  (public_name awskit-unix)

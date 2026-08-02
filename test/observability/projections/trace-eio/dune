@@ -1,0 +1,3 @@
+(library
+ (name awskit_observability_trace_eio)
+ (libraries awskit awskit-eio base eio trace.core))

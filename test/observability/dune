@@ -1,0 +1,189 @@
+(library
+ (name observability_lwt_fixture)
+ (modules observability_lwt_fixture)
+ (libraries
+  awskit
+  awskit-s3
+  awskit-lwt
+  awskit-s3-lwt
+  base
+  cohttp-lwt-unix
+  lwt
+  ptime))
+
+(test
+ (name test_observation_engine)
+ (modules test_observation_engine)
+ (package awskit)
+ (libraries awskit base alcotest logs))
+
+(library
+ (name observability_eio_fixture)
+ (modules observability_eio_fixture)
+ (libraries awskit awskit-s3 awskit-eio awskit-s3-eio base eio ptime))
+
+(test
+ (name test_observer_lwt)
+ (modules test_observer_lwt)
+ (package awskit-s3-lwt)
+ (libraries
+  awskit
+  awskit-s3
+  awskit-lwt
+  observability_lwt_fixture
+  base
+  alcotest
+  lwt
+  lwt.unix
+  logs))
+
+(test
+ (name test_observer_eio)
+ (modules test_observer_eio)
+ (package awskit-s3-eio)
+ (libraries
+  awskit
+  awskit-s3
+  awskit-eio
+  awskit-s3-eio
+  awskit_runtime_http_workload
+  observability_eio_fixture
+  base
+  alcotest
+  eio
+  eio_main
+  logs))
+
+(test
+ (name test_metrics_projection)
+ (modules test_metrics_projection)
+ (package awskit-s3-lwt)
+ (libraries
+  awskit
+  awskit-s3
+  awskit-lwt
+  observability_lwt_fixture
+  awskit_observability_metrics
+  base
+  alcotest
+  lwt
+  lwt.unix
+  metrics
+  logs))
+
+(test
+ (name test_trace_lwt_projection)
+ (modules test_trace_lwt_projection)
+ (package awskit-s3-lwt)
+ (libraries
+  awskit
+  awskit-s3
+  awskit-lwt
+  observability_lwt_fixture
+  awskit_observability_trace_lwt
+  base
+  alcotest
+  lwt
+  lwt.unix
+  trace.core
+  logs))
+
+(test
+ (name test_trace_eio_projection)
+ (modules test_trace_eio_projection)
+ (package awskit-s3-eio)
+ (libraries
+  awskit
+  awskit-eio
+  observability_eio_fixture
+  awskit_observability_trace_eio
+  base
+  alcotest
+  eio
+  eio_main
+  trace.core
+  logs))
+
+(test
+ (name test_opentelemetry_lwt_projection)
+ (modules test_opentelemetry_lwt_projection)
+ (package awskit-s3-lwt)
+ (libraries
+  awskit
+  awskit-s3
+  awskit-lwt
+  observability_lwt_fixture
+  awskit_observability_opentelemetry_lwt
+  base
+  alcotest
+  lwt
+  lwt.unix
+  opentelemetry
+  opentelemetry-lwt
+  logs))
+
+(test
+ (name test_transfer_observation_lwt)
+ (modules test_transfer_observation_lwt)
+ (package awskit-s3-lwt-unix)
+ (libraries
+  awskit
+  awskit-s3
+  awskit-lwt
+  awskit-lwt-unix
+  awskit-s3-lwt-unix
+  awskit_runtime_http_workload
+  base
+  alcotest
+  fmt
+  lwt
+  lwt.unix
+  ptime
+  unix))
+
+(test
+ (name test_transfer_observation_eio)
+ (modules test_transfer_observation_eio)
+ (package awskit-s3-eio)
+ (libraries
+  awskit
+  awskit-s3
+  awskit-eio
+  awskit-s3-eio
+  awskit_runtime_http_workload
+  observability_eio_fixture
+  base
+  alcotest
+  eio
+  eio_main
+  ptime
+  unix))
+
+(rule
+ (alias observability-contracts)
+ (deps
+  (alias interfaces/observability-interface-contracts)
+  test_observation_engine.exe
+  test_observer_lwt.exe
+  test_observer_eio.exe
+  test_metrics_projection.exe
+  test_trace_lwt_projection.exe
+  test_trace_eio_projection.exe
+  test_opentelemetry_lwt_projection.exe
+  test_transfer_observation_lwt.exe
+  test_transfer_observation_eio.exe)
+ (action
+  (progn
+   (run ./test_observation_engine.exe)
+   (run ./test_observer_lwt.exe)
+   (run ./test_observer_eio.exe)
+   (run ./test_metrics_projection.exe)
+   (run ./test_trace_lwt_projection.exe)
+   (run ./test_trace_eio_projection.exe)
+   (run ./test_opentelemetry_lwt_projection.exe)
+   (setenv
+    AWSKIT_RUNTIME_HTTP_REQUIRE_LOOPBACK
+    1
+    (progn
+     (run ./test_transfer_observation_lwt.exe)
+     (run ./test_transfer_observation_eio.exe))))))

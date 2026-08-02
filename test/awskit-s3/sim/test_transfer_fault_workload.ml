@@ -4,6 +4,9 @@ module Bucket_name = Awskit_s3.Bucket_name
 module Multipart = Awskit_s3.Multipart
 module Object_key = Awskit_s3.Object_key
 module Transfer = Awskit_s3.Transfer
+module O = Awskit.Observability
+module P = O.For_projection
+module Operation = Awskit_s3.Operation
 
 let test_time = Ptime.epoch
 
@@ -66,20 +69,188 @@ let check_string case label expected actual =
       (Digest.to_hex (Digest.string expected))
       (Digest.to_hex (Digest.string actual))
 
-let operation_is op record =
-  match (op, record.Simulator.op) with
-  | `Create_multipart_upload, `Create_multipart_upload
-  | `Upload_part, `Upload_part
-  | `Complete_multipart_upload, `Complete_multipart_upload
-  | `Abort_multipart_upload, `Abort_multipart_upload ->
-      true
-  | _ -> false
+type expected_completion = {
+  operation : Operation.t;
+  outcome : string;
+  logical_request_bytes : int64 option;
+  logical_response_bytes : int64 option;
+}
 
-let operation_name = function
-  | `Create_multipart_upload -> "CreateMultipartUpload"
-  | `Upload_part -> "UploadPart"
-  | `Complete_multipart_upload -> "CompleteMultipartUpload"
-  | `Abort_multipart_upload -> "AbortMultipartUpload"
+let completion_dimension name completion =
+  completion
+  |> P.Operation.Completion.dimensions
+  |> List.find_map (fun dimension ->
+      if String.equal name (P.Dimension.name dimension) then
+        Some (P.Dimension.value dimension)
+      else None)
+
+let completion_measurement name completion =
+  completion
+  |> P.Operation.Completion.measurements
+  |> List.find_map (fun measurement ->
+      if String.equal name (P.Measurement.name measurement) then
+        Some (P.Measurement.value measurement)
+      else None)
+
+let int64_measurement name completion =
+  match completion_measurement name completion with
+  | None -> None
+  | Some (P.Measurement.Int64 value) -> Some value
+  | Some _ -> failwith (Fmt.str "measurement %s is not int64" name)
+
+let has_prefix prefix value = Base.String.is_prefix value ~prefix
+
+let expected_completion ?request_bytes ?response_bytes operation outcome =
+  {
+    operation;
+    outcome;
+    logical_request_bytes = request_bytes;
+    logical_response_bytes = response_bytes;
+  }
+
+let ok_completion ?request_bytes operation =
+  expected_completion ?request_bytes operation "ok"
+
+let error_completion ?request_bytes operation =
+  expected_completion ?request_bytes operation "error"
+
+let exception_completion ?request_bytes operation =
+  expected_completion ?request_bytes operation "exception"
+
+let cancelled_completion ?request_bytes operation =
+  expected_completion ?request_bytes operation "cancelled"
+
+let rec take count values =
+  if count <= 0 then []
+  else
+    match values with
+    | [] -> []
+    | value :: rest -> value :: take (count - 1) rest
+
+let rec drop count values =
+  if count <= 0 then values
+  else match values with [] -> [] | _ :: rest -> drop (count - 1) rest
+
+let expected_terminal_stream case =
+  let length = String.length case.Model.local_body in
+  let request_bytes = Int64.of_int length in
+  let part_lengths = Model.part_lengths case in
+  let upload_completions () =
+    List.map
+      (fun part_length ->
+        let operation = Operation.Upload_part in
+        let request_bytes = Int64.of_int part_length in
+        ok_completion ~request_bytes operation)
+      part_lengths
+  in
+  let successful_multipart_prefix () =
+    ok_completion Operation.Create_multipart_upload :: upload_completions ()
+  in
+  let effective_fault =
+    match case.Model.fault with
+    | Some fault when Model.fault_reaches case fault -> Some fault
+    | None | Some _ -> None
+  in
+  match (Model.uses_multipart case, effective_fault) with
+  | false, None -> [ ok_completion ~request_bytes Operation.Put_object ]
+  | false, Some (Model.Progress_callback_raises_after _) ->
+      [ exception_completion ~request_bytes Operation.Put_object ]
+  | false, Some (Model.Cancellation_after_bytes _) ->
+      [ cancelled_completion ~request_bytes Operation.Put_object ]
+  | false, Some (Model.Read_fails_after _ | Model.Write_fails_after _) ->
+      [ error_completion ~request_bytes Operation.Put_object ]
+  | false, Some _ -> [ ok_completion ~request_bytes Operation.Put_object ]
+  | true, None ->
+      successful_multipart_prefix ()
+      @ [ ok_completion Operation.Complete_multipart_upload ]
+  | true, Some Model.Multipart_create_fails ->
+      [ error_completion Operation.Create_multipart_upload ]
+  | true, Some (Model.Multipart_part_fails part) ->
+      let prefix =
+        ok_completion Operation.Create_multipart_upload
+        :: take (part - 1) (upload_completions ())
+      in
+      prefix
+      @ [
+          error_completion
+            ~request_bytes:(Int64.of_int (List.nth part_lengths (part - 1)))
+            Operation.Upload_part;
+          ok_completion Operation.Abort_multipart_upload;
+        ]
+  | true, Some Model.Multipart_complete_fails ->
+      successful_multipart_prefix ()
+      @ [
+          error_completion Operation.Complete_multipart_upload;
+          ok_completion Operation.Abort_multipart_upload;
+        ]
+  | true, Some Model.Cleanup_delete_fails ->
+      successful_multipart_prefix ()
+      @ [
+          error_completion Operation.Complete_multipart_upload;
+          error_completion Operation.Abort_multipart_upload;
+        ]
+  | ( true,
+      Some
+        ( Model.Read_fails_after offset
+        | Model.Write_fails_after offset
+        | Model.Cancellation_after_bytes offset ) ) ->
+      let part = (offset / case.Model.part_size) + 1 in
+      let prefix =
+        ok_completion Operation.Create_multipart_upload
+        :: take (part - 1) (upload_completions ())
+      in
+      let failed =
+        let part_length = List.nth part_lengths (part - 1) in
+        let request_bytes = Int64.of_int part_length in
+        match case.Model.fault with
+        | Some (Model.Cancellation_after_bytes _) ->
+            cancelled_completion ~request_bytes Operation.Upload_part
+        | _ -> error_completion ~request_bytes Operation.Upload_part
+      in
+      prefix @ [ failed; ok_completion Operation.Abort_multipart_upload ]
+  | true, Some (Model.Progress_callback_raises_after offset) ->
+      let part = (offset / case.Model.part_size) + 1 in
+      ok_completion Operation.Create_multipart_upload
+      :: take part (upload_completions ())
+      @ [ ok_completion Operation.Abort_multipart_upload ]
+
+let check_observation_stream case observations =
+  let expected = expected_terminal_stream case in
+  check_int case "terminal completion count" (List.length expected)
+    (List.length observations);
+  List.iter2
+    (fun expected completion ->
+      check_string case "terminal operation"
+        (Operation.to_string expected.operation)
+        (Option.value ~default:"<missing>"
+           (completion_dimension "aws.operation" completion));
+      check_string case "terminal outcome" expected.outcome
+        (completion |> P.Operation.Completion.outcome |> O.Outcome.to_string);
+      check_bool case "terminal logical request bytes" true
+        (Option.equal Int64.equal expected.logical_request_bytes
+           (int64_measurement "logical.request_bytes" completion));
+      check_bool case "terminal logical response bytes" true
+        (Option.equal Int64.equal expected.logical_response_bytes
+           (int64_measurement "logical.response_bytes" completion));
+      check_bool case "terminal attempts absent" true
+        (Option.is_none (completion_measurement "attempts" completion));
+      check_bool case "terminal operation is not physical HTTP" false
+        (String.equal "awskit.http.attempt"
+           (P.Operation.Completion.info completion |> P.Operation.Info.name));
+      List.iter
+        (fun measurement ->
+          check_bool case "terminal HTTP measurement absent" false
+            (has_prefix "http." (P.Measurement.name measurement)))
+        (P.Operation.Completion.measurements completion);
+      List.iter
+        (fun dimension ->
+          check_bool case "terminal HTTP dimension absent" false
+            (has_prefix "http." (P.Dimension.name dimension)))
+        (P.Operation.Completion.dimensions completion))
+    expected observations
+
+let operation_is op record = Operation.equal op record.Simulator.op
+let operation_name = Operation.to_string
 
 let count_operations op history =
   List.fold_left
@@ -100,13 +271,14 @@ let check_fault_history case store =
       (has_faulted_operation op history)
   in
   match case.Model.fault with
-  | Some Model.Multipart_create_fails -> expect_faulted `Create_multipart_upload
-  | Some (Model.Multipart_part_fails _) -> expect_faulted `Upload_part
+  | Some Model.Multipart_create_fails ->
+      expect_faulted Operation.Create_multipart_upload
+  | Some (Model.Multipart_part_fails _) -> expect_faulted Operation.Upload_part
   | Some Model.Multipart_complete_fails ->
-      expect_faulted `Complete_multipart_upload
+      expect_faulted Operation.Complete_multipart_upload
   | Some Model.Cleanup_delete_fails ->
-      expect_faulted `Complete_multipart_upload;
-      expect_faulted `Abort_multipart_upload
+      expect_faulted Operation.Complete_multipart_upload;
+      expect_faulted Operation.Abort_multipart_upload
   | None
   | Some
       ( Read_fails_after _ | Write_fails_after _
@@ -250,6 +422,7 @@ let create_connection case =
   ignore
     (expect_ok case "create bucket" (Simulator.Bucket.create conn ~bucket ())
       : Awskit_s3.Bucket.Create.result);
+  Simulator.clear_observations conn;
   (store, conn)
 
 let upload_single case counts conn =
@@ -504,16 +677,16 @@ let verify_failure case store conn counts ~remote_absent ~owned_upload_aborted
   check_fault_history case store;
   if owned_upload_aborted then (
     check_int case "abort count" 1
-      (count_operations `Abort_multipart_upload history);
+      (count_operations Operation.Abort_multipart_upload history);
     check_upload_cleaned_up case conn counts)
   else if cleanup_error_secondary then (
     check_int case "abort count" 1
-      (count_operations `Abort_multipart_upload history);
+      (count_operations Operation.Abort_multipart_upload history);
     check_bool case "abort consumed cleanup fault" true
-      (has_faulted_operation `Abort_multipart_upload history))
+      (has_faulted_operation Operation.Abort_multipart_upload history))
   else
     check_int case "abort count" 0
-      (count_operations `Abort_multipart_upload history)
+      (count_operations Operation.Abort_multipart_upload history)
 
 type transfer_observation =
   | Returned of (unit, Awskit.Error.t) result
@@ -529,6 +702,7 @@ module Target = struct
     let store, conn = create_connection case in
     let counts = counters () in
     let observed = observe_transfer (fun () -> run_transfer case counts conn) in
+    let terminal_observations = Simulator.observations conn in
     match Model.expected_upload case with
     | Model.Upload_succeeds { remote_body; progress_final } ->
         (match observed with
@@ -537,6 +711,7 @@ module Target = struct
             failf case "transfer raised unexpectedly: %s"
               (Printexc.to_string exn));
         verify_success case store counts ~remote_body ~progress_final;
+        check_observation_stream case terminal_observations;
         true
     | Model.Upload_fails
         {
@@ -572,6 +747,7 @@ module Target = struct
           ~owned_upload_aborted ~read_bytes ~written_bytes ~progress_bytes
           ~progress_report_max ~callback_exception_preserved
           ~cleanup_error_secondary;
+        check_observation_stream case terminal_observations;
         true
 end
 

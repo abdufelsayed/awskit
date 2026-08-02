@@ -1,0 +1,44 @@
+(rule
+ (alias observability-interface-contracts)
+ (package awskit)
+ (deps
+  check_interfaces.sh
+  core_private.ml.fail
+  core_private_child.ml.fail
+  eio_private.ml.fail
+  lwt_private.ml.fail
+  runtime_engine.ml.fail
+  public_projection.ml
+  metric_diagnostics.ml.fail
+  s3_execution.ml.fail
+  s3_observation.ml.fail
+  s3_execution_child.ml.fail
+  s3_observation_child.ml.fail
+  arbitrary_diagnostic.ml.fail
+  sensitive_diagnostic.ml.fail
+  %{lib:awskit:awskit.cma}
+  %{lib:awskit-s3:awskit_s3.cma}
+  %{lib:awskit-lwt:awskit_lwt.cma}
+  %{lib:awskit-eio:awskit_eio.cma})
+ (action
+  (run
+   bash
+   %{dep:check_interfaces.sh}
+   %{bin:ocamlfind}
+   %{dep:public_projection.ml}
+   %{dep:metric_diagnostics.ml.fail}
+   %{dep:arbitrary_diagnostic.ml.fail}
+   %{dep:sensitive_diagnostic.ml.fail}
+   %{dep:core_private.ml.fail}
+   %{dep:core_private_child.ml.fail}
+   %{dep:s3_execution.ml.fail}
+   %{dep:s3_observation.ml.fail}
+   %{dep:s3_execution_child.ml.fail}
+   %{dep:s3_observation_child.ml.fail}
+   %{dep:lwt_private.ml.fail}
+   %{dep:eio_private.ml.fail}
+   %{dep:runtime_engine.ml.fail}
+   %{lib:awskit:awskit.cma}
+   %{lib:awskit-s3:awskit_s3.cma}
+   %{lib:awskit-lwt:awskit_lwt.cma}
+   %{lib:awskit-eio:awskit_eio.cma})))

@@ -296,6 +296,10 @@ end
 
 module Make
     (Runtime : Awskit_s3.RUNTIME with type 'a t = 'a)
+    (Observer :
+      Awskit.Observability.For_service.Observer
+        with type 'a io = 'a
+         and type connection = Runtime.connection)
     (S3 : sig
       module Object : sig
         val put :
@@ -352,6 +356,9 @@ module Make
 struct
   module Transfer = Awskit_s3.Transfer
   module Plan = Transfer.Plan
+
+  module Transfer_observation =
+    Awskit_s3.Observability.For_transfer.Make (Observer)
 
   let notify_transfer_progress callback ~direction ~phase ?total ?part_number
       transferred =
@@ -555,7 +562,8 @@ struct
             bytes_transferred;
           }
 
-  let resume_multipart_upload_file conn ~upload ?options ?on_progress ~path () =
+  let resume_multipart_upload_file_raw conn ~upload ?options ?on_progress ~path
+      () =
     let options =
       Option.value ~default:Awskit_s3.Transfer.default_upload_options options
     in
@@ -573,7 +581,8 @@ struct
     complete_multipart conn ~upload ~options ~bytes_transferred:content_length
       uploaded_now
 
-  let multipart_upload_file conn ~bucket ~key ?options ?on_progress ~path () =
+  let multipart_upload_file_raw conn ~bucket ~key ?options ?on_progress ~path ()
+      =
     let options =
       Option.value ~default:Awskit_s3.Transfer.default_upload_options options
     in
@@ -631,7 +640,7 @@ struct
     | Ok _ as result -> result
     | Error error -> abort_and_return error
 
-  let upload_file conn ~bucket ~key ?options ?on_progress ~path () =
+  let upload_file_raw conn ~bucket ~key ?options ?on_progress ~path () =
     let options =
       Option.value ~default:Awskit_s3.Transfer.default_upload_options options
     in
@@ -661,7 +670,8 @@ struct
         Awskit_s3.Transfer.validate_upload_multipart_selection options
       in
       let* result =
-        multipart_upload_file conn ~bucket ~key ~options ?on_progress ~path ()
+        multipart_upload_file_raw conn ~bucket ~key ~options ?on_progress ~path
+          ()
       in
       Ok (Awskit_s3.Transfer.Multipart result)
 
@@ -766,7 +776,7 @@ struct
     in
     loop 0 ranges
 
-  let download_file conn ~bucket ~key ?options ?on_progress ~path () =
+  let download_file_raw conn ~bucket ~key ?options ?on_progress ~path () =
     let options =
       Option.value ~default:Awskit_s3.Transfer.default_download_options options
     in
@@ -808,4 +818,56 @@ struct
             Ok
               (Awskit_s3.Transfer.Ranged
                  { info; parts; bytes_transferred = content_length }))
+
+  let upload_summary result =
+    let parts =
+      match result with
+      | Awskit_s3.Transfer.Put _ -> 1
+      | Multipart result -> Base.List.length result.parts
+    in
+    Awskit_s3.Observability.For_transfer.
+      {
+        logical_bytes = Awskit_s3.Transfer.upload_bytes_transferred result;
+        parts;
+      }
+
+  let multipart_summary (result : Awskit_s3.Transfer.multipart_upload_result) =
+    Awskit_s3.Observability.For_transfer.
+      {
+        logical_bytes = result.bytes_transferred;
+        parts = Base.List.length result.parts;
+      }
+
+  let download_summary result =
+    let parts =
+      match result with
+      | Awskit_s3.Transfer.Get _ -> 1
+      | Ranged result -> result.parts
+    in
+    Awskit_s3.Observability.For_transfer.
+      {
+        logical_bytes = Awskit_s3.Transfer.download_bytes_transferred result;
+        parts;
+      }
+
+  let resume_multipart_upload_file conn ~upload ?options ?on_progress ~path () =
+    Transfer_observation.with_upload conn ~summarize:multipart_summary
+      (fun () ->
+        resume_multipart_upload_file_raw conn ~upload ?options ?on_progress
+          ~path ())
+
+  let multipart_upload_file conn ~bucket ~key ?options ?on_progress ~path () =
+    Transfer_observation.with_upload conn ~summarize:multipart_summary
+      (fun () ->
+        multipart_upload_file_raw conn ~bucket ~key ?options ?on_progress ~path
+          ())
+
+  let upload_file conn ~bucket ~key ?options ?on_progress ~path () =
+    Transfer_observation.with_upload conn ~summarize:upload_summary (fun () ->
+        upload_file_raw conn ~bucket ~key ?options ?on_progress ~path ())
+
+  let download_file conn ~bucket ~key ?options ?on_progress ~path () =
+    Transfer_observation.with_download conn ~summarize:download_summary
+      (fun () ->
+        download_file_raw conn ~bucket ~key ?options ?on_progress ~path ())
 end

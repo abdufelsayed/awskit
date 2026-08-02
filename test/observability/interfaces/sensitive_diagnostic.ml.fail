@@ -1,0 +1,3 @@
+module F = Awskit.Observability.For_service
+
+let signature = F.Diagnostic.sensitive_string ~name:"signature" "secret"

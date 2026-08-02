@@ -21,6 +21,7 @@ let make_simulator ?(bucket = "test-bucket") () =
   ignore
     (Simulator.Bucket.create conn ~bucket:(bucket_name bucket) ()
     |> ok_or_fail "create bucket");
+  Simulator.clear_observations conn;
   conn
 
 let is_body_error error =

@@ -7,6 +7,7 @@
   awskit-s3-sim
   awskit_s3_workload
   alcotest
+  base
   qcheck-core
   qcheck-alcotest
   ptime)
@@ -41,7 +42,8 @@
    (run
     ./test_awskit_s3_sim.exe
     test
-    "contract:awskit-s3-sim:body-lifecycle"))))
+    "contract:awskit-s3-sim:body-lifecycle")
+   (run ./test_awskit_s3_sim.exe test "behavior:awskit-s3-sim:observability"))))
 
 (rule
  (alias transfer-faults)

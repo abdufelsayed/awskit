@@ -78,20 +78,7 @@ type bucket_state = {
   mutable ownership_controls : Awskit_s3.Bucket.Ownership_controls.config option;
 }
 
-type operation =
-  [ `Put_object
-  | `Get_object
-  | `Head_object
-  | `Delete_object
-  | `List_objects_v2
-  | `List_object_versions
-  | `Copy_object
-  | `Delete_objects
-  | `Create_multipart_upload
-  | `Upload_part
-  | `Complete_multipart_upload
-  | `Abort_multipart_upload
-  | `List_parts ]
+type operation = Awskit_s3.Operation.t
 
 type operation_record = {
   op : operation;
@@ -140,6 +127,20 @@ val connect : store -> credentials:Awskit.Credentials.t -> t
 val store : t -> store
 val credentials : t -> Awskit.Credentials.t
 val now : t -> Ptime.t
+
+val observations :
+  t -> Awskit.Observability.For_projection.Operation.Completion.t list
+(** Return terminal logical-operation completions recorded on this connection.
+
+    The stream is connection-local even when multiple connections share a store.
+    It contains no physical HTTP or retry observations. *)
+
+val clear_observations : t -> unit
+(** Clear the connection-local completion stream without changing store history.
+*)
+
+val record_observation :
+  t -> Awskit.Observability.For_projection.Operation.Completion.t -> unit
 
 val record_operation :
   ?faulted:bool -> t -> operation -> string -> string option -> unit

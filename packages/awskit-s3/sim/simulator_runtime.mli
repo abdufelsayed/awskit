@@ -14,4 +14,7 @@ module Runtime : sig
   val response_body : ?read_fault:Awskit.Error.t -> string -> response_body
   (** Build an in-memory response body, optionally failing reads with
       [read_fault]. *)
+
+  val response_body_reader_consumed_bytes : response_body_reader -> int64
+  (** Return caller-consumed bytes for a scoped simulator reader. *)
 end

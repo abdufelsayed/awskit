@@ -15,6 +15,7 @@ let s3_uri ?key bucket =
   | Some key -> Fmt.str "s3://%s/%s" bucket key
 
 let with_s3_operation ~operation ?bucket ?key error =
+  let operation = Operation.to_string operation in
   let resource = Option.map (fun bucket -> s3_uri ?key bucket) bucket in
   let already_present =
     List.exists

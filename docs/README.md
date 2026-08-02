@@ -10,6 +10,8 @@ This directory contains Awskit's maintainer policies and workflows.
 - `testing.md` defines test and validation rules.
 - `security-threat-model.md` summarizes protected SDK assets, trust
   boundaries, and the executable evidence for security-sensitive behavior.
+- `observability.md` documents typed observation semantics, public sink
+  contracts, and application-owned reporter/exporter policy.
 - `release-gates.md` defines the local, CI, and public API review evidence
   required for production-ready release claims.
 - `changelog.md` defines release-note and changelog rules.

@@ -11,7 +11,7 @@ module Copy_object = Object.Copy
 module List_objects_v2 = Object.List
 module List_object_versions = Object.Versions
 
-module Make (C : Request_context.S) = struct
+module Make (C : Execution_request_context.S) = struct
   open C
 
   let ( let* ) = bind
@@ -121,67 +121,75 @@ module Make (C : Request_context.S) = struct
     else Ok ()
 
   let put conn ~bucket ~key ?options ~body () =
-    let bucket = Bucket_name.to_string bucket in
-    let key = Object_key.to_string key in
-    let options = Option.value ~default:Put_object.default_options options in
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"PutObject"
-        ~bucket ~key
-    in
-    match S3_validation.validate_bucket_key bucket key with
-    | Error error -> return_error error
-    | Ok () -> (
-        match validate_put_options options with
+    with_operation conn ~operation:Operation.Put_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        let bucket = Bucket_name.to_string bucket in
+        let key = Object_key.to_string key in
+        let options =
+          Option.value ~default:Put_object.default_options options
+        in
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.Put_object ~bucket ~key
+        in
+        match S3_validation.validate_bucket_key bucket key with
         | Error error -> return_error error
         | Ok () -> (
-            let descriptor = R.Request_body.descriptor body in
-            match descriptor.content_length with
-            | None ->
-                return_error
-                  (Awskit.Error.Producer.validation ~field:"content_length"
-                     "S3 uploads require a known content length before SigV4 \
-                      chunked streaming")
-            | Some content_length -> (
-                match Awskit.Body.Request.validate_descriptor descriptor with
-                | Error error -> return_error error
-                | Ok () -> (
-                    let headers =
-                      [ ("content-length", Int64.to_string content_length) ]
-                      @ Metadata_headers.to_headers options.metadata
-                      @ write_precondition_headers options.preconditions
-                      @ checksum_value_headers options.checksum
-                      @ destination_encryption_headers options.encryption
-                      |> add_opt_content_type_header "content-type"
-                           options.content_type
-                      |> add_opt_header "cache-control"
-                           (header_value options.cache_control)
-                      |> add_opt_header "content-encoding"
-                           (header_value options.content_encoding)
-                      |> add_opt_header "content-disposition"
-                           (header_value options.content_disposition)
-                      |> add_opt_header "x-amz-storage-class"
-                           (Option.map Storage_class.to_string
-                              options.storage_class)
-                      |> add_opt_header "x-amz-tagging"
-                           (tags_header options.tags)
-                      |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                           options.expected_bucket_owner
-                    in
-                    match object_request conn ~bucket ~key with
+            match validate_put_options options with
+            | Error error -> return_error error
+            | Ok () -> (
+                let descriptor = R.Request_body.descriptor body in
+                match descriptor.content_length with
+                | None ->
+                    return_error
+                      (Awskit.Error.Producer.validation ~field:"content_length"
+                         "S3 uploads require a known content length before \
+                          SigV4 chunked streaming")
+                | Some content_length -> (
+                    match
+                      Awskit.Body.Request.validate_descriptor descriptor
+                    with
                     | Error error -> return_error error
-                    | Ok request ->
-                        let* result =
-                          with_response conn ~method_:`PUT ~request ~query:[]
-                            ~headers ~payload_hash:descriptor.payload_hash body
-                            ~f:(fun response body ->
-                              let* discarded = discard_response_body body in
-                              match discarded with
-                              | Error error -> return_error error
-                              | Ok () ->
-                                  return_result return_error return_ok
-                                    (put_result response))
+                    | Ok () -> (
+                        let headers =
+                          [ ("content-length", Int64.to_string content_length) ]
+                          @ Metadata_headers.to_headers options.metadata
+                          @ write_precondition_headers options.preconditions
+                          @ checksum_value_headers options.checksum
+                          @ destination_encryption_headers options.encryption
+                          |> add_opt_content_type_header "content-type"
+                               options.content_type
+                          |> add_opt_header "cache-control"
+                               (header_value options.cache_control)
+                          |> add_opt_header "content-encoding"
+                               (header_value options.content_encoding)
+                          |> add_opt_header "content-disposition"
+                               (header_value options.content_disposition)
+                          |> add_opt_header "x-amz-storage-class"
+                               (Option.map Storage_class.to_string
+                                  options.storage_class)
+                          |> add_opt_header "x-amz-tagging"
+                               (tags_header options.tags)
+                          |> add_opt_account_id_header
+                               "x-amz-expected-bucket-owner"
+                               options.expected_bucket_owner
                         in
-                        return_result return_error return_ok result))))
+                        match object_request conn ~bucket ~key with
+                        | Error error -> return_error error
+                        | Ok request ->
+                            let* result =
+                              with_discarded_response_in_session conn ~session
+                                ~method_:`PUT ~request ~query:[] ~headers
+                                ~payload_hash:descriptor.payload_hash body
+                                ~f:(fun response body ->
+                                  let* discarded = discard_response_body body in
+                                  match discarded with
+                                  | Error error -> return_error error
+                                  | Ok () ->
+                                      return_result return_error return_ok
+                                        (put_result response))
+                            in
+                            return_result return_error return_ok result)))))
 
   let put_string conn ~bucket ~key ?options ~contents () =
     put conn ~bucket ~key ?options ~body:(R.Request_body.of_string contents) ()
@@ -189,13 +197,13 @@ module Make (C : Request_context.S) = struct
   let put_bytes conn ~bucket ~key ?options ~contents () =
     put conn ~bucket ~key ?options ~body:(R.Request_body.of_bytes contents) ()
 
-  let get conn ~bucket ~key ?options ~consume () =
+  let get_in_session session conn ~bucket ~key ?options ~consume () =
     let bucket = Bucket_name.to_string bucket in
     let key = Object_key.to_string key in
     let options = Option.value ~default:Get_object.default_options options in
     let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"GetObject"
-        ~bucket ~key
+      S3_error_context.return_s3_error return_error
+        ~operation:Operation.Get_object ~bucket ~key
     in
     match S3_validation.validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -218,47 +226,60 @@ module Make (C : Request_context.S) = struct
         | Error error -> return_error error
         | Ok request ->
             let* result =
-              with_empty_response conn ~method_:`GET ~request ~query ~headers
-                ~f:(fun response body ->
-                  match object_info response with
-                  | Error error -> return_error error
-                  | Ok info ->
-                      let* consumed =
-                        R.Response_body.with_reader body ~consume
-                      in
-                      return_result return_error return_ok
-                        (Result.map (get_result info) consumed))
+              with_empty_response_in_session conn ~session ~method_:`GET
+                ~request ~query ~headers ~f:(fun response body ->
+                  R.Response_body.with_reader body ~consume:(fun reader ->
+                      match object_info response with
+                      | Error error -> return_error error
+                      | Ok info ->
+                          let* consumed = consume reader in
+                          return_result return_error return_ok
+                            (Result.map (get_result info) consumed)))
             in
             return_result return_error return_ok result)
+
+  let get conn ~bucket ~key ?options ~consume () =
+    with_operation conn ~operation:Operation.Get_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        get_in_session session conn ~bucket ~key ?options ~consume ())
 
   let read_string ~max_bytes reader = read_body reader ~max_size:max_bytes
   let read_bytes ~max_bytes reader = read_body_bytes reader ~max_size:max_bytes
 
   let get_string conn ~bucket ~key ?options ~max_bytes () =
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(Bucket_name.to_string bucket)
-        ~key:(Object_key.to_string key)
-    in
-    match validate_max_bytes max_bytes with
-    | Error error -> return_error error
-    | Ok () ->
-        get conn ~bucket ~key ?options ~consume:(read_string ~max_bytes) ()
+    with_operation conn ~operation:Operation.Get_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.Get_object
+            ~bucket:(Bucket_name.to_string bucket)
+            ~key:(Object_key.to_string key)
+        in
+        match validate_max_bytes max_bytes with
+        | Error error -> return_error error
+        | Ok () ->
+            get_in_session session conn ~bucket ~key ?options
+              ~consume:(read_string ~max_bytes) ())
 
   let get_bytes conn ~bucket ~key ?options ~max_bytes () =
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(Bucket_name.to_string bucket)
-        ~key:(Object_key.to_string key)
-    in
-    match validate_max_bytes max_bytes with
-    | Error error -> return_error error
-    | Ok () ->
-        get conn ~bucket ~key ?options ~consume:(read_bytes ~max_bytes) ()
+    with_operation conn ~operation:Operation.Get_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.Get_object
+            ~bucket:(Bucket_name.to_string bucket)
+            ~key:(Object_key.to_string key)
+        in
+        match validate_max_bytes max_bytes with
+        | Error error -> return_error error
+        | Ok () ->
+            get_in_session session conn ~bucket ~key ?options
+              ~consume:(read_bytes ~max_bytes) ())
 
-  let find conn ~bucket ~key ?options ~consume () =
+  let find_in_session session conn ~bucket ~key ?options ~consume () =
     let return_consumer_error =
-      S3_error_context.return_s3_error return_error ~operation:"GetObject"
+      S3_error_context.return_s3_error return_error
+        ~operation:Operation.Get_object
         ~bucket:(Bucket_name.to_string bucket)
         ~key:(Object_key.to_string key)
     in
@@ -266,7 +287,9 @@ module Make (C : Request_context.S) = struct
       let* result = consume reader in
       return_ok result
     in
-    let* result = get conn ~bucket ~key ?options ~consume () in
+    let* result =
+      get_in_session session conn ~bucket ~key ?options ~consume ()
+    in
     match result with
     | Ok ({ Get_object.value = Ok value; _ } as result) ->
         return_ok (Some { result with Get_object.value })
@@ -274,66 +297,80 @@ module Make (C : Request_context.S) = struct
     | Error error when Error.is_no_such_key error -> return_ok None
     | Error error -> return_error error
 
+  let find conn ~bucket ~key ?options ~consume () =
+    with_operation conn ~operation:Operation.Get_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        find_in_session session conn ~bucket ~key ?options ~consume ())
+
   let find_string conn ~bucket ~key ?options ~max_bytes () =
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(Bucket_name.to_string bucket)
-        ~key:(Object_key.to_string key)
-    in
-    match validate_max_bytes max_bytes with
-    | Error error -> return_error error
-    | Ok () ->
-        find conn ~bucket ~key ?options ~consume:(read_string ~max_bytes) ()
+    with_operation conn ~operation:Operation.Get_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        match validate_max_bytes max_bytes with
+        | Error error ->
+            S3_error_context.return_s3_error return_error
+              ~operation:Operation.Get_object
+              ~bucket:(Bucket_name.to_string bucket)
+              ~key:(Object_key.to_string key) error
+        | Ok () ->
+            find_in_session session conn ~bucket ~key ?options
+              ~consume:(read_string ~max_bytes) ())
 
   let find_bytes conn ~bucket ~key ?options ~max_bytes () =
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"GetObject"
-        ~bucket:(Bucket_name.to_string bucket)
-        ~key:(Object_key.to_string key)
-    in
-    match validate_max_bytes max_bytes with
-    | Error error -> return_error error
-    | Ok () ->
-        find conn ~bucket ~key ?options ~consume:(read_bytes ~max_bytes) ()
+    with_operation conn ~operation:Operation.Get_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        match validate_max_bytes max_bytes with
+        | Error error ->
+            S3_error_context.return_s3_error return_error
+              ~operation:Operation.Get_object
+              ~bucket:(Bucket_name.to_string bucket)
+              ~key:(Object_key.to_string key) error
+        | Ok () ->
+            find_in_session session conn ~bucket ~key ?options
+              ~consume:(read_bytes ~max_bytes) ())
 
   let head conn ~bucket ~key ?options () =
-    let bucket = Bucket_name.to_string bucket in
-    let key = Object_key.to_string key in
-    let options = Option.value ~default:Head_object.default_options options in
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"HeadObject"
-        ~bucket ~key
-    in
-    match S3_validation.validate_bucket_key bucket key with
-    | Error error -> return_error error
-    | Ok () -> (
-        let headers =
-          read_precondition_headers options.preconditions
-          @ checksum_mode_header options.checksum_mode
-          @ source_encryption_headers options.source_encryption
-          |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-               options.expected_bucket_owner
+    with_operation conn ~operation:Operation.Head_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        let bucket = Bucket_name.to_string bucket in
+        let key = Object_key.to_string key in
+        let options =
+          Option.value ~default:Head_object.default_options options
         in
-        let query =
-          match options.version_id with
-          | None -> []
-          | Some version_id ->
-              [ ("versionId", [ Object.Version_id.to_string version_id ]) ]
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.Head_object ~bucket ~key
         in
-        match object_request conn ~bucket ~key with
+        match S3_validation.validate_bucket_key bucket key with
         | Error error -> return_error error
-        | Ok request ->
-            let* result =
-              with_empty_response conn ~method_:`HEAD ~request ~query ~headers
-                ~f:(fun response body ->
-                  let* discarded = discard_response_body body in
-                  match discarded with
-                  | Error error -> return_error error
-                  | Ok () ->
-                      return_result return_error return_ok
-                        (object_info response))
+        | Ok () -> (
+            let headers =
+              read_precondition_headers options.preconditions
+              @ checksum_mode_header options.checksum_mode
+              @ source_encryption_headers options.source_encryption
+              |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+                   options.expected_bucket_owner
             in
-            return_result return_error return_ok result)
+            let query =
+              match options.version_id with
+              | None -> []
+              | Some version_id ->
+                  [ ("versionId", [ Object.Version_id.to_string version_id ]) ]
+            in
+            match object_request conn ~bucket ~key with
+            | Error error -> return_error error
+            | Ok request ->
+                let* result =
+                  with_empty_discarded_response_in_session conn ~session
+                    ~method_:`HEAD ~request ~query ~headers
+                    ~f:(fun response body ->
+                      let* discarded = discard_response_body body in
+                      match discarded with
+                      | Error error -> return_error error
+                      | Ok () ->
+                          return_result return_error return_ok
+                            (object_info response))
+                in
+                return_result return_error return_ok result))
 
   let is_head_object_missing error =
     Error.is_no_such_key error
@@ -355,293 +392,314 @@ module Make (C : Request_context.S) = struct
     | Error error -> return_error error
 
   let delete conn ~bucket ~key ?options () =
-    let bucket = Bucket_name.to_string bucket in
-    let key = Object_key.to_string key in
-    let options = Option.value ~default:Delete_object.default_options options in
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"DeleteObject"
-        ~bucket ~key
-    in
-    match S3_validation.validate_bucket_key bucket key with
-    | Error error -> return_error error
-    | Ok () -> (
-        let headers =
-          delete_precondition_headers options.preconditions
-          |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-               options.expected_bucket_owner
+    with_operation conn ~operation:Operation.Delete_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        let bucket = Bucket_name.to_string bucket in
+        let key = Object_key.to_string key in
+        let options =
+          Option.value ~default:Delete_object.default_options options
         in
-        let query =
-          match options.version_id with
-          | None -> []
-          | Some version_id ->
-              [ ("versionId", [ Object.Version_id.to_string version_id ]) ]
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.Delete_object ~bucket ~key
         in
-        match object_request conn ~bucket ~key with
-        | Error error -> return_error error
-        | Ok request ->
-            let* result =
-              with_empty_response conn ~method_:`DELETE ~request ~query ~headers
-                ~f:(fun response body ->
-                  let* discarded = discard_response_body body in
-                  match discarded with
-                  | Error error -> return_error error
-                  | Ok () ->
-                      return_result return_error return_ok
-                        (delete_result response))
-            in
-            return_result return_error return_ok result)
-
-  let delete_objects conn ~bucket ~objects ?options () =
-    let bucket = Bucket_name.to_string bucket in
-    let options =
-      Option.value ~default:Delete_objects.default_options options
-    in
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"DeleteObjects"
-        ~bucket
-    in
-    match S3_validation.validate_bucket bucket with
-    | Error error -> return_error error
-    | Ok () -> (
-        match Object_delete_xml.validate_objects objects with
+        match S3_validation.validate_bucket_key bucket key with
         | Error error -> return_error error
         | Ok () -> (
-            let body = Object_delete_xml.body objects in
             let headers =
-              [
-                ("content-md5", content_md5 body);
-                ("content-type", "application/xml");
-              ]
+              delete_precondition_headers options.preconditions
               |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                    options.expected_bucket_owner
             in
-            let upload = R.Request_body.of_string body in
-            match
-              bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/"
-            with
+            let query =
+              match options.version_id with
+              | None -> []
+              | Some version_id ->
+                  [ ("versionId", [ Object.Version_id.to_string version_id ]) ]
+            in
+            match object_request conn ~bucket ~key with
             | Error error -> return_error error
             | Ok request ->
                 let* result =
-                  with_response conn ~method_:`POST ~request
-                    ~query:[ ("delete", []) ]
-                    ~headers
-                    ~payload_hash:
-                      (R.Request_body.descriptor upload).payload_hash upload
-                    ~f:(fun response response_body ->
-                      let* body =
-                        read_response_body response_body ~max_size:1_048_576L
-                      in
-                      match body with
+                  with_empty_discarded_response_in_session conn ~session
+                    ~method_:`DELETE ~request ~query ~headers
+                    ~f:(fun response body ->
+                      let* discarded = discard_response_body body in
+                      match discarded with
                       | Error error -> return_error error
-                      | Ok body ->
+                      | Ok () ->
                           return_result return_error return_ok
-                            (Object_delete_xml.parse_result ~response body))
+                            (delete_result response))
                 in
                 return_result return_error return_ok result))
 
-  let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
-      ?options () =
-    let source_bucket = Bucket_name.to_string source_bucket in
-    let source_key = Object_key.to_string source_key in
-    let destination_bucket = Bucket_name.to_string destination_bucket in
-    let destination_key = Object_key.to_string destination_key in
-    let options = Option.value ~default:Copy_object.default_options options in
-    let source_error =
-      S3_error_context.return_s3_error return_error ~operation:"CopyObject"
-        ~bucket:source_bucket ~key:source_key
-    in
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"CopyObject"
-        ~bucket:destination_bucket ~key:destination_key
-    in
-    match S3_validation.validate_bucket_key source_bucket source_key with
-    | Error error -> source_error error
-    | Ok () -> (
-        match
-          S3_validation.validate_bucket_key destination_bucket destination_key
-        with
+  let delete_objects conn ~bucket ~objects ?options () =
+    with_operation conn ~operation:Operation.Delete_objects
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        let bucket = Bucket_name.to_string bucket in
+        let options =
+          Option.value ~default:Delete_objects.default_options options
+        in
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.Delete_objects ~bucket
+        in
+        match S3_validation.validate_bucket bucket with
         | Error error -> return_error error
         | Ok () -> (
-            let copy_source =
-              Awskit.Signing.uri_encode ~encode_slash:false
-                (Fmt.str "/%s/%s" source_bucket source_key)
-            in
-            let copy_source =
-              match options.source_version_id with
-              | None -> copy_source
-              | Some version_id ->
-                  Fmt.str "%s?versionId=%s" copy_source
-                    (Awskit.Signing.uri_encode ~encode_slash:true
-                       (Object.Version_id.to_string version_id))
-            in
-            match validate_copy_options options with
+            match Object_delete_xml.validate_objects objects with
             | Error error -> return_error error
             | Ok () -> (
+                let body = Object_delete_xml.body objects in
                 let headers =
-                  ("x-amz-copy-source", copy_source)
-                  :: copy_source_precondition_headers
-                       options.source_preconditions
-                  @ checksum_algorithm_header options.checksum_algorithm
-                  @ destination_encryption_headers
-                      options.destination_encryption
-                  @ copy_source_encryption_headers options.source_encryption
-                in
-                let headers =
-                  match options.metadata_directive with
-                  | None -> headers
-                  | Some `Copy ->
-                      ("x-amz-metadata-directive", "COPY") :: headers
-                  | Some (`Replace metadata) ->
-                      ("x-amz-metadata-directive", "REPLACE")
-                      :: Metadata_headers.to_headers metadata
-                      @ headers
-                in
-                let headers =
-                  headers
-                  |> add_opt_header "x-amz-storage-class"
-                       (Option.map Storage_class.to_string options.storage_class)
+                  [
+                    ("content-md5", content_md5 body);
+                    ("content-type", "application/xml");
+                  ]
                   |> add_opt_account_id_header "x-amz-expected-bucket-owner"
                        options.expected_bucket_owner
-                  |> add_opt_account_id_header
-                       "x-amz-source-expected-bucket-owner"
-                       options.source_expected_bucket_owner
                 in
+                let upload = R.Request_body.of_string body in
                 match
-                  object_request conn ~bucket:destination_bucket
-                    ~key:destination_key
+                  bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/"
                 with
                 | Error error -> return_error error
                 | Ok request ->
                     let* result =
-                      with_retryable_embedded_response conn ~method_:`PUT
-                        ~request ~query:[] ~headers
+                      with_response_in_session conn ~session ~method_:`POST
+                        ~request
+                        ~query:[ ("delete", []) ]
+                        ~headers
                         ~payload_hash:
-                          (Awskit.Body.Payload_hash.sha256_of_string "")
-                        R.Request_body.empty ~f:(fun response body ->
+                          (R.Request_body.descriptor upload).payload_hash upload
+                        ~f:(fun response response_body ->
                           let* body =
-                            read_response_body body ~max_size:1_048_576L
+                            read_response_body response_body
+                              ~max_size:1_048_576L
                           in
                           match body with
                           | Error error -> return_error error
                           | Ok body ->
                               return_result return_error return_ok
-                                (copy_result response body))
+                                (Object_delete_xml.parse_result ~response body))
                     in
                     return_result return_error return_ok result)))
 
-  let list_versions conn ~bucket ?options () =
-    let bucket = Bucket_name.to_string bucket in
-    let options =
-      Option.value ~default:List_object_versions.default_options options
-    in
-    let return_error =
-      S3_error_context.return_s3_error return_error
-        ~operation:"ListObjectVersions" ~bucket
-    in
-    match S3_validation.validate_bucket bucket with
-    | Error error -> return_error error
-    | Ok () -> (
-        match validate_list_versions_options options with
-        | Error error -> return_error error
+  let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
+      ?options () =
+    with_operation conn ~operation:Operation.Copy_object
+      ~bucket:(Bucket_name.to_string destination_bucket) (fun session ->
+        let source_bucket = Bucket_name.to_string source_bucket in
+        let source_key = Object_key.to_string source_key in
+        let destination_bucket = Bucket_name.to_string destination_bucket in
+        let destination_key = Object_key.to_string destination_key in
+        let options =
+          Option.value ~default:Copy_object.default_options options
+        in
+        let source_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.Copy_object ~bucket:source_bucket
+            ~key:source_key
+        in
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.Copy_object ~bucket:destination_bucket
+            ~key:destination_key
+        in
+        match S3_validation.validate_bucket_key source_bucket source_key with
+        | Error error -> source_error error
         | Ok () -> (
-            let add name = function
-              | None -> []
-              | Some value -> [ (name, [ value ]) ]
-            in
-            let query =
-              [ ("versions", []) ]
-              @ add "prefix"
-                  (Option.map Object_key.Prefix.to_string options.prefix)
-              @ add "delimiter"
-                  (Option.map List_object_versions.Delimiter.to_string
-                     options.delimiter)
-              @ add "max-keys" (Option.map string_of_int options.max_keys)
-              @ add "key-marker"
-                  (Option.map Object_key.to_string options.key_marker)
-              @ add "version-id-marker"
-                  (Option.map Object.Version_id.to_string
-                     options.version_id_marker)
-            in
             match
-              bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/"
+              S3_validation.validate_bucket_key destination_bucket
+                destination_key
             with
             | Error error -> return_error error
-            | Ok request ->
-                let headers =
-                  []
-                  |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                       options.expected_bucket_owner
+            | Ok () -> (
+                let copy_source =
+                  Awskit.Signing.uri_encode ~encode_slash:false
+                    (Fmt.str "/%s/%s" source_bucket source_key)
                 in
-                let* result =
-                  with_empty_response conn ~method_:`GET ~request ~query
-                    ~headers ~f:(fun response body ->
-                      let* body =
-                        read_response_body body ~max_size:4_194_304L
-                      in
-                      match body with
-                      | Error error -> return_error error
-                      | Ok body ->
-                          return_result return_error return_ok
-                            (Object_versions_xml.parse_page ~response body))
+                let copy_source =
+                  match options.source_version_id with
+                  | None -> copy_source
+                  | Some version_id ->
+                      Fmt.str "%s?versionId=%s" copy_source
+                        (Awskit.Signing.uri_encode ~encode_slash:true
+                           (Object.Version_id.to_string version_id))
                 in
-                return_result return_error return_ok result))
+                match validate_copy_options options with
+                | Error error -> return_error error
+                | Ok () -> (
+                    let headers =
+                      ("x-amz-copy-source", copy_source)
+                      :: copy_source_precondition_headers
+                           options.source_preconditions
+                      @ checksum_algorithm_header options.checksum_algorithm
+                      @ destination_encryption_headers
+                          options.destination_encryption
+                      @ copy_source_encryption_headers options.source_encryption
+                    in
+                    let headers =
+                      match options.metadata_directive with
+                      | None -> headers
+                      | Some `Copy ->
+                          ("x-amz-metadata-directive", "COPY") :: headers
+                      | Some (`Replace metadata) ->
+                          ("x-amz-metadata-directive", "REPLACE")
+                          :: Metadata_headers.to_headers metadata
+                          @ headers
+                    in
+                    let headers =
+                      headers
+                      |> add_opt_header "x-amz-storage-class"
+                           (Option.map Storage_class.to_string
+                              options.storage_class)
+                      |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+                           options.expected_bucket_owner
+                      |> add_opt_account_id_header
+                           "x-amz-source-expected-bucket-owner"
+                           options.source_expected_bucket_owner
+                    in
+                    match
+                      object_request conn ~bucket:destination_bucket
+                        ~key:destination_key
+                    with
+                    | Error error -> return_error error
+                    | Ok request ->
+                        let* result =
+                          with_retryable_embedded_response_in_session conn
+                            ~session ~method_:`PUT ~request ~query:[] ~headers
+                            ~payload_hash:
+                              (Awskit.Body.Payload_hash.sha256_of_string "")
+                            R.Request_body.empty ~f:(fun response body ->
+                              let* body =
+                                read_response_body body ~max_size:1_048_576L
+                              in
+                              match body with
+                              | Error error -> return_error error
+                              | Ok body ->
+                                  return_result return_error return_ok
+                                    (copy_result response body))
+                        in
+                        return_result return_error return_ok result))))
+
+  let list_versions conn ~bucket ?options () =
+    with_operation conn ~operation:Operation.List_object_versions
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        let bucket = Bucket_name.to_string bucket in
+        let options =
+          Option.value ~default:List_object_versions.default_options options
+        in
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.List_object_versions ~bucket
+        in
+        match S3_validation.validate_bucket bucket with
+        | Error error -> return_error error
+        | Ok () -> (
+            match validate_list_versions_options options with
+            | Error error -> return_error error
+            | Ok () -> (
+                let add name = function
+                  | None -> []
+                  | Some value -> [ (name, [ value ]) ]
+                in
+                let query =
+                  [ ("versions", []) ]
+                  @ add "prefix"
+                      (Option.map Object_key.Prefix.to_string options.prefix)
+                  @ add "delimiter"
+                      (Option.map List_object_versions.Delimiter.to_string
+                         options.delimiter)
+                  @ add "max-keys" (Option.map string_of_int options.max_keys)
+                  @ add "key-marker"
+                      (Option.map Object_key.to_string options.key_marker)
+                  @ add "version-id-marker"
+                      (Option.map Object.Version_id.to_string
+                         options.version_id_marker)
+                in
+                match
+                  bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/"
+                with
+                | Error error -> return_error error
+                | Ok request ->
+                    let headers =
+                      []
+                      |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+                           options.expected_bucket_owner
+                    in
+                    let* result =
+                      with_empty_response_in_session conn ~session ~method_:`GET
+                        ~request ~query ~headers ~f:(fun response body ->
+                          let* body =
+                            read_response_body body ~max_size:4_194_304L
+                          in
+                          match body with
+                          | Error error -> return_error error
+                          | Ok body ->
+                              return_result return_error return_ok
+                                (Object_versions_xml.parse_page ~response body))
+                    in
+                    return_result return_error return_ok result)))
 
   let list conn ~bucket ?options () =
-    let bucket = Bucket_name.to_string bucket in
-    let options =
-      Option.value ~default:List_objects_v2.default_options options
-    in
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"ListObjectsV2"
-        ~bucket
-    in
-    match S3_validation.validate_bucket bucket with
-    | Error error -> return_error error
-    | Ok () -> (
-        match validate_list_options options with
+    with_operation conn ~operation:Operation.List_objects_v2
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        let bucket = Bucket_name.to_string bucket in
+        let options =
+          Option.value ~default:List_objects_v2.default_options options
+        in
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.List_objects_v2 ~bucket
+        in
+        match S3_validation.validate_bucket bucket with
         | Error error -> return_error error
         | Ok () -> (
-            let add name = function
-              | None -> []
-              | Some value -> [ (name, [ value ]) ]
-            in
-            let query =
-              [ ("list-type", [ "2" ]) ]
-              @ add "prefix"
-                  (Option.map Object_key.Prefix.to_string options.prefix)
-              @ add "delimiter"
-                  (Option.map List_objects_v2.Delimiter.to_string
-                     options.delimiter)
-              @ add "max-keys" (Option.map string_of_int options.max_keys)
-              @ add "start-after"
-                  (Option.map Object_key.to_string options.start_after)
-              @ add "continuation-token"
-                  (Option.map List_objects_v2.Continuation_token.to_string
-                     options.continuation_token)
-            in
-            match
-              bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/"
-            with
+            match validate_list_options options with
             | Error error -> return_error error
-            | Ok request ->
-                let headers =
-                  []
-                  |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                       options.expected_bucket_owner
+            | Ok () -> (
+                let add name = function
+                  | None -> []
+                  | Some value -> [ (name, [ value ]) ]
                 in
-                let* result =
-                  with_empty_response conn ~method_:`GET ~request ~query
-                    ~headers ~f:(fun response body ->
-                      let* body =
-                        read_response_body body ~max_size:4_194_304L
-                      in
-                      match body with
-                      | Error error -> return_error error
-                      | Ok body ->
-                          return_result return_error return_ok
-                            (Object_list_xml.parse_page ~response body))
+                let query =
+                  [ ("list-type", [ "2" ]) ]
+                  @ add "prefix"
+                      (Option.map Object_key.Prefix.to_string options.prefix)
+                  @ add "delimiter"
+                      (Option.map List_objects_v2.Delimiter.to_string
+                         options.delimiter)
+                  @ add "max-keys" (Option.map string_of_int options.max_keys)
+                  @ add "start-after"
+                      (Option.map Object_key.to_string options.start_after)
+                  @ add "continuation-token"
+                      (Option.map List_objects_v2.Continuation_token.to_string
+                         options.continuation_token)
                 in
-                return_result return_error return_ok result))
+                match
+                  bucket_request conn ~bucket ~suffix:"/" ~signing_suffix:"/"
+                with
+                | Error error -> return_error error
+                | Ok request ->
+                    let headers =
+                      []
+                      |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+                           options.expected_bucket_owner
+                    in
+                    let* result =
+                      with_empty_response_in_session conn ~session ~method_:`GET
+                        ~request ~query ~headers ~f:(fun response body ->
+                          let* body =
+                            read_response_body body ~max_size:4_194_304L
+                          in
+                          match body with
+                          | Error error -> return_error error
+                          | Ok body ->
+                              return_result return_error return_ok
+                                (Object_list_xml.parse_page ~response body))
+                    in
+                    return_result return_error return_ok result)))
 
   module List = struct
     type 'acc fold_step = Continue of 'acc | Stop of 'acc
@@ -676,7 +734,8 @@ module Make (C : Request_context.S) = struct
 
     let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
       let return_context_error =
-        S3_error_context.return_s3_error return_error ~operation:"ListObjectsV2"
+        S3_error_context.return_s3_error return_error
+          ~operation:Operation.List_objects_v2
           ~bucket:(Bucket_name.to_string bucket)
       in
       match validate_max_pages max_pages with
@@ -722,7 +781,8 @@ module Make (C : Request_context.S) = struct
 
     let collect_pages conn ~bucket ?options ~max_pages ~init ~f () =
       let return_context_error =
-        S3_error_context.return_s3_error return_error ~operation:"ListObjectsV2"
+        S3_error_context.return_s3_error return_error
+          ~operation:Operation.List_objects_v2
           ~bucket:(Bucket_name.to_string bucket)
       in
       match validate_required_max_pages max_pages with
@@ -819,7 +879,7 @@ module Make (C : Request_context.S) = struct
     let fold_pages_until conn ~bucket ?options ?max_pages ~init ~f () =
       let return_context_error =
         S3_error_context.return_s3_error return_error
-          ~operation:"ListObjectVersions"
+          ~operation:Operation.List_object_versions
           ~bucket:(Bucket_name.to_string bucket)
       in
       match validate_max_pages max_pages with
@@ -867,7 +927,7 @@ module Make (C : Request_context.S) = struct
     let collect_pages conn ~bucket ?options ~max_pages ~init ~f () =
       let return_context_error =
         S3_error_context.return_s3_error return_error
-          ~operation:"ListObjectVersions"
+          ~operation:Operation.List_object_versions
           ~bucket:(Bucket_name.to_string bucket)
       in
       match validate_required_max_pages max_pages with

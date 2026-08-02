@@ -26,6 +26,7 @@ depends: [
   "alcotest" {with-test & >= "1.9.1"}
   "qcheck-core" {with-test & >= "0.91"}
   "qcheck-alcotest" {with-test & >= "0.91"}
+  "mtime" {with-test & >= "2.1.0"}
   "odoc" {with-doc}
 ]
 build: [

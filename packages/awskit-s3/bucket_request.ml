@@ -15,7 +15,7 @@ module Bucket_cors = Bucket.Cors
 module Bucket_public_access_block = Bucket.Public_access_block
 module Bucket_ownership_controls = Bucket.Ownership_controls
 
-module Make (C : Request_context.S) = struct
+module Make (C : Execution_request_context.S) = struct
   open C
 
   let ( let* ) = bind
@@ -45,8 +45,8 @@ module Make (C : Request_context.S) = struct
     let options = Option.value ~default options in
     field options
 
-  let get_xml ?expected_bucket_owner conn ~bucket ~operation ~subresource
-      ~max_size ~parse =
+  let get_xml_in_session session ?expected_bucket_owner conn ~bucket ~operation
+      ~subresource ~max_size ~parse =
     let bucket = Bucket_name.to_string bucket in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation ~bucket
@@ -58,7 +58,8 @@ module Make (C : Request_context.S) = struct
         | Error error -> return_error error
         | Ok request ->
             with_operation_result return_error return_ok
-              (with_empty_response conn ~method_:`GET ~request
+              (with_empty_response_in_session conn ~session ~method_:`GET
+                 ~request
                  ~query:[ (subresource, []) ]
                  ~headers:(expected_owner_headers expected_bucket_owner)
                  ~f:(fun response body ->
@@ -69,8 +70,8 @@ module Make (C : Request_context.S) = struct
                        return_result return_error return_ok
                          (parse body response))))
 
-  let put_xml ?expected_bucket_owner conn ~bucket ~operation ~subresource ~body
-      =
+  let put_xml_in_session session ?expected_bucket_owner conn ~bucket ~operation
+      ~subresource ~body =
     let bucket = Bucket_name.to_string bucket in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation ~bucket
@@ -88,7 +89,8 @@ module Make (C : Request_context.S) = struct
         | Error error -> return_error error
         | Ok request ->
             with_operation_result return_error return_ok
-              (with_response conn ~method_:`PUT ~request
+              (with_discarded_response_in_session conn ~session ~method_:`PUT
+                 ~request
                  ~query:[ (subresource, []) ]
                  ~headers
                  ~payload_hash:(R.Request_body.descriptor upload).payload_hash
@@ -99,8 +101,8 @@ module Make (C : Request_context.S) = struct
                    | Error error -> return_error error
                    | Ok () -> return_ok response)))
 
-  let delete_subresource ?expected_bucket_owner conn ~bucket ~operation
-      ~subresource =
+  let delete_subresource_in_session session ?expected_bucket_owner conn ~bucket
+      ~operation ~subresource =
     let bucket = Bucket_name.to_string bucket in
     let return_error =
       S3_error_context.return_s3_error return_error ~operation ~bucket
@@ -112,7 +114,8 @@ module Make (C : Request_context.S) = struct
         | Error error -> return_error error
         | Ok request ->
             with_operation_result return_error return_ok
-              (with_empty_response conn ~method_:`DELETE ~request
+              (with_empty_discarded_response_in_session conn ~session
+                 ~method_:`DELETE ~request
                  ~query:[ (subresource, []) ]
                  ~headers:(expected_owner_headers expected_bucket_owner)
                  ~f:(fun response body ->
@@ -122,37 +125,44 @@ module Make (C : Request_context.S) = struct
                    | Ok () -> return_ok response)))
 
   let create conn ~bucket ?options () =
-    let bucket = Bucket_name.to_string bucket in
-    let options = Option.value ~default:Create_bucket.default_options options in
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"CreateBucket"
-        ~bucket
-    in
-    match S3_validation.validate_bucket bucket with
-    | Error error -> return_error error
-    | Ok () -> (
-        let region = Option.value ~default:(region conn) options.region in
-        let body =
-          if
-            Awskit.Region.equal region (Awskit.Region.of_string_exn "us-east-1")
-          then ""
-          else Bucket_result_xml.create_config region
+    with_operation conn ~operation:Operation.Create_bucket
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        let options =
+          Option.value ~default:Create_bucket.default_options options
         in
-        let upload = R.Request_body.of_string body in
-        let headers =
-          if body = "" then [] else [ ("content-type", "application/xml") ]
+        let bucket = Bucket_name.to_string bucket in
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.Create_bucket ~bucket
         in
-        match bucket_root_request conn bucket with
+        match S3_validation.validate_bucket bucket with
         | Error error -> return_error error
-        | Ok request ->
-            with_operation_result return_error return_ok
-              (with_response conn ~method_:`PUT ~request ~query:[] ~headers
-                 ~payload_hash:(R.Request_body.descriptor upload).payload_hash
-                 upload ~f:(fun response body ->
-                   let* discarded = discard_response_body body in
-                   match discarded with
-                   | Error error -> return_error error
-                   | Ok () -> return_ok { Create_bucket.response })))
+        | Ok () -> (
+            let region = Option.value ~default:(region conn) options.region in
+            let body =
+              if
+                Awskit.Region.equal region
+                  (Awskit.Region.of_string_exn "us-east-1")
+              then ""
+              else Bucket_result_xml.create_config region
+            in
+            let upload = R.Request_body.of_string body in
+            let headers =
+              if body = "" then [] else [ ("content-type", "application/xml") ]
+            in
+            match bucket_root_request conn bucket with
+            | Error error -> return_error error
+            | Ok request ->
+                with_operation_result return_error return_ok
+                  (with_discarded_response_in_session conn ~session
+                     ~method_:`PUT ~request ~query:[] ~headers
+                     ~payload_hash:
+                       (R.Request_body.descriptor upload).payload_hash upload
+                     ~f:(fun response body ->
+                       let* discarded = discard_response_body body in
+                       match discarded with
+                       | Error error -> return_error error
+                       | Ok () -> return_ok { Create_bucket.response }))))
 
   let delete conn ~bucket ?options () =
     let expected_bucket_owner =
@@ -160,25 +170,28 @@ module Make (C : Request_context.S) = struct
         (fun (options : Delete_bucket.options) -> options.expected_bucket_owner)
         options
     in
-    let bucket = Bucket_name.to_string bucket in
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"DeleteBucket"
-        ~bucket
-    in
-    match S3_validation.validate_bucket bucket with
-    | Error error -> return_error error
-    | Ok () -> (
-        match bucket_root_request conn bucket with
+    with_operation conn ~operation:Operation.Delete_bucket
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        let bucket = Bucket_name.to_string bucket in
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.Delete_bucket ~bucket
+        in
+        match S3_validation.validate_bucket bucket with
         | Error error -> return_error error
-        | Ok request ->
-            with_operation_result return_error return_ok
-              (with_empty_response conn ~method_:`DELETE ~request ~query:[]
-                 ~headers:(expected_owner_headers expected_bucket_owner)
-                 ~f:(fun response body ->
-                   let* discarded = discard_response_body body in
-                   match discarded with
-                   | Error error -> return_error error
-                   | Ok () -> return_ok { Delete_bucket.response })))
+        | Ok () -> (
+            match bucket_root_request conn bucket with
+            | Error error -> return_error error
+            | Ok request ->
+                with_operation_result return_error return_ok
+                  (with_empty_discarded_response_in_session conn ~session
+                     ~method_:`DELETE ~request ~query:[]
+                     ~headers:(expected_owner_headers expected_bucket_owner)
+                     ~f:(fun response body ->
+                       let* discarded = discard_response_body body in
+                       match discarded with
+                       | Error error -> return_error error
+                       | Ok () -> return_ok { Delete_bucket.response }))))
 
   let head conn ~bucket ?options () =
     let expected_bucket_owner =
@@ -186,50 +199,53 @@ module Make (C : Request_context.S) = struct
         (fun (options : Head_bucket.options) -> options.expected_bucket_owner)
         options
     in
-    let bucket_name = bucket in
-    let bucket = Bucket_name.to_string bucket in
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"HeadBucket"
-        ~bucket
-    in
-    match S3_validation.validate_bucket bucket with
-    | Error error -> return_error error
-    | Ok () -> (
-        match bucket_root_request conn bucket with
-        | Error error -> return_error error
-        | Ok request ->
-            with_operation_result return_error return_ok
-              (with_empty_response conn ~method_:`HEAD ~request ~query:[]
-                 ~headers:(expected_owner_headers expected_bucket_owner)
-                 ~f:(fun response body ->
-                   let* discarded = discard_response_body body in
-                   match discarded with
-                   | Error error -> return_error error
-                   | Ok () ->
-                       let region =
-                         match
-                           Awskit.Response.header response "x-amz-bucket-region"
-                         with
-                         | None -> Ok None
-                         | Some value -> (
-                             match Awskit.Region.of_string value with
-                             | Ok region -> Ok (Some region)
-                             | Error error ->
-                                 Error
-                                   (S3_error_context.decode_with_context
-                                      ~what:
-                                        "x-amz-bucket-region response header"
-                                      (Awskit.Error.to_string_hum error)))
-                       in
-                       return_result return_error return_ok
-                         (Result.map
-                            (fun region ->
-                              {
-                                Head_bucket.name = bucket_name;
-                                region;
-                                response;
-                              })
-                            region))))
+    with_operation conn ~operation:Operation.Head_bucket
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        let bucket_name = bucket in
+        let bucket = Bucket_name.to_string bucket in
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.Head_bucket ~bucket
+        in
+        let response_handler response body =
+          let* discarded = discard_response_body body in
+          match discarded with
+          | Error error -> return_error error
+          | Ok () ->
+              let region =
+                match Awskit.Response.header response "x-amz-bucket-region" with
+                | None -> Ok None
+                | Some value -> (
+                    match Awskit.Region.of_string value with
+                    | Ok region -> Ok (Some region)
+                    | Error error ->
+                        Error
+                          (S3_error_context.decode_with_context
+                             ~what:"x-amz-bucket-region response header"
+                             (Awskit.Error.to_string_hum error)))
+              in
+              let result =
+                Result.map
+                  (fun region ->
+                    { Head_bucket.name = bucket_name; region; response })
+                  region
+              in
+              return_result return_error return_ok result
+        in
+        let result =
+          match S3_validation.validate_bucket bucket with
+          | Error error -> return_error error
+          | Ok () -> (
+              match bucket_root_request conn bucket with
+              | Error error -> return_error error
+              | Ok request ->
+                  with_operation_result return_error return_ok
+                    (with_empty_discarded_response_in_session conn ~session
+                       ~method_:`HEAD ~request ~query:[]
+                       ~headers:(expected_owner_headers expected_bucket_owner)
+                       ~f:response_handler))
+        in
+        result)
 
   let exists conn ~bucket ?options () =
     let* result = head conn ~bucket ?options () in
@@ -239,23 +255,25 @@ module Make (C : Request_context.S) = struct
     | Error error -> return_error error
 
   let list conn =
-    let return_error =
-      S3_error_context.return_s3_error return_error ~operation:"ListBuckets"
-    in
-    match root_request conn with
-    | Error error -> return_error error
-    | Ok request ->
-        with_operation_result return_error return_ok
-          (with_empty_response conn ~method_:`GET ~request ~query:[] ~headers:[]
-             ~f:(fun response body ->
-               let* body = read_response_body body ~max_size:4_194_304L in
-               match body with
-               | Error error -> return_error error
-               | Ok body ->
-                   return_result return_error return_ok
-                     (Result.map
-                        (fun buckets -> { List_buckets.buckets; response })
-                        (Bucket_result_xml.parse_list body))))
+    with_operation conn ~operation:Operation.List_buckets (fun session ->
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.List_buckets
+        in
+        match root_request conn with
+        | Error error -> return_error error
+        | Ok request ->
+            with_operation_result return_error return_ok
+              (with_empty_response_in_session conn ~session ~method_:`GET
+                 ~request ~query:[] ~headers:[] ~f:(fun response body ->
+                   let* body = read_response_body body ~max_size:4_194_304L in
+                   match body with
+                   | Error error -> return_error error
+                   | Ok body ->
+                       return_result return_error return_ok
+                         (Result.map
+                            (fun buckets -> { List_buckets.buckets; response })
+                            (Bucket_result_xml.parse_list body)))))
 
   let get_location conn ~bucket ?options () =
     let expected_bucket_owner =
@@ -264,31 +282,36 @@ module Make (C : Request_context.S) = struct
           options.expected_bucket_owner)
         options
     in
-    let bucket = Bucket_name.to_string bucket in
-    let return_error =
-      S3_error_context.return_s3_error return_error
-        ~operation:"GetBucketLocation" ~bucket
-    in
-    match S3_validation.validate_bucket bucket with
-    | Error error -> return_error error
-    | Ok () -> (
-        match bucket_root_request conn bucket with
+    with_operation conn ~operation:Operation.Get_bucket_location
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        let bucket = Bucket_name.to_string bucket in
+        let return_error =
+          S3_error_context.return_s3_error return_error
+            ~operation:Operation.Get_bucket_location ~bucket
+        in
+        match S3_validation.validate_bucket bucket with
         | Error error -> return_error error
-        | Ok request ->
-            with_operation_result return_error return_ok
-              (with_empty_response conn ~method_:`GET ~request
-                 ~query:[ ("location", []) ]
-                 ~headers:(expected_owner_headers expected_bucket_owner)
-                 ~f:(fun response body ->
-                   let* body = read_response_body body ~max_size:1_048_576L in
-                   match body with
-                   | Error error -> return_error error
-                   | Ok body ->
-                       return_result return_error return_ok
-                         (Result.map
-                            (fun region ->
-                              { Get_bucket_location.region; response })
-                            (Bucket_result_xml.parse_location body)))))
+        | Ok () -> (
+            match bucket_root_request conn bucket with
+            | Error error -> return_error error
+            | Ok request ->
+                with_operation_result return_error return_ok
+                  (with_empty_response_in_session conn ~session ~method_:`GET
+                     ~request
+                     ~query:[ ("location", []) ]
+                     ~headers:(expected_owner_headers expected_bucket_owner)
+                     ~f:(fun response body ->
+                       let* body =
+                         read_response_body body ~max_size:1_048_576L
+                       in
+                       match body with
+                       | Error error -> return_error error
+                       | Ok body ->
+                           return_result return_error return_ok
+                             (Result.map
+                                (fun region ->
+                                  { Get_bucket_location.region; response })
+                                (Bucket_result_xml.parse_location body))))))
 
   module Policy = struct
     let get conn ~bucket ?options () =
@@ -298,28 +321,33 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket = Bucket_name.to_string bucket in
-      let return_error =
-        S3_error_context.return_s3_error return_error
-          ~operation:"GetBucketPolicy" ~bucket
-      in
-      match S3_validation.validate_bucket bucket with
-      | Error error -> return_error error
-      | Ok () -> (
-          match bucket_root_request conn bucket with
+      with_operation conn ~operation:Operation.Get_bucket_policy
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          let bucket = Bucket_name.to_string bucket in
+          let return_error =
+            S3_error_context.return_s3_error return_error
+              ~operation:Operation.Get_bucket_policy ~bucket
+          in
+          match S3_validation.validate_bucket bucket with
           | Error error -> return_error error
-          | Ok request ->
-              with_operation_result return_error return_ok
-                (with_empty_response conn ~method_:`GET ~request
-                   ~query:[ ("policy", []) ]
-                   ~headers:(expected_owner_headers expected_bucket_owner)
-                   ~f:(fun _response body ->
-                     let* body = read_response_body body ~max_size:1_048_576L in
-                     match body with
-                     | Error error -> return_error error
-                     | Ok body ->
-                         return_result return_error return_ok
-                           (Policy.of_json body))))
+          | Ok () -> (
+              match bucket_root_request conn bucket with
+              | Error error -> return_error error
+              | Ok request ->
+                  with_operation_result return_error return_ok
+                    (with_empty_response_in_session conn ~session ~method_:`GET
+                       ~request
+                       ~query:[ ("policy", []) ]
+                       ~headers:(expected_owner_headers expected_bucket_owner)
+                       ~f:(fun _response body ->
+                         let* body =
+                           read_response_body body ~max_size:1_048_576L
+                         in
+                         match body with
+                         | Error error -> return_error error
+                         | Ok body ->
+                             return_result return_error return_ok
+                               (Policy.of_json body)))))
 
     let put conn ~bucket ?options ~policy () =
       let expected_bucket_owner =
@@ -328,35 +356,40 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket = Bucket_name.to_string bucket in
-      let return_error =
-        S3_error_context.return_s3_error return_error
-          ~operation:"PutBucketPolicy" ~bucket
-      in
-      match S3_validation.validate_bucket bucket with
-      | Error error -> return_error error
-      | Ok () -> (
-          let body = Policy.to_json policy in
-          let upload = R.Request_body.of_string body in
-          let headers =
-            [ content_md5_header body; ("content-type", "application/json") ]
-            |> add_opt_account_id_header "x-amz-expected-bucket-owner"
-                 expected_bucket_owner
+      with_operation conn ~operation:Operation.Put_bucket_policy
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          let bucket = Bucket_name.to_string bucket in
+          let return_error =
+            S3_error_context.return_s3_error return_error
+              ~operation:Operation.Put_bucket_policy ~bucket
           in
-          match bucket_root_request conn bucket with
+          match S3_validation.validate_bucket bucket with
           | Error error -> return_error error
-          | Ok request ->
-              with_operation_result return_error return_ok
-                (with_response conn ~method_:`PUT ~request
-                   ~query:[ ("policy", []) ]
-                   ~headers
-                   ~payload_hash:(R.Request_body.descriptor upload).payload_hash
-                   upload
-                   ~f:(fun response body ->
-                     let* discarded = discard_response_body body in
-                     match discarded with
-                     | Error error -> return_error error
-                     | Ok () -> return_ok response)))
+          | Ok () -> (
+              let body = Policy.to_json policy in
+              let upload = R.Request_body.of_string body in
+              let headers =
+                [
+                  content_md5_header body; ("content-type", "application/json");
+                ]
+                |> add_opt_account_id_header "x-amz-expected-bucket-owner"
+                     expected_bucket_owner
+              in
+              match bucket_root_request conn bucket with
+              | Error error -> return_error error
+              | Ok request ->
+                  with_operation_result return_error return_ok
+                    (with_discarded_response_in_session conn ~session
+                       ~method_:`PUT ~request
+                       ~query:[ ("policy", []) ]
+                       ~headers
+                       ~payload_hash:
+                         (R.Request_body.descriptor upload).payload_hash upload
+                       ~f:(fun response body ->
+                         let* discarded = discard_response_body body in
+                         match discarded with
+                         | Error error -> return_error error
+                         | Ok () -> return_ok response))))
 
     let delete conn ~bucket ?options () =
       let expected_bucket_owner =
@@ -365,8 +398,11 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      delete_subresource ?expected_bucket_owner conn ~bucket
-        ~operation:"DeleteBucketPolicy" ~subresource:"policy"
+      with_operation conn ~operation:Operation.Delete_bucket_policy
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          delete_subresource_in_session session ?expected_bucket_owner conn
+            ~bucket ~operation:Operation.Delete_bucket_policy
+            ~subresource:"policy")
   end
 
   module Versioning = struct
@@ -383,9 +419,11 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      get_xml ?expected_bucket_owner conn ~bucket ~subresource:"versioning"
-        ~operation:"GetBucketVersioning" ~max_size:1_048_576L
-        ~parse:Bucket_versioning_xml.parse
+      with_operation conn ~operation:Operation.Get_bucket_versioning
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          get_xml_in_session session ?expected_bucket_owner conn ~bucket
+            ~subresource:"versioning" ~operation:Operation.Get_bucket_versioning
+            ~max_size:1_048_576L ~parse:Bucket_versioning_xml.parse)
 
     let put conn ~bucket ?options ~status () =
       let expected_bucket_owner =
@@ -394,17 +432,20 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
-      let return_error =
-        S3_error_context.return_s3_error return_error
-          ~operation:"PutBucketVersioning" ~bucket:bucket_context
-      in
-      match validate_status status with
-      | Error error -> return_error error
-      | Ok () ->
-          put_xml ?expected_bucket_owner conn ~bucket ~subresource:"versioning"
-            ~operation:"PutBucketVersioning"
-            ~body:(Bucket_versioning_xml.xml (Some status))
+      with_operation conn ~operation:Operation.Put_bucket_versioning
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          let bucket_context = Bucket_name.to_string bucket in
+          let return_error =
+            S3_error_context.return_s3_error return_error
+              ~operation:Operation.Put_bucket_versioning ~bucket:bucket_context
+          in
+          match validate_status status with
+          | Error error -> return_error error
+          | Ok () ->
+              put_xml_in_session session ?expected_bucket_owner conn ~bucket
+                ~subresource:"versioning"
+                ~operation:Operation.Put_bucket_versioning
+                ~body:(Bucket_versioning_xml.xml (Some status)))
   end
 
   module Tagging = struct
@@ -420,8 +461,11 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      get_xml ?expected_bucket_owner conn ~bucket ~subresource:"tagging"
-        ~operation:"GetBucketTagging" ~max_size:1_048_576L ~parse
+      with_operation conn ~operation:Operation.Get_bucket_tagging
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          get_xml_in_session session ?expected_bucket_owner conn ~bucket
+            ~subresource:"tagging" ~operation:Operation.Get_bucket_tagging
+            ~max_size:1_048_576L ~parse)
 
     let put conn ~bucket ?options ~tags () =
       let expected_bucket_owner =
@@ -430,16 +474,19 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
-      let return_error =
-        S3_error_context.return_s3_error return_error
-          ~operation:"PutBucketTagging" ~bucket:bucket_context
-      in
-      match S3_validation.validate_tags tags with
-      | Error error -> return_error error
-      | Ok () ->
-          put_xml ?expected_bucket_owner conn ~bucket ~subresource:"tagging"
-            ~operation:"PutBucketTagging" ~body:(xml_tags tags)
+      with_operation conn ~operation:Operation.Put_bucket_tagging
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          let bucket_context = Bucket_name.to_string bucket in
+          let return_error =
+            S3_error_context.return_s3_error return_error
+              ~operation:Operation.Put_bucket_tagging ~bucket:bucket_context
+          in
+          match S3_validation.validate_tags tags with
+          | Error error -> return_error error
+          | Ok () ->
+              put_xml_in_session session ?expected_bucket_owner conn ~bucket
+                ~subresource:"tagging" ~operation:Operation.Put_bucket_tagging
+                ~body:(xml_tags tags))
 
     let delete conn ~bucket ?options () =
       let expected_bucket_owner =
@@ -448,8 +495,11 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      delete_subresource ?expected_bucket_owner conn ~bucket
-        ~operation:"DeleteBucketTagging" ~subresource:"tagging"
+      with_operation conn ~operation:Operation.Delete_bucket_tagging
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          delete_subresource_in_session session ?expected_bucket_owner conn
+            ~bucket ~operation:Operation.Delete_bucket_tagging
+            ~subresource:"tagging")
   end
 
   module Encryption = struct
@@ -460,9 +510,11 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      get_xml ?expected_bucket_owner conn ~bucket ~subresource:"encryption"
-        ~operation:"GetBucketEncryption" ~max_size:1_048_576L
-        ~parse:Bucket_encryption_xml.parse
+      with_operation conn ~operation:Operation.Get_bucket_encryption
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          get_xml_in_session session ?expected_bucket_owner conn ~bucket
+            ~subresource:"encryption" ~operation:Operation.Get_bucket_encryption
+            ~max_size:1_048_576L ~parse:Bucket_encryption_xml.parse)
 
     let put conn ~bucket ?options ~config () =
       let expected_bucket_owner =
@@ -471,17 +523,20 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
-      let return_error =
-        S3_error_context.return_s3_error return_error
-          ~operation:"PutBucketEncryption" ~bucket:bucket_context
-      in
-      match Bucket_encryption_xml.validate_config config with
-      | Error error -> return_error error
-      | Ok () ->
-          put_xml ?expected_bucket_owner conn ~bucket ~subresource:"encryption"
-            ~operation:"PutBucketEncryption"
-            ~body:(Bucket_encryption_xml.xml config)
+      with_operation conn ~operation:Operation.Put_bucket_encryption
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          let bucket_context = Bucket_name.to_string bucket in
+          let return_error =
+            S3_error_context.return_s3_error return_error
+              ~operation:Operation.Put_bucket_encryption ~bucket:bucket_context
+          in
+          match Bucket_encryption_xml.validate_config config with
+          | Error error -> return_error error
+          | Ok () ->
+              put_xml_in_session session ?expected_bucket_owner conn ~bucket
+                ~subresource:"encryption"
+                ~operation:Operation.Put_bucket_encryption
+                ~body:(Bucket_encryption_xml.xml config))
 
     let delete conn ~bucket ?options () =
       let expected_bucket_owner =
@@ -490,8 +545,11 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      delete_subresource ?expected_bucket_owner conn ~bucket
-        ~operation:"DeleteBucketEncryption" ~subresource:"encryption"
+      with_operation conn ~operation:Operation.Delete_bucket_encryption
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          delete_subresource_in_session session ?expected_bucket_owner conn
+            ~bucket ~operation:Operation.Delete_bucket_encryption
+            ~subresource:"encryption")
   end
 
   module Cors = struct
@@ -501,9 +559,11 @@ module Make (C : Request_context.S) = struct
           (fun (options : Bucket_cors.options) -> options.expected_bucket_owner)
           options
       in
-      get_xml ?expected_bucket_owner conn ~bucket ~subresource:"cors"
-        ~operation:"GetBucketCors" ~max_size:1_048_576L
-        ~parse:Bucket_cors_xml.parse
+      with_operation conn ~operation:Operation.Get_bucket_cors
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          get_xml_in_session session ?expected_bucket_owner conn ~bucket
+            ~subresource:"cors" ~operation:Operation.Get_bucket_cors
+            ~max_size:1_048_576L ~parse:Bucket_cors_xml.parse)
 
     let put conn ~bucket ?options ~config () =
       let expected_bucket_owner =
@@ -511,17 +571,19 @@ module Make (C : Request_context.S) = struct
           (fun (options : Bucket_cors.options) -> options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
-      let return_error =
-        S3_error_context.return_s3_error return_error ~operation:"PutBucketCors"
-          ~bucket:bucket_context
-      in
-      match Bucket_cors_xml.validate_config config with
-      | Error error -> return_error error
-      | Ok () ->
-          put_xml ?expected_bucket_owner conn ~bucket ~subresource:"cors"
-            ~operation:"PutBucketCors"
-            ~body:(Bucket_cors_xml.xml config)
+      with_operation conn ~operation:Operation.Put_bucket_cors
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          let bucket_context = Bucket_name.to_string bucket in
+          let return_error =
+            S3_error_context.return_s3_error return_error
+              ~operation:Operation.Put_bucket_cors ~bucket:bucket_context
+          in
+          match Bucket_cors_xml.validate_config config with
+          | Error error -> return_error error
+          | Ok () ->
+              put_xml_in_session session ?expected_bucket_owner conn ~bucket
+                ~subresource:"cors" ~operation:Operation.Put_bucket_cors
+                ~body:(Bucket_cors_xml.xml config))
 
     let delete conn ~bucket ?options () =
       let expected_bucket_owner =
@@ -529,8 +591,10 @@ module Make (C : Request_context.S) = struct
           (fun (options : Bucket_cors.options) -> options.expected_bucket_owner)
           options
       in
-      delete_subresource ?expected_bucket_owner conn ~bucket
-        ~operation:"DeleteBucketCors" ~subresource:"cors"
+      with_operation conn ~operation:Operation.Delete_bucket_cors
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          delete_subresource_in_session session ?expected_bucket_owner conn
+            ~bucket ~operation:Operation.Delete_bucket_cors ~subresource:"cors")
   end
 
   module Public_access_block = struct
@@ -541,10 +605,12 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      get_xml ?expected_bucket_owner conn ~bucket
-        ~subresource:"publicAccessBlock" ~max_size:1_048_576L
-        ~operation:"GetPublicAccessBlock"
-        ~parse:Bucket_access_xml.Public_access_block.parse
+      with_operation conn ~operation:Operation.Get_public_access_block
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          get_xml_in_session session ?expected_bucket_owner conn ~bucket
+            ~subresource:"publicAccessBlock" ~max_size:1_048_576L
+            ~operation:Operation.Get_public_access_block
+            ~parse:Bucket_access_xml.Public_access_block.parse)
 
     let put conn ~bucket ?options ~config () =
       let expected_bucket_owner =
@@ -553,9 +619,12 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      put_xml ?expected_bucket_owner conn ~bucket
-        ~operation:"PutPublicAccessBlock" ~subresource:"publicAccessBlock"
-        ~body:(Bucket_access_xml.Public_access_block.xml config)
+      with_operation conn ~operation:Operation.Put_public_access_block
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          put_xml_in_session session ?expected_bucket_owner conn ~bucket
+            ~operation:Operation.Put_public_access_block
+            ~subresource:"publicAccessBlock"
+            ~body:(Bucket_access_xml.Public_access_block.xml config))
 
     let delete conn ~bucket ?options () =
       let expected_bucket_owner =
@@ -564,8 +633,11 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      delete_subresource ?expected_bucket_owner conn ~bucket
-        ~operation:"DeletePublicAccessBlock" ~subresource:"publicAccessBlock"
+      with_operation conn ~operation:Operation.Delete_public_access_block
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          delete_subresource_in_session session ?expected_bucket_owner conn
+            ~bucket ~operation:Operation.Delete_public_access_block
+            ~subresource:"publicAccessBlock")
   end
 
   module Ownership_controls = struct
@@ -583,10 +655,12 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      get_xml ?expected_bucket_owner conn ~bucket
-        ~subresource:"ownershipControls" ~max_size:1_048_576L
-        ~operation:"GetBucketOwnershipControls"
-        ~parse:Bucket_access_xml.Ownership_controls.parse
+      with_operation conn ~operation:Operation.Get_bucket_ownership_controls
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          get_xml_in_session session ?expected_bucket_owner conn ~bucket
+            ~subresource:"ownershipControls" ~max_size:1_048_576L
+            ~operation:Operation.Get_bucket_ownership_controls
+            ~parse:Bucket_access_xml.Ownership_controls.parse)
 
     let put conn ~bucket ?options ~config () =
       let expected_bucket_owner =
@@ -595,18 +669,21 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      let bucket_context = Bucket_name.to_string bucket in
-      let return_error =
-        S3_error_context.return_s3_error return_error
-          ~operation:"PutBucketOwnershipControls" ~bucket:bucket_context
-      in
-      match validate_config config with
-      | Error error -> return_error error
-      | Ok () ->
-          put_xml ?expected_bucket_owner conn ~bucket
-            ~operation:"PutBucketOwnershipControls"
-            ~subresource:"ownershipControls"
-            ~body:(Bucket_access_xml.Ownership_controls.xml config)
+      with_operation conn ~operation:Operation.Put_bucket_ownership_controls
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          let bucket_context = Bucket_name.to_string bucket in
+          let return_error =
+            S3_error_context.return_s3_error return_error
+              ~operation:Operation.Put_bucket_ownership_controls
+              ~bucket:bucket_context
+          in
+          match validate_config config with
+          | Error error -> return_error error
+          | Ok () ->
+              put_xml_in_session session ?expected_bucket_owner conn ~bucket
+                ~operation:Operation.Put_bucket_ownership_controls
+                ~subresource:"ownershipControls"
+                ~body:(Bucket_access_xml.Ownership_controls.xml config))
 
     let delete conn ~bucket ?options () =
       let expected_bucket_owner =
@@ -615,8 +692,10 @@ module Make (C : Request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      delete_subresource ?expected_bucket_owner conn ~bucket
-        ~operation:"DeleteBucketOwnershipControls"
-        ~subresource:"ownershipControls"
+      with_operation conn ~operation:Operation.Delete_bucket_ownership_controls
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
+          delete_subresource_in_session session ?expected_bucket_owner conn
+            ~bucket ~operation:Operation.Delete_bucket_ownership_controls
+            ~subresource:"ownershipControls")
   end
 end

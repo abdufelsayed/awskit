@@ -1,10 +1,33 @@
 open Base
+module Http_observation = Awskit.Observability.For_runtime.Http
 
-let src = Logs.Src.create "awskit-lwt" ~doc:"AWS Lwt HTTP"
+module type CONNECTOR = sig
+  module Client : Cohttp_lwt.S.Client
 
-module Log = (val Logs.src_log src : Logs.LOG)
+  type call
+  (** A connector-owned in-flight HTTP call. The handle must remain valid from
+      [call] initiation until [abort] is complete, including while response
+      headers are still pending. *)
 
-module Make (Client : Cohttp_lwt.S.Client) = struct
+  val call :
+    ?ctx:Client.ctx ->
+    headers:Cohttp.Header.t ->
+    body:Cohttp_lwt.Body.t ->
+    Cohttp.Code.meth ->
+    Uri.t ->
+    call
+
+  val response : call -> (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t
+
+  val abort : call -> unit Lwt.t
+  (** Close or otherwise abandon the in-flight call. This operation is
+      idempotent and must complete before the runtime releases a cancellation or
+      cleanup result. *)
+end
+
+module Make_with_connector (Connector : CONNECTOR) = struct
+  module Client = Connector.Client
+
   let default_max_response_drain_bytes = 64 * 1024 * 1024
 
   type conn = {
@@ -19,19 +42,34 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     random_float : upper_bound:float -> float;
     timeout_policy : Awskit.Timeout.policy;
     max_response_drain_bytes : int;
+    observability : Observer.t;
   }
 
   type request_body_writer = {
     push : string -> unit Lwt.t;
     close : unit -> unit;
     cancelled : unit Lwt.t;
+    streaming : Observer.lease;
+    streaming_active : bool ref;
+    produced_bytes : int64 ref;
     remaining : int64 option ref;
     mutable write_error : Awskit.Error.t option;
+  }
+
+  type attempt_stats = {
+    connector_request_bytes : int64 option ref;
+    connector_response_bytes : int64 ref;
+    connector_drained_bytes : int64 ref;
+    draining : bool ref;
+    streaming_active : bool ref;
+    request_streaming : Observer.lease;
+    response_streaming : Observer.lease;
   }
 
   type request_body_bridge = {
     body : Cohttp_lwt.Body.t;
     finished : (unit, Awskit.Error.t) Result.t Lwt.t;
+    settled : unit Lwt.t;
     cancel : unit -> unit;
   }
 
@@ -48,11 +86,21 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
   type response_body = {
     body : Cohttp_lwt.Body.t;
+    method_ : Awskit.Request.Method.t;
     sleep : Ptime.Span.t -> unit Lwt.t;
     timeout_policy : Awskit.Timeout.policy;
     max_response_drain_bytes : int;
     framing : response_body_framing;
     bodiless : bool;
+    stats : attempt_stats;
+    observability : Observer.t;
+    abort : unit -> unit Lwt.t;
+    cleanup : response_cleanup;
+  }
+
+  and response_cleanup = {
+    mutable promise : (unit, Awskit.Error.t) Result.t Lwt.t option;
+    mutable cancel : unit -> unit;
   }
 
   type response_body_reader = {
@@ -65,6 +113,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     mutable offset : int;
     mutable eof : bool;
     mutable remaining : int64 option;
+    stats : attempt_stats;
   }
 
   let validate_create_args ?endpoint ~max_response_drain_bytes () =
@@ -118,7 +167,8 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
   let create_with_credentials_provider ?ctx ?endpoint ~region
       ~credentials_provider ~clock ?retry_policy ?sleep ?random_float
       ?timeout_policy
-      ?(max_response_drain_bytes = default_max_response_drain_bytes) () =
+      ?(max_response_drain_bytes = default_max_response_drain_bytes)
+      ?(observability = Observer.default ()) () =
     let retry_policy =
       Option.value retry_policy ~default:Awskit.Retry.default
     in
@@ -162,14 +212,16 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                         random_float;
                         timeout_policy;
                         max_response_drain_bytes;
+                        observability;
                       })))
 
   let create ?ctx ?endpoint ~region ~credentials ~clock ?retry_policy ?sleep
-      ?random_float ?timeout_policy ?max_response_drain_bytes () =
+      ?random_float ?timeout_policy ?max_response_drain_bytes ?observability ()
+      =
     create_with_credentials_provider ?ctx ?endpoint ~region
       ~credentials_provider:(fun () -> Lwt.return_ok credentials)
       ~clock ?retry_policy ?sleep ?random_float ?timeout_policy
-      ?max_response_drain_bytes ()
+      ?max_response_drain_bytes ?observability ()
 
   let make_uri (request : Awskit.Request.t) =
     let target = request.target in
@@ -220,7 +272,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     | Stream (descriptor, _) -> descriptor
 
   let body_error message = Awskit.Error.Producer.body message
-  let int64_equal left right = Stdlib.Int64.compare left right = 0
+  let int64_equal left right = Int64.compare left right = 0
 
   let split_header_values values =
     values
@@ -239,7 +291,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
   let parse_content_length_value value =
     if ascii_digits value then
-      match Stdlib.Int64.of_string_opt value with
+      match Int64.of_string_opt value with
       | Some length -> Ok length
       | None -> Error (body_error "invalid response Content-Length header")
     else Error (body_error "invalid response Content-Length header")
@@ -349,11 +401,20 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           | Ok result -> Lwt.return result
           | Error error -> Lwt.return_error error)
 
-  let writer_for descriptor ~push ~close ~cancelled =
+  let observe_result_phase observability definition ~method_ f =
+    Observer.with_operation observability ~operation:definition
+      ~start:(fun () -> Http_observation.phase_start ~method_)
+      f
+
+  let writer_for descriptor ~push ~close ~cancelled ~streaming ~streaming_active
+      =
     {
       push;
       close;
       cancelled;
+      streaming;
+      streaming_active;
+      produced_bytes = ref 0L;
       remaining = ref descriptor.Awskit.Body.Request.content_length;
       write_error = None;
     }
@@ -363,10 +424,10 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     | None -> Ok ()
     | Some remaining ->
         let length64 = Int64.of_int length in
-        if Stdlib.Int64.compare length64 remaining > 0 then
+        if Int64.compare length64 remaining > 0 then
           Error (body_error "request body exceeded declared content_length")
         else (
-          writer.remaining := Some (Stdlib.Int64.sub remaining length64);
+          writer.remaining := Some Int64.(remaining - length64);
           Ok ())
 
   let invalid_write_bounds bytes ~off ~len =
@@ -382,6 +443,19 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
             Error
               (body_error "request body ended before declared content_length"))
 
+  let push_request_body (writer : request_body_writer) chunk =
+    let length = Int64.of_int (String.length chunk) in
+    if !(writer.streaming_active) then Observer.add writer.streaming length;
+    Lwt.try_bind
+      (fun () -> writer.push chunk)
+      (fun () ->
+        (writer.produced_bytes := Int64.(!(writer.produced_bytes) + length));
+        Lwt.return_unit)
+      (fun exn ->
+        if !(writer.streaming_active) then
+          Observer.add writer.streaming Int64.(neg length);
+        Lwt.fail exn)
+
   let write_request_body_string writer string =
     match writer.write_error with
     | Some error -> Lwt.return_error error
@@ -396,7 +470,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                 Lwt.bind
                   (Lwt.pick
                      [
-                       writer.push string;
+                       push_request_body writer string;
                        Lwt.bind writer.cancelled (fun () ->
                            Lwt.fail Lwt.Canceled);
                      ])
@@ -429,7 +503,8 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                   Lwt.bind
                     (Lwt.pick
                        [
-                         writer.push (Stdlib.Bytes.sub_string bytes off len);
+                         push_request_body writer
+                           (Bytes.sub bytes ~pos:off ~len |> Bytes.to_string);
                          Lwt.bind writer.cancelled (fun () ->
                              Lwt.fail Lwt.Canceled);
                        ])
@@ -445,11 +520,134 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                       writer.write_error <- Some error;
                       Lwt.return_error error))
 
-  let body_to_cohttp (conn : conn) = function
+  let count_request_body stats body ~on_settled =
+    let stream = Cohttp_lwt.Body.to_stream body in
+    let stream =
+      Lwt_stream.from (fun () ->
+          Lwt.try_bind
+            (fun () -> Lwt_stream.get stream)
+            (function
+              | None ->
+                  on_settled ();
+                  Lwt.return_none
+              | Some chunk ->
+                  if !(stats.streaming_active) then begin
+                    let length = Int64.of_int (String.length chunk) in
+                    let connector_request_bytes =
+                      Option.value !(stats.connector_request_bytes) ~default:0L
+                    in
+                    stats.connector_request_bytes :=
+                      Some Int64.(connector_request_bytes + length);
+                    Observer.add stats.request_streaming Int64.(neg length)
+                  end;
+                  Lwt.return_some chunk)
+            (fun exn ->
+              on_settled ();
+              Lwt.fail exn))
+    in
+    Cohttp_lwt.Body.of_stream stream
+
+  let drain_limit_error max_response_drain_bytes =
+    Awskit.Error.Producer.body
+      ~limit:(Int64.of_int max_response_drain_bytes)
+      "response body exceeded max_response_drain_bytes"
+
+  let await_connector_abort abort =
+    Lwt.no_cancel (Lwt.catch (fun () -> abort ()) (fun _ -> Lwt.return_unit))
+
+  let response_cleanup () = { promise = None; cancel = (fun () -> ()) }
+
+  (* Raw-response cleanup and scoped body cleanup operate on the same stream.
+     Keep one promise for that physical response so an exception that escapes a
+     body helper can join the already-completed drain instead of pulling again. *)
+  let run_response_cleanup cleanup f =
+    match cleanup.promise with
+    | Some promise -> Lwt.protected promise
+    | None ->
+        let promise = Lwt.catch f (fun exn -> Lwt.fail exn) in
+        cleanup.promise <- Some promise;
+        cleanup.cancel <- (fun () -> Lwt.cancel promise);
+        let joined = Lwt.protected promise in
+        Lwt.on_cancel joined cleanup.cancel;
+        joined
+
+  (* A response can arrive before request production has finished, or before
+     framing validation has succeeded. In those paths the response body has
+     not been handed to [Response_body], so drain it at the connector boundary
+     before returning the original request/framing result. *)
+  let drain_raw_response_body (conn : conn) stats ~method_ ~abort ~cleanup body
+      =
+    run_response_cleanup cleanup (fun () ->
+        let stream = Cohttp_lwt.Body.to_stream body in
+        let was_draining = !(stats.draining) in
+        let drained_before = !(stats.connector_drained_bytes) in
+        stats.draining := true;
+        let rec loop remaining =
+          Lwt.bind (Lwt_stream.get stream) (function
+            | None -> Lwt.return_ok ()
+            | Some chunk ->
+                let length = String.length chunk in
+                (* The connector has already delivered this chunk, so count all
+                   bytes pulled even when the configured drain limit rejects it. *)
+                (stats.connector_drained_bytes :=
+                   Int64.(!(stats.connector_drained_bytes) + of_int length));
+                if length > remaining then
+                  Lwt.return_error
+                    (drain_limit_error conn.max_response_drain_bytes)
+                else loop (remaining - length))
+        in
+        let drain =
+          Lwt.catch
+            (fun () -> loop conn.max_response_drain_bytes)
+            (function
+              | Lwt.Canceled -> Lwt.fail Lwt.Canceled
+              | exn -> Lwt.return_error (body_error (Exn.to_string exn)))
+        in
+        Lwt.finalize
+          (fun () ->
+            let result =
+              observe_result_phase conn.observability
+                (fun () ->
+                  Http_observation.response_body_drain ~bytes:(fun () ->
+                      Int64.max 0L
+                        Int64.(
+                          !(stats.connector_drained_bytes) - drained_before)))
+                ~method_
+                (fun () ->
+                  with_timeout_result ~sleep:conn.sleep conn.timeout_policy
+                    `Drain drain)
+            in
+            Lwt.catch
+              (fun () ->
+                Lwt.bind result (function
+                  | Ok () -> Lwt.return_ok ()
+                  | Error _ as error ->
+                      Lwt.bind (await_connector_abort abort) (fun () ->
+                          Lwt.return error)))
+              (fun exn ->
+                Lwt.bind (await_connector_abort abort) (fun () -> Lwt.fail exn)))
+          (fun () ->
+            stats.draining := was_draining;
+            Lwt.return_unit))
+
+  let body_to_cohttp (conn : conn) stats ~method_ = function
     | Body (_, body) ->
-        { body; finished = Lwt.return_ok (); cancel = (fun () -> ()) }
+        {
+          body;
+          finished = Lwt.return_ok ();
+          settled = Lwt.return_unit;
+          cancel = (fun () -> ());
+        }
     | Stream (descriptor, write) ->
         let stream, push = Lwt_stream.create_bounded 16 in
+        let connector_settled, wake_connector_settled = Lwt.wait () in
+        let connector_settled_once =
+          let settled = ref false in
+          fun () ->
+            if not !settled then (
+              settled := true;
+              Lwt.wakeup_later wake_connector_settled ())
+        in
         let finished, wake_finished = Lwt.wait () in
         let wake_finished_once =
           let woken = ref false in
@@ -477,22 +675,31 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           writer_for descriptor
             ~push:(fun chunk -> push#push chunk)
             ~close:(fun () -> push#close)
-            ~cancelled
+            ~cancelled ~streaming:stats.request_streaming
+            ~streaming_active:stats.streaming_active
         in
         let producer =
           Lwt.catch
             (fun () ->
-              let write_promise = write writer in
+              let write_promise = ref None in
               let write_with_timeout =
-                with_timeout_result ~sleep:conn.sleep conn.timeout_policy
-                  `Request_body write_promise
+                observe_result_phase conn.observability
+                  (fun () ->
+                    Http_observation.request_body_production ~bytes:(fun () ->
+                        !(writer.produced_bytes)))
+                  ~method_
+                  (fun () ->
+                    let promise = write writer in
+                    write_promise := Some promise;
+                    with_timeout_result ~sleep:conn.sleep conn.timeout_policy
+                      `Request_body promise)
               in
               let write_or_cancelled =
                 Lwt.pick
                   [
                     write_with_timeout;
                     Lwt.bind cancelled (fun () ->
-                        Lwt.cancel write_promise;
+                        Option.iter !write_promise ~f:Lwt.cancel;
                         Lwt.fail Lwt.Canceled);
                   ]
               in
@@ -503,9 +710,6 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                     wake_finished_result_once result;
                     Lwt.return_unit
                 | Error error ->
-                    Log.warn (fun m ->
-                        m "request body stream failed: %s"
-                          (Awskit.Error.to_string_hum error));
                     writer.close ();
                     wake_finished_result_once (Error error);
                     Lwt.return_unit))
@@ -526,29 +730,33 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
                       Lwt.return_unit
                   | None ->
                       let error = body_error (Exn.to_string exn) in
-                      Log.warn (fun m ->
-                          m "request body stream raised: %s"
-                            (Awskit.Error.to_string_hum error));
                       wake_finished_result_once (Error error);
                       Lwt.return_unit))
         in
         Lwt.async (fun () -> producer);
         {
-          body = Cohttp_lwt.Body.of_stream stream;
+          body =
+            count_request_body stats
+              (Cohttp_lwt.Body.of_stream stream)
+              ~on_settled:connector_settled_once;
           finished;
+          settled = Lwt.join [ producer; connector_settled ];
           cancel =
             (fun () ->
               cancel_requested := true;
               writer.close ();
               wake_cancelled_once ();
+              connector_settled_once ();
               Lwt.cancel producer);
         }
 
-  let do_with_response (conn : conn) (request : Awskit.Request.t) request_body
-      ~f =
+  let do_with_response_raw (conn : conn) (request : Awskit.Request.t)
+      request_body ~stats ~f =
     let uri = make_uri request in
     let headers = Cohttp.Header.of_list request.headers in
-    let bridge = body_to_cohttp conn request_body in
+    let bridge =
+      body_to_cohttp conn stats ~method_:request.method_ request_body
+    in
     let with_transport_timeout phase promise =
       with_timeout_result ~sleep:conn.sleep conn.timeout_policy phase promise
     in
@@ -560,7 +768,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
     let response_is_bodiless status =
       is_head || status = 204 || status = 304 || (status >= 100 && status < 200)
     in
-    let make_response_body ~status response body =
+    let make_response_body ~status response body ~abort ~cleanup =
       let bodiless = response_is_bodiless status in
       let headers = Cohttp.Response.headers response in
       let framing =
@@ -575,11 +783,16 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           Ok
             {
               body;
+              method_ = request.method_;
               sleep = conn.sleep;
               timeout_policy = conn.timeout_policy;
               max_response_drain_bytes = conn.max_response_drain_bytes;
               framing = (if bodiless then Response_unknown else framing);
               bodiless;
+              stats;
+              observability = conn.observability;
+              abort;
+              cleanup;
             }
     in
     let exception Callback_raised of exn in
@@ -600,70 +813,123 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       | exception exn -> Awskit.Body.Request.escaped_exn exn
     in
     let cancel_unfinished_request_body () =
-      match Lwt.state bridge.finished with
-      | Lwt.Sleep ->
-          bridge.cancel ();
-          Lwt.return_unit
-      | Lwt.Return _ | Lwt.Fail _ -> Lwt.return_unit
+      bridge.cancel ();
+      Lwt.catch (fun () -> bridge.settled) (fun _ -> Lwt.return_unit)
     in
     let call_f response response_body =
-      Log.debug (fun m -> m "HTTP %d" (Awskit.Response.status response));
       Lwt.catch
         (fun () -> f response response_body)
         (function
           | Lwt.Canceled -> Lwt.fail Lwt.Canceled
           | exn -> Lwt.fail (Callback_raised exn))
     in
+    let call_handle : Connector.call option ref = ref None in
+    let call_aborted = ref false in
+    let abort_call () =
+      match !call_handle with
+      | None -> Lwt.return_unit
+      | Some call ->
+          if !call_aborted then Lwt.return_unit
+          else (
+            call_aborted := true;
+            await_connector_abort (fun () -> Connector.abort call))
+    in
     let response =
       Lwt.catch
         (fun () ->
           Lwt.bind
-            (with_timeout_value ~sleep:conn.sleep conn.timeout_policy `Connect
-               (Client.call ?ctx:conn.ctx ~headers ~body:bridge.body
-                  ~chunked:false meth uri))
+            (observe_result_phase conn.observability
+               Http_observation.response_headers_wait ~method_:request.method_
+               (fun () ->
+                 let call =
+                   Connector.call ?ctx:conn.ctx ~headers ~body:bridge.body meth
+                     uri
+                 in
+                 call_handle := Some call;
+                 (* Keep the connector's promise alive while [abort] closes
+                    the physical call. Without this boundary, cancellation
+                    can stop at a connector that deliberately ignores
+                    [Lwt.cancel], leaving the runtime waiting for headers and
+                    never invoking its owned cleanup path. *)
+                 let response = Lwt.protected (Connector.response call) in
+                 with_timeout_value ~sleep:conn.sleep conn.timeout_policy
+                   `Connect response))
             (function
-              | Error error -> Lwt.return_error error
-              | Ok (response, response_body) -> (
+              | Error error ->
+                  Lwt.bind (abort_call ()) (fun () -> Lwt.return_error error)
+              | Ok (response, response_body) ->
+                  let abort = abort_call in
+                  let cleanup = response_cleanup () in
                   let status =
                     Cohttp.Response.status response
                     |> Cohttp.Code.code_of_status
                   in
                   let aws_response = to_aws_response response in
-                  let make_and_call () =
-                    match make_response_body ~status response response_body with
-                    | Error error -> Lwt.return_error error
-                    | Ok response_body -> call_f aws_response response_body
+                  let fail_after_response_cleanup error =
+                    Lwt.bind
+                      (drain_raw_response_body conn stats
+                         ~method_:request.method_ ~abort ~cleanup response_body)
+                      (fun _ -> Lwt.return_error error)
                   in
-                  if successful_status status then
-                    Lwt.bind bridge.finished (function
-                      | Error error -> Lwt.return_error error
-                      | Ok () -> make_and_call ())
-                  else
-                    match ready_request_body_result () with
-                    | Some (Error error) -> Lwt.return_error error
-                    | Some (Ok ()) -> make_and_call ()
-                    | None ->
-                        Lwt.finalize make_and_call (fun () ->
-                            bridge.cancel ();
-                            Lwt.return_unit))))
-        (function
-          | Lwt.Canceled -> Lwt.fail Lwt.Canceled
-          | Callback_raised exn -> Lwt.fail exn
-          | exn -> (
-              match Awskit.Body.Request.escaped_exn exn with
-              | Some escaped -> Lwt.fail escaped
-              | None -> (
-                  match ready_request_body_exception () with
+                  let fail_after_response_cleanup_exn exn =
+                    let cleanup =
+                      Lwt.catch
+                        (fun () ->
+                          drain_raw_response_body conn stats
+                            ~method_:request.method_ ~abort ~cleanup
+                            response_body
+                          |> Lwt.protected)
+                        (fun _ ->
+                          Lwt.return_error
+                            (body_error "response cleanup failed"))
+                    in
+                    Lwt.bind cleanup (fun _ -> Lwt.fail exn)
+                  in
+                  let make_and_call () =
+                    match
+                      make_response_body ~status response response_body ~abort
+                        ~cleanup
+                    with
+                    | Error error -> fail_after_response_cleanup error
+                    | Ok response_body ->
+                        Lwt.bind (call_f aws_response response_body) (function
+                          | Ok value -> Lwt.return_ok value
+                          | Error error -> fail_after_response_cleanup error)
+                  in
+                  Lwt.catch
+                    (fun () ->
+                      if successful_status status then
+                        Lwt.bind bridge.finished (function
+                          | Error error -> fail_after_response_cleanup error
+                          | Ok () -> make_and_call ())
+                      else
+                        match ready_request_body_result () with
+                        | Some (Error error) ->
+                            fail_after_response_cleanup error
+                        | Some (Ok ()) -> make_and_call ()
+                        | None ->
+                            Lwt.finalize make_and_call (fun () ->
+                                bridge.cancel ();
+                                Lwt.return_unit))
+                    (fun exn -> fail_after_response_cleanup_exn exn)))
+        (fun exn ->
+          Lwt.bind (abort_call ()) (fun () ->
+              match exn with
+              | Lwt.Canceled -> Lwt.fail Lwt.Canceled
+              | Callback_raised exn -> Lwt.fail exn
+              | exn -> (
+                  match Awskit.Body.Request.escaped_exn exn with
                   | Some escaped -> Lwt.fail escaped
-                  | None ->
-                      let message = Exn.to_string exn in
-                      let error =
-                        Awskit.Error.Producer.transport ~retryable:true message
-                      in
-                      Log.warn (fun m ->
-                          m "HTTP call failed: %s"
-                            (Awskit.Error.to_string_hum error));
-                      Lwt.return_error error)))
+                  | None -> (
+                      match ready_request_body_exception () with
+                      | Some escaped -> Lwt.fail escaped
+                      | None ->
+                          let message = Exn.to_string exn in
+                          let error =
+                            Awskit.Error.Producer.transport ~retryable:true
+                              message
+                          in
+                          Lwt.return_error error))))
     in
     Lwt.finalize
       (fun () ->
@@ -677,6 +943,80 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
               Lwt.return_error error
           | result -> Lwt.return result))
       cancel_unfinished_request_body
+
+  let do_with_response (conn : conn) (request : Awskit.Request.t) request_body
+      ~f =
+    let descriptor = request_body_descriptor request_body in
+    let replayability =
+      if descriptor.replayable then Http_observation.Replayable
+      else Non_replayable
+    in
+    Observer.with_instrument conn.observability
+      Http_observation.attempts_in_flight
+      ~labels:(fun () ->
+        Http_observation.request_state ~method_:request.method_)
+      1L
+      (fun () ->
+        let request_streaming =
+          Observer.acquire conn.observability
+            Http_observation.streaming_bytes_in_flight
+            ~labels:(fun () ->
+              Http_observation.streaming_state Http_observation.Request)
+            0L
+        in
+        let response_streaming =
+          Observer.acquire conn.observability
+            Http_observation.streaming_bytes_in_flight
+            ~labels:(fun () ->
+              Http_observation.streaming_state Http_observation.Response)
+            0L
+        in
+        let response_seen = ref None in
+        let stats =
+          {
+            connector_request_bytes =
+              ref
+                (match request_body with Body _ -> None | Stream _ -> Some 0L);
+            connector_response_bytes = ref 0L;
+            connector_drained_bytes = ref 0L;
+            draining = ref false;
+            streaming_active = ref true;
+            request_streaming;
+            response_streaming;
+          }
+        in
+        let response () =
+          Option.map !response_seen ~f:(fun response ->
+              Http_observation.response
+                ~status:(Awskit.Response.status response)
+                ?request_id:(Awskit.Response.request_id response)
+                ?host_id:(Awskit.Response.host_id response)
+                ())
+        in
+        let stats_value () =
+          Http_observation.request_stats
+            ~connector_request_bytes:!(stats.connector_request_bytes)
+            ~connector_response_bytes:!(stats.connector_response_bytes)
+            ~connector_drained_bytes:!(stats.connector_drained_bytes)
+        in
+        Lwt.finalize
+          (fun () ->
+            Observer.with_operation conn.observability
+              ~operation:(fun () ->
+                Http_observation.request ~response ~stats:stats_value)
+              ~start:(fun () ->
+                Http_observation.request_start ~method_:request.method_
+                  ~replayability)
+              (fun () ->
+                do_with_response_raw conn request request_body ~stats
+                  ~f:(fun response body ->
+                    response_seen := Some response;
+                    f response body)))
+          (fun () ->
+            stats.streaming_active := false;
+            Observer.release request_streaming;
+            Observer.release response_streaming;
+            Lwt.return_unit))
 
   module Runtime = struct
     type +'a t = 'a Lwt.t
@@ -725,15 +1065,23 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       | Response_unknown | Response_chunked -> None
 
     let record_response_body_read reader length =
-      match reader.remaining with
-      | None -> ()
-      | Some remaining ->
-          let length = Int64.of_int length in
-          reader.remaining <- Some (Stdlib.Int64.sub remaining length)
+      if not !(reader.stats.streaming_active) then ()
+      else
+        let length64 = Int64.of_int length in
+        (if !(reader.stats.draining) then
+           reader.stats.connector_drained_bytes :=
+             Int64.(!(reader.stats.connector_drained_bytes) + length64)
+         else
+           reader.stats.connector_response_bytes :=
+             Int64.(!(reader.stats.connector_response_bytes) + length64));
+        match reader.remaining with
+        | None -> ()
+        | Some remaining ->
+            reader.remaining <- Some Int64.(remaining - length64)
 
     let response_body_eof reader =
       match reader.remaining with
-      | Some remaining when Stdlib.Int64.compare remaining 0L > 0 ->
+      | Some remaining when Int64.compare remaining 0L > 0 ->
           Lwt.return_error
             (body_error "response body ended before declared Content-Length")
       | None | Some _ ->
@@ -745,9 +1093,13 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       else if reader.offset < String.length reader.chunk then begin
         let available = String.length reader.chunk - reader.offset in
         let copied = min available len in
-        Stdlib.String.blit reader.chunk reader.offset bytes off copied;
+        Bytes.From_string.blit ~src:reader.chunk ~src_pos:reader.offset
+          ~dst:bytes ~dst_pos:off ~len:copied;
         reader.offset <- reader.offset + copied;
         record_response_body_read reader copied;
+        if !(reader.stats.streaming_active) then
+          Observer.add reader.stats.response_streaming
+            Int64.(neg (of_int copied));
         Lwt.return_ok copied
       end
       else if reader.eof then Lwt.return_ok 0
@@ -755,6 +1107,9 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
         Lwt.bind (Lwt_stream.get reader.stream) (function
           | None -> response_body_eof reader
           | Some chunk ->
+              if !(reader.stats.streaming_active) then
+                Observer.add reader.stats.response_streaming
+                  (Int64.of_int (String.length chunk));
               reader.chunk <- chunk;
               reader.offset <- 0;
               read_from_current reader bytes ~off ~len)
@@ -809,11 +1164,6 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           | Ok 0 -> Lwt.return_ok None
           | Ok n -> Lwt.return_ok (Some (Bytes.sub buffer ~pos:0 ~len:n)))
 
-    let drain_limit_error max_response_drain_bytes =
-      Awskit.Error.Producer.body
-        ~limit:(Int64.of_int max_response_drain_bytes)
-        "response body exceeded max_response_drain_bytes"
-
     let drain_reader reader ~remaining ~max_response_drain_bytes =
       let buffer = Bytes.create 8192 in
       let rec loop remaining =
@@ -831,9 +1181,41 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       loop remaining
 
     let drain_response_body_reader reader (body : response_body) =
-      with_timeout_result ~sleep:body.sleep body.timeout_policy `Drain
-        (drain_reader reader ~remaining:body.max_response_drain_bytes
-           ~max_response_drain_bytes:body.max_response_drain_bytes)
+      run_response_cleanup body.cleanup (fun () ->
+          let was_draining = !(reader.stats.draining) in
+          let drained_before = !(reader.stats.connector_drained_bytes) in
+          reader.stats.draining := true;
+          let drain =
+            Lwt.finalize
+              (fun () ->
+                observe_result_phase body.observability
+                  (fun () ->
+                    Http_observation.response_body_drain ~bytes:(fun () ->
+                        Int64.max 0L
+                          Int64.(
+                            !(reader.stats.connector_drained_bytes)
+                            - drained_before)))
+                  ~method_:body.method_
+                  (fun () ->
+                    with_timeout_result ~sleep:body.sleep body.timeout_policy
+                      `Drain
+                      (drain_reader reader
+                         ~remaining:body.max_response_drain_bytes
+                         ~max_response_drain_bytes:body.max_response_drain_bytes)))
+              (fun () ->
+                reader.stats.draining := was_draining;
+                Lwt.return_unit)
+          in
+          Lwt.catch
+            (fun () ->
+              Lwt.bind drain (function
+                | Ok () -> Lwt.return_ok ()
+                | Error _ as error ->
+                    Lwt.bind (await_connector_abort body.abort) (fun () ->
+                        Lwt.return error)))
+            (fun exn ->
+              Lwt.bind (await_connector_abort body.abort) (fun () ->
+                  Lwt.fail exn)))
 
     let drain_response_body_after_exception reader body exn =
       let drain =
@@ -859,11 +1241,25 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           offset = 0;
           eof = false;
           remaining = initial_response_body_remaining body.framing;
+          stats = body.stats;
         }
+      in
+      let connector_response_bytes_before =
+        !(body.stats.connector_response_bytes)
       in
       Lwt.catch
         (fun () ->
-          Lwt.bind (consume reader) (fun result ->
+          Lwt.bind
+            (observe_result_phase body.observability
+               (fun () ->
+                 Http_observation.response_body_consumption ~bytes:(fun () ->
+                     Int64.max 0L
+                       Int64.(
+                         !(body.stats.connector_response_bytes)
+                         - connector_response_bytes_before)))
+               ~method_:body.method_
+               (fun () -> consume reader))
+            (fun result ->
               match result with
               | Ok _ ->
                   Lwt.bind (drain_response_body_reader reader body) (function
@@ -891,6 +1287,7 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
           offset = 0;
           eof = false;
           remaining = initial_response_body_remaining body.framing;
+          stats = body.stats;
         }
       in
       drain_response_body_reader reader body
@@ -904,6 +1301,9 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       let next = next_response_body
       let with_reader = with_response_body
       let discard = discard_response_body
+
+      let consumed_bytes (body : response_body) =
+        Int64.max 0L !(body.stats.connector_response_bytes)
     end
 
     module Transport = struct
@@ -939,7 +1339,12 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
       type +'a io = 'a Lwt.t
       type connection = conn
 
-      let resolve c = c.credentials_provider ()
+      let resolve (c : conn) =
+        Observer.with_operation c.observability
+          ~operation:(fun () ->
+            Awskit.Observability.For_service.Credential_resolution.operation)
+          ~start:(fun () -> ())
+          c.credentials_provider
     end
 
     module Endpoint = struct
@@ -960,7 +1365,44 @@ module Make (Client : Cohttp_lwt.S.Client) = struct
 
       let policy (c : conn) = c.timeout_policy
     end
+
+    module Observability = struct
+      type 'a io = 'a Lwt.t
+      type connection = conn
+      type lease = Observer.lease
+
+      let with_operation (connection : connection) =
+        Observer.with_operation connection.observability
+
+      let emit_event (connection : connection) =
+        Observer.emit_event connection.observability
+
+      let acquire (connection : connection) =
+        Observer.acquire connection.observability
+
+      let add = Observer.add
+      let release = Observer.release
+
+      let with_instrument (connection : connection) =
+        Observer.with_instrument connection.observability
+    end
   end
 
   type t = conn
+end
+
+module Make (Client : Cohttp_lwt.S.Client) = struct
+  module Connector = struct
+    module Client = Client
+
+    type call = (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t
+
+    let call ?ctx ~headers ~body meth uri =
+      Client.call ?ctx ~headers ~body meth uri
+
+    let response call = call
+    let abort _call = Lwt.return_unit
+  end
+
+  include Make_with_connector (Connector)
 end

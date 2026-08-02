@@ -24,7 +24,14 @@ type connection = {
 }
 
 type 'a t = 'a
-type response_body = { body : string; read_error_after : int option }
+
+type response_body = {
+  body : string;
+  read_error_after : int option;
+  consumed_bytes : int64 ref;
+  draining : bool ref;
+}
+
 type request_body_writer = { buffer : Buffer.t; mutable active : bool }
 
 type response_body_reader = {
@@ -32,6 +39,8 @@ type response_body_reader = {
   read_error_after : int option;
   mutable active : bool;
   mutable offset : int;
+  consumed_bytes : int64 ref;
+  draining : bool ref;
 }
 
 let credentials =
@@ -123,14 +132,28 @@ let read_response_body reader bytes ~off ~len =
       let copied = min len remaining in
       String.blit reader.body reader.offset bytes off copied;
       reader.offset <- reader.offset + copied;
+      if not !(reader.draining) then
+        reader.consumed_bytes :=
+          Int64.add !(reader.consumed_bytes) (Int64.of_int copied);
       Ok copied
 
-let rec drain reader =
+let rec drain_reader reader =
   let bytes = Bytes.create 8 in
   match read_response_body reader bytes ~off:0 ~len:(Bytes.length bytes) with
   | Error _ as error -> error
   | Ok 0 -> Ok ()
-  | Ok _ -> drain reader
+  | Ok _ -> drain_reader reader
+
+let drain (body : response_body) reader =
+  let was_draining = !(body.draining) in
+  body.draining := true;
+  match drain_reader reader with
+  | result ->
+      body.draining := was_draining;
+      result
+  | exception exn ->
+      body.draining := was_draining;
+      raise exn
 
 let with_response_body (body : response_body) ~consume =
   let reader =
@@ -139,11 +162,13 @@ let with_response_body (body : response_body) ~consume =
       read_error_after = body.read_error_after;
       active = true;
       offset = 0;
+      consumed_bytes = body.consumed_bytes;
+      draining = body.draining;
     }
   in
   match consume reader with
   | Ok _ as result -> (
-      match drain reader with
+      match drain body reader with
       | Ok () ->
           reader.active <- false;
           result
@@ -151,11 +176,11 @@ let with_response_body (body : response_body) ~consume =
           reader.active <- false;
           error)
   | Error _ as error ->
-      ignore (drain reader : (unit, Awskit.Error.t) result);
+      ignore (drain body reader : (unit, Awskit.Error.t) result);
       reader.active <- false;
       error
   | exception exn ->
-      ignore (drain reader : (unit, Awskit.Error.t) result);
+      ignore (drain body reader : (unit, Awskit.Error.t) result);
       reader.active <- false;
       raise exn
 
@@ -166,9 +191,11 @@ let discard_response_body (body : response_body) =
       read_error_after = body.read_error_after;
       active = true;
       offset = 0;
+      consumed_bytes = body.consumed_bytes;
+      draining = body.draining;
     }
   in
-  let result = drain reader in
+  let result = drain body reader in
   reader.active <- false;
   result
 
@@ -217,6 +244,7 @@ module Response_body = struct
 
   let with_reader = with_response_body
   let discard = discard_response_body
+  let consumed_bytes (body : response_body) = !(body.consumed_bytes)
 end
 
 let do_with_response conn request (body : request_body) ~f =
@@ -237,6 +265,8 @@ let do_with_response conn request (body : request_body) ~f =
             {
               body = response.body;
               read_error_after = response.read_error_after;
+              consumed_bytes = ref 0L;
+              draining = ref false;
             })
 
 module Transport = struct

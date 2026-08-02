@@ -1,0 +1,10 @@
+(executable
+ (name observability_overhead)
+ (libraries awskit awskit-lwt base fmt logs lwt mtime.clock.os))
+
+(rule
+ (alias observability-bench)
+ (package awskit-lwt)
+ (deps observability_overhead.exe)
+ (action
+  (run ./observability_overhead.exe)))

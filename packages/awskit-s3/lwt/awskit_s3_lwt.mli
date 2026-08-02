@@ -23,6 +23,7 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
     ?random_float:(upper_bound:float -> float) ->
     ?timeout_policy:Awskit.Timeout.policy ->
     ?max_response_drain_bytes:int ->
+    ?observability:Awskit_lwt.Observability.t ->
     unit ->
     (t, Awskit.Error.t) result
   (** Create a generic Lwt S3 client.
@@ -35,7 +36,7 @@ module Make (Client : Cohttp_lwt.S.Client) : sig
       endpoint variants, local S3-compatible tests, or explicit endpoints that
       use S3-compatible signing/addressing rules. [max_response_drain_bytes]
       controls how much response body the runtime drains after successful
-      consumers. *)
+      consumers. [observability] installs application-selected projections. *)
 
   module Body : sig
     include

@@ -51,7 +51,7 @@ let request =
 let bytes_to_string bytes = Bytes.sub_string bytes 0 (Bytes.length bytes)
 
 let response_body ?read_error_after body : R.response_body =
-  { body; read_error_after }
+  { body; read_error_after; consumed_bytes = ref 0L; draining = ref false }
 
 let read_response_body body =
   R.Response_body.with_reader body ~consume:(fun reader ->

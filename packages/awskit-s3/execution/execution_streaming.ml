@@ -1,4 +1,6 @@
-module Make (R : Request_context.RUNTIME) = struct
+open Base
+
+module Make (R : Execution_runtime.S) = struct
   let ( let* ) = R.IO.bind
 
   module Body = struct
@@ -54,7 +56,9 @@ module Make (R : Request_context.RUNTIME) = struct
         | Error _ as error -> R.IO.return error
         | Ok 0 -> R.IO.return (Ok None)
         | Ok n ->
-            let chunk = if n = chunk_size then bytes else Bytes.sub bytes 0 n in
+            let chunk =
+              if n = chunk_size then bytes else Bytes.sub bytes ~pos:0 ~len:n
+            in
             R.IO.return (Ok (Some chunk))
 
     let fold ?chunk_size reader ~init ~f =
@@ -96,7 +100,7 @@ module Make (R : Request_context.RUNTIME) = struct
         let buffer = Buffer.create 4096 in
         let* result =
           fold ?chunk_size reader ~init:0L ~f:(fun total chunk ->
-              let total = Int64.add total (Int64.of_int (Bytes.length chunk)) in
+              let total = Int64.(total + of_int (Bytes.length chunk)) in
               match check_limit ~max_bytes total with
               | Error _ as error -> R.IO.return error
               | Ok () ->
@@ -113,7 +117,7 @@ module Make (R : Request_context.RUNTIME) = struct
       else
         fold ?chunk_size reader ~init:(0L, []) ~f:(fun total_chunks chunk ->
             let total, chunks = total_chunks in
-            let total = Int64.add total (Int64.of_int (Bytes.length chunk)) in
+            let total = Int64.(total + of_int (Bytes.length chunk)) in
             match check_limit ~max_bytes total with
             | Error _ as error -> R.IO.return error
             | Ok () -> (
@@ -122,12 +126,12 @@ module Make (R : Request_context.RUNTIME) = struct
                 | Ok () -> R.IO.return (Ok (total, chunk :: chunks))))
 
     let chunks_to_bytes total chunks =
-      let bytes = Bytes.create (Int64.to_int total) in
+      let bytes = Bytes.create (Int64.to_int_exn total) in
       let rec copy offset = function
         | [] -> bytes
         | chunk :: chunks ->
             let len = Bytes.length chunk in
-            Bytes.blit chunk 0 bytes offset len;
+            Bytes.blit ~src:chunk ~src_pos:0 ~dst:bytes ~dst_pos:offset ~len;
             copy (offset + len) chunks
       in
       copy 0 (List.rev chunks)

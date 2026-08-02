@@ -23,6 +23,12 @@ type t
 module Runtime :
   Awskit.Runtime.S with type 'a t = 'a Lwt.t and type connection = t
 
+(** Expert service-package observation port bound to this runtime. *)
+module Runtime_observer :
+  Awskit.Observability.For_service.Observer
+    with type 'a io = 'a Lwt.t
+     and type connection = t
+
 module Credentials : sig
   module Provider = Awskit_lwt.Credentials.Provider
 
@@ -106,6 +112,7 @@ val create :
   ?random_float:(upper_bound:float -> float) ->
   ?timeout_policy:Awskit.Timeout.policy ->
   ?max_response_drain_bytes:int ->
+  ?observability:Awskit_lwt.Observability.t ->
   ?imdsv1_fallback:Credentials.imdsv1_fallback ->
   unit ->
   (t, Awskit.Error.t) result
@@ -138,7 +145,13 @@ val create :
       limit, the operation fails with a body-limit error. If the consumer fails,
       the consumer error is returned. Response body read timeouts invalidate the
       reader; native [Lwt.Canceled] from user callbacks and body reads is
-      preserved.
+      preserved. This adapter owns one lower-level Cohttp connection per HTTP
+      call from initiation through response headers. Each call receives an
+      exclusive fresh connection, matching Cohttp Lwt Unix 6.2.1's no-cache
+      baseline; the adapter does not pool connections. A failed, timed-out, or
+      cancelled operation closes that in-flight call and awaits its terminal
+      cleanup before the attempt returns; successful bounded drains reach EOF
+      and close their owned connection normally.
     @param imdsv1_fallback
       Controls tokenless IMDSv1 fallback when the default credential chain uses
       EC2 instance metadata credentials. *)

@@ -9,6 +9,7 @@ module Bucket_name = Awskit_s3.Bucket_name
 module Multipart_model = Awskit_s3.Multipart
 module Object_key = Awskit_s3.Object_key
 module Object_model = Awskit_s3.Object
+module Operation = Awskit_s3.Operation
 
 module Multipart = struct
   type connection = t
@@ -52,7 +53,8 @@ module Multipart = struct
       Option.value ~default:Multipart_model.Create.default_options options
     in
     let return_error error =
-      Error (with_operation `Create_multipart_upload ~bucket ~key error)
+      Error
+        (with_operation Operation.Create_multipart_upload ~bucket ~key error)
     in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -64,7 +66,7 @@ module Multipart = struct
             | Error error -> return_error error
             | Ok () -> (
                 match
-                  operation_fault conn `Create_multipart_upload bucket
+                  operation_fault conn Operation.Create_multipart_upload bucket
                     (Some key)
                 with
                 | Some error -> return_error error
@@ -113,7 +115,7 @@ module Multipart = struct
     let upload_id = upload_handle_id upload in
     let part_number_int = Multipart_model.Part_number.to_int part_number in
     let return_error error =
-      Error (with_operation `Upload_part ~bucket ~key error)
+      Error (with_operation Operation.Upload_part ~bucket ~key error)
     in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -124,7 +126,9 @@ module Multipart = struct
             match require_multipart_upload conn ~bucket ~key ~upload_id with
             | Error error -> return_error error
             | Ok (_bucket_state, stored_upload) -> (
-                match operation_fault conn `Upload_part bucket (Some key) with
+                match
+                  operation_fault conn Operation.Upload_part bucket (Some key)
+                with
                 | Some error -> return_error error
                 | None -> (
                     match request_body_result body with
@@ -258,7 +262,8 @@ module Multipart = struct
     let key = upload_handle_key upload in
     let upload_id = upload_handle_id upload in
     let return_error error =
-      Error (with_operation `Complete_multipart_upload ~bucket ~key error)
+      Error
+        (with_operation Operation.Complete_multipart_upload ~bucket ~key error)
     in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -273,8 +278,8 @@ module Multipart = struct
                 | Error error -> return_error error
                 | Ok () -> (
                     match
-                      operation_fault conn `Complete_multipart_upload bucket
-                        (Some key)
+                      operation_fault conn Operation.Complete_multipart_upload
+                        bucket (Some key)
                     with
                     | Some error -> return_error error
                     | None -> (
@@ -343,7 +348,7 @@ module Multipart = struct
     let key = upload_handle_key upload in
     let upload_id = upload_handle_id upload in
     let return_error error =
-      Error (with_operation `Abort_multipart_upload ~bucket ~key error)
+      Error (with_operation Operation.Abort_multipart_upload ~bucket ~key error)
     in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -352,7 +357,8 @@ module Multipart = struct
         | Error error -> return_error error
         | Ok (bucket_state, _upload) -> (
             match
-              operation_fault conn `Abort_multipart_upload bucket (Some key)
+              operation_fault conn Operation.Abort_multipart_upload bucket
+                (Some key)
             with
             | Some error -> return_error error
             | None ->
@@ -377,7 +383,7 @@ module Multipart = struct
     let key = upload_handle_key upload in
     let upload_id = upload_handle_id upload in
     let return_error error =
-      Error (with_operation `List_parts ~bucket ~key error)
+      Error (with_operation Operation.List_parts ~bucket ~key error)
     in
     match validate_bucket_key bucket key with
     | Error error -> return_error error
@@ -388,7 +394,9 @@ module Multipart = struct
             match require_multipart_upload conn ~bucket ~key ~upload_id with
             | Error error -> return_error error
             | Ok (_bucket_state, upload) -> (
-                match operation_fault conn `List_parts bucket (Some key) with
+                match
+                  operation_fault conn Operation.List_parts bucket (Some key)
+                with
                 | Some error -> return_error error
                 | None ->
                     let max_parts =
@@ -452,7 +460,10 @@ module Multipart = struct
         part_number_marker =
       { base with Multipart_model.List_parts.part_number_marker }
 
-    let fold_pages conn ~upload ?options ?max_pages ~init ~f () =
+    let fetch_page conn ~upload ~options () =
+      list_parts conn ~upload ~options ()
+
+    let fold_pages_with ~fetch conn ~upload ?options ?max_pages ~init ~f () =
       match validate_max_pages max_pages with
       | Error error -> Error error
       | Ok () ->
@@ -462,9 +473,9 @@ module Multipart = struct
           in
           let rec loop part_number_marker page_count acc =
             let options = options_for_page base part_number_marker in
-            match list_parts conn ~upload ~options () with
+            match fetch conn ~upload ~options () with
             | Error error -> Error error
-            | Ok page -> (
+            | Ok (page : Multipart_model.List_parts.page) -> (
                 match f acc page with
                 | Error error -> Error error
                 | Ok acc -> (
@@ -484,17 +495,27 @@ module Multipart = struct
           in
           loop base.part_number_marker 0 init
 
-    let pages conn ~upload ?options ?max_pages () =
-      fold_pages conn ~upload ?options ?max_pages ~init:[]
+    let fold_pages conn ~upload ?options ?max_pages ~init ~f () =
+      fold_pages_with ~fetch:fetch_page conn ~upload ?options ?max_pages ~init
+        ~f ()
+
+    let pages_with ~fetch conn ~upload ?options ?max_pages () =
+      fold_pages_with ~fetch conn ~upload ?options ?max_pages ~init:[]
         ~f:(fun pages page -> Ok (page :: pages))
         ()
-      |> Result.map List.rev
+      |> Result.map Base.List.rev
+
+    let pages conn ~upload ?options ?max_pages () =
+      pages_with ~fetch:fetch_page conn ~upload ?options ?max_pages ()
+
+    let parts_with ~fetch conn ~upload ?options ?max_pages () =
+      fold_pages_with ~fetch conn ~upload ?options ?max_pages ~init:[]
+        ~f:(fun parts (page : Multipart_model.List_parts.page) ->
+          Ok (Base.List.rev_append page.parts parts))
+        ()
+      |> Result.map Base.List.rev
 
     let parts conn ~upload ?options ?max_pages () =
-      fold_pages conn ~upload ?options ?max_pages ~init:[]
-        ~f:(fun parts (page : Multipart_model.List_parts.page) ->
-          Ok (List.rev_append page.parts parts))
-        ()
-      |> Result.map List.rev
+      parts_with ~fetch:fetch_page conn ~upload ?options ?max_pages ()
   end
 end

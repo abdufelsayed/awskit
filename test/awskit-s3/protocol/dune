@@ -47,6 +47,25 @@
   qcheck-alcotest
   fmt))
 
+(test
+ (name test_observability_protocol)
+ (package awskit-s3)
+ (modules test_observability_protocol)
+ (libraries
+  awskit
+  awskit-s3
+  awskit_s3_protocol_test_support
+  alcotest
+  ptime
+  fmt))
+
+(rule
+ (alias observability-protocol)
+ (package awskit-s3)
+ (deps test_observability_protocol.exe)
+ (action
+  (run ./test_observability_protocol.exe)))
+
 (rule
  (alias protocol-laws)
  (package awskit-s3)

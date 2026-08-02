@@ -39,5 +39,8 @@ module Request = Request
 module Response = Response
 (** Body-free HTTP response metadata. *)
 
+module Observability = Observability
+(** Runtime-neutral typed observability values and projection contracts. *)
+
 module Runtime = Runtime
 (** Runtime abstraction for concurrency adapters. *)

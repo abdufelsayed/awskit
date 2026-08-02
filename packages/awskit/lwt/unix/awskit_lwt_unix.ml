@@ -1,4 +1,98 @@
-module Strict = Awskit_lwt.Make (Cohttp_lwt_unix.Client)
+module Owned_connector = struct
+  module Client = Cohttp_lwt_unix.Client
+
+  type call = {
+    connection : Cohttp_lwt_unix.Connection.t option ref;
+    mutable response_promise :
+      (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t option;
+    mutable abort_requested : bool;
+    mutable closed : bool;
+  }
+
+  let close owner =
+    match !(owner.connection) with
+    | Some connection when not owner.closed ->
+        owner.closed <- true;
+        Cohttp_lwt_unix.Connection.close connection
+    | Some _ | None -> ()
+
+  let own_response_body owner body =
+    match body with
+    | `Empty | `String _ | `Strings _ ->
+        close owner;
+        body
+    | `Stream stream ->
+        let stream =
+          Lwt_stream.from (fun () ->
+              Lwt.try_bind
+                (fun () -> Lwt_stream.get stream)
+                (function
+                  | None ->
+                      close owner;
+                      Lwt.return_none
+                  | Some chunk -> Lwt.return_some chunk)
+                (fun exn ->
+                  close owner;
+                  Lwt.fail exn))
+        in
+        Cohttp_lwt.Body.of_stream stream
+
+  let call ?ctx ~headers ~body meth uri =
+    let owner =
+      {
+        connection = ref None;
+        response_promise = None;
+        abort_requested = false;
+        closed = false;
+      }
+    in
+    let ctx =
+      Option.value ctx ~default:(Lazy.force Cohttp_lwt_unix.Net.default_ctx)
+    in
+    let response_promise =
+      Lwt.bind (Cohttp_lwt_unix.Net.resolve ~ctx uri) (fun endpoint ->
+          Lwt.bind
+            (Cohttp_lwt_unix.Connection.connect ~ctx ~persistent:true endpoint)
+            (fun connection ->
+              owner.connection := Some connection;
+              if owner.abort_requested then (
+                close owner;
+                Lwt.fail Lwt.Canceled)
+              else
+                Lwt.try_bind
+                  (fun () ->
+                    Cohttp_lwt_unix.Connection.call connection ~headers ~body
+                      meth uri)
+                  (fun (response, body) ->
+                    if owner.abort_requested then (
+                      close owner;
+                      Lwt.fail Lwt.Canceled)
+                    else Lwt.return (response, own_response_body owner body))
+                  (fun exn ->
+                    close owner;
+                    Lwt.fail exn)))
+    in
+    owner.response_promise <- Some response_promise;
+    owner
+
+  let response owner =
+    match owner.response_promise with
+    | Some response -> response
+    | None -> Lwt.fail (Failure "connector response requested before call")
+
+  let abort owner =
+    owner.abort_requested <- true;
+    close owner;
+    Option.iter Lwt.cancel owner.response_promise;
+    match owner.response_promise with
+    | None -> Lwt.return_unit
+    | Some response ->
+        Lwt.catch
+          (fun () -> Lwt.bind response (fun _ -> Lwt.return_unit))
+          (fun _ -> Lwt.return_unit)
+end
+
+module Strict = Awskit_lwt.For_connector.Make (Owned_connector)
 include Strict
 
 module Credentials = struct
@@ -479,7 +573,7 @@ end
 
 let create ?ctx ?endpoint ?region ?credentials ?(clock = Ptime_clock.now)
     ?retry_policy ?random_float ?timeout_policy ?max_response_drain_bytes
-    ?imdsv1_fallback () =
+    ?observability ?imdsv1_fallback () =
   match
     ( (match region with
       | Some region -> Awskit.Region.of_string region
@@ -512,5 +606,5 @@ let create ?ctx ?endpoint ?region ?credentials ?(clock = Ptime_clock.now)
       in
       Strict.create_with_credentials_provider ?ctx ?endpoint ~region
         ~credentials_provider ~clock ?retry_policy ~sleep ~random_float
-        ?timeout_policy ?max_response_drain_bytes ()
+        ?timeout_policy ?max_response_drain_bytes ?observability ()
   | Error error, _, _ | _, Error error, _ | _, _, Error error -> Error error

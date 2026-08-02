@@ -31,13 +31,14 @@ build plumbing.
 | Service core | `packages/awskit-s3` | Runtime-neutral S3 domain, request construction, signing inputs, XML, and operation contracts. |
 | Service runtime package | `packages/awskit-s3/lwt`, `packages/awskit-s3/eio`, `packages/awskit-s3/lwt/unix` | Owns service-specific client entrypoints for the selected runtime. |
 | Simulator package | `packages/awskit-s3/sim` | Public root simulator API; implementation modules stay private. |
+| Observability contract adapters | `test/observability/projections` | Private test libraries prove the public sink contracts against Metrics, Trace, and OpenTelemetry without adding released packages or dependencies. |
 | Examples | `examples/<runtime-or-backend>` | Buildable workflows using supported public APIs. |
 | Tests | `test/<package-or-surface>` | Deterministic tests, protocol evidence, runtime workloads, simulator workloads, and integration workloads. |
 
 Public `.mli` files live beside their implementation. Package overview docs
 live in `packages/*/doc`. Test helpers live under `test/support` or a
 package-scoped `test/*/support` library and remain private unless a later
-design intentionally publishes a conformance contract.
+design intentionally publishes an integration contract.
 
 Protocol fixtures belong under `test/*/fixtures`. Property tests, fuzz replay,
 simulator workloads, runtime workloads, and local-service integration tests belong
@@ -60,6 +61,15 @@ and adapter-specific tests.
   adapter modules.
 - Use module signatures or small adapter modules for dependency injection when
   tests, simulators, or runtime backends need swappable behavior.
+
+Runtime adapters also own asynchronous observation context, monotonic duration
+measurement, native exception and cancellation preservation, and exact-once
+scope finalization. The runtime-neutral model separates bounded dimensions,
+numeric measurements, and diagnostics, and metric projections cannot receive
+the diagnostic view. Applications own Logs reporters and levels plus all
+Metrics and telemetry reporter/exporter lifecycle. Third-party projection
+packaging requires a separate public-surface decision; contract adapters
+remain private test code until then.
 
 ## Error Model
 

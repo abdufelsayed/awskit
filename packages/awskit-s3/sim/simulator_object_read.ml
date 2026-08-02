@@ -8,6 +8,7 @@ open Simulator_inspect
 open Simulator_object_body
 module Error = Awskit_s3.Error
 module Object = Awskit_s3.Object
+module Operation = Awskit_s3.Operation
 
 let object_read_info (obj : stored_object) ~status ~content_length
     ~range_headers =
@@ -55,7 +56,7 @@ let read_object ?read_fault obj options ~consume =
 let get conn ~bucket ~key ?options ~consume () =
   let options = Option.value ~default:Object.Get.default_options options in
   let return_error error =
-    Error (with_operation `Get_object ~bucket ~key error)
+    Error (with_operation Operation.Get_object ~bucket ~key error)
   in
   match validate_bucket_key bucket key with
   | Error error -> return_error error
@@ -73,7 +74,8 @@ let get conn ~bucket ~key ?options ~consume () =
           | Some (Stored_object obj) -> (
               match take_fault conn with
               | Some Response_lost -> (
-                  record ~faulted:true conn `Get_object bucket (Some key);
+                  record ~faulted:true conn Operation.Get_object bucket
+                    (Some key);
                   match
                     read_object obj options
                       ~read_fault:(fault_error Response_lost)
@@ -82,10 +84,11 @@ let get conn ~bucket ~key ?options ~consume () =
                   | Error error -> return_error error
                   | Ok _ as ok -> ok)
               | Some fault ->
-                  record ~faulted:true conn `Get_object bucket (Some key);
+                  record ~faulted:true conn Operation.Get_object bucket
+                    (Some key);
                   return_error (fault_error fault)
               | None -> (
-                  record conn `Get_object bucket (Some key);
+                  record conn Operation.Get_object bucket (Some key);
                   match read_object obj options ~consume with
                   | Error error -> return_error error
                   | Ok _ as ok -> ok))))
@@ -93,7 +96,7 @@ let get conn ~bucket ~key ?options ~consume () =
 let find conn ~bucket ~key ?options ~consume () =
   let options = Option.value ~default:Object.Get.default_options options in
   let return_error error =
-    Error (with_operation `Get_object ~bucket ~key error)
+    Error (with_operation Operation.Get_object ~bucket ~key error)
   in
   let lookup_error error =
     if Error.is_no_such_key error then Ok None else return_error error
@@ -114,7 +117,8 @@ let find conn ~bucket ~key ?options ~consume () =
           | Some (Stored_object obj) -> (
               match take_fault conn with
               | Some Response_lost -> (
-                  record ~faulted:true conn `Get_object bucket (Some key);
+                  record ~faulted:true conn Operation.Get_object bucket
+                    (Some key);
                   match
                     read_object obj options
                       ~read_fault:(fault_error Response_lost)
@@ -123,10 +127,11 @@ let find conn ~bucket ~key ?options ~consume () =
                   | Error error -> return_error error
                   | Ok result -> Ok (Some result))
               | Some fault ->
-                  record ~faulted:true conn `Get_object bucket (Some key);
+                  record ~faulted:true conn Operation.Get_object bucket
+                    (Some key);
                   return_error (fault_error fault)
               | None -> (
-                  record conn `Get_object bucket (Some key);
+                  record conn Operation.Get_object bucket (Some key);
                   match read_object obj options ~consume with
                   | Error error -> return_error error
                   | Ok result -> Ok (Some result)))))
@@ -134,7 +139,7 @@ let find conn ~bucket ~key ?options ~consume () =
 let head conn ~bucket ~key ?options () =
   let options = Option.value ~default:Object.Head.default_options options in
   let return_error error =
-    Error (with_operation `Head_object ~bucket ~key error)
+    Error (with_operation Operation.Head_object ~bucket ~key error)
   in
   match validate_bucket_key bucket key with
   | Error error -> return_error error
@@ -150,7 +155,9 @@ let head conn ~bucket ~key ?options () =
                    ~current:(Option.is_none options.version_id)
                    marker)
           | Some (Stored_object obj) -> (
-              match operation_fault conn `Head_object bucket (Some key) with
+              match
+                operation_fault conn Operation.Head_object bucket (Some key)
+              with
               | Some error -> return_error error
               | None -> (
                   match ensure_read_preconditions obj options.preconditions with

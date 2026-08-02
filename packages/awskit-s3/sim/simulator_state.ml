@@ -89,20 +89,7 @@ type bucket_state = {
   mutable ownership_controls : Bucket.Ownership_controls.config option;
 }
 
-type operation =
-  [ `Put_object
-  | `Get_object
-  | `Head_object
-  | `Delete_object
-  | `List_objects_v2
-  | `List_object_versions
-  | `Copy_object
-  | `Delete_objects
-  | `Create_multipart_upload
-  | `Upload_part
-  | `Complete_multipart_upload
-  | `Abort_multipart_upload
-  | `List_parts ]
+type operation = Awskit_s3.Operation.t
 
 type operation_record = {
   op : operation;
@@ -120,6 +107,8 @@ type store = {
   mutable next_upload_id : int;
   mutable next_version_id : int;
 }
+
+type observation = Awskit.Observability.For_projection.Operation.Completion.t
 
 let create_store ?(config = default_config) ~clock () =
   {
@@ -159,14 +148,26 @@ type t = {
   credentials : Awskit.Credentials.t;
   faults : fault Queue.t;
   mutable random_faults : random_faults option;
+  mutable observations : observation list;
 }
 
 let connect store ~credentials =
-  { store; credentials; faults = Queue.create (); random_faults = None }
+  {
+    store;
+    credentials;
+    faults = Queue.create ();
+    random_faults = None;
+    observations = [];
+  }
 
 let store t = t.store
 let credentials t = t.credentials
 let now t = Clock.now t.store.clock
+let observations t = Base.List.rev t.observations
+let clear_observations t = t.observations <- []
+
+let record_observation t observation =
+  t.observations <- observation :: t.observations
 
 let record_operation ?(faulted = false) t op bucket key =
   t.store.history <-

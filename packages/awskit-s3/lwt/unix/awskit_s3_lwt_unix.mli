@@ -21,6 +21,7 @@ val create :
   ?random_float:(upper_bound:float -> float) ->
   ?timeout_policy:Awskit.Timeout.policy ->
   ?max_response_drain_bytes:int ->
+  ?observability:Awskit_lwt.Observability.t ->
   ?imdsv1_fallback:Awskit_lwt_unix.Credentials.imdsv1_fallback ->
   unit ->
   (t, Awskit_s3.Error.t) result
@@ -31,7 +32,8 @@ val create :
     [endpoint_config] for AWS endpoint variants, local S3-compatible tests, or
     explicit endpoints that use S3-compatible signing/addressing rules.
     [max_response_drain_bytes] controls how much response body the runtime
-    drains after successful consumers. *)
+    drains after successful consumers. [observability] installs
+    application-selected projections. *)
 
 module Body : sig
   include
