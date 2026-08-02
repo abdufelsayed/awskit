@@ -39,8 +39,9 @@ omit `~observability`, the built-in clients behave as if you had passed
 `default ()`.
 
 Pass `Awskit_lwt.Observability.none` or `Awskit_eio.Observability.none` to
-turn observation off completely for a client: no source checks, no clock
-reads, no per-call work of any kind.
+turn observation off completely for a client: no Logs source checks, no
+clock reads, and no field encoding or sink dispatch. The only residual
+per-call cost is allocating the call closures themselves.
 
 ### Sources and levels
 
@@ -308,6 +309,15 @@ need them:
 - `Awskit_s3.Observability.Make` and `.For_simulator` wire those runtimes
   and the simulator into the S3 client. `Awskit_s3.Observability.For_transfer`
   observes the high-level upload and download boundaries.
+
+These composition roles are expert surface, and they evolve faster than the
+application-facing modules: while Awskit is pre-1.0, `For_service`, the
+`For_runtime` functor contracts, and the `Awskit_s3.Observability`
+composition roles may change between releases, with notice in the changelog.
+The application-facing modules — `Sources`, `Metric_sink`, `Trace_sink`,
+`Correlation`, `Health`, `Logs_tags`, and the `For_projection` views those
+deliver — remain stable across releases; any change there is called out
+explicitly in the changelog.
 
 The simulator keeps its own per-connection record of operation completions,
 available as `Awskit_s3_sim.observations`, which test suites can assert
