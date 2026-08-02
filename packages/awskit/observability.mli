@@ -565,7 +565,20 @@ module For_runtime : sig
     val enabled : t -> For_projection.Operation.Info.t -> bool
     val start : t -> For_projection.Operation.Start.t -> activation
     val correlation : activation -> Diagnostic.Public.t list
+
     val within : activation -> (unit -> 'a io) -> 'a io
+    (** Run the supplied SDK callback with this activation's trace context
+        installed as current, so application spans emitted inside the callback
+        nest under this span.
+
+        The callback must be invoked at most once, and its result must be
+        returned unchanged: do not store, replay, map, or rebuild it. Awskit
+        defends itself against a misbehaving wrapper — a repeated, skipped, or
+        substituted callback and a raised exception are contained, counted in
+        observer health, and the SDK always proceeds with the callback's real
+        result — but it cannot defend against a wrapper that never returns,
+        which stalls the SDK operation. *)
+
     val finish : activation -> For_projection.Operation.Completion.t -> unit
     val event_enabled : t -> For_projection.Event.Info.t -> bool
     val event : t -> For_projection.Event.t -> unit

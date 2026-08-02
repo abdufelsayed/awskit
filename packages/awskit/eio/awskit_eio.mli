@@ -34,10 +34,13 @@ module Observability : sig
       within : 'a. (unit -> 'a) -> 'a;
           (** Install trace context around the supplied SDK callback.
 
-              Awskit defends callback invocation and result semantics when this
-              wrapper misbehaves, but trusts the wrapper to remain live: a
-              wrapper that does not return can stall the SDK operation even if
-              it already invoked the callback. *)
+              Invoke the callback at most once and return its result unchanged:
+              do not store, replay, map, or rebuild it. Awskit defends callback
+              invocation and result semantics when this wrapper misbehaves — a
+              repeated, skipped, or substituted callback and a raised exception
+              are contained and counted in observer health — but trusts the
+              wrapper to remain live: a wrapper that does not return can stall
+              the SDK operation even if it already invoked the callback. *)
       correlation : Awskit.Observability.Diagnostic.Public.t list;
           (** Validated public trace-correlation diagnostics. *)
       finish :

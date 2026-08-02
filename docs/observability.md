@@ -107,11 +107,15 @@ Two guarantees matter when writing sinks:
 - If your callback raises, the failure is contained: the SDK call returns
   whatever it would have returned anyway, and the failure is counted in
   observer health (below).
-- A trace `within` function is defended against misuse — calling the SDK
-  callback twice, skipping it, substituting its result, or raising — and the
-  SDK always sees the callback's real result. What Awskit cannot defend is a
-  `within` that never returns: that stalls the SDK call, so treat liveness as
-  your responsibility.
+- A trace `within` function has one contract: invoke the SDK callback at
+  most once, and return its result unchanged — do not store, replay, map, or
+  rebuild it. Pass-through wrappers of the kind the private OpenTelemetry
+  contract adapter uses satisfy this by construction. If the function
+  misbehaves — calling the callback twice, skipping it, substituting its
+  result, or raising — the failure is contained, counted in observer health,
+  and the SDK always sees the callback's real result. What Awskit cannot
+  defend is a `within` that never returns: that stalls the SDK call, so treat
+  liveness as your responsibility.
 
 ## What You Will See: Operations, Attempts, And Retries
 
