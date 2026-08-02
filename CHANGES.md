@@ -9,6 +9,10 @@
   application-owned metric/trace integration resources. Metrics, Trace,
   and OpenTelemetry adapters remain private contract tests; no observability
   PPX or other released package was added. (#28, a7565c2)
+- Added validated region and bucket diagnostics (`aws.region`,
+  `aws.s3.bucket`) to S3 operation, attempt, and presigned-artifact
+  completions for logs and traces. Object keys stay out of every signal, and
+  metric label sets remain declared and finite. (#28, c4dadfa)
 
 ## Changed
 
@@ -16,18 +20,22 @@
   connection per HTTP call instead of relying on connector connection reuse,
   and documented that the generic `awskit-lwt` functor cannot abort a client
   that ignores cancellation or guarantee reuse after abandoned-body cleanup.
-  (#28, a7565c2)
+  Connection reuse behind a pooled connector is planned future work. (#28,
+  a7565c2; f556f78)
 
 ## Documentation, CI, and Release
 
 - Added `docs/observability.md` covering observation semantics, public sink
-  contracts, the exact metric-family inventory, and application-owned
-  reporter/exporter policy, and updated the README plus the architecture,
-  testing, and security threat model guides for the new surface. (#28,
-  a7565c2)
+  contracts, the exact metric-family inventory, application-owned
+  reporter/exporter policy, duration-unit and backend-conversion
+  conventions, the trace-sink `within` contract, and expert-surface
+  stability, and updated the README plus the architecture, testing, and
+  security threat model guides for the new surface. (#28, a7565c2; 693ba84;
+  0c5b17a; a0e2639)
 - Added observability validation gates for observer and projection contracts,
   S3 attempt-topology protocol workloads, installed-interface compile-fail
-  checks, and a focused observability benchmark. (#28, a7565c2)
+  checks, and a focused observability benchmark with a recorded overhead
+  baseline. (#28, a7565c2; 5cef4d1; 7435e9b)
 
 # 0.2.0
 
