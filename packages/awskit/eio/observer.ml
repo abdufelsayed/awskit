@@ -82,7 +82,6 @@ type lease = Runtime.lease
 let default = Runtime.default
 let none = Runtime.none
 let create = Runtime.create
-let config = Runtime.config
 let health = Runtime.health
 let snapshot = Runtime.snapshot
 let instrument_snapshot = Runtime.snapshot

@@ -214,7 +214,6 @@ module For_runtime = struct
       let engine = Engine.create ~logs ?clock ~metric_sinks ~trace_sinks () in
       { engine; scope_key = Some (Context.create ()); hard_off = false }
 
-    let config = create
     let default () = create ()
     let health t = Engine.health t.engine
     let snapshot t = Engine.instrument_snapshot t.engine

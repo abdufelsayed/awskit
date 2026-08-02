@@ -588,16 +588,6 @@ module For_runtime : sig
       unit ->
       t
 
-    val config :
-      ?logs:bool ->
-      ?clock:(unit -> int64) ->
-      ?metric_sinks:Metric_sink.t list ->
-      ?trace_sinks:Trace_sink.t list ->
-      unit ->
-      t
-    (** Alias for [create], provided for runtime facades that expose observer
-        configuration as a value-producing operation. *)
-
     val health : t -> Health.snapshot
     val snapshot : t -> For_projection.Metric.Observation.t list
 
