@@ -401,7 +401,12 @@ module For_service : sig
         receive the typed payload, before either value is encoded into generic
         projection fields. A decision is evaluated only when at least one
         declared level is enabled for the definition's source; its message is
-        forced only if Logs accepts the selected level. *)
+        forced only if Logs accepts the selected level.
+
+        An [Emit] decision must use a level from the policy's declared [levels].
+        Emitting an undeclared level is a policy error: the emission is
+        suppressed, the failure is counted in observer health, and the SDK call
+        is unaffected. *)
 
     type decision =
       | Skip

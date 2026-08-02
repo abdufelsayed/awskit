@@ -307,6 +307,42 @@ let test_definition_failure_is_local () =
     Int64.(
       health_count observer ~projection_name:"engine" ~phase:Enablement > 0L)
 
+let test_undeclared_log_level_is_contained () =
+  let records = ref 0 in
+  let reporter =
+    {
+      Logs.report =
+        (fun _src _level ~over k _msgf ->
+          Int.incr records;
+          over ();
+          k ());
+    }
+  in
+  let previous_reporter = Logs.reporter () in
+  let previous_level = Logs.Src.level source in
+  Exn.protect
+    ~f:(fun () ->
+      Logs.set_reporter reporter;
+      Logs.Src.set_level source (Some Logs.Debug);
+      let policy =
+        F.Log.operation ~levels:[ Logs.Debug ]
+          ~decide:(fun (_ : (unit, unit) F.operation_completion) ->
+            F.Log.Emit { level = Logs.Error; message = lazy "undeclared" })
+      in
+      let definition = operation ~log:policy "awskit.test.undeclared" in
+      let observer = Observer.create () in
+      let result = run observer definition Success in
+      Alcotest.(check bool)
+        "callback result preserved" true
+        (Poly.equal Success result);
+      Alcotest.(check int) "undeclared level never emitted" 0 !records;
+      Alcotest.(check bool)
+        "policy failure recorded at finish" true
+        Int64.(health_count observer ~projection_name:"logs" ~phase:Finish > 0L))
+    ~finally:(fun () ->
+      Logs.set_reporter previous_reporter;
+      Logs.Src.set_level source previous_level)
+
 let () =
   Alcotest.run "awskit-observation-engine"
     [
@@ -323,5 +359,7 @@ let () =
             test_projection_failure_is_local;
           Alcotest.test_case "definition failure local" `Quick
             test_definition_failure_is_local;
+          Alcotest.test_case "undeclared log level contained" `Quick
+            test_undeclared_log_level_is_contained;
         ] );
     ]
