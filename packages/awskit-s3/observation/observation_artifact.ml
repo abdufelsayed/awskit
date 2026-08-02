@@ -1,7 +1,12 @@
 open Base
 module F = Awskit.Observability.For_service
 
-type start = { operation : Artifact_operation.t }
+type start = {
+  operation : Artifact_operation.t;
+  region : string option;
+  bucket : string option;
+}
+
 type finish = unit
 
 type completion_labels = {
@@ -49,11 +54,19 @@ let artifacts_in_flight_family =
 
 let artifacts_in_flight = F.Instrument.define ~family:artifacts_in_flight_family
 let state_labels operation : operation_labels = { operation }
-let start (operation : Artifact_operation.t) : start = { operation }
+
+let start ?region ?bucket (operation : Artifact_operation.t) : start =
+  { operation; region; bucket }
 
 let start_fields (start : start) =
   F.Fields.create
     ~dimensions:[ F.Dimension.Enum.value operation_dimension start.operation ]
+    ~diagnostics:
+      (List.filter_map ~f:Fn.id
+         [
+           Option.bind start.region ~f:F.Diagnostic.aws_region;
+           Option.bind start.bucket ~f:F.Diagnostic.bucket_name;
+         ])
     ()
 
 let finish_fields (_ : finish) = F.Fields.empty
@@ -114,19 +127,21 @@ let operation () =
     ~span_kind:Awskit.Observability.Span_kind.Internal ~start:start_fields
     ~classify ~finish:finish_fields ~log ~metrics ()
 
-let complete ~operation:operation_name ~outcome () =
-  F.Operation.project (operation ()) ~start:(start operation_name)
+let complete ~operation:operation_name ~outcome ?region ?bucket () =
+  F.Operation.project (operation ())
+    ~start:(start ?region ?bucket operation_name)
     ~result:(Error (Failure "simulator completion")) ~default_outcome:outcome
     ~duration_ns:None
 
 module Make (Runtime : F.Observer) = struct
-  let with_artifact connection ~operation:operation_name callback =
+  let with_artifact connection ~operation:operation_name ~region ~bucket
+      callback =
     Runtime.with_instrument connection artifacts_in_flight
       ~labels:(fun () -> state_labels operation_name)
       1L
       (fun () ->
         Runtime.with_operation connection
           ~operation:(fun () -> operation ())
-          ~start:(fun () -> start operation_name)
+          ~start:(fun () -> start ?region ?bucket operation_name)
           callback)
 end

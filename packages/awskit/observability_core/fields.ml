@@ -276,6 +276,9 @@ module Diagnostic = struct
 
   let aws_extended_request_id =
     provider_identifier ~name:"aws.extended_request_id"
+
+  let aws_region = provider_identifier ~name:"aws.region"
+  let bucket_name = provider_identifier ~name:"aws.s3.bucket"
 end
 
 module Fields = struct

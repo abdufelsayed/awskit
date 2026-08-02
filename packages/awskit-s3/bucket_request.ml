@@ -125,7 +125,8 @@ module Make (C : Execution_request_context.S) = struct
                    | Ok () -> return_ok response)))
 
   let create conn ~bucket ?options () =
-    with_operation conn ~operation:Operation.Create_bucket (fun session ->
+    with_operation conn ~operation:Operation.Create_bucket
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         let options =
           Option.value ~default:Create_bucket.default_options options
         in
@@ -169,7 +170,8 @@ module Make (C : Execution_request_context.S) = struct
         (fun (options : Delete_bucket.options) -> options.expected_bucket_owner)
         options
     in
-    with_operation conn ~operation:Operation.Delete_bucket (fun session ->
+    with_operation conn ~operation:Operation.Delete_bucket
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         let bucket = Bucket_name.to_string bucket in
         let return_error =
           S3_error_context.return_s3_error return_error
@@ -197,7 +199,8 @@ module Make (C : Execution_request_context.S) = struct
         (fun (options : Head_bucket.options) -> options.expected_bucket_owner)
         options
     in
-    with_operation conn ~operation:Operation.Head_bucket (fun session ->
+    with_operation conn ~operation:Operation.Head_bucket
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         let bucket_name = bucket in
         let bucket = Bucket_name.to_string bucket in
         let return_error =
@@ -279,7 +282,8 @@ module Make (C : Execution_request_context.S) = struct
           options.expected_bucket_owner)
         options
     in
-    with_operation conn ~operation:Operation.Get_bucket_location (fun session ->
+    with_operation conn ~operation:Operation.Get_bucket_location
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         let bucket = Bucket_name.to_string bucket in
         let return_error =
           S3_error_context.return_s3_error return_error
@@ -317,7 +321,8 @@ module Make (C : Execution_request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      with_operation conn ~operation:Operation.Get_bucket_policy (fun session ->
+      with_operation conn ~operation:Operation.Get_bucket_policy
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           let bucket = Bucket_name.to_string bucket in
           let return_error =
             S3_error_context.return_s3_error return_error
@@ -351,7 +356,8 @@ module Make (C : Execution_request_context.S) = struct
             options.expected_bucket_owner)
           options
       in
-      with_operation conn ~operation:Operation.Put_bucket_policy (fun session ->
+      with_operation conn ~operation:Operation.Put_bucket_policy
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           let bucket = Bucket_name.to_string bucket in
           let return_error =
             S3_error_context.return_s3_error return_error
@@ -393,7 +399,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Delete_bucket_policy
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           delete_subresource_in_session session ?expected_bucket_owner conn
             ~bucket ~operation:Operation.Delete_bucket_policy
             ~subresource:"policy")
@@ -414,7 +420,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Get_bucket_versioning
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           get_xml_in_session session ?expected_bucket_owner conn ~bucket
             ~subresource:"versioning" ~operation:Operation.Get_bucket_versioning
             ~max_size:1_048_576L ~parse:Bucket_versioning_xml.parse)
@@ -427,7 +433,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Put_bucket_versioning
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           let bucket_context = Bucket_name.to_string bucket in
           let return_error =
             S3_error_context.return_s3_error return_error
@@ -456,7 +462,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Get_bucket_tagging
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           get_xml_in_session session ?expected_bucket_owner conn ~bucket
             ~subresource:"tagging" ~operation:Operation.Get_bucket_tagging
             ~max_size:1_048_576L ~parse)
@@ -469,7 +475,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Put_bucket_tagging
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           let bucket_context = Bucket_name.to_string bucket in
           let return_error =
             S3_error_context.return_s3_error return_error
@@ -490,7 +496,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Delete_bucket_tagging
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           delete_subresource_in_session session ?expected_bucket_owner conn
             ~bucket ~operation:Operation.Delete_bucket_tagging
             ~subresource:"tagging")
@@ -505,7 +511,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Get_bucket_encryption
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           get_xml_in_session session ?expected_bucket_owner conn ~bucket
             ~subresource:"encryption" ~operation:Operation.Get_bucket_encryption
             ~max_size:1_048_576L ~parse:Bucket_encryption_xml.parse)
@@ -518,7 +524,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Put_bucket_encryption
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           let bucket_context = Bucket_name.to_string bucket in
           let return_error =
             S3_error_context.return_s3_error return_error
@@ -540,7 +546,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Delete_bucket_encryption
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           delete_subresource_in_session session ?expected_bucket_owner conn
             ~bucket ~operation:Operation.Delete_bucket_encryption
             ~subresource:"encryption")
@@ -553,7 +559,8 @@ module Make (C : Execution_request_context.S) = struct
           (fun (options : Bucket_cors.options) -> options.expected_bucket_owner)
           options
       in
-      with_operation conn ~operation:Operation.Get_bucket_cors (fun session ->
+      with_operation conn ~operation:Operation.Get_bucket_cors
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           get_xml_in_session session ?expected_bucket_owner conn ~bucket
             ~subresource:"cors" ~operation:Operation.Get_bucket_cors
             ~max_size:1_048_576L ~parse:Bucket_cors_xml.parse)
@@ -564,7 +571,8 @@ module Make (C : Execution_request_context.S) = struct
           (fun (options : Bucket_cors.options) -> options.expected_bucket_owner)
           options
       in
-      with_operation conn ~operation:Operation.Put_bucket_cors (fun session ->
+      with_operation conn ~operation:Operation.Put_bucket_cors
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           let bucket_context = Bucket_name.to_string bucket in
           let return_error =
             S3_error_context.return_s3_error return_error
@@ -584,7 +592,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Delete_bucket_cors
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           delete_subresource_in_session session ?expected_bucket_owner conn
             ~bucket ~operation:Operation.Delete_bucket_cors ~subresource:"cors")
   end
@@ -598,7 +606,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Get_public_access_block
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           get_xml_in_session session ?expected_bucket_owner conn ~bucket
             ~subresource:"publicAccessBlock" ~max_size:1_048_576L
             ~operation:Operation.Get_public_access_block
@@ -612,7 +620,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Put_public_access_block
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           put_xml_in_session session ?expected_bucket_owner conn ~bucket
             ~operation:Operation.Put_public_access_block
             ~subresource:"publicAccessBlock"
@@ -626,7 +634,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Delete_public_access_block
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           delete_subresource_in_session session ?expected_bucket_owner conn
             ~bucket ~operation:Operation.Delete_public_access_block
             ~subresource:"publicAccessBlock")
@@ -648,7 +656,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Get_bucket_ownership_controls
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           get_xml_in_session session ?expected_bucket_owner conn ~bucket
             ~subresource:"ownershipControls" ~max_size:1_048_576L
             ~operation:Operation.Get_bucket_ownership_controls
@@ -662,7 +670,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Put_bucket_ownership_controls
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           let bucket_context = Bucket_name.to_string bucket in
           let return_error =
             S3_error_context.return_s3_error return_error
@@ -685,7 +693,7 @@ module Make (C : Execution_request_context.S) = struct
           options
       in
       with_operation conn ~operation:Operation.Delete_bucket_ownership_controls
-        (fun session ->
+        ~bucket:(Bucket_name.to_string bucket) (fun session ->
           delete_subresource_in_session session ?expected_bucket_owner conn
             ~bucket ~operation:Operation.Delete_bucket_ownership_controls
             ~subresource:"ownershipControls")

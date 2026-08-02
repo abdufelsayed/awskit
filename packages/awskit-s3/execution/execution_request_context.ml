@@ -50,6 +50,7 @@ module type S = sig
   val with_operation :
     connection ->
     operation:Operation.t ->
+    ?bucket:string ->
     (session -> ('a, Error.t) result io) ->
     ('a, Error.t) result io
 

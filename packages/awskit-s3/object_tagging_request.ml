@@ -51,7 +51,8 @@ module Make (C : Execution_request_context.S) = struct
                             (parse_tags body)))))
 
   let get conn ~bucket ~key ?options () =
-    with_operation conn ~operation:Operation.Get_object_tagging (fun session ->
+    with_operation conn ~operation:Operation.Get_object_tagging
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         get_in_session session conn ~bucket ~key ?options ())
 
   let put_in_session session conn ~bucket ~key ?options ~tags () =
@@ -96,7 +97,8 @@ module Make (C : Execution_request_context.S) = struct
                        | Ok () -> return_ok response))))
 
   let put conn ~bucket ~key ?options ~tags () =
-    with_operation conn ~operation:Operation.Put_object_tagging (fun session ->
+    with_operation conn ~operation:Operation.Put_object_tagging
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         put_in_session session conn ~bucket ~key ?options ~tags ())
 
   let delete_in_session session conn ~bucket ~key ?options () =
@@ -128,5 +130,6 @@ module Make (C : Execution_request_context.S) = struct
 
   let delete conn ~bucket ~key ?options () =
     with_operation conn ~operation:Operation.Delete_object_tagging
-      (fun session -> delete_in_session session conn ~bucket ~key ?options ())
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
+        delete_in_session session conn ~bucket ~key ?options ())
 end

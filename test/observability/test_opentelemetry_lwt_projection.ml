@@ -150,6 +150,11 @@ let canonical_projection () =
   check_int_attribute "HTTP response status" http_span
     "http.response.status_code" 200;
   check_string_attribute "AWS request ID" http_span "aws.request_id" "R2";
+  check_string_attribute "AWS region" operation_span "aws.region" "us-east-1";
+  check_string_attribute "S3 bucket" operation_span "aws.s3.bucket"
+    "observability-bucket";
+  check_string_attribute "attempt inherits bucket" attempt_span "aws.s3.bucket"
+    "observability-bucket";
   check_string_attribute "HTTP span correlation" http_span "span.id"
     (http_span |> Otel.Span.id |> Otel.Span_id.to_hex);
   check_unset_status "successful AWS span status" operation_span;
@@ -179,7 +184,9 @@ let canonical_projection () =
   let metric_attributes =
     List.concat_map capture.metrics ~f:metric_attribute_names
   in
-  List.iter [ "aws.request_id"; "trace.id"; "span.id" ] ~f:(fun name ->
+  List.iter
+    [ "aws.request_id"; "trace.id"; "span.id"; "aws.region"; "aws.s3.bucket" ]
+    ~f:(fun name ->
       Alcotest.(check bool)
         (name ^ " excluded from metrics")
         false

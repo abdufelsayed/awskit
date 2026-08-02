@@ -202,7 +202,7 @@ module Make (C : Execution_request_context.S) = struct
 
   let create_upload conn ~bucket ~key ?options () =
     with_operation conn ~operation:Operation.Create_multipart_upload
-      (fun session ->
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         create_upload_in_session session conn ~bucket ~key ?options ())
 
   let upload_part_in_session session conn ~upload ~part_number ~body ?options ()
@@ -281,7 +281,9 @@ module Make (C : Execution_request_context.S) = struct
                 | Ok () -> send ~content_length descriptor)))
 
   let upload_part conn ~upload ~part_number ~body ?options () =
-    with_operation conn ~operation:Operation.Upload_part (fun session ->
+    with_operation conn ~operation:Operation.Upload_part
+      ~bucket:(Multipart.Upload.bucket upload |> Bucket_name.to_string)
+      (fun session ->
         upload_part_in_session session conn ~upload ~part_number ~body ?options
           ())
 
@@ -373,6 +375,7 @@ module Make (C : Execution_request_context.S) = struct
 
   let complete_upload conn ~upload ?options ~parts () =
     with_operation conn ~operation:Operation.Complete_multipart_upload
+      ~bucket:(Multipart.Upload.bucket upload |> Bucket_name.to_string)
       (fun session ->
         complete_upload_in_session session conn ~upload ?options ~parts ())
 
@@ -410,6 +413,7 @@ module Make (C : Execution_request_context.S) = struct
 
   let abort_upload conn ~upload ?options () =
     with_operation conn ~operation:Operation.Abort_multipart_upload
+      ~bucket:(Multipart.Upload.bucket upload |> Bucket_name.to_string)
       (fun session -> abort_upload_in_session session conn ~upload ?options ())
 
   let validate_list_parts_options (options : List_parts.options) =
@@ -564,8 +568,9 @@ module Make (C : Execution_request_context.S) = struct
                                          })))))))
 
   let list_parts conn ~upload ?options () =
-    with_operation conn ~operation:Operation.List_parts (fun session ->
-        list_parts_in_session session conn ~upload ?options ())
+    with_operation conn ~operation:Operation.List_parts
+      ~bucket:(Multipart.Upload.bucket upload |> Bucket_name.to_string)
+      (fun session -> list_parts_in_session session conn ~upload ?options ())
 
   module List_parts = struct
     let validate_max_pages = function

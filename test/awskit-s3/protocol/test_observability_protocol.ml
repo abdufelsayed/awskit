@@ -748,6 +748,12 @@ let run_presigned_artifact label expected call =
     (label ^ " signing identity")
     (Some expected)
     (artifact_identity (List.hd signings));
+  (match diagnostic "aws.region" (List.hd parents) with
+  | Some (String "us-east-1") -> ()
+  | _ -> Alcotest.fail (label ^ " artifact did not record the configured region"));
+  (match diagnostic "aws.s3.bucket" (List.hd parents) with
+  | Some (String "bucket") -> ()
+  | _ -> Alcotest.fail (label ^ " artifact did not record the request bucket"));
   Alcotest.(check int)
     (label ^ " has no S3 operation")
     0
@@ -878,6 +884,57 @@ let test_presigned_credential_failure_skips_signing () =
   assert_artifact_observation_secrets_absent "credential failure parent"
     (List.hd parents)
 
+let test_resource_identity_diagnostics () =
+  Alcotest.(check bool)
+    "empty region rejected" true
+    (Option.is_none (O.For_service.Diagnostic.aws_region ""));
+  Alcotest.(check bool)
+    "control-bearing bucket rejected" true
+    (Option.is_none (O.For_service.Diagnostic.bucket_name "bucket\tsecret"));
+  Alcotest.(check bool)
+    "oversized bucket rejected" true
+    (Option.is_none
+       (O.For_service.Diagnostic.bucket_name (String.make 1025 'b')));
+  let conn = Recording.connect [ Recording.response 206 "payload" ] in
+  ignore (get_string conn |> Protocol_support.ok_or_fail "resource identity get");
+  let completion =
+    operation_completions conn "awskit.s3.operation" |> List.hd
+  in
+  (match diagnostic "aws.region" completion with
+  | Some (String "us-east-1") -> ()
+  | _ -> Alcotest.fail "operation did not record the configured region");
+  (match diagnostic "aws.s3.bucket" completion with
+  | Some (String "bucket") -> ()
+  | _ -> Alcotest.fail "operation did not record the request bucket");
+  let attempt = operation_completions conn "awskit.s3.attempt" |> List.hd in
+  (match diagnostic "aws.s3.bucket" attempt with
+  | Some (String "bucket") -> ()
+  | _ -> Alcotest.fail "attempt did not inherit the request bucket");
+  match diagnostic "aws.region" attempt with
+  | Some (String "us-east-1") -> ()
+  | _ -> Alcotest.fail "attempt did not inherit the configured region"
+
+let test_root_operation_has_region_without_bucket () =
+  let conn =
+    Recording.connect
+      [
+        Recording.response 200
+          "<ListAllMyBucketsResult><Buckets></Buckets></ListAllMyBucketsResult>";
+      ]
+  in
+  ignore
+    (Recording.S3.Bucket.list conn
+    |> Protocol_support.ok_or_fail "list buckets response");
+  let completion =
+    operation_completions conn "awskit.s3.operation" |> List.hd
+  in
+  (match diagnostic "aws.region" completion with
+  | Some (String "us-east-1") -> ()
+  | _ -> Alcotest.fail "root operation did not record the configured region");
+  Alcotest.(check bool)
+    "root operation has no bucket diagnostic" true
+    (Option.is_none (diagnostic "aws.s3.bucket" completion))
+
 let () =
   Alcotest.run "awskit-s3-observability-protocol"
     [
@@ -916,5 +973,9 @@ let () =
             test_presigned_validation_failure_keeps_signing_boundary;
           Alcotest.test_case "presigned credential failure" `Quick
             test_presigned_credential_failure_skips_signing;
+          Alcotest.test_case "resource identity diagnostics" `Quick
+            test_resource_identity_diagnostics;
+          Alcotest.test_case "root operation identity" `Quick
+            test_root_operation_has_region_without_bucket;
         ] );
     ]

@@ -11,7 +11,11 @@ module type Identity = sig
 end
 
 module Make (Identity : Identity) = struct
-  type start = { operation : Identity.t }
+  type start = {
+    operation : Identity.t;
+    region : string option;
+    bucket : string option;
+  }
 
   type finish = {
     attempts : int option;
@@ -20,7 +24,7 @@ module Make (Identity : Identity) = struct
     retry_class : Awskit.Error.retry_class option;
   }
 
-  let start operation = { operation }
+  let start ?region ?bucket operation = { operation; region; bucket }
 
   let operation_dimension =
     F.Dimension.Enum.define ~name:"aws.operation" ~equal:Identity.equal
@@ -44,6 +48,12 @@ module Make (Identity : Identity) = struct
   let start_fields start =
     F.Fields.create
       ~dimensions:[ F.Dimension.Enum.value operation_dimension start.operation ]
+      ~diagnostics:
+        (List.filter_map ~f:Fn.id
+           [
+             Option.bind start.region ~f:F.Diagnostic.aws_region;
+             Option.bind start.bucket ~f:F.Diagnostic.bucket_name;
+           ])
       ()
 
   let finish_fields finish =
@@ -124,8 +134,9 @@ module Make (Identity : Identity) = struct
   let simulated_operation = define ~classify:classify_simulated ~metrics:[]
 
   let complete ~operation ~outcome ?retry_class ?logical_request_bytes
-      ?logical_response_bytes () =
-    F.Operation.project simulated_operation ~start:(start operation)
+      ?logical_response_bytes ?region ?bucket () =
+    F.Operation.project simulated_operation
+      ~start:(start ?region ?bucket operation)
       ~result:
         (Ok
            {

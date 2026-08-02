@@ -226,9 +226,11 @@ struct
       | Not_supported _ | Multiple _ ->
           false
 
-    let with_operation conn ~operation callback =
+    let with_operation conn ~operation ?bucket callback =
       let session = Execution_session.create operation in
-      Observed_operation.with_operation conn ~operation
+      let region = Awskit.Region.to_string (region conn) in
+      Observed_operation.with_operation conn ~operation ~region:(Some region)
+        ~bucket
         ~attempts:(fun () -> Execution_session.attempts session)
         ~logical_request_bytes:(fun () ->
           Execution_session.logical_request_bytes session)

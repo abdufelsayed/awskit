@@ -262,7 +262,10 @@ become client spans named by method, and attempts, credentials, signing,
 phases, transfers, and presign generations become internal spans. Retry
 decisions are span events on the attempt that caused them. Caller
 cancellation is not an error status; a failed HTTP response keeps its
-status-derived error.
+status-derived error. Operation, attempt, and presign-artifact spans carry
+the configured region and the request bucket as the `aws.region` and
+`aws.s3.bucket` attributes; bucket-less operations such as `ListBuckets`
+carry the region only.
 
 For safety, spans never carry URLs, paths, query strings, or endpoint values,
 so presigned URLs, signatures, and tokens can never leak through tracing.
@@ -277,9 +280,12 @@ Awskit separates three kinds of values and treats them differently:
 - **Labels** on metrics come only from small declared sets (operations,
   outcomes, retry classes, status classes, methods, directions). Cardinality
   stays bounded no matter what your buckets and keys are named.
-- **Diagnostics** such as AWS request IDs, host IDs, and HTTP status codes
-  may appear in logs and traces after validation, but never become metric
-  labels.
+- **Diagnostics** such as AWS request IDs, host IDs, HTTP status codes, the
+  configured region, and bucket names may appear in logs and traces after
+  validation, but never become metric labels. Region and bucket identity are
+  diagnostics rather than dimensions on purpose: label sets must stay
+  declared and finite. Object keys are never diagnostics — they are
+  caller-controlled free text and stay out of every signal.
 - **Sensitive values** — credentials, authorization material, tokens,
   signatures, presigned URLs, signed query parameters, raw provider error
   bodies, and arbitrary exception text — never appear in any signal, and

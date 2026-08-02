@@ -11,7 +11,11 @@ module Shape = Observation_logical_operation.Make (struct
   let source = Types.Sources.operation
 end)
 
-type start = Shape.start = { operation : Types.Operation.t }
+type start = Shape.start = {
+  operation : Types.Operation.t;
+  region : string option;
+  bucket : string option;
+}
 
 type finish = Shape.finish = {
   attempts : int option;
@@ -129,8 +133,8 @@ let operation ~attempts ~logical_request_bytes ~logical_response_bytes =
     ~metrics
 
 module Make (Runtime : F.Observer) = struct
-  let with_operation connection ~operation:operation_name ~attempts
-      ~logical_request_bytes ~logical_response_bytes callback =
+  let with_operation connection ~operation:operation_name ~region ~bucket
+      ~attempts ~logical_request_bytes ~logical_response_bytes callback =
     Runtime.with_instrument connection operations_in_flight
       ~labels:(fun () -> state_labels operation_name)
       1L
@@ -138,6 +142,6 @@ module Make (Runtime : F.Observer) = struct
         Runtime.with_operation connection
           ~operation:(fun () ->
             operation ~attempts ~logical_request_bytes ~logical_response_bytes)
-          ~start:(fun () -> start operation_name)
+          ~start:(fun () -> start ?region ?bucket operation_name)
           callback)
 end

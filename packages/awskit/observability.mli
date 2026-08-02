@@ -294,6 +294,14 @@ module For_service : sig
     val aws_extended_request_id : string -> t option
     (** An opaque, nonempty printable-ASCII AWS extended request identifier of
         at most 1024 bytes. *)
+
+    val aws_region : string -> t option
+    (** An opaque, nonempty printable-ASCII AWS region name of at most 1024
+        bytes. *)
+
+    val bucket_name : string -> t option
+    (** An opaque, nonempty printable-ASCII S3 bucket name of at most 1024
+        bytes. *)
   end
 
   module Fields : sig

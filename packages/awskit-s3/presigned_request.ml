@@ -23,6 +23,8 @@ struct
 
   let with_artifact conn ~artifact_operation ~error_operation ~bucket ~key f =
     Observed_artifact.with_artifact conn ~operation:artifact_operation
+      ~region:(Some (Awskit.Region.to_string (region conn)))
+      ~bucket:(Some (Bucket_name.to_string bucket))
       (fun () ->
         let* credentials = credentials conn in
         let bucket_context = Bucket_name.to_string bucket in

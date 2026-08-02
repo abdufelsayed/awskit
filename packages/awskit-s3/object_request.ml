@@ -121,7 +121,8 @@ module Make (C : Execution_request_context.S) = struct
     else Ok ()
 
   let put conn ~bucket ~key ?options ~body () =
-    with_operation conn ~operation:Operation.Put_object (fun session ->
+    with_operation conn ~operation:Operation.Put_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         let bucket = Bucket_name.to_string bucket in
         let key = Object_key.to_string key in
         let options =
@@ -238,14 +239,16 @@ module Make (C : Execution_request_context.S) = struct
             return_result return_error return_ok result)
 
   let get conn ~bucket ~key ?options ~consume () =
-    with_operation conn ~operation:Operation.Get_object (fun session ->
+    with_operation conn ~operation:Operation.Get_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         get_in_session session conn ~bucket ~key ?options ~consume ())
 
   let read_string ~max_bytes reader = read_body reader ~max_size:max_bytes
   let read_bytes ~max_bytes reader = read_body_bytes reader ~max_size:max_bytes
 
   let get_string conn ~bucket ~key ?options ~max_bytes () =
-    with_operation conn ~operation:Operation.Get_object (fun session ->
+    with_operation conn ~operation:Operation.Get_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         let return_error =
           S3_error_context.return_s3_error return_error
             ~operation:Operation.Get_object
@@ -259,7 +262,8 @@ module Make (C : Execution_request_context.S) = struct
               ~consume:(read_string ~max_bytes) ())
 
   let get_bytes conn ~bucket ~key ?options ~max_bytes () =
-    with_operation conn ~operation:Operation.Get_object (fun session ->
+    with_operation conn ~operation:Operation.Get_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         let return_error =
           S3_error_context.return_s3_error return_error
             ~operation:Operation.Get_object
@@ -294,11 +298,13 @@ module Make (C : Execution_request_context.S) = struct
     | Error error -> return_error error
 
   let find conn ~bucket ~key ?options ~consume () =
-    with_operation conn ~operation:Operation.Get_object (fun session ->
+    with_operation conn ~operation:Operation.Get_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         find_in_session session conn ~bucket ~key ?options ~consume ())
 
   let find_string conn ~bucket ~key ?options ~max_bytes () =
-    with_operation conn ~operation:Operation.Get_object (fun session ->
+    with_operation conn ~operation:Operation.Get_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         match validate_max_bytes max_bytes with
         | Error error ->
             S3_error_context.return_s3_error return_error
@@ -310,7 +316,8 @@ module Make (C : Execution_request_context.S) = struct
               ~consume:(read_string ~max_bytes) ())
 
   let find_bytes conn ~bucket ~key ?options ~max_bytes () =
-    with_operation conn ~operation:Operation.Get_object (fun session ->
+    with_operation conn ~operation:Operation.Get_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         match validate_max_bytes max_bytes with
         | Error error ->
             S3_error_context.return_s3_error return_error
@@ -322,7 +329,8 @@ module Make (C : Execution_request_context.S) = struct
               ~consume:(read_bytes ~max_bytes) ())
 
   let head conn ~bucket ~key ?options () =
-    with_operation conn ~operation:Operation.Head_object (fun session ->
+    with_operation conn ~operation:Operation.Head_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         let bucket = Bucket_name.to_string bucket in
         let key = Object_key.to_string key in
         let options =
@@ -384,7 +392,8 @@ module Make (C : Execution_request_context.S) = struct
     | Error error -> return_error error
 
   let delete conn ~bucket ~key ?options () =
-    with_operation conn ~operation:Operation.Delete_object (fun session ->
+    with_operation conn ~operation:Operation.Delete_object
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         let bucket = Bucket_name.to_string bucket in
         let key = Object_key.to_string key in
         let options =
@@ -425,7 +434,8 @@ module Make (C : Execution_request_context.S) = struct
                 return_result return_error return_ok result))
 
   let delete_objects conn ~bucket ~objects ?options () =
-    with_operation conn ~operation:Operation.Delete_objects (fun session ->
+    with_operation conn ~operation:Operation.Delete_objects
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         let bucket = Bucket_name.to_string bucket in
         let options =
           Option.value ~default:Delete_objects.default_options options
@@ -477,7 +487,8 @@ module Make (C : Execution_request_context.S) = struct
 
   let copy conn ~source_bucket ~source_key ~destination_bucket ~destination_key
       ?options () =
-    with_operation conn ~operation:Operation.Copy_object (fun session ->
+    with_operation conn ~operation:Operation.Copy_object
+      ~bucket:(Bucket_name.to_string destination_bucket) (fun session ->
         let source_bucket = Bucket_name.to_string source_bucket in
         let source_key = Object_key.to_string source_key in
         let destination_bucket = Bucket_name.to_string destination_bucket in
@@ -574,7 +585,7 @@ module Make (C : Execution_request_context.S) = struct
 
   let list_versions conn ~bucket ?options () =
     with_operation conn ~operation:Operation.List_object_versions
-      (fun session ->
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         let bucket = Bucket_name.to_string bucket in
         let options =
           Option.value ~default:List_object_versions.default_options options
@@ -632,7 +643,8 @@ module Make (C : Execution_request_context.S) = struct
                     return_result return_error return_ok result)))
 
   let list conn ~bucket ?options () =
-    with_operation conn ~operation:Operation.List_objects_v2 (fun session ->
+    with_operation conn ~operation:Operation.List_objects_v2
+      ~bucket:(Bucket_name.to_string bucket) (fun session ->
         let bucket = Bucket_name.to_string bucket in
         let options =
           Option.value ~default:List_objects_v2.default_options options

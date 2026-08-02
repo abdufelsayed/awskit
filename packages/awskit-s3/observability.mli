@@ -43,12 +43,16 @@ module For_simulator : sig
     ?retry_class:Awskit.Error.retry_class ->
     ?logical_request_bytes:int64 ->
     ?logical_response_bytes:int64 ->
+    ?region:string ->
+    ?bucket:string ->
     unit ->
     Awskit.Observability.For_projection.Operation.Completion.t
 
   val complete_artifact :
     operation:Artifact_operation.t ->
     outcome:Awskit.Observability.Outcome.t ->
+    ?region:string ->
+    ?bucket:string ->
     unit ->
     Awskit.Observability.For_projection.Operation.Completion.t
   (** Pure completion for one connection-bound presigned-artifact operation.
